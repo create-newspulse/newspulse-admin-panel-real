@@ -15,7 +15,7 @@ app.post("/api/admin/login", (req, res) => {
   if (email === "admin@example.com" && password === "12345") {
     return res.json({
       success: true,
-      token: "news-pulse-demo-token",
+      token: "news-pulse-demo-token"
     });
   } else {
     return res.status(401).json({ success: false, message: "Invalid credentials" });
