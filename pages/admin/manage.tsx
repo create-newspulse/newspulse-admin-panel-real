@@ -8,7 +8,7 @@ type NewsItem = {
   id: string;
   title: string;
   content: string;
-  // You can extend this as needed: imageUrl, date, author, etc.
+  // Optionally extend with: imageUrl, date, author, etc.
 };
 
 export default function ManageNews() {
