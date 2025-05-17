@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/router";
+import { useState, ChangeEvent, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import api from "../../lib/api";
 
 type LoginResponse = {
@@ -15,7 +15,7 @@ export default function AdminLogin() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     try {
       const res = await api.post<LoginResponse>("/admin/login", { email, password });
@@ -38,7 +38,7 @@ export default function AdminLogin() {
           type="email"
           placeholder="Email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
           required
           className="w-full mb-4 p-2 border rounded"
         />
@@ -46,7 +46,7 @@ export default function AdminLogin() {
           type="password"
           placeholder="Password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
           required
           className="w-full mb-4 p-2 border rounded"
         />
