@@ -1,8 +1,7 @@
-// lib/api.ts
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://your-backend-url.com/api", // Replace this with your working backend URL
+  baseURL: "http://localhost:5000/api", // 🔁 Replace with your real backend
 });
 
 export default api;
