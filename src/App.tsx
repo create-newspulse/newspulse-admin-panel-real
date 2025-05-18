@@ -1,23 +1,12 @@
-import { Route, Routes, Navigate } from "react-router-dom";
-import AdminNavbar from "./components/AdminNavbar";
-import AdminLogin from "./pages/AdminLogin";
-import Dashboard from "./pages/Dashboard";
-import AddNews from "./pages/AddNews";
-import ManageNews from "./pages/ManageNews";
+import React from 'react';
 
-const isAuthenticated = !!localStorage.getItem("adminToken");
-
-export default function App() {
+function App() {
   return (
-    <div>
-      {isAuthenticated && <AdminNavbar />}
-      <Routes>
-        <Route path="/admin" element={<AdminLogin />} />
-        <Route path="/admin/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/admin" />} />
-        <Route path="/admin/add" element={isAuthenticated ? <AddNews /> : <Navigate to="/admin" />} />
-        <Route path="/admin/manage" element={isAuthenticated ? <ManageNews /> : <Navigate to="/admin" />} />
-        <Route path="*" element={<Navigate to="/admin" />} />
-      </Routes>
+    <div className="text-center p-6">
+      <h1 className="text-2xl font-bold text-blue-600">✅ Admin Panel is Working</h1>
+      <p className="text-gray-600 mt-4">Start building your features!</p>
     </div>
   );
 }
+
+export default App;
