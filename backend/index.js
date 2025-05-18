@@ -1,42 +1,35 @@
+// backend/index.js (Local Mode)
+
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Connect to MongoDB
-mongoose.connect("mongodb://127.0.0.1:27017/news-pulse", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log("✅ Connected to MongoDB"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
-
-// ✅ Admin Schema
-const Admin = mongoose.model("Admin", new mongoose.Schema({
-  email: String,
-  password: String,
-}));
-
-// ✅ Login Route
-app.post("/api/admin/login", async (req, res) => {
+// ✅ Fake Login Route
+app.post("/api/admin/login", (req, res) => {
   const { email, password } = req.body;
-  const admin = await Admin.findOne({ email, password });
 
-  if (admin) {
-    res.json({ success: true, token: "real-admin-token" });
+  if (email === "admin@example.com" && password === "12345") {
+    return res.json({
+      success: true,
+      token: "local-admin-token"
+    });
   } else {
-    res.status(401).json({ success: false, message: "Invalid credentials" });
+    return res.status(401).json({
+      success: false,
+      message: "Invalid credentials"
+    });
   }
 });
 
-// ✅ Test Route
+// ✅ Optional: Test Route
 app.get("/", (req, res) => {
-  res.send("✅ Real Admin API running");
+  res.send("🧪 Local Fake Admin API is running");
 });
 
 app.listen(5000, () => {
-  console.log("🚀 Admin API is running at http://localhost:5000");
+  console.log("🔐 Local Admin API running at http://localhost:5000");
 });
