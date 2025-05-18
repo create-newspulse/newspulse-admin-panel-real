@@ -1,14 +1,17 @@
-import Link from "next/link";
+// components/AdminNavbar.tsx
+import React from 'react';
+import { Link } from 'react-router-dom';
 
-export default function AdminNavbar() {
-  return (
-    <nav className="bg-gray-900 text-white p-4 flex justify-between">
-      <span className="font-bold text-xl">News Pulse Admin</span>
-      <div className="space-x-4">
-        <Link href="/admin/dashboard" className="hover:underline">Dashboard</Link>
-        <Link href="/admin/add" className="hover:underline">Add News</Link>
-        <Link href="/admin/manage" className="hover:underline">Manage News</Link>
-      </div>
-    </nav>
-  );
-}
+const AdminNavbar = () => (
+  <nav className="flex justify-between items-center p-4 bg-blue-800 text-white">
+    <h1 className="text-lg font-bold">News Pulse Admin</h1>
+    <div className="space-x-4">
+      <Link to="/dashboard">Dashboard</Link>
+      <Link to="/add-news">Add News</Link>
+      <Link to="/manage-news">Manage News</Link>
+      <button className="bg-red-600 px-3 py-1 rounded hover:bg-red-700">Logout</button>
+    </div>
+  </nav>
+);
+
+export default AdminNavbar;
