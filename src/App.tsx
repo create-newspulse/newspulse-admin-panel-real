@@ -1,12 +1,21 @@
-import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import AdminLogin from './pages/AdminLogin';
+import Dashboard from './pages/Dashboard';
+import AddNews from './pages/AddNews';
+import ManageNews from './pages/ManageNews';
+import AdminNavbar from './components/AdminNavbar';
 
 function App() {
   return (
-    <div className="text-center p-6">
-      <h1 className="text-2xl font-bold text-blue-600">✅ Admin Panel is Working</h1>
-      <p className="text-gray-600 mt-4">Start building your features!</p>
-    </div>
+    <Router>
+      <AdminNavbar />
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/login" element={<AdminLogin />} />
+        <Route path="/add-news" element={<AddNews />} />
+        <Route path="/manage-news" element={<ManageNews />} />
+      </Routes>
+    </Router>
   );
 }
-
 export default App;
