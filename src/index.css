@@ -1,3 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ✅ Custom styles after Tailwind setup */
 body {
   margin: 0;
   font-family: Arial, sans-serif;
