@@ -1,9 +1,7 @@
-// lib/api.ts
-
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:5000/api", // ✅ Local API URL
+  baseURL: "http://localhost:5000/api", // ✅ This MUST be localhost:5000/api
 });
 
 export default api;
