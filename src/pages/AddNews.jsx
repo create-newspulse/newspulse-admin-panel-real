@@ -1,0 +1,1 @@
+export default function AddNews() { return <h2>📝 Add News</h2>; }

@@ -1,0 +1,1 @@
+export default function SafeOwnerZone() { return <h2>🛡️ Safe Owner Zone</h2>; }

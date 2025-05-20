@@ -1,0 +1,1 @@
+export default function ManageNews() { return <h2>🗂️ Manage News</h2>; }
