@@ -1,0 +1,27 @@
+# .vercelignore
+
+node_modules/
+dist/
+.cache/
+.next/
+out/
+
+.env*
+*.env
+admin-backend/.env*
+frontend/.env*
+
+*.key
+*.pem
+*.p12
+*.crt
+*.enc
+*.bak
+serviceAccountKey.json
+
+logs/
+*.log
+.vscode/
+.idea/
+.DS_Store
+*.swp
