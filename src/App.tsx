@@ -1,0 +1,125 @@
+// 📁 src/App.tsx
+
+import { useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+
+import './lib/i18n.config';
+import { I18nextProvider } from 'react-i18next';
+import i18n from './lib/i18n.config';
+
+import { useDarkMode } from '@context/DarkModeContext';
+import { useAuth } from '@context/AuthContext';
+import { AITrainingInfoProvider } from '@context/AITrainingInfoContext';
+
+import Navbar from '@components/Navbar';
+import Breadcrumbs from '@components/Breadcrumbs';
+import LockCheckWrapper from '@components/LockCheckWrapper';
+import ProtectedRoute from '@components/ProtectedRoute';
+import FounderRoute from '@components/FounderRoute';
+
+import LockedPage from '@pages/LockedPage';
+import AdminLogin from '@pages/Login';
+
+// Admin Pages
+import Dashboard from '@pages/admin/Dashboard';
+import AddNews from '@pages/AddNews';
+import EditNews from '@pages/EditNews';
+import ManageNews from '@pages/ManageNews';
+import AddCategory from '@pages/AddCategory';
+import LanguageSettings from '@pages/LanguageSettings';
+import PushHistory from '@pages/PushHistory';
+import AiTest from '@pages/AiTest';
+import SavedNews from '@pages/SavedNews';
+import TestNotification from '@pages/TestNotification';
+import InspirationHub from '@pages/media/InspirationHub';
+
+// Polls
+import PollOfTheDay from '@pages/PollOfTheDay';
+import PollEditor from '@pages/PollEditor';
+import PollResultsChart from '@pages/PollResultsChart';
+
+// Founder-Only Pages
+import SafeOwnerZone from '@pages/admin/SafeOwnerZone';
+import LanguageManager from '@pages/SafeOwner/LanguageManager';
+import PanelGuide from '@pages/SafeOwner/PanelGuide';
+import Settings from '@pages/SafeOwner/Settings';
+import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
+import AdminControlCenter from '@components/AdminControlCenter';
+import FeatureHelpPanel from '@components/SafeZone/FeatureHelpPanel';
+import LiveFeedManager from '@pages/admin/LiveFeedManager';
+import EmbedManager from '@pages/admin/EmbedManager';
+import ToggleControls from '@pages/admin/ToggleControls';
+import ControlConstitution from '@pages/admin/ControlConstitution';
+import Diagnostics from '@pages/admin/Diagnostics';
+
+function App() {
+  const { isDark } = useDarkMode();
+  const { isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
+
+  return (
+    <AITrainingInfoProvider>
+      <I18nextProvider i18n={i18n}>
+        <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-slate-900 text-white' : 'bg-white text-black'}`}>
+          <Navbar />
+          {isAuthenticated && <Breadcrumbs />}
+
+          <main className="p-4 md:p-6 max-w-7xl mx-auto">
+            <Routes>
+              {/* 🧭 Default Redirect to Admin Dashboard */}
+              <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
+
+              {/* 🔐 Admin Protected Routes */}
+              <Route path="/add" element={<ProtectedRoute><LockCheckWrapper><AddNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/push-history" element={<ProtectedRoute><LockCheckWrapper><PushHistory /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/add-category" element={<ProtectedRoute><LockCheckWrapper><AddCategory /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/ai-test" element={<ProtectedRoute><LockCheckWrapper><AiTest /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/media/inspiration" element={<ProtectedRoute><LockCheckWrapper><InspirationHub /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/poll" element={<ProtectedRoute><LockCheckWrapper><PollOfTheDay /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/locked" element={<LockedPage />} />
+
+              {/* 🛡️ Founder-Only Routes */}
+              <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+              <Route path="/safe-owner" element={<FounderRoute><SafeOwnerZone /></FounderRoute>} />
+              <Route path="/safe-owner/help" element={<FounderRoute><FeatureHelpPanel /></FounderRoute>} />
+              <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />
+              <Route path="/safe-owner/language-settings" element={<FounderRoute><LanguageManager /></FounderRoute>} />
+              <Route path="/safe-owner/panel-guide" element={<FounderRoute><PanelGuide /></FounderRoute>} />
+              <Route path="/safe-owner/founder-settings" element={<FounderRoute><Settings /></FounderRoute>} />
+              <Route path="/safe-owner/update-pin" element={<FounderRoute><UpdateFounderPIN /></FounderRoute>} />
+              <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
+              <Route path="/admin/embed-manager" element={<FounderRoute><EmbedManager /></FounderRoute>} />
+              <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
+              <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
+              <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
+
+              {/* 🔐 Login + Fallback */}
+              <Route path="/login" element={<AdminLogin />} />
+              <Route path="/unauthorized" element={
+                <div className="text-red-500 text-xl font-semibold text-center my-20">
+                  ❌ Access Denied. Please contact the administrator.
+                </div>
+              } />
+              <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+            </Routes>
+          </main>
+
+          <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+        </div>
+      </I18nextProvider>
+    </AITrainingInfoProvider>
+  );
+}
+
+export default App;
