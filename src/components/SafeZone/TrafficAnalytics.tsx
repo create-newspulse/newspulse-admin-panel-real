@@ -1,5 +1,6 @@
 // 📂 components/SafeZone/TrafficAnalytics.tsx
 import { useEffect, useState } from 'react';
+import { api } from '../../lib/api';
 
 const TrafficAnalytics = () => {
   const [data, setData] = useState<any>(null);
@@ -8,8 +9,7 @@ const TrafficAnalytics = () => {
   useEffect(() => {
     const fetchTraffic = async () => {
       try {
-        const res = await fetch('/api/monitor-hub');
-        const json = await res.json();
+        const json: any = await api.monitorHub();
         setData({
           viewsToday: json.viewsToday,
           peakTime: json.peakTime,

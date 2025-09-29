@@ -3,7 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",              // Vite + TS 5
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
@@ -18,9 +18,9 @@
     "noImplicitReturns": true,
     "allowJs": false,
     "baseUrl": ".",
-
-    // ✅ Path aliases for better imports
+    "types": ["node", "react", "react-dom", "vite/client"],
     "paths": {
+      "@/*": ["src/*"],
       "@components/*": ["src/components/*"],
       "@pages/*": ["src/pages/*"],
       "@context/*": ["src/context/*"],
@@ -33,6 +33,6 @@
       "@types/*": ["src/types/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "vite.config.ts", "env.d.ts"],
   "exclude": ["node_modules", "dist", "build"]
 }

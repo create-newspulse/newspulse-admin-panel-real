@@ -1,8 +1,9 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { FaTrash, FaDownload, FaComments } from 'react-icons/fa';
 import axios from 'axios';
 import { useAITrainingInfo } from '@context/AITrainingInfoContext';
 
+// ---------- Types ----------
 interface CommandLog {
   command: string;
   timestamp: string;
@@ -11,73 +12,149 @@ interface CommandLog {
   tag?: string;
 }
 
+interface ThinkingFeedRes {
+  insights?: string[];
+  items?: string[]; // tolerate alt shape
+}
+
+interface QueueItem {
+  title: string;
+  status: string;
+}
+
+interface QueueRes {
+  pendingItems?: QueueItem[];
+  queue?: QueueItem[]; // tolerate alt shape
+}
+
+interface DiagnosticsRes {
+  mostUsed?: [string, number] | null;
+  sources?: { manual?: number; voice?: number; api?: number };
+  patternHits?: Record<string, number>;
+}
+
+interface IntegrityScanRes {
+  flaggedIssues?: any[];
+  [k: string]: any;
+}
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: any;
+    SpeechRecognition?: any;
+  }
+}
+
+// ---------- Axios defaults (so cookies/auth work via proxy) ----------
+axios.defaults.withCredentials = true;
+
+// Small helper: safe JSON fetch using axios (returns data or throws)
+const get = async <T,>(url: string) => {
+  const res = await axios.get<T>(url);
+  return res.data;
+};
+
+// ---------- Component ----------
 export default function KiranOSPanel() {
   // State hooks
   const [manualCommand, setManualCommand] = useState('');
   const [logs, setLogs] = useState<CommandLog[]>([]);
   const [thinking, setThinking] = useState<string[]>([]);
-  const [queue, setQueue] = useState<{ title: string; status: string }[]>([]);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [chatResponse, setChatResponse] = useState<string | null>(null);
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [aiStats, setAiStats] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<{
+    mostUsed: [string, number] | null;
+    sources: { manual?: number; voice?: number; api?: number };
+    topPattern: string | null;
+    lastUpdated: string | null;
+  } | null>(null);
+  const [aiStats, setAiStats] = useState<IntegrityScanRes | null>(null);
 
-  // 🧠 Use global AI trainer context
+  // 🧠 Global AI trainer context
   const { info: trainerInfo, loading: trainerLoading, error: trainerError } = useAITrainingInfo();
 
   // Speech Recognition Ref to prevent re-trigger
   const recognitionRef = useRef<any>(null);
 
-  // -- Voice command effect
+  // ---------- Voice command effect ----------
   useEffect(() => {
-    if ('webkitSpeechRecognition' in window && !recognitionRef.current) {
-      const recognition = new (window as any).webkitSpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-IN';
+    const SpeechCtor =
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
 
-      recognition.onresult = async (event: any) => {
-        const last = event.results.length - 1;
-        const command = event.results[last][0].transcript.trim().toLowerCase();
+    if (SpeechCtor && !recognitionRef.current) {
+      try {
+        const recognition = new SpeechCtor();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-IN';
 
-        try {
-          const res = await axios.post('/api/system/ai-command', {
-            command,
-            trigger: 'voice',
-          });
-          alert(`🤖 ${res.data.result}`);
-        } catch {
-          alert('⚠️ Command failed. Check logs.');
-        }
-      };
-      recognition.onerror = (e: any) => console.warn('🎤 Voice error:', e);
+        recognition.onresult = async (event: any) => {
+          const last = event.results.length - 1;
+          const command = (event.results[last]?.[0]?.transcript ?? '')
+            .trim()
+            .toLowerCase();
+          if (!command) return;
 
-      recognition.start();
-      recognitionRef.current = recognition;
+          try {
+            const res = await axios.post('/api/system/ai-command', {
+              command,
+              trigger: 'voice',
+            });
+            alert(`🤖 ${res.data?.result ?? 'Done.'}`);
+          } catch {
+            alert('⚠️ Command failed. Check logs.');
+          }
+        };
+
+        recognition.onerror = (e: any) => console.warn('🎤 Voice error:', e);
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (e) {
+        console.warn('Speech init failed:', e);
+      }
     }
-    // Cleanup voice recognition on unmount
+
+    // Cleanup
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
-        recognitionRef.current = null;
+        try {
+          recognitionRef.current.stop();
+        } finally {
+          recognitionRef.current = null;
+        }
       }
     };
   }, []);
 
-  // -- Thinking Feed and AI Queue polling
+  // ---------- Thinking Feed & AI Queue polling ----------
   useEffect(() => {
     let stopped = false;
     const loadStatus = async () => {
       try {
         const [thinkingRes, queueRes] = await Promise.all([
-          axios.get('/api/system/thinking-feed'),
-          axios.get('/api/system/ai-queue')
+          get<ThinkingFeedRes>('/api/system/thinking-feed'),
+          get<QueueRes>('/api/system/ai-queue'),
         ]);
-        if (!stopped) {
-          setThinking(Array.isArray(thinkingRes.data?.insights) ? thinkingRes.data.insights : []);
-          setQueue(Array.isArray(queueRes.data?.pendingItems) ? queueRes.data.pendingItems : []);
-        }
+
+        if (stopped) return;
+
+        const insights = Array.isArray(thinkingRes?.insights)
+          ? thinkingRes.insights
+          : Array.isArray(thinkingRes?.items)
+          ? thinkingRes.items
+          : [];
+
+        const pending = Array.isArray(queueRes?.pendingItems)
+          ? queueRes.pendingItems
+          : Array.isArray(queueRes?.queue)
+          ? queueRes.queue
+          : [];
+
+        setThinking(insights);
+        setQueue(pending);
       } catch (err) {
         if (!stopped) {
           setThinking([]);
@@ -85,47 +162,62 @@ export default function KiranOSPanel() {
         }
       }
     };
+
     loadStatus();
-    const interval = setInterval(loadStatus, 10000);
+    const interval = setInterval(loadStatus, 10_000);
     return () => {
       stopped = true;
       clearInterval(interval);
     };
   }, []);
 
-  // -- Analytics polling
+  // ---------- Analytics polling ----------
   useEffect(() => {
     let stopped = false;
     const fetchAnalytics = async () => {
       try {
-        const res = await axios.get('/api/system/ai-diagnostics');
+        const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+        if (stopped) return;
+
+        const topPattern =
+          res?.patternHits && Object.keys(res.patternHits).length > 0
+            ? Object.entries(res.patternHits).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0]
+            : null;
+
+        setAnalytics({
+          mostUsed: res?.mostUsed ?? null,
+          sources: res?.sources ?? {},
+          topPattern,
+          lastUpdated: new Date().toLocaleTimeString(),
+        });
+      } catch {
         if (!stopped) {
-          setAnalytics({
-            mostUsed: res.data.mostUsed,
-            sources: res.data.sources,
-            topPattern: Object.entries(res.data.patternHits || {})?.[0]?.[0] || null,
-            lastUpdated: new Date().toLocaleTimeString(),
-          });
+          setAnalytics(null);
         }
-      } catch {}
+      }
     };
+
     fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 10000);
+    const interval = setInterval(fetchAnalytics, 10_000);
     return () => {
       stopped = true;
       clearInterval(interval);
     };
   }, []);
 
-  // -- Integrity scan (on load)
+  // ---------- Integrity scan (on load) ----------
   useEffect(() => {
-    fetch('/api/system/integrity-scan')
-      .then(res => res.json())
-      .then(setAiStats)
-      .catch(() => {});
+    (async () => {
+      try {
+        const data = await get<IntegrityScanRes>('/api/system/integrity-scan');
+        setAiStats(data ?? null);
+      } catch {
+        setAiStats(null);
+      }
+    })();
   }, []);
 
-  // -- Manual command send
+  // ---------- Manual command send ----------
   const handleManualCommand = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && manualCommand.trim()) {
       try {
@@ -133,7 +225,7 @@ export default function KiranOSPanel() {
           command: manualCommand.trim(),
           trigger: 'manual',
         });
-        alert(`🤖 ${res.data.result}`);
+        alert(`🤖 ${res.data?.result ?? 'Done.'}`);
         setManualCommand('');
       } catch {
         alert('⚠️ Command failed.');
@@ -141,15 +233,16 @@ export default function KiranOSPanel() {
     }
   };
 
-  // -- Logs fetch, clear, export
+  // ---------- Logs fetch, clear, export ----------
   const fetchLogs = async () => {
     try {
-      const res = await axios.get('/api/system/view-logs');
-      setLogs(res.data.logs || []);
+      const res = await get<{ logs?: CommandLog[] }>('/api/system/view-logs');
+      setLogs(Array.isArray(res?.logs) ? res.logs : []);
     } catch {
       alert('❌ Failed to fetch logs.');
     }
   };
+
   const clearLogs = async () => {
     if (!window.confirm('Are you sure you want to delete all logs?')) return;
     try {
@@ -160,13 +253,14 @@ export default function KiranOSPanel() {
       alert('❌ Failed to clear logs.');
     }
   };
+
   const exportLogs = () => {
-    const csv = logs.map(log =>
-      `"${log.command}","${log.timestamp}","${log.trigger}","${log.result}","${log.tag || ''}"`
+    const header = 'Command,Timestamp,Trigger,Result,Tag\n';
+    const csvLines = logs.map(
+      (log) =>
+        `"${(log.command ?? '').replaceAll('"', '""')}","${log.timestamp ?? ''}","${log.trigger ?? ''}","${(log.result ?? '').replaceAll('"', '""')}","${(log.tag ?? '').replaceAll('"', '""')}"`
     );
-    const blob = new Blob([`Command,Timestamp,Trigger,Result,Tag\n${csv.join('\n')}`], {
-      type: 'text/csv'
-    });
+    const blob = new Blob([header + csvLines.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -175,28 +269,33 @@ export default function KiranOSPanel() {
     URL.revokeObjectURL(url);
   };
 
-  // -- Diagnostics alert
+  // ---------- Diagnostics alert ----------
   const fetchDiagnostics = async () => {
     try {
-      const res = await axios.get('/api/system/ai-diagnostics');
-      alert(`📊 Top command: ${res.data.mostUsed[0]} (${res.data.mostUsed[1]} times)`);
+      const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+      const top = res?.mostUsed ?? null;
+      if (top) {
+        alert(`📊 Top command: ${top[0]} (${top[1]} times)`);
+      } else {
+        alert('📊 No usage data yet.');
+      }
     } catch {
       alert('❌ Diagnostics failed.');
     }
   };
 
-  // -- Ask KiranOS
+  // ---------- Ask KiranOS ----------
   const handleAskKiranOS = async () => {
     if (!chatInput.trim()) return;
     try {
-      const res = await axios.post('/api/system/ask-kiranos', { prompt: chatInput });
-      setChatResponse(res.data.reply || '🤖 No response.');
+      const res = await axios.post('/api/system/ask-kiranos', { prompt: chatInput.trim() });
+      setChatResponse(res.data?.reply || '🤖 No response.');
     } catch {
       setChatResponse('⚠️ Failed to get response from KiranOS.');
     }
   };
 
-  // --- UI ---
+  // ---------- UI ----------
   return (
     <div className="ai-card glow-panel ai-highlight hover-glow border border-blue-500 shadow-xl rounded-xl p-5 bg-white dark:bg-slate-900 transition-all duration-300">
       {/* Manual Command */}
@@ -208,6 +307,7 @@ export default function KiranOSPanel() {
         onKeyDown={handleManualCommand}
         className="mt-3 w-full px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-black dark:text-white shadow-sm focus:ring-2 focus:ring-blue-400"
       />
+
       {/* Controls */}
       <div className="flex flex-wrap gap-4 mt-4 text-sm font-medium text-blue-600 dark:text-blue-300">
         <button onClick={fetchLogs}>🔁 View Logs</button>
@@ -226,32 +326,41 @@ export default function KiranOSPanel() {
             {thinking.length > 0 ? thinking.map((item, idx) => <li key={idx}>{item}</li>) : <li>⚠️ No insights available.</li>}
           </ul>
         </div>
+
         {/* AI Mission Queue */}
         <div className="bg-purple-50 dark:bg-slate-800 p-4 rounded shadow">
           <h3 className="text-md font-bold text-purple-600 dark:text-purple-300">🎯 AI Mission Queue</h3>
           <ul className="list-disc ml-5 text-sm text-slate-700 dark:text-slate-300 space-y-1">
-            {queue.map((task, idx) => <li key={idx}>{task.title} — <span className="italic text-xs">{task.status}</span></li>)}
+            {queue.length > 0
+              ? queue.map((task, idx) => (
+                  <li key={idx}>
+                    {task.title} — <span className="italic text-xs">{task.status}</span>
+                  </li>
+                ))
+              : <li>—</li>}
           </ul>
         </div>
+
         {/* Analytics */}
         {analytics && (
           <div className="bg-yellow-50 dark:bg-slate-800 p-4 rounded shadow">
             <h3 className="text-md font-bold text-yellow-700 dark:text-yellow-300">📊 KiranOS AI Analytics</h3>
             <ul className="list-disc ml-5 text-sm text-slate-700 dark:text-slate-300 mt-2 space-y-1">
-              <li>Top Command Today: <strong>{analytics?.mostUsed?.[0] || '—'}</strong></li>
-              <li>Times Used: <strong>{analytics?.mostUsed?.[1] || 0}</strong></li>
+              <li>Top Command Today: <strong>{analytics.mostUsed?.[0] ?? '—'}</strong></li>
+              <li>Times Used: <strong>{analytics.mostUsed?.[1] ?? 0}</strong></li>
               <li>Sources:
                 <ul className="ml-4 list-square">
-                  <li>Manual: {analytics?.sources?.manual || 0}</li>
-                  <li>Voice: {analytics?.sources?.voice || 0}</li>
-                  <li>API: {analytics?.sources?.api || 0}</li>
+                  <li>Manual: {analytics.sources?.manual ?? 0}</li>
+                  <li>Voice: {analytics.sources?.voice ?? 0}</li>
+                  <li>API: {analytics.sources?.api ?? 0}</li>
                 </ul>
               </li>
-              <li>Most Used Pattern: <strong>{analytics?.topPattern || '—'}</strong></li>
-              <li>Last Updated: <strong>{analytics?.lastUpdated || '—'}</strong></li>
+              <li>Most Used Pattern: <strong>{analytics.topPattern ?? '—'}</strong></li>
+              <li>Last Updated: <strong>{analytics.lastUpdated ?? '—'}</strong></li>
             </ul>
           </div>
         )}
+
         {/* Trainer Info */}
         <div className="bg-indigo-50 dark:bg-slate-800 p-4 rounded shadow">
           <h3 className="text-md font-bold text-indigo-700 dark:text-indigo-300">🧠 AI Training Overview</h3>
@@ -263,24 +372,28 @@ export default function KiranOSPanel() {
               <li>Next Training: <strong>{trainerInfo.nextTraining}</strong></li>
               <li>Articles Analyzed: <strong>{trainerInfo.articlesAnalyzed}</strong></li>
               <li>Pattern Focus: <strong>{trainerInfo.patternFocus}</strong></li>
-              <li>Modules Trained: <strong>{trainerInfo.modulesTrained?.length}</strong></li>
+              <li>Modules Trained: <strong>{trainerInfo.modulesTrained?.length ?? 0}</strong></li>
               <li>Keywords Indexed: <strong>{trainerInfo.keywords}</strong></li>
               <li>Status: <span className="text-green-600 dark:text-green-400 font-bold">Ready</span></li>
             </ul>
           )}
         </div>
+
         {/* AI Integrity Scan */}
         {aiStats && (
           <div className="bg-green-50 dark:bg-slate-800 p-4 rounded shadow">
             <h3 className="text-md font-bold text-green-700 dark:text-green-300">🛡️ AI Integrity Scan</h3>
-            {aiStats?.flaggedIssues?.length > 0 ? (
-              <pre className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{JSON.stringify(aiStats, null, 2)}</pre>
+            {(aiStats?.flaggedIssues?.length ?? 0) > 0 ? (
+              <pre className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
+                {JSON.stringify(aiStats, null, 2)}
+              </pre>
             ) : (
               <p className="text-green-700 dark:text-green-200 mt-1 font-semibold">✅ System Clean — No issues found.</p>
             )}
           </div>
         )}
       </div>
+
       {/* Ask KiranOS Modal */}
       {showChat && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center">
@@ -292,7 +405,7 @@ export default function KiranOSPanel() {
               placeholder="Ask your question..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleAskKiranOS(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAskKiranOS(); }}
               autoFocus
             />
             <button onClick={handleAskKiranOS} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mb-2">Ask</button>

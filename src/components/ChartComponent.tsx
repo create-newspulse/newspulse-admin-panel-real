@@ -7,7 +7,7 @@ import {
   Legend,
   ChartOptions,
 } from 'chart.js';
-import axios from 'axios';
+import { api } from '../lib/api';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -17,10 +17,9 @@ const ChartComponent: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    axios
-      .get('/api/monitor-hub')
-      .then((res) => {
-        const { debug = 0, manualEntry = 0, technology = 0 } = res.data;
+    api.monitorHub()
+      .then((res: any) => {
+        const { debug = 0, manualEntry = 0, technology = 0 } = res;
         setChartData([debug, manualEntry, technology]);
         setLoading(false);
       })

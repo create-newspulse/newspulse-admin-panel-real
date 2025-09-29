@@ -8,7 +8,9 @@ import LiveTicker from '@components/LiveTicker';
 import VoicePlayer from '@components/VoicePlayer';
 import ChartComponent from '@components/ChartComponent';
 import VoiceAndExplainer from '@components/VoiceAndExplainer';
-import api from '../../utils/api';
+
+// api client from src/lib/api.ts (default export = axios instance)
+import apiClient from '@lib/api';
 
 type DashboardStats = {
   total: number;
@@ -29,11 +31,13 @@ type DashboardStats = {
 const Dashboard = () => {
   const { t, i18n } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [aiCommand, setAiCommand] = useState(null);
+  const [aiCommand, setAiCommand] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  // align with src/lib/api.ts (VITE_API_BASE)
+  const API_BASE =
+    (import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || 'http://localhost:5000') + '/api';
 
   const articles = useMemo(
     () => [
@@ -47,33 +51,69 @@ const Dashboard = () => {
     const fetchStats = async () => {
       setLoading(true);
       setError(null);
+
+      // normalize payload into your DashboardStats shape
+      const normalize = (raw: any): DashboardStats => {
+        if (raw?.total !== undefined && raw?.byCategory && raw?.byLanguage) {
+          return raw as DashboardStats;
+        }
+        const totals = raw?.totals || {};
+        return {
+          total: Number(totals.news ?? 0),
+          byCategory: Array.isArray(raw?.byCategory) ? raw.byCategory : [],
+          byLanguage: Array.isArray(raw?.byLanguage) ? raw.byLanguage : [],
+          recent: Array.isArray(raw?.recent) ? raw.recent : [],
+          aiLogs: Number(raw?.aiLogs ?? 0),
+          activeUsers: Number(raw?.activeUsers ?? 0),
+        };
+      };
+
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`${API_BASE}/dashboard-stats`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(`Server error ${res.status}: ${res.statusText} - ${errorText}`);
+        // Build RequestInit safely; only attach headers if we have a token
+        const initAuth: RequestInit = {};
+        if (token) {
+          initAuth.headers = { Authorization: `Bearer ${token}` } as HeadersInit;
         }
 
-        const contentType = res.headers.get('content-type');
-        if (!contentType?.includes('application/json')) {
-          throw new Error('Expected JSON, but received non-JSON response.');
+        // 1) Try your rich endpoint
+        let res = await fetch(`${API_BASE}/dashboard-stats`, initAuth);
+
+        // If unauthorized, retry once without token
+        if (!res.ok && res.status === 401) {
+          res = await fetch(`${API_BASE}/dashboard-stats`);
         }
 
-        const data = await res.json();
-        if (data?.success && data?.data) {
-          setStats(data.data);
-        } else {
-          setError(data?.message || 'Unknown error occurred.');
+        if (res.ok) {
+          const ct = res.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) throw new Error('Non-JSON from /dashboard-stats');
+          const json = await res.json();
+          const payload = json?.data ?? json; // accept {success,data} or plain
+          setStats(normalize(payload));
+          return;
         }
+
+        // 2) Fallback to /api/stats (alias)
+        let res2 = await fetch(`${API_BASE}/stats`, initAuth);
+        if (!res2.ok && res2.status === 401) {
+          res2 = await fetch(`${API_BASE}/stats`);
+        }
+        if (!res2.ok) {
+          const reason = await res2.text().catch(() => '');
+          throw new Error(
+            `Failed both endpoints. /dashboard-stats=${res.status}, /stats=${res2.status}. ${reason}`
+          );
+        }
+
+        const ct2 = res2.headers.get('content-type') || '';
+        if (!ct2.includes('application/json')) throw new Error('Non-JSON from /stats');
+        const json2 = await res2.json();
+        const payload2 = json2?.data ?? json2;
+        setStats(normalize(payload2));
       } catch (err: any) {
-        console.error('❌ Dashboard API Error:', err.message);
-        setError(t('dashboardError'));
+        console.error('❌ Dashboard API Error:', err?.message || err);
+        setError('Failed to load dashboard stats. Please ensure the backend server is running.');
       } finally {
         setLoading(false);
       }
@@ -81,7 +121,7 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        const res = await api.get('/system/ai-command');
+        const res = await apiClient.get('/system/ai-command');
         setAiCommand(res.data);
       } catch (err: any) {
         console.error('❌ AI Command API Error:', err.response?.data || err.message);
@@ -127,7 +167,11 @@ const Dashboard = () => {
 
         {stats && (
           <>
-            <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2, duration: 0.6 }}>
+            <motion.section
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2, duration: 0.6 }}
+            >
               <StatsCards
                 totalNews={stats.total}
                 categoryCount={stats.byCategory.length}
@@ -137,15 +181,27 @@ const Dashboard = () => {
               />
             </motion.section>
 
-            <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3, duration: 0.6 }}>
+            <motion.section
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.6 }}
+            >
               <ChartComponent />
             </motion.section>
 
-            <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 0.6 }}>
+            <motion.section
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.6 }}
+            >
               <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
             </motion.section>
 
-            <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.6 }}>
+            <motion.section
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.6 }}
+            >
               <VoiceAndExplainer text={t('aiSummaryBody')} />
               <VoicePlayer text={t('topNewsBody')} language={langCode} />
             </motion.section>
@@ -158,7 +214,10 @@ const Dashboard = () => {
           transition={{ delay: 0.6, duration: 0.6 }}
           aria-labelledby="ai-insights"
         >
-          <h2 id="ai-insights" className="text-2xl font-semibold text-slate-700 dark:text-slate-100 mb-6 flex items-center gap-2">
+          <h2
+            id="ai-insights"
+            className="text-2xl font-semibold text-slate-700 dark:text-slate-100 mb-6 flex items-center gap-2"
+          >
             🧠 {t('weeklyAiInsights')}
           </h2>
 
