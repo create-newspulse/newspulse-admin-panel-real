@@ -89,3 +89,13 @@ frontend/public/temp/
 frontend/public/uploads/
 tmp/
 temp/
+**/serviceAccountKey.json
+**/*-key.json
+config/drive-key.json
+admin-backend/.env
+**/news-pulse-*.json
+**/serviceAccountKey.json
+**/*-key.json
+config/drive-key.json
+admin-backend/.env
+**/news-pulse-*.json
