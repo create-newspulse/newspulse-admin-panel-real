@@ -4,10 +4,18 @@ export function extractIframeSrc(input: string): string | null {
   if (!input) return null;
   // If input is a plain URL
   try {
-    const maybeUrl = new URL(input.trim(), window?.location?.href || undefined);
+    const trimmed = input.trim();
+    // Try absolute URL first
+    const maybeUrl = new URL(trimmed);
     if (maybeUrl && maybeUrl.hostname) return maybeUrl.toString();
   } catch (e) {
-    // not a plain url
+    // Try with base URL if available
+    try {
+      const maybeUrl = new URL(input.trim(), window?.location?.href || undefined);
+      if (maybeUrl && maybeUrl.hostname) return maybeUrl.toString();
+    } catch (e2) {
+      // not a plain url
+    }
   }
 
   const m = /<iframe[^>]+src=["']([^"']+)["']/i.exec(input);
