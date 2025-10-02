@@ -67,7 +67,20 @@ const InspirationHub: React.FC = () => {
 
         {embedPreview && (
           <div className="mt-6 aspect-video w-full rounded overflow-hidden border border-blue-500 shadow">
-            <div dangerouslySetInnerHTML={{ __html: embedPreview }} />
+            {/* Render embed safely: prefer iframe src, otherwise sanitize HTML before injection */}
+            {(() => {
+              // runtime safety: only render preview in browser secure contexts
+              if (typeof window === 'undefined' || window.location.protocol === 'file:') {
+                return <div className="text-sm text-red-600">Preview blocked in this context.</div>;
+              }
+              try {
+                const { extractIframeSrc, isHostAllowed } = require('../../lib/embedUtils');
+                const src = extractIframeSrc(embedPreview || '');
+                if (src && isHostAllowed(src)) return <iframe title="embed" src={src} width="100%" height="100%" frameBorder={0} allowFullScreen />;
+              } catch (e) {}
+              const { sanitizeHtml } = require('../../lib/sanitize');
+              return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(embedPreview || '') }} />;
+            })()}
           </div>
         )}
       </SectionBlock>

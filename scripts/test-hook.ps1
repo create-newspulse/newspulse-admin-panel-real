@@ -20,7 +20,8 @@ Set-Content -Path $f1 -Value 'hello world'
 $f2 = Join-Path $tmp 'secret.txt'
 $fakePrefix = 'sk-'
 $fakeBody = [System.Guid]::NewGuid().ToString('N').Substring(0,32)
-Set-Content -Path $f2 -Value ("api_key = \"" + $fakePrefix + $fakeBody + "\"")
+# Use single-quoted string parts and concatenation to avoid nested-quote escaping
+Set-Content -Path $f2 -Value ('api_key = "' + $fakePrefix + $fakeBody + '"')
 
 # Fixture: allowed path example (should be skipped)
 $allowedDir = Join-Path $repo 'public'

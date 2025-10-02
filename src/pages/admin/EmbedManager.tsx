@@ -2,6 +2,7 @@
 // ✅ Embed Manager with TED Youth Zone, Manual Embed, and Section Assignment
 
 import React, { useState } from 'react';
+import { extractIframeSrc, isHostAllowed } from '../../lib/embedUtils';
 
 const SectionBlock = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="bg-white dark:bg-slate-800 rounded-xl shadow p-5 mb-8 border border-slate-200 dark:border-slate-700">
@@ -12,7 +13,11 @@ const SectionBlock = ({ title, children }: { title: string; children: React.Reac
 
 const EmbedManager: React.FC = () => {
   const [customEmbed, setCustomEmbed] = useState('');
-  const [embedPreview, setEmbedPreview] = useState('');
+  // embedSrc holds a safe iframe src URL extracted from user input
+  const [embedSrc, setEmbedSrc] = useState('');
+  const [embedError, setEmbedError] = useState('');
+
+  // embed utils handle extraction and host allowlist (configurable via VITE_EMBED_ALLOWLIST)
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -101,14 +106,37 @@ const EmbedManager: React.FC = () => {
 
         <button
           className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500"
-          onClick={() => setEmbedPreview(customEmbed)}
+          onClick={() => {
+            setEmbedError('');
+            setEmbedSrc('');
+            const src = extractIframeSrc(customEmbed);
+            if (!src) {
+              setEmbedError('Unable to extract a valid iframe src from the input. Paste a full iframe or embed URL.');
+              return;
+            }
+            if (!isHostAllowed(src)) {
+              setEmbedError('Embed host not allowed. Only YouTube, Vimeo, TED, AirVuz and trusted providers are permitted.');
+              return;
+            }
+            setEmbedSrc(src);
+          }}
         >
           ▶️ Preview Embed
         </button>
 
-        {embedPreview && (
+        {embedError && <p className="text-sm text-red-600 mt-3">{embedError}</p>}
+
+        {embedSrc && (
           <div className="mt-6 aspect-video w-full rounded overflow-hidden border border-blue-500 shadow">
-            <div dangerouslySetInnerHTML={{ __html: embedPreview }} />
+            <iframe
+              title="Embed preview"
+              src={embedSrc}
+              width="100%"
+              height="100%"
+              frameBorder={0}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
           </div>
         )}
       </SectionBlock>

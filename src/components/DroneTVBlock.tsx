@@ -17,7 +17,21 @@ const moodTagColors: Record<string, string> = {
 const DroneTVBlock = ({ video }: { video: DroneVideo }) => {
   return (
     <div className="mb-8 border rounded-lg p-4 shadow-md bg-white dark:bg-slate-900">
-      <div dangerouslySetInnerHTML={{ __html: video.embedCode }} />
+      <div>
+        {(() => {
+          if (typeof window === 'undefined' || window.location.protocol === 'file:') {
+            return <div className="text-sm text-red-600">Preview blocked</div>;
+          }
+          try {
+            const { extractIframeSrc, isHostAllowed } = require('./../lib/embedUtils');
+            const src = extractIframeSrc(video.embedCode || '');
+            if (src && isHostAllowed(src)) return <iframe title={video.title || 'video'} src={src} width="100%" height="320" frameBorder={0} allowFullScreen />;
+          } catch (e) {}
+          const { sanitizeHtml } = require('./../lib/sanitize');
+          // eslint-disable-next-line react/no-danger
+          return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(video.embedCode || '') }} />;
+        })()}
+      </div>
 
       <div className="mt-4 text-lg font-semibold text-slate-900 dark:text-white">
         {video.title}

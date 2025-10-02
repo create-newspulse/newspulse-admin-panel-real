@@ -1,0 +1,5 @@
+title = "gitleaks config for newspulse"
+
+[[allowlist.rules]]
+description = "Allow env examples and documentation"
+regexes = ['\.env.example$', '\.md$', 'README', '\/public\/']
