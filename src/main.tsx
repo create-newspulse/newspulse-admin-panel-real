@@ -14,6 +14,9 @@ import { NotificationProvider } from "./context/NotificationContext";
 import { LanguageProvider } from "./context/LanguageContext";
 import { bootstrapAuth } from "./lib/auth";
 bootstrapAuth();
+// Initialize DOMPurify in the browser to make window.DOMPurify available
+import initDomPurify from './lib/initDomPurify';
+initDomPurify();
 
 // 🎯 Grouped providers
 const Providers: React.FC<React.PropsWithChildren> = ({ children }) => (
