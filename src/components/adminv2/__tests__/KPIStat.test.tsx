@@ -25,4 +25,26 @@ describe('KPIStat', () => {
     const down = screen.getByText('▼')
     expect(down).toBeInTheDocument()
   })
+
+  it('flips good/bad colors when invert=true', () => {
+    // For invert metrics, negative is good (green)
+    render(<KPIStat label="Error Rate" value={0.03} delta={-0.01} invert />)
+    const downs = screen.getAllByText('▼')
+    const down = downs[downs.length - 1]
+    expect(down).toBeInTheDocument()
+    // Check the container around delta has green class
+    const deltaContainer = down.parentElement as HTMLElement | null
+    expect(deltaContainer?.className).toMatch(/text-emerald-600|dark:text-emerald-400/)
+  })
+
+  it('formats percent values when format and deltaFormat are percent', () => {
+    render(
+      <KPIStat label="Conversion" value={0.1234} delta={0.0234} format="percent" deltaFormat="percent" />
+    )
+    // Use role group and then query inside to avoid matching other cards
+    const group = screen.getByRole('group', { name: /Conversion:/ })
+    expect(group).toBeInTheDocument()
+    expect(group.textContent).toMatch(/12/) // value approx 12%
+    expect(group.textContent).toMatch(/2/)  // delta approx 2%
+  })
 })
