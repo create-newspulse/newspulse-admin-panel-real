@@ -2,6 +2,7 @@
 // ✅ Embed Manager with TED Youth Zone, Manual Embed, and Section Assignment
 
 import React, { useState } from 'react';
+import AdminShell from '../../components/adminv2/AdminShell';
 import { extractIframeSrc, isHostAllowed } from '../../lib/embedUtils';
 
 const SectionBlock = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -20,6 +21,7 @@ const EmbedManager: React.FC = () => {
   // embed utils handle extraction and host allowlist (configurable via VITE_EMBED_ALLOWLIST)
 
   return (
+    <AdminShell>
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-10">🧩 Embed Manager</h1>
 
@@ -145,6 +147,7 @@ const EmbedManager: React.FC = () => {
         📜 All embeds are from YouTube, TED, AirVuz or other trusted public sources. No videos are hosted on News Pulse. This system follows legal, non-monetized embedding standards.
       </p>
     </div>
+    </AdminShell>
   );
 };
 
