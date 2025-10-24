@@ -16,7 +16,7 @@ export function getAllowedHosts(): string[] {
     // Vite exposes env vars starting with VITE_
     const raw = (import.meta as any).env?.VITE_EMBED_ALLOWLIST || process.env.VITE_EMBED_ALLOWLIST || '';
     if (!raw) return DEFAULT_ALLOWED;
-    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  return raw.split(',').map((s: string) => s.trim()).filter(Boolean);
   } catch (e) {
     return DEFAULT_ALLOWED;
   }

@@ -1,6 +1,6 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 
-type Col<T> = { key: keyof T; header: string; render?: (row: T) => React.ReactNode };
+type Col<T> = { key: keyof T; header: string; render?: (row: T) => ReactNode };
 
 export default function Table<T extends { id: string | number }>({ rows, columns }: { rows: T[]; columns: Col<T>[] }) {
   return (

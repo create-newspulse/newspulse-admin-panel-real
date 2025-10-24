@@ -1,6 +1,6 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 
-export default function Card({ title, subtitle, children, actions }: { title?: string; subtitle?: string; children: React.ReactNode; actions?: React.ReactNode }) {
+export default function Card({ title, subtitle, children, actions }: { title?: string; subtitle?: string; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="card">
       <div className="flex items-start justify-between gap-4">

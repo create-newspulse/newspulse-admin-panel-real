@@ -1,4 +1,4 @@
-import React from 'react';
+// React import not required with automatic JSX runtime and no React namespace usage
 
 export default function KPIStat({ label, value, delta, tone = 'blue' }: { label: string; value: string; delta?: string; tone?: 'blue'|'green'|'rose'|'amber' }) {
   const toneMap: Record<string, string> = {
