@@ -38,30 +38,63 @@ export function ThemeToggle() {
 }
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(false);
+  const [path, setPath] = React.useState<string>('');
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setPath(window.location.pathname);
+    }
+  }, []);
+
+  const NavLinks = (
+    <nav className="p-3 space-y-1">
+      {nav.map(item => {
+        const isActive = path && path.toLowerCase().startsWith(item.href.toLowerCase());
+        return (
+          <a
+            key={item.href}
+            href={item.href}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors duration-150 
+              ${isActive ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-100' : 'hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800'}`}
+          >
+            <span aria-hidden>
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${isActive ? 'bg-blue-600' : 'bg-blue-500'}`} />
+            </span>
+            {item.label}
+          </a>
+        );
+      })}
+    </nav>
+  );
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-[#0b1725] text-slate-900 dark:text-slate-100">
       <div className="flex">
-        {/* Sidebar */}
-        <aside className={`hidden md:block w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur sticky top-0 h-screen`}> 
+        {/* Desktop Sidebar */}
+        <aside className={`hidden md:block w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur sticky top-0 h-screen`}>
           <div className="p-4 border-b border-slate-200 dark:border-slate-800">
             <div className="text-xl font-extrabold tracking-tight"><span className="text-blue-600">News</span>Pulse Admin</div>
           </div>
-          <nav className="p-3 space-y-1">
-            {nav.map(item => (
-              <a key={item.href} href={item.href} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800">
-                <span className="i" aria-hidden>
-                  {/* simple dot icon */}
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" />
-                </span>
-                {item.label}
-              </a>
-            ))}
-          </nav>
+          {NavLinks}
           <div className="p-3 border-t border-slate-200 dark:border-slate-800">
             <ThemeToggle />
           </div>
         </aside>
+
+        {/* Mobile Drawer */}
+        {open && (
+          <div className="md:hidden fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
+            <div className="absolute inset-y-0 left-0 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shadow-xl">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div className="text-lg font-bold"><span className="text-blue-600">News</span>Pulse</div>
+                <button className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setOpen(false)} aria-label="Close">✕</button>
+              </div>
+              {NavLinks}
+              <div className="p-3 border-t border-slate-200 dark:border-slate-800"><ThemeToggle /></div>
+            </div>
+          </div>
+        )}
 
         {/* Main */}
         <div className="flex-1 min-w-0">
