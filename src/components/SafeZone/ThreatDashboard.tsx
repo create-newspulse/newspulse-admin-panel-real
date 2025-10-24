@@ -1,5 +1,6 @@
 // 📁 frontend/components/SafeZone/ThreatDashboard.tsx
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   FaShieldAlt, FaBug, FaRobot, FaHistory, FaCheck, FaTimes, FaDownload
 } from 'react-icons/fa';
@@ -149,7 +150,7 @@ const ColorCard = ({
   value,
 }: {
   color: string;
-  icon: JSX.Element;
+  icon: ReactNode;
   label: string;
   value: number;
 }) => (

@@ -17,6 +17,7 @@ import {
 interface EngineStat {
   name: string;
   value: number;
+  [key: string]: unknown;
 }
 
 interface DailyStat {
