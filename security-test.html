@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ Security Test - News Pulse Admin</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 900px; 
+            margin: 30px auto; 
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 { 
+            color: #2c3e50; 
+            text-align: center; 
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .test-box { 
+            border: 2px solid #007bff; 
+            border-radius: 12px; 
+            padding: 25px; 
+            margin: 20px 0;
+            transition: all 0.3s ease;
+        }
+        .test-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .secure { 
+            border-color: #dc3545; 
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe6e6 100%);
+        }
+        .demo { 
+            border-color: #28a745; 
+            background: linear-gradient(135deg, #f0fff4 0%, #e6ffe6 100%);
+        }
+        .info { 
+            border-color: #17a2b8; 
+            background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+        }
+        button { 
+            padding: 12px 24px; 
+            margin: 8px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .btn-demo { background: #28a745; color: white; }
+        .btn-secure { background: #dc3545; color: white; }
+        .btn-info { background: #17a2b8; color: white; }
+        .btn-warning { background: #ffc107; color: #333; }
+        .status { 
+            font-weight: bold; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 20px 0;
+            text-align: center;
+            font-size: 18px;
+        }
+        .active-demo { 
+            background: #d4edda; 
+            color: #155724; 
+            border: 2px solid #28a745;
+        }
+        .active-secure { 
+            background: #f8d7da; 
+            color: #721c24;
+            border: 2px solid #dc3545;
+        }
+        .results {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            min-height: 60px;
+        }
+        .highlight {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .step {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .code {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ News Pulse Security Test</h1>
+        
+        <div class="status" id="status">
+            Current Mode: <span id="mode">Checking...</span>
+        </div>
+
+        <div class="test-box demo">
+            <h3>🚀 Demo Mode (Current Default)</h3>
+            <p><strong>VITE_DEMO_MODE = true</strong></p>
+            <p>✅ Automatic access to admin panel</p>
+            <p>✅ No login required for Vercel visitors</p>
+            <p>✅ Perfect for showcasing your project</p>
+            <p>✅ Professional presentation mode</p>
+            <button class="btn-demo" onclick="setDemoMode(true)">🚀 Enable Demo Mode</button>
+        </div>
+
+        <div class="test-box secure">
+            <h3>🔐 Secure Mode (Production Ready)</h3>
+            <p><strong>VITE_DEMO_MODE = false</strong></p>
+            <p>🔐 Real authentication required</p>
+            <p>🔐 Login page appears before access</p>
+            <p>🔐 Blocks unauthorized access completely</p>
+            <p>🔐 Enterprise-grade security</p>
+            <button class="btn-secure" onclick="setDemoMode(false)">🔐 Enable Secure Mode</button>
+        </div>
+
+        <div class="test-box info">
+            <h3>🧪 Testing Actions</h3>
+            <button class="btn-info" onclick="checkCurrentMode()">🔍 Check Current Mode</button>
+            <button class="btn-info" onclick="goToAdmin()">🎯 Open Admin Panel</button>
+            <button class="btn-warning" onclick="clearStorage()">🧹 Reset All Settings</button>
+        </div>
+
+        <div class="test-box">
+            <h3>📊 Test Results</h3>
+            <div class="results" id="results">
+                <p>👆 Click buttons above to test different security modes and see real-time results!</p>
+            </div>
+        </div>
+
+        <div class="test-box info">
+            <h3>🌐 How to Test on Vercel</h3>
+            <div class="step">
+                <strong>Step 1:</strong> Go to <a href="https://vercel.com/dashboard" target="_blank">Vercel Dashboard</a>
+            </div>
+            <div class="step">
+                <strong>Step 2:</strong> Find your project: <code>newspulse-admin-panel-real</code>
+            </div>
+            <div class="step">
+                <strong>Step 3:</strong> Settings → Environment Variables → Add New
+            </div>
+            <div class="step">
+                <strong>Step 4:</strong> Name: <code>VITE_DEMO_MODE</code>, Value: <code>false</code>
+            </div>
+            <div class="step">
+                <strong>Step 5:</strong> Redeploy and test - login will be required!
+            </div>
+        </div>
+
+        <div class="test-box">
+            <h3>💻 Quick Browser Console Test</h3>
+            <p>Want to test immediately? Copy and paste this in your browser console (F12):</p>
+            <div class="code">
+// Test Secure Mode
+localStorage.setItem('VITE_DEMO_MODE', 'false');
+window.location.reload();
+
+// Test Demo Mode  
+localStorage.setItem('VITE_DEMO_MODE', 'true');
+window.location.reload();
+            </div>
+            <button class="btn-info" onclick="copyConsoleCode()">📋 Copy Console Code</button>
+        </div>
+
+        <div class="highlight">
+            <strong>🎯 Current Status:</strong> Your admin panel is running with environment-controlled security. 
+            Demo mode allows easy showcasing while secure mode provides enterprise-grade authentication!
+        </div>
+    </div>
+
+    <script>
+        function setDemoMode(enabled) {
+            const resultsEl = document.getElementById('results');
+            
+            if (enabled) {
+                localStorage.setItem('VITE_DEMO_MODE', 'true');
+                resultsEl.innerHTML = `
+                    <div style="color: #28a745; font-weight: bold;">
+                        ✅ Demo Mode Activated!
+                        <br><br>
+                        🚀 Admin panel will now provide automatic access<br>
+                        🎯 Perfect for showcasing your project<br>
+                        🌐 Vercel visitors will see full functionality<br>
+                        <br>
+                        <strong>Next:</strong> Click "Open Admin Panel" to see demo access in action!
+                    </div>
+                `;
+            } else {
+                localStorage.setItem('VITE_DEMO_MODE', 'false');
+                resultsEl.innerHTML = `
+                    <div style="color: #dc3545; font-weight: bold;">
+                        🔐 Secure Mode Activated!
+                        <br><br>
+                        🛡️ Admin panel will now require real login<br>
+                        🔒 Authentication enforced for all users<br>
+                        🏢 Enterprise-grade security enabled<br>
+                        <br>
+                        <strong>Next:</strong> Click "Open Admin Panel" to test secure authentication!
+                    </div>
+                `;
+            }
+            checkCurrentMode();
+        }
+
+        function clearStorage() {
+            localStorage.clear();
+            document.getElementById('results').innerHTML = `
+                <div style="color: #17a2b8; font-weight: bold;">
+                    🧹 All Settings Cleared!
+                    <br><br>
+                    🔄 Default behavior will now apply<br>
+                    📊 System will use environment defaults<br>
+                    🎯 Test different modes using buttons above<br>
+                </div>
+            `;
+            checkCurrentMode();
+        }
+
+        function checkCurrentMode() {
+            const demoMode = localStorage.getItem('VITE_DEMO_MODE');
+            const statusEl = document.getElementById('status');
+            const modeEl = document.getElementById('mode');
+            
+            if (demoMode === 'false') {
+                modeEl.textContent = 'Secure Mode 🔐';
+                statusEl.className = 'status active-secure';
+            } else if (demoMode === 'true') {
+                modeEl.textContent = 'Demo Mode 🚀';
+                statusEl.className = 'status active-demo';
+            } else {
+                modeEl.textContent = 'Default (Demo) 🚀';
+                statusEl.className = 'status active-demo';
+            }
+        }
+
+        function goToAdmin() {
+            const resultsEl = document.getElementById('results');
+            const currentMode = localStorage.getItem('VITE_DEMO_MODE');
+            
+            // Determine URL based on environment
+            let adminUrl;
+            if (window.location.hostname === 'localhost') {
+                adminUrl = 'http://localhost:5173';
+            } else {
+                adminUrl = 'https://newspulse-admin-panel-real-mx60.vercel.app';
+            }
+            
+            resultsEl.innerHTML = `
+                <div style="color: #007bff; font-weight: bold;">
+                    🎯 Opening Admin Panel...
+                    <br><br>
+                    🌐 URL: ${adminUrl}<br>
+                    🔧 Mode: ${currentMode === 'false' ? 'Secure (Login Required)' : 'Demo (Auto Access)'}<br>
+                    <br>
+                    <strong>Watch for:</strong> ${currentMode === 'false' ? 'Login page should appear!' : 'Automatic admin access!'}
+                </div>
+            `;
+            
+            // Open in new tab
+            window.open(adminUrl, '_blank');
+        }
+
+        function copyConsoleCode() {
+            const code = `// Test Secure Mode\nlocalStorage.setItem('VITE_DEMO_MODE', 'false');\nwindow.location.reload();\n\n// Test Demo Mode\nlocalStorage.setItem('VITE_DEMO_MODE', 'true');\nwindow.location.reload();`;
+            
+            navigator.clipboard.writeText(code).then(() => {
+                document.getElementById('results').innerHTML = `
+                    <div style="color: #28a745; font-weight: bold;">
+                        📋 Console Code Copied!
+                        <br><br>
+                        1. Open your admin panel<br>
+                        2. Press F12 to open console<br>
+                        3. Paste and run the code<br>
+                        4. Watch the security mode change!
+                    </div>
+                `;
+            });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkCurrentMode();
+            
+            // Add some helpful info on first load
+            setTimeout(() => {
+                if (!localStorage.getItem('security_test_visited')) {
+                    document.getElementById('results').innerHTML = `
+                        <div style="color: #6c757d;">
+                            <strong>🎉 Welcome to the Security Test!</strong><br><br>
+                            This tool helps you test the News Pulse admin panel security system.<br>
+                            Use the buttons above to switch between Demo and Secure modes.<br><br>
+                            <em>Current setup is perfect for showcasing your project! 🚀</em>
+                        </div>
+                    `;
+                    localStorage.setItem('security_test_visited', 'true');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

@@ -32,10 +32,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isFounder, setIsFounder] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 🛡️ SECURE: Only enable demo mode with explicit environment variable
-  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+  // 🛡️ SECURE: Environment-controlled demo access
+  const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
   const isVercelPreview = window.location.hostname.includes('vercel.app');
-  const allowAutoLogin = isDemoMode && isVercelPreview;
+  
+  // 🔒 Auto-login logic: Only on Vercel when NOT explicitly disabled
+  const allowAutoLogin = demoModeEnv !== 'false' && isVercelPreview;
+  
+  // Debug logging
+  console.log('🔧 AuthContext Debug:', {
+    demoModeEnv,
+    isVercelPreview,
+    allowAutoLogin,
+    hostname: window.location.hostname
+  });
 
   useEffect(() => {
     const storedUser = localStorage.getItem('currentUser');

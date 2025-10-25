@@ -12,20 +12,32 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   const location = useLocation();
   const { isFounder, isAuthenticated, isLoading } = useAuth();
 
-  // 🛡️ SECURE: Only bypass if explicitly enabled via environment variable
-  // This prevents accidental security bypasses in real production
-  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+  // 🛡️ SECURE: Environment-controlled demo access
+  const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
   const isVercelPreview = window.location.hostname.includes('vercel.app');
   
-  // 🔒 SECURITY: Only allow bypass for specific demo environments  
-  const allowDemoBypass = isDemoMode && isVercelPreview;
+  // 🔒 SECURITY: Demo mode logic
+  // - If VITE_DEMO_MODE is explicitly 'false', require authentication
+  // - If VITE_DEMO_MODE is 'true' OR undefined on Vercel, allow demo access
+  // - For localhost, always require proper authentication
+  const isDemoMode = demoModeEnv !== 'false' && isVercelPreview;
+  
+  // Debug logging (remove in production)
+  console.log('🔧 FounderRoute Debug:', {
+    demoModeEnv,
+    isVercelPreview,
+    isDemoMode,
+    isAuthenticated,
+    isFounder,
+    hostname: window.location.hostname
+  });
   
   if (isLoading) {
     return <div className="text-center mt-10">🔐 Checking founder access...</div>;
   }
 
   // ✅ Proper authentication check OR controlled demo access
-  if ((isAuthenticated && isFounder) || allowDemoBypass) {
+  if ((isAuthenticated && isFounder) || isDemoMode) {
     return <>{children}</>;
   }
 

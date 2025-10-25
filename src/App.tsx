@@ -17,6 +17,7 @@ import Breadcrumbs from '@components/Breadcrumbs';
 import LockCheckWrapper from '@components/LockCheckWrapper';
 import ProtectedRoute from '@components/ProtectedRoute';
 import FounderRoute from '@components/FounderRoute';
+import EnvTest from '@components/EnvTest';
 
 import LockedPage from '@pages/LockedPage';
 import AdminLogin from '@pages/Login';
@@ -119,6 +120,7 @@ function App() {
           </main>
 
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+          <EnvTest />
         </div>
       </I18nextProvider>
     </AITrainingInfoProvider>
