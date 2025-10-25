@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-export type AiEngine = "gpt" | "gemini" | "auto";
+export type AiEngine = "gpt" | "gemini" | "claude" | "auto";
 
 type AiEngineToggleProps = {
   engine: AiEngine;
   setEngine: (engine: AiEngine) => void;
 };
 
-const fallbackEngines: AiEngine[] = ["gpt", "gemini", "auto"];
+const fallbackEngines: AiEngine[] = ["claude", "gpt", "gemini", "auto"];
 
 const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) => {
   const { t } = useTranslation();
@@ -64,6 +64,8 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
         ? "GPT-4"
         : key === "gemini"
         ? "Gemini 2.5"
+        : key === "claude"
+        ? "Claude Sonnet 3.7"
         : `${t("autoMode") || "Auto"} ✅`
   }));
 

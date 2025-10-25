@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+# Call the PS checker directly from .git/hooks
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -ExecutionPolicy Bypass -File ".git/hooks/pre-commit.ps1" "$@"
+else
+  powershell -NoProfile -ExecutionPolicy Bypass -File ".git/hooks/pre-commit.ps1" "$@"
+fi

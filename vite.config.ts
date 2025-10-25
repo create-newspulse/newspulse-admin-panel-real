@@ -44,6 +44,7 @@ export default defineConfig(({ mode }): UserConfig => {
           target: API_HTTP,
           changeOrigin: true,
           secure: false,
+          // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
         '/socket.io': {
           target: API_WS,

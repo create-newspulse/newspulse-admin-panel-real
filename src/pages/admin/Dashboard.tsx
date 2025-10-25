@@ -35,7 +35,9 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Using the configured apiClient from @lib/api instead of direct fetch
+  // align with src/lib/api.ts (VITE_API_BASE)
+  const API_BASE =
+    (import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || 'http://localhost:5000') + '/api';
 
   const articles = useMemo(
     () => [
@@ -67,10 +69,48 @@ const Dashboard = () => {
       };
 
       try {
-        // Use the properly configured API client instead of direct fetch
-        const response = await apiClient.get('/dashboard-stats');
-        const payload = response?.data ?? response; // handle both {success,data} and direct data
-        setStats(normalize(payload));
+        const token = localStorage.getItem('token');
+
+        // Build RequestInit safely; only attach headers if we have a token
+        const initAuth: RequestInit = {};
+        if (token) {
+          initAuth.headers = { Authorization: `Bearer ${token}` } as HeadersInit;
+        }
+
+        // 1) Try your rich endpoint
+        let res = await fetch(`${API_BASE}/dashboard-stats`, initAuth);
+
+        // If unauthorized, retry once without token
+        if (!res.ok && res.status === 401) {
+          res = await fetch(`${API_BASE}/dashboard-stats`);
+        }
+
+        if (res.ok) {
+          const ct = res.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) throw new Error('Non-JSON from /dashboard-stats');
+          const json = await res.json();
+          const payload = json?.data ?? json; // accept {success,data} or plain
+          setStats(normalize(payload));
+          return;
+        }
+
+        // 2) Fallback to /api/stats (alias)
+        let res2 = await fetch(`${API_BASE}/stats`, initAuth);
+        if (!res2.ok && res2.status === 401) {
+          res2 = await fetch(`${API_BASE}/stats`);
+        }
+        if (!res2.ok) {
+          const reason = await res2.text().catch(() => '');
+          throw new Error(
+            `Failed both endpoints. /dashboard-stats=${res.status}, /stats=${res2.status}. ${reason}`
+          );
+        }
+
+        const ct2 = res2.headers.get('content-type') || '';
+        if (!ct2.includes('application/json')) throw new Error('Non-JSON from /stats');
+        const json2 = await res2.json();
+        const payload2 = json2?.data ?? json2;
+        setStats(normalize(payload2));
       } catch (err: any) {
         console.error('❌ Dashboard API Error:', err?.message || err);
         setError('Failed to load dashboard stats. Please ensure the backend server is running.');
@@ -90,7 +130,7 @@ const Dashboard = () => {
 
     fetchStats();
     fetchAICommand();
-  }, [t]);
+  }, [API_BASE, t]);
 
   const langCode = (i18n.language?.split('-')[0] || 'en') as 'en' | 'hi' | 'gu';
 
@@ -154,7 +194,7 @@ const Dashboard = () => {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.4, duration: 0.6 }}
             >
-              <LiveTicker apiUrl="/api/news-ticker" position="top" />
+              <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
             </motion.section>
 
             <motion.section

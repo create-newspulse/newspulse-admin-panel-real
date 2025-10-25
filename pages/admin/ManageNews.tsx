@@ -1,5 +1,6 @@
 // ✅ Updated: admin-backend/pages/admin/ManageNews.tsx with Filters, Preview, Pagination, Inline Editing
 import React, { useEffect, useState } from 'react';
+import AdminShell from '../../src/components/adminv2/AdminShell';
 
 interface NewsItem {
   _id: string;
@@ -88,11 +89,20 @@ const ManageNews: React.FC = () => {
     cancelEditing();
   };
 
-  if (loading) return <p className="p-6 text-gray-500">Loading...</p>;
-  if (error) return <p className="p-6 text-red-500">{error}</p>;
+  if (loading) return (
+    <AdminShell>
+      <p className="p-6 text-gray-500">Loading...</p>
+    </AdminShell>
+  );
+  if (error) return (
+    <AdminShell>
+      <p className="p-6 text-red-500">{error}</p>
+    </AdminShell>
+  );
 
   return (
-    <div className="p-6">
+    <AdminShell>
+    <div className="p-0">
       <h1 className="text-2xl font-bold mb-4">📁 Manage News</h1>
 
       <div className="flex gap-4 mb-4">
@@ -177,6 +187,7 @@ const ManageNews: React.FC = () => {
         </div>
       )}
     </div>
+    </AdminShell>
   );
 };
 

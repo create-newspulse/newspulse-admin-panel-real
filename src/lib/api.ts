@@ -12,7 +12,6 @@ const BASE = RAW_BASE.replace(/\/$/, ""); // strip trailing slash
 const baseURL = isDevelopment ? "/api" : (BASE ? `${BASE}/api` : "/api");
 
 console.log('🔧 API Config:', { isDevelopment, RAW_BASE, BASE, baseURL });
-
 // Single axios instance for all API calls
 const apiClient = axios.create({
   baseURL,
@@ -25,7 +24,6 @@ apiClient.interceptors.request.use((config) => {
   console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
   return config;
 });
-
 // Centralized error logging (helps debug 404/500 quickly)
 apiClient.interceptors.response.use(
   (r) => r,

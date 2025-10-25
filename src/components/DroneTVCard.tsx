@@ -28,7 +28,21 @@ export default function DroneTVCard({ video }: Props) {
       <h2 className="text-lg font-bold mb-2">{video.title}</h2>
 
       {/* Embedded video */}
-      <div className="my-3" dangerouslySetInnerHTML={{ __html: video.embedCode }} />
+      <div className="my-3">
+        {(() => {
+          if (typeof window === 'undefined' || window.location.protocol === 'file:') {
+            return <div className="text-sm text-red-600">Preview blocked</div>;
+          }
+          try {
+            const { extractIframeSrc, isHostAllowed } = require('../lib/embedUtils');
+            const src = extractIframeSrc(video.embedCode || '');
+            if (src && isHostAllowed(src)) return <iframe title={video.title || 'video'} src={src} width="100%" height="280" frameBorder={0} allowFullScreen />;
+          } catch (e) {}
+          const { sanitizeHtml } = require('../lib/sanitize');
+          // eslint-disable-next-line react/no-danger
+          return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(video.embedCode || '') }} />;
+        })()}
+      </div>
 
       {/* Description */}
       <p className="text-gray-700 text-sm mb-2">{video.description}</p>

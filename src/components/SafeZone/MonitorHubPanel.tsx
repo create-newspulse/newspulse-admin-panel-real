@@ -43,9 +43,11 @@ const MonitorHubPanel: React.FC = () => {
   };
 
   // 🔁 Fetch Live Data
+  const API_BASE = (import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
   const fetchStatus = async () => {
     try {
-      const json: MonitorData = await getJSON('/api/system/monitor-hub');
+      const url = API_BASE ? `${API_BASE.replace(/\/api$/, '')}/api/system/monitor-hub` : '/api/system/monitor-hub';
+      const json: MonitorData = await getJSON(url);
       // Accept either {success:true, ...} or plain object
       const success = json.success ?? true;
       if (!success) throw new Error('API success=false');
@@ -70,7 +72,8 @@ const MonitorHubPanel: React.FC = () => {
 
   // 🧠 Real-Time User Count via Socket (same-origin -> Vite proxy -> backend)
   useEffect(() => {
-    const socket: Socket = io('/', {
+    const SOCKET_URL = (import.meta.env.VITE_API_WS ?? import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '') || undefined;
+    const socket: Socket = io(SOCKET_URL || '/', {
       path: '/socket.io',
       transports: ['websocket'],
       withCredentials: true,

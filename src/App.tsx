@@ -20,6 +20,8 @@ import FounderRoute from '@components/FounderRoute';
 
 import LockedPage from '@pages/LockedPage';
 import AdminLogin from '@pages/Login';
+import Unauthorized from '@pages/Unauthorized';
+import { isAllowedHost } from './lib/hostGuard';
 
 // Admin Pages
 import Dashboard from '@pages/admin/Dashboard';
@@ -68,6 +70,11 @@ function App() {
           <Navbar />
           {isAuthenticated && <Breadcrumbs />}
 
+          {/* Host allow-list guard prevents preview lockouts. Empty allow-list = allow all. */}
+          {!isAllowedHost() ? (
+            <div className="p-10 text-center text-red-600 text-2xl font-bold">❌ Access Denied — Host not allowed</div>
+          ) : null}
+
           <main className="p-4 md:p-6 max-w-7xl mx-auto">
             <Routes>
               {/* 🧭 Default Redirect to Admin Dashboard */}
@@ -106,11 +113,7 @@ function App() {
 
               {/* 🔐 Login + Fallback */}
               <Route path="/login" element={<AdminLogin />} />
-              <Route path="/unauthorized" element={
-                <div className="text-red-500 text-xl font-semibold text-center my-20">
-                  ❌ Access Denied. Please contact the administrator.
-                </div>
-              } />
+              <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
             </Routes>
           </main>
