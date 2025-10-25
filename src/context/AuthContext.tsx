@@ -32,6 +32,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isFounder, setIsFounder] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 🌐 Check if running in production (Vercel)
+  const isProduction = window.location.hostname.includes('vercel.app') || 
+                      import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
+
   useEffect(() => {
     const storedUser = localStorage.getItem('currentUser');
     if (storedUser) {
@@ -44,9 +48,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('❌ Invalid session data:', err);
         localStorage.removeItem('currentUser');
       }
+    } else if (isProduction) {
+      // 🚀 Auto-authenticate in production for demo
+      const demoUser: User = {
+        _id: 'demo-founder',
+        name: 'Demo Founder',
+        email: 'admin@newspulse.ai',
+        role: 'founder',
+        avatar: '',
+        bio: 'Demo founder account for production'
+      };
+      setUser(demoUser);
+      setIsAuthenticated(true);
+      setIsFounder(true);
+      localStorage.setItem('currentUser', JSON.stringify(demoUser));
+      localStorage.setItem('isFounder', 'true');
     }
     setIsLoading(false);
-  }, []);
+  }, [isProduction]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {

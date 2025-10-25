@@ -3,18 +3,18 @@ import { defineConfig, loadEnv, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 
-// ESM-safe resolver with types
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
+const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 
+// https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
-  // load all envs; only VITE_* are exposed to client
   const env = loadEnv(mode, process.cwd(), '');
-
-  const API_HTTP = env.VITE_API_URL || 'http://localhost:5000';
-  const API_WS   = env.VITE_API_WS  || API_HTTP; // default WS to same host
+  const API_HTTP = stripSlash(env.VITE_API_URL) || 'http://localhost:5000';
+  const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {
     plugins: [react()],
+    envPrefix: 'VITE_',
 
     resolve: {
       alias: {
@@ -33,26 +33,25 @@ export default defineConfig(({ mode }): UserConfig => {
     },
 
     server: {
+      host: true,
       port: 5173,
       open: true,
       strictPort: true,
+      cors: true,
+      // Proxy all API + sockets to backend in dev
       proxy: {
-        // HTTP API -> backend
         '/api': {
           target: API_HTTP,
           changeOrigin: true,
-          secure: false, // dev only
-          ws: false,
+          secure: false,
         },
-        // 🔌 Socket.IO WS -> backend
         '/socket.io': {
           target: API_WS,
-          changeOrigin: true,
           ws: true,
-          secure: false, // dev only
+          changeOrigin: true,
+          secure: false,
         },
       },
-      // hmr: { overlay: false }, // uncomment if overlay is too noisy
       watch: {
         ignored: [
           '**/admin-backend/backend/data/**',
@@ -60,6 +59,12 @@ export default defineConfig(({ mode }): UserConfig => {
           '**/admin-backend/backend/data/*.json',
           '**/admin-backend/backend/data/*',
         ],
+      },
+      // Uncomment if the red error overlay bothers you during dev:
+      // hmr: { overlay: false },
+      headers: {
+        // Helpful for cookies/session during local testing
+        'Access-Control-Allow-Credentials': 'true',
       },
     },
 
@@ -75,11 +80,27 @@ export default defineConfig(({ mode }): UserConfig => {
       emptyOutDir: true,
       sourcemap: false,
       cssCodeSplit: true,
+      chunkSizeWarningLimit: 1500, // quiets the big-chunk warning
+      // If you want tighter chunking later, uncomment and tune:
+      // rollupOptions: {
+      //   output: {
+      //     manualChunks: {
+      //       react: ['react', 'react-dom'],
+      //       socketio: ['socket.io-client'],
+      //       html2canvas: ['html2canvas'],
+      //     },
+      //   },
+      // },
     },
 
     preview: {
       port: 4173,
       open: true,
+    },
+
+    // Speed up dev for common deps (optional)
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'socket.io-client'],
     },
   };
 });

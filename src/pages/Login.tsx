@@ -1,6 +1,6 @@
 // 📁 src/pages/Login.tsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -12,6 +12,30 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('admin@newspulse.ai');
   const [password, setPassword] = useState('Safe!2025@News');
   const [error, setError] = useState('');
+
+  // 🌐 Auto-login in production for demo purposes
+  const isProduction = window.location.hostname.includes('vercel.app');
+  
+  const handleAutoLogin = async () => {
+    localStorage.setItem('isFounder', 'true');
+    localStorage.setItem('currentUser', JSON.stringify({
+      _id: 'founder-demo',
+      name: 'Demo Founder',
+      email: 'admin@newspulse.ai',
+      role: 'founder',
+      avatar: '',
+      bio: 'Demo founder account'
+    }));
+    localStorage.setItem('isLoggedIn', 'true');
+    navigate('/admin/dashboard');
+  };
+
+  useEffect(() => {
+    if (isProduction) {
+      // Auto-login with founder credentials in production
+      handleAutoLogin();
+    }
+  }, [isProduction, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +93,21 @@ const Login: React.FC = () => {
             Login
           </button>
         </form>
+
+        {/* 🌐 Demo Access Button for Production */}
+        {isProduction && (
+          <div className="mt-4 text-center">
+            <button
+              onClick={handleAutoLogin}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded transition"
+            >
+              🚀 Demo Access (Founder Mode)
+            </button>
+            <p className="text-sm text-gray-500 mt-2">
+              Click above for instant demo access
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

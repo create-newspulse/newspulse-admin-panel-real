@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import io from 'socket.io-client';
+import React, { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
 import {
   FaChartLine, FaTrafficLight, FaUserShield, FaMapMarkedAlt,
   FaRobot, FaShieldAlt, FaFileExport
@@ -18,55 +18,86 @@ interface MonitorData {
   aiTools: string[];
   ptiScore: number;
   flags: number;
+  success?: boolean; // tolerate APIs that include or omit this
 }
 
-const MonitorHubPanel = () => {
+const MonitorHubPanel: React.FC = () => {
   const [data, setData] = useState<MonitorData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeUsers, setActiveUsers] = useState<number | null>(null);
+
+  // Small helper to ensure JSON & better errors
+  const getJSON = async (url: string) => {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${res.statusText} :: ${text.slice(0, 180)}`);
+    }
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Expected JSON, got "${ct}". Body: ${text.slice(0, 180)}`);
+    }
+    return res.json();
+  };
 
   // 🔁 Fetch Live Data
   const fetchStatus = async () => {
-  try {
-    const res = await fetch('/api/system/monitor-hub');
-    if (!res.ok) throw new Error('Status not OK');
-    const json = await res.json();
-    // Check for success field
-    if (!json.success) throw new Error('API success is false');
-    setData(json);
-    setActiveUsers(json.activeUsers);
-    setError(false); // Clear error if data loads
-  } catch (err) {
-    console.error('❌ Monitor Hub Fetch Error:', err);
-    setError(true);
-    setData(null); // Clear data on error
-  } finally {
-    setLoading(false);
-  }
-};
+    try {
+      const json: MonitorData = await getJSON('/api/system/monitor-hub');
+      // Accept either {success:true, ...} or plain object
+      const success = json.success ?? true;
+      if (!success) throw new Error('API success=false');
+      setData(json);
+      setActiveUsers(json.activeUsers);
+      setError(null);
+    } catch (err: any) {
+      console.error('❌ Monitor Hub Fetch Error:', err);
+      setError(err?.message || 'Unknown error');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 📦 Initial + Interval Fetch
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 30000); // every 30s
+    const interval = setInterval(fetchStatus, 30_000); // every 30s
     return () => clearInterval(interval);
   }, []);
 
-  // 🧠 Real-Time User Count via Socket
+  // 🧠 Real-Time User Count via Socket (same-origin -> Vite proxy -> backend)
   useEffect(() => {
-    const socket = io();
+    const socket: Socket = io('/', {
+      path: '/socket.io',
+      transports: ['websocket'],
+      withCredentials: true,
+    });
+
+    socket.on('connect', () => {
+      console.log('🔌 Connected to backend', socket.id);
+    });
+
     socket.on('activeUserCount', (count: number) => {
       setActiveUsers(count);
     });
-    return () => { socket.disconnect(); };
+
+    socket.on('connect_error', (e) => {
+      console.error('Socket connect error:', e);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // 📤 Export PDF Report
   const exportReport = async () => {
     try {
-      const res = await fetch('/api/reports/export?type=pdf');
-      if (!res.ok) throw new Error('Failed to fetch PDF');
+      const res = await fetch('/api/reports/export?type=pdf', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -85,9 +116,15 @@ const MonitorHubPanel = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const res = await fetch('/api/system/daily-summary-toggle', { method: 'POST' });
-      const json = await res.json();
-      alert(json?.enabled ? '✅ Daily email summary enabled' : '❌ Email summary disabled');
+      const res = await fetch('/api/system/daily-summary-toggle', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ toggle: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      const enabled = json?.enabled ?? false;
+      alert(enabled ? '✅ Daily email summary enabled' : '❌ Email summary disabled');
     } catch (err) {
       console.error('Email toggle failed:', err);
     }
@@ -95,7 +132,7 @@ const MonitorHubPanel = () => {
 
   // 🧪 Load States
   if (loading) return <div className="text-sm text-slate-500">⏳ Loading Monitor Hub...</div>;
-  if (error || !data) return <div className="text-sm text-red-500">❌ Error loading system monitor data</div>;
+  if (error || !data) return <div className="text-sm text-red-500">❌ Error loading system monitor data<br />{error}</div>;
 
   return (
     <div className="space-y-4 text-sm text-slate-700 dark:text-slate-200">
@@ -166,7 +203,7 @@ const Panel = ({
   children,
 }: {
   title: string;
-  icon: JSX.Element;
+  icon: React.ReactNode;
   color: string;
   bgColor: string;
   children: React.ReactNode;
