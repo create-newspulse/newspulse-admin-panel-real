@@ -1,6 +1,6 @@
 // 📁 src/pages/Login.tsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -13,29 +13,33 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('Safe!2025@News');
   const [error, setError] = useState('');
 
-  // 🌐 Auto-login in production for demo purposes
-  const isProduction = window.location.hostname.includes('vercel.app');
+  // 🛡️ SECURE: Only enable demo features when explicitly configured
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+  const isVercelPreview = window.location.hostname.includes('vercel.app');
+  const showDemoButton = isDemoMode && isVercelPreview;
   
-  const handleAutoLogin = async () => {
-    localStorage.setItem('isFounder', 'true');
-    localStorage.setItem('currentUser', JSON.stringify({
-      _id: 'founder-demo',
-      name: 'Demo Founder',
-      email: 'admin@newspulse.ai',
-      role: 'founder',
-      avatar: '',
-      bio: 'Demo founder account'
-    }));
-    localStorage.setItem('isLoggedIn', 'true');
-    navigate('/admin/dashboard');
-  };
-
-  useEffect(() => {
-    if (isProduction) {
-      // Auto-login with founder credentials in production
-      handleAutoLogin();
+  const handleDemoLogin = async () => {
+    // Use the regular login flow with demo credentials
+    const success = await login('demo@newspulse.ai', 'demo-password');
+    if (success) {
+      toast.success('✅ Demo login successful');
+      navigate('/admin/dashboard');
+    } else {
+      // Fallback for demo mode
+      localStorage.setItem('isFounder', 'true');
+      localStorage.setItem('currentUser', JSON.stringify({
+        _id: 'demo-founder',
+        name: 'Demo User',
+        email: 'demo@newspulse.ai',
+        role: 'founder',
+        avatar: '',
+        bio: 'Demo account - Preview only'
+      }));
+      localStorage.setItem('isLoggedIn', 'true');
+      toast.success('✅ Demo mode activated');
+      navigate('/admin/dashboard');
     }
-  }, [isProduction, navigate]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,17 +98,17 @@ const Login: React.FC = () => {
           </button>
         </form>
 
-        {/* 🌐 Demo Access Button for Production */}
-        {isProduction && (
+        {/* 🛡️ Secure Demo Access - Only when explicitly enabled */}
+        {showDemoButton && (
           <div className="mt-4 text-center">
             <button
-              onClick={handleAutoLogin}
+              onClick={handleDemoLogin}
               className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded transition"
             >
-              🚀 Demo Access (Founder Mode)
+              🚀 Demo Access (Preview Mode)
             </button>
             <p className="text-sm text-gray-500 mt-2">
-              Click above for instant demo access
+              For demonstration purposes only
             </p>
           </div>
         )}

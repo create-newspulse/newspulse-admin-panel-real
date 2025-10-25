@@ -32,9 +32,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isFounder, setIsFounder] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 🌐 Check if running in production (Vercel)
-  const isProduction = window.location.hostname.includes('vercel.app') || 
-                      import.meta.env.VITE_ENABLE_DEMO_MODE === 'true';
+  // 🛡️ SECURE: Only enable demo mode with explicit environment variable
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+  const isVercelPreview = window.location.hostname.includes('vercel.app');
+  const allowAutoLogin = isDemoMode && isVercelPreview;
 
   useEffect(() => {
     const storedUser = localStorage.getItem('currentUser');
@@ -48,15 +49,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.error('❌ Invalid session data:', err);
         localStorage.removeItem('currentUser');
       }
-    } else if (isProduction) {
-      // 🚀 Auto-authenticate in production for demo
+    } else if (allowAutoLogin) {
+      // 🎯 CONTROLLED: Only auto-login when explicitly enabled for demos
+      console.log('🚀 Demo mode enabled - Auto-authenticating for preview');
       const demoUser: User = {
         _id: 'demo-founder',
-        name: 'Demo Founder',
-        email: 'admin@newspulse.ai',
+        name: 'Demo User',
+        email: 'demo@newspulse.ai',
         role: 'founder',
         avatar: '',
-        bio: 'Demo founder account for production'
+        bio: 'Demo account - Preview mode only'
       };
       setUser(demoUser);
       setIsAuthenticated(true);
@@ -65,7 +67,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       localStorage.setItem('isFounder', 'true');
     }
     setIsLoading(false);
-  }, [isProduction]);
+  }, [allowAutoLogin]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
