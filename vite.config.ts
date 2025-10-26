@@ -9,7 +9,12 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
-  const API_HTTP = stripSlash(env.VITE_API_URL) || 'http://localhost:3002';
+  const rawApi = stripSlash(env.VITE_API_URL);
+  const isLocal = !!rawApi && /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(rawApi);
+  // In dev, default to local backend; in prod, default to our secure proxy
+  const API_HTTP = rawApi && !isLocal
+    ? rawApi
+    : (mode === 'development' ? 'http://localhost:3002' : '/admin-api');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {

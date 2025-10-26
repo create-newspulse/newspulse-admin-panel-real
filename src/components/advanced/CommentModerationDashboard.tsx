@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { MessageSquare, CheckCircle, XCircle, Flag, Ban, TrendingDown, TrendingUp } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3002/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/admin-api';
 
 export default function CommentModerationDashboard() {
   const [comments, setComments] = useState<any[]>([]);
