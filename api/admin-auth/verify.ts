@@ -20,8 +20,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .setIssuedAt()
       .sign(secret);
 
-    const cookie = `np_admin=${session}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400; ${process.env.NODE_ENV === 'production' ? 'Secure; ' : ''}`;
-    res.setHeader('Set-Cookie', cookie);
+    // Build robust cookie attributes for custom domain
+    const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || '';
+    const isProd = process.env.NODE_ENV === 'production';
+    const attrs = [
+      `np_admin=${session}`,
+      'Path=/',
+      'HttpOnly',
+      // Lax is friendlier to redirect-based logins than Strict
+      'SameSite=Lax',
+      'Max-Age=86400',
+    ];
+    if (isProd) attrs.push('Secure');
+    if (host && host.includes('.')) attrs.push(`Domain=${host}`);
+    res.setHeader('Set-Cookie', attrs.join('; '));
+    res.setHeader('Cache-Control', 'no-store');
 
     const redirectTo = '/';
     res.status(302).setHeader('Location', redirectTo);

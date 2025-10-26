@@ -48,35 +48,64 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   });
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
-    if (storedUser) {
-      try {
-        const parsedUser: User = JSON.parse(storedUser);
-        setUser(parsedUser);
+    const init = async () => {
+      const storedUser = localStorage.getItem('currentUser');
+      if (storedUser) {
+        try {
+          const parsedUser: User = JSON.parse(storedUser);
+          setUser(parsedUser);
+          setIsAuthenticated(true);
+          setIsFounder(parsedUser.role === 'founder');
+        } catch (err) {
+          console.error('❌ Invalid session data:', err);
+          localStorage.removeItem('currentUser');
+        }
+      } else if (allowAutoLogin) {
+        // 🎯 CONTROLLED: Only auto-login when explicitly enabled for demos
+        console.log('🚀 Demo mode enabled - Auto-authenticating for preview');
+        const demoUser: User = {
+          _id: 'demo-founder',
+          name: 'Demo User',
+          email: 'demo@newspulse.ai',
+          role: 'founder',
+          avatar: '',
+          bio: 'Demo account - Preview mode only'
+        };
+        setUser(demoUser);
         setIsAuthenticated(true);
-        setIsFounder(parsedUser.role === 'founder');
-      } catch (err) {
-        console.error('❌ Invalid session data:', err);
-        localStorage.removeItem('currentUser');
+        setIsFounder(true);
+        localStorage.setItem('currentUser', JSON.stringify(demoUser));
+        localStorage.setItem('isFounder', 'true');
+      } else {
+        // 🔐 Check server session cookie (magic-link auth)
+        try {
+          const resp = await fetch('/api/admin-auth/session', { credentials: 'include' });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data?.authenticated) {
+              const sessionUser: User = {
+                _id: data.email || 'admin-user',
+                name: data.email?.split('@')[0] || 'Admin',
+                email: data.email,
+                role: 'founder', // Treat authenticated admins as founders for panel access
+                avatar: '',
+                bio: ''
+              };
+              setUser(sessionUser);
+              setIsAuthenticated(true);
+              setIsFounder(true);
+              // Persist minimal user to avoid blank reloads
+              localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+              localStorage.setItem('isFounder', 'true');
+            }
+          }
+        } catch (e) {
+          // Ignore and keep unauthenticated state
+        }
       }
-    } else if (allowAutoLogin) {
-      // 🎯 CONTROLLED: Only auto-login when explicitly enabled for demos
-      console.log('🚀 Demo mode enabled - Auto-authenticating for preview');
-      const demoUser: User = {
-        _id: 'demo-founder',
-        name: 'Demo User',
-        email: 'demo@newspulse.ai',
-        role: 'founder',
-        avatar: '',
-        bio: 'Demo account - Preview mode only'
-      };
-      setUser(demoUser);
-      setIsAuthenticated(true);
-      setIsFounder(true);
-      localStorage.setItem('currentUser', JSON.stringify(demoUser));
-      localStorage.setItem('isFounder', 'true');
-    }
-    setIsLoading(false);
+      setIsLoading(false);
+    };
+    init();
   }, [allowAutoLogin]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
@@ -115,6 +144,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
     setIsAuthenticated(false);
     setIsFounder(false);
+    // Best-effort cookie clear on server
+    fetch('/api/admin-auth/logout', { credentials: 'include' }).catch(() => {});
   };
 
   return (

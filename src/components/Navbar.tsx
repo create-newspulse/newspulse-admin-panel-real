@@ -6,13 +6,13 @@ import LanguageDropdown from './LanguageDropdown';
 
 export default function Navbar() {
   const { isDark, toggleDark } = useDarkMode();
-  const { isAuthenticated, isFounder } = useAuth(); // ✅ Auth state
+  const { isAuthenticated, isFounder, logout } = useAuth(); // ✅ Auth state
   const navigate = useNavigate();
   const { t } = useTranslation();
   const location = useLocation();
 
   const handleLogout = () => {
-    localStorage.clear();
+    logout();
     navigate('/auth');
   };
 
