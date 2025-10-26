@@ -22,8 +22,15 @@ export default function Navbar() {
     { to: '/manage-news', icon: '🗂️', label: t('manage') },
     { to: '/push-history', icon: '📣', label: t('pushHistory') },
     { to: '/media/inspiration', icon: '🌟', label: t('inspirationHub') },
-    { to: '/ai-test', icon: '🧠', label: t('aiPanel') },
-    { to: '/safe-owner', icon: '🛡️', label: t('safeOwnerZone') },
+    { to: '/ai-test', icon: '�', label: t('aiPanel') },
+      { to: '/admin/media-library', icon: '🖼️', label: 'Media Library' },
+      { to: '/admin/ai-assistant', icon: '🤖', label: 'AI Assistant' },
+      { to: '/admin/workflow', icon: '🧭', label: 'Workflow' },
+      { to: '/admin/analytics', icon: '📈', label: 'Analytics' },
+      { to: '/admin/web-stories', icon: '📱', label: 'Web Stories' },
+      { to: '/admin/moderation', icon: '💬', label: 'Moderation' },
+      { to: '/admin/seo', icon: '🔍', label: 'SEO Tools' },
+      { to: '/safe-owner', icon: '🛡️', label: t('safeOwnerZone') },
   ];
 
   return (
@@ -56,6 +63,24 @@ export default function Navbar() {
             {/* 📘 Panel Guide – Visible to Founder only */}
             {isFounder && (
               <>
+                <Link
+                  to="/admin/security"
+                  className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${
+                    location.pathname === '/admin/security' ? 'text-blue-400' : 'text-white'
+                  }`}
+                >
+                  <span>🛡️</span>
+                  Security
+                </Link>
+                <Link
+                  to="/admin/founder-control"
+                  className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${
+                    location.pathname === '/admin/founder-control' ? 'text-blue-400' : 'text-white'
+                  }`}
+                >
+                  <span>🧰</span>
+                  Founder Control
+                </Link>
                 <Link
                   to="/safe-owner/help"
                   className="text-xs text-blue-400 underline hover:text-white"

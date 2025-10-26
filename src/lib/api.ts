@@ -9,7 +9,8 @@ import axios, { AxiosError } from "axios";
 const isDevelopment = import.meta.env.MODE === 'development';
 const RAW_BASE = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE ?? "") + "";
 const BASE = RAW_BASE.replace(/\/$/, ""); // strip trailing slash
-const baseURL = isDevelopment ? "/api" : (BASE ? `${BASE}/api` : "/api");
+// In production without explicit BASE, target the Vercel proxy at /admin-api
+const baseURL = isDevelopment ? "/api" : (BASE ? `${BASE}/api` : "/admin-api");
 
 console.log('🔧 API Config:', { isDevelopment, RAW_BASE, BASE, baseURL });
 // Single axios instance for all API calls
@@ -32,6 +33,14 @@ apiClient.interceptors.response.use(
     const data = err.response?.data as any;
     const msg = (data && (data.message || data.error)) || err.message;
     console.error(`API ${status ?? ""}: ${msg}`, data);
+    // On unauthorized in production, steer to auth page
+    if (status === 401 && typeof window !== 'undefined' && !isDevelopment) {
+      // avoid loops if already on auth page
+      const path = window.location.pathname;
+      if (!path.startsWith('/auth')) {
+        window.location.href = '/auth';
+      }
+    }
     return Promise.reject(err);
   }
 );

@@ -17,7 +17,6 @@ import Breadcrumbs from '@components/Breadcrumbs';
 import LockCheckWrapper from '@components/LockCheckWrapper';
 import ProtectedRoute from '@components/ProtectedRoute';
 import FounderRoute from '@components/FounderRoute';
-import EnvTest from '@components/EnvTest';
 
 import LockedPage from '@pages/LockedPage';
 import AdminLogin from '@pages/Login';
@@ -46,7 +45,6 @@ import PollResultsChart from '@pages/PollResultsChart';
 import SafeOwnerZone from '@pages/admin/SafeOwnerZone';
 import LanguageManager from '@pages/SafeOwner/LanguageManager';
 import PanelGuide from '@pages/SafeOwner/PanelGuide';
-import Settings from '@pages/SafeOwner/Settings';
 import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
 import AdminControlCenter from '@components/AdminControlCenter';
 import FeatureHelpPanel from '@components/SafeZone/FeatureHelpPanel';
@@ -55,6 +53,16 @@ import EmbedManager from '@pages/admin/EmbedManager';
 import ToggleControls from '@pages/admin/ToggleControls';
 import ControlConstitution from '@pages/admin/ControlConstitution';
 import Diagnostics from '@pages/admin/Diagnostics';
+// Advanced Modules
+import AIEditorialAssistant from '@components/advanced/AIEditorialAssistant';
+import EnhancedSecurityDashboard from '@components/advanced/EnhancedSecurityDashboard';
+import EditorialWorkflowEngine from '@components/advanced/EditorialWorkflowEngine';
+import FounderControlCenter from '@components/advanced/FounderControlCenter';
+import MediaLibrary from '@components/advanced/MediaLibrary';
+import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
+import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
+import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
+import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 
 function App() {
   const { isDark } = useDarkMode();
@@ -104,13 +112,23 @@ function App() {
               <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />
               <Route path="/safe-owner/language-settings" element={<FounderRoute><LanguageManager /></FounderRoute>} />
               <Route path="/safe-owner/panel-guide" element={<FounderRoute><PanelGuide /></FounderRoute>} />
-              <Route path="/safe-owner/founder-settings" element={<FounderRoute><Settings /></FounderRoute>} />
               <Route path="/safe-owner/update-pin" element={<FounderRoute><UpdateFounderPIN /></FounderRoute>} />
               <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
               <Route path="/admin/embed-manager" element={<FounderRoute><EmbedManager /></FounderRoute>} />
               <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
+
+              {/* 🚀 Advanced Modules */}
+              <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />
+              <Route path="/admin/workflow" element={<ProtectedRoute><EditorialWorkflowEngine /></ProtectedRoute>} />
+              <Route path="/admin/media-library" element={<ProtectedRoute><MediaLibrary /></ProtectedRoute>} />
+              <Route path="/admin/analytics" element={<ProtectedRoute><AnalyticsDashboard /></ProtectedRoute>} />
+              <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
+              <Route path="/admin/web-stories" element={<ProtectedRoute><WebStoriesEditor /></ProtectedRoute>} />
+              <Route path="/admin/moderation" element={<ProtectedRoute><CommentModerationDashboard /></ProtectedRoute>} />
+              <Route path="/admin/seo" element={<ProtectedRoute><SEOToolsDashboard /></ProtectedRoute>} />
+              <Route path="/admin/founder-control" element={<FounderRoute><FounderControlCenter /></FounderRoute>} />
 
               {/* 🔐 Login + Fallback */}
               <Route path="/login" element={<AdminLogin />} />
@@ -120,7 +138,6 @@ function App() {
           </main>
 
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-          <EnvTest />
         </div>
       </I18nextProvider>
     </AITrainingInfoProvider>

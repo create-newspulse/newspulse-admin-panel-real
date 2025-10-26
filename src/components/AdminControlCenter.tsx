@@ -3,10 +3,8 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import html2pdf from 'html2pdf.js';
 import {
-  FaBrain, FaLock, FaChartLine, FaMoneyBill,
-  FaGavel, FaCogs, FaSave, FaUserShield, FaWrench
+  FaBrain, FaMoneyBill, FaUserShield
 } from 'react-icons/fa';
-import MissionControlSidebar from "./SafeZone/MissionControlSidebar";
 import { useNavigate, Link } from 'react-router-dom';
 
 // ✅ Admin Panel Lock Protection Wrapper
@@ -62,7 +60,6 @@ const safeDefaults = {
 
 export default function AdminControlCenter() {
   const [settings, setSettings] = useState(defaultSettings);
-  const [backup, setBackup] = useState(defaultSettings);
   useLockdownCheck(settings);
 
   useEffect(() => {
@@ -70,7 +67,6 @@ export default function AdminControlCenter() {
       .then(res => {
         const config = res.data || defaultSettings;
         setSettings(config);
-        setBackup(config);
       })
       .catch(() => {
         toast.error('⚠️ Failed to load settings from database.');
@@ -83,10 +79,7 @@ export default function AdminControlCenter() {
       axios.post('/api/settings/save', settings),
       {
         loading: 'Saving settings...',
-        success: () => {
-          setBackup(settings);
-          return '✅ Settings saved!';
-        },
+        success: '✅ Settings saved!',
         error: '❌ Failed to save settings.',
       }
     );
@@ -95,11 +88,6 @@ export default function AdminControlCenter() {
   const handleReset = () => {
     setSettings(safeDefaults);
     toast.success('♻️ Settings reverted to Safe Mode');
-  };
-
-  const handleRestoreBackup = () => {
-    setSettings(backup);
-    toast.success('🔁 Settings restored from last backup');
   };
 
   const handleExportPDF = () => {
@@ -143,110 +131,94 @@ export default function AdminControlCenter() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 p-4 md:p-6 max-w-7xl mx-auto">
-      <div className="w-full md:w-64 flex-shrink-0">
-        <MissionControlSidebar
-          onExportSettings={handleExportPDF}
-          onBackupSite={() => toast.success('💾 Backup triggered (simulated).')}
-          onRestoreBackup={handleRestoreBackup}
-        />
-      </div>
+    <div className="min-h-screen bg-slate-900 p-4 md:p-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-4xl font-bold mb-3 text-white">🧩 Admin Control Center</h1>
+          <p className="text-lg text-slate-200">Configure AI intelligence, founder controls, and monetization settings</p>
+          <div className="mt-4 bg-blue-900/50 border border-blue-500 rounded-lg p-4">
+            <p className="text-base text-white">
+              📊 <strong className="text-white">Need system monitoring?</strong> Visit <Link to="/safe-owner" className="text-blue-300 underline hover:text-blue-200 font-semibold">Safe Owner Zone</Link> for real-time metrics and detailed panels.
+            </p>
+          </div>
+        </div>
 
-      <div className="flex-1 space-y-6">
-        <h1 className="text-2xl font-bold mb-2 text-white">🧩 Admin Control Center – News Pulse</h1>
+        <div className="space-y-6">
 
-        <ZoneSection title="AI Intelligence Zone" icon={<FaBrain />}>
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={settings.aiTrainer}
-              onChange={(e) => setSettings(prev => ({ ...prev, aiTrainer: e.target.checked }))}
-            />
-            Enable AI Trainer (Beta)
-          </label>
-        </ZoneSection>
+          <ZoneSection title="AI Intelligence Zone" icon={<FaBrain />}>
+            <label className="flex items-center gap-3 text-base text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.aiTrainer}
+                onChange={(e) => setSettings(prev => ({ ...prev, aiTrainer: e.target.checked }))}
+                className="w-5 h-5"
+              />
+              <span className="font-medium">Enable AI Trainer (Beta)</span>
+            </label>
+          </ZoneSection>
 
-        <ZoneSection title="Founder Control Zone" icon={<FaUserShield />}>
-          <label className="flex items-center gap-3 text-sm mb-2">
-            <input
-              type="checkbox"
-              checked={settings.lockdown}
-              onChange={(e) => setSettings(prev => ({ ...prev, lockdown: e.target.checked }))}
-            />
-            🔒 Enable Lockdown Mode
-          </label>
+          <ZoneSection title="Founder Control Zone" icon={<FaUserShield />}>
+            <label className="flex items-center gap-3 text-base text-white mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.lockdown}
+                onChange={(e) => setSettings(prev => ({ ...prev, lockdown: e.target.checked }))}
+                className="w-5 h-5"
+              />
+              <span className="font-medium">🔒 Enable Lockdown Mode</span>
+            </label>
 
-          <label className="flex items-center gap-3 text-sm mb-2">
-            <input
-              type="checkbox"
-              checked={settings.signatureLock}
-              onChange={(e) => setSettings(prev => ({ ...prev, signatureLock: e.target.checked }))}
-            />
-            ✍️ Enable Signature Lock
-          </label>
+            <label className="flex items-center gap-3 text-base text-white mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.signatureLock}
+                onChange={(e) => setSettings(prev => ({ ...prev, signatureLock: e.target.checked }))}
+                className="w-5 h-5"
+              />
+              <span className="font-medium">✍️ Enable Signature Lock</span>
+            </label>
 
-          <label className="flex items-center gap-3 text-sm mb-4">
-            <input
-              type="checkbox"
-              checked={settings.founderOnly}
-              onChange={(e) => setSettings(prev => ({ ...prev, founderOnly: e.target.checked }))}
-            />
-            👑 Founder-Only Panel Mode
-          </label>
+            <label className="flex items-center gap-3 text-base text-white mb-4 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.founderOnly}
+                onChange={(e) => setSettings(prev => ({ ...prev, founderOnly: e.target.checked }))}
+                className="w-5 h-5"
+              />
+              <span className="font-medium">👑 Founder-Only Panel Mode</span>
+            </label>
 
-          <Link
-            to="/safe-owner/update-pin"
-            className="inline-block px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-          >
-            🔁 Update Founder PIN
-          </Link>
-        </ZoneSection>
+            <Link
+              to="/safe-owner/update-pin"
+              className="inline-block px-5 py-3 text-base font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-lg"
+            >
+              🔁 Update Founder PIN
+            </Link>
+          </ZoneSection>
 
-        <ZoneSection title="Performance + Reach Zone" icon={<FaChartLine />}>
-          <p className="text-sm">Control homepage performance, voice playlist behavior, engagement logic.</p>
-        </ZoneSection>
+          <ZoneSection title="Monetization Zone" icon={<FaMoneyBill />}>
+            <label className="flex items-center gap-3 text-base text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.adsenseEnabled}
+                onChange={(e) => setSettings(prev => ({ ...prev, adsenseEnabled: e.target.checked }))}
+                className="w-5 h-5"
+              />
+              <span className="font-medium">Enable Google AdSense</span>
+            </label>
+          </ZoneSection>
 
-        <ZoneSection title="Monetization Zone" icon={<FaMoneyBill />}>
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={settings.adsenseEnabled}
-              onChange={(e) => setSettings(prev => ({ ...prev, adsenseEnabled: e.target.checked }))}
-            />
-            Enable Google AdSense
-          </label>
-        </ZoneSection>
-
-        <ZoneSection title="Compliance & Legal Zone" icon={<FaGavel />}>
-          <p className="text-sm">Enable PTI filters, AI trust checkers, defamation guard, and GDPR consent.</p>
-        </ZoneSection>
-
-        <ZoneSection title="UI Customization" icon={<FaCogs />}>
-          <p className="text-sm">Choose layout mode, toggle dark/light theme, font preferences.</p>
-        </ZoneSection>
-
-        <ZoneSection title="Backup & Export Zone" icon={<FaSave />}>
-          <p className="text-sm">Auto backup, manual export to PDF, and restore backup options.</p>
-        </ZoneSection>
-
-        <ZoneSection title="Admin & Team Control" icon={<FaLock />}>
-          <p className="text-sm">Manage team roles, login logs, and admin panel access.</p>
-        </ZoneSection>
-
-        <ZoneSection title="Advanced Settings" icon={<FaWrench />}>
-          <p className="text-sm">Advanced developer options: AMP toggle, API test tools.</p>
-        </ZoneSection>
-
-        <div className="sticky bottom-0 bg-slate-800 p-4 rounded-xl shadow-md flex justify-between items-center">
-          <button onClick={handleSave} className="bg-green-500 px-6 py-2 rounded-lg font-bold hover:bg-green-600">
-            💾 Save All
-          </button>
-          <button onClick={handleReset} className="bg-red-500 px-6 py-2 rounded-lg font-bold hover:bg-red-600">
-            ♻️ Safe Mode
-          </button>
-          <button onClick={handleExportPDF} className="bg-blue-600 px-6 py-2 rounded-lg font-bold hover:bg-blue-700">
-            📤 Export
-          </button>
+          <div className="sticky bottom-0 bg-slate-800 p-6 rounded-xl shadow-2xl flex flex-wrap gap-4 justify-center items-center border-2 border-slate-700">
+            <button onClick={handleSave} className="bg-green-600 px-8 py-3 rounded-lg text-lg font-bold text-white hover:bg-green-700 transition shadow-lg">
+              💾 Save All
+            </button>
+            <button onClick={handleReset} className="bg-red-600 px-8 py-3 rounded-lg text-lg font-bold text-white hover:bg-red-700 transition shadow-lg">
+              ♻️ Safe Mode
+            </button>
+            <button onClick={handleExportPDF} className="bg-blue-600 px-8 py-3 rounded-lg text-lg font-bold text-white hover:bg-blue-700 transition shadow-lg">
+              📤 Export
+            </button>
+          </div>
         </div>
       </div>
     </div>

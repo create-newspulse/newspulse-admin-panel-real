@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 
 import StatsCards from '@components/StatsCards';
@@ -35,9 +34,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // align with src/lib/api.ts (VITE_API_BASE)
-  const API_BASE =
-    (import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || 'http://localhost:5000') + '/api';
+  // Use relative /api so Vite proxy handles the active backend port in development
+  const API_BASE = '/api';
 
   const articles = useMemo(
     () => [
@@ -69,48 +67,18 @@ const Dashboard = () => {
       };
 
       try {
-        const token = localStorage.getItem('token');
-
-        // Build RequestInit safely; only attach headers if we have a token
-        const initAuth: RequestInit = {};
-        if (token) {
-          initAuth.headers = { Authorization: `Bearer ${token}` } as HeadersInit;
-        }
-
-        // 1) Try your rich endpoint
-        let res = await fetch(`${API_BASE}/dashboard-stats`, initAuth);
-
-        // If unauthorized, retry once without token
-        if (!res.ok && res.status === 401) {
-          res = await fetch(`${API_BASE}/dashboard-stats`);
-        }
-
-        if (res.ok) {
-          const ct = res.headers.get('content-type') || '';
-          if (!ct.includes('application/json')) throw new Error('Non-JSON from /dashboard-stats');
-          const json = await res.json();
-          const payload = json?.data ?? json; // accept {success,data} or plain
+        // Prefer the centralized axios client (handles base, creds, errors)
+        try {
+          const r1 = await apiClient.get('/dashboard-stats');
+          const payload = r1.data?.data ?? r1.data;
           setStats(normalize(payload));
           return;
+        } catch (e1: any) {
+          // Fallback alias
+          const r2 = await apiClient.get('/stats');
+          const payload2 = r2.data?.data ?? r2.data;
+          setStats(normalize(payload2));
         }
-
-        // 2) Fallback to /api/stats (alias)
-        let res2 = await fetch(`${API_BASE}/stats`, initAuth);
-        if (!res2.ok && res2.status === 401) {
-          res2 = await fetch(`${API_BASE}/stats`);
-        }
-        if (!res2.ok) {
-          const reason = await res2.text().catch(() => '');
-          throw new Error(
-            `Failed both endpoints. /dashboard-stats=${res.status}, /stats=${res2.status}. ${reason}`
-          );
-        }
-
-        const ct2 = res2.headers.get('content-type') || '';
-        if (!ct2.includes('application/json')) throw new Error('Non-JSON from /stats');
-        const json2 = await res2.json();
-        const payload2 = json2?.data ?? json2;
-        setStats(normalize(payload2));
       } catch (err: any) {
         console.error('❌ Dashboard API Error:', err?.message || err);
         setError('Failed to load dashboard stats. Please ensure the backend server is running.');
@@ -137,26 +105,18 @@ const Dashboard = () => {
   return (
     <main className="min-h-screen bg-gradient-to-b from-white to-gray-100 dark:from-slate-900 dark:to-slate-800 text-gray-900 dark:text-white transition-all duration-500">
       <div className="max-w-7xl mx-auto px-6 py-10 space-y-12">
-        <motion.header
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+        <header
           className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
         >
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-800 dark:text-white">
             📊 {t('dashboard')}
           </h1>
-        </motion.header>
+  </header>
 
         {loading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1, duration: 0.5 }}
-            className="text-center text-gray-500 dark:text-gray-400"
-          >
+          <div className="text-center text-gray-500 dark:text-gray-400">
             ⏳ {t('loadingDashboard')}
-          </motion.div>
+          </div>
         )}
 
         {error && (
@@ -167,11 +127,7 @@ const Dashboard = () => {
 
         {stats && (
           <>
-            <motion.section
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2, duration: 0.6 }}
-            >
+            <section>
               <StatsCards
                 totalNews={stats.total}
                 categoryCount={stats.byCategory.length}
@@ -179,41 +135,24 @@ const Dashboard = () => {
                 activeUsers={stats.activeUsers}
                 aiLogs={stats.aiLogs}
               />
-            </motion.section>
+            </section>
 
-            <motion.section
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3, duration: 0.6 }}
-            >
+            <section>
               <ChartComponent />
-            </motion.section>
+            </section>
 
-            <motion.section
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.4, duration: 0.6 }}
-            >
+            <section>
               <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
-            </motion.section>
+            </section>
 
-            <motion.section
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5, duration: 0.6 }}
-            >
+            <section>
               <VoiceAndExplainer text={t('aiSummaryBody')} />
               <VoicePlayer text={t('topNewsBody')} language={langCode} />
-            </motion.section>
+            </section>
           </>
         )}
 
-        <motion.section
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6, duration: 0.6 }}
-          aria-labelledby="ai-insights"
-        >
+        <section aria-labelledby="ai-insights">
           <h2
             id="ai-insights"
             className="text-2xl font-semibold text-slate-700 dark:text-slate-100 mb-6 flex items-center gap-2"
@@ -233,7 +172,7 @@ const Dashboard = () => {
               <pre className="text-sm">{JSON.stringify(aiCommand, null, 2)}</pre>
             </div>
           )}
-        </motion.section>
+  </section>
       </div>
     </main>
   );

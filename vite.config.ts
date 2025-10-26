@@ -9,7 +9,7 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
-  const API_HTTP = stripSlash(env.VITE_API_URL) || 'http://localhost:5000';
+  const API_HTTP = stripSlash(env.VITE_API_URL) || 'http://localhost:3002';
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {
@@ -36,7 +36,8 @@ export default defineConfig(({ mode }): UserConfig => {
       host: true,
       port: 5173,
       open: true,
-      strictPort: true,
+      // Allow auto-fallback if 5173 is busy (prevents hard exits on dev)
+      strictPort: false,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {
