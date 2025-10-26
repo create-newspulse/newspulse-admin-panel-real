@@ -13,7 +13,7 @@ export default function Navbar() {
 
   const handleLogout = () => {
     localStorage.clear();
-    navigate('/login');
+    navigate('/auth');
   };
 
   const navItems = [

@@ -28,7 +28,7 @@ api.interceptors.response.use(
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       // Remove token, redirect to login page if needed
       localStorage.removeItem('adminToken');
-      window.location.href = '/admin/login';
+      window.location.href = '/auth';
     }
     return Promise.reject(error);
   }
