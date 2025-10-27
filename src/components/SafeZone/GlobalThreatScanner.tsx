@@ -1,5 +1,6 @@
 // 📁 src/components/SafeZone/GlobalThreatScanner.tsx
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaShieldAlt, FaLock, FaGlobe, FaCheckCircle, FaSyncAlt
 } from 'react-icons/fa';
@@ -33,7 +34,7 @@ const GlobalThreatScanner = () => {
     try {
       setLoading(true);
       setLastError(null);
-      const res = await fetch('/api/system/threat-status', {
+      const res = await fetch(`${API_BASE_PATH}/system/threat-status`, {
         cache: 'no-store',
         signal: controller.signal,
       });

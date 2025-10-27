@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { api, API_BASE_PATH } from '@lib/api';
 import {
   FaPoll,
   FaDownload,
@@ -22,8 +23,7 @@ const LiveNewsPollsPanel = () => {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/polls/live-stats');
-      const json = await res.json();
+  const json: any = await api.pollsLiveStats();
       if (json.success) setStats(json.data);
       else throw new Error('Invalid response');
     } catch (err) {
@@ -37,7 +37,7 @@ const LiveNewsPollsPanel = () => {
   const exportPDF = async () => {
     try {
       setIsExporting(true);
-      const res = await fetch('/api/polls/export-pdf', { method: 'POST' });
+      const res = await fetch(`${API_BASE_PATH}/polls/export-pdf`, { method: 'POST' });
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');

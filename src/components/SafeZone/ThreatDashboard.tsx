@@ -1,5 +1,6 @@
 // 📁 frontend/components/SafeZone/ThreatDashboard.tsx
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import type { ReactNode } from 'react';
 import {
   FaShieldAlt, FaBug, FaRobot, FaHistory, FaCheck, FaTimes, FaDownload
@@ -29,7 +30,7 @@ const ThreatDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/dashboard/threat-stats');
+  const res = await fetch(`${API_BASE_PATH}/dashboard/threat-stats`);
       const json = await res.json();
       if (json.success) {
         setStats(json);

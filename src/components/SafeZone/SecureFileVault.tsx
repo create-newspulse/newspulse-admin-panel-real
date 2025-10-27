@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaFileDownload, FaClock, FaUpload, FaTrash
 } from 'react-icons/fa';
@@ -17,7 +18,7 @@ const SecureFileVault = () => {
   const handleDownload = () => {
     setMessage(null);
     setError(null);
-    window.open('/backups/latest.zip', '_blank');
+  window.open(`${API_BASE_PATH}/backups/latest.zip`, '_blank');
   };
 
   const handleUpload = () => {
@@ -32,7 +33,7 @@ const SecureFileVault = () => {
     const formData = new FormData();
     formData.append('vault', file);
 
-    fetch('/api/vault/upload', {
+    fetch(`${API_BASE_PATH}/vault/upload`, {
       method: 'POST',
       body: formData,
     })

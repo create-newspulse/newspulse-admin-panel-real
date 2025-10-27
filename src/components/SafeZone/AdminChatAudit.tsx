@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaComments,
   FaRobot,
@@ -25,7 +26,7 @@ const AdminChatAudit = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/admin-chat-audit");
+  const res = await fetch(`${API_BASE_PATH}/admin-chat-audit`);
         const data = await res.json();
 
         // Check for both res.ok and data.logs is array

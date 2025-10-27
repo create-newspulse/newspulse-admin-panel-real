@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaChartLine, FaTrafficLight, FaUserShield, FaMapMarkedAlt,
   FaRobot, FaShieldAlt, FaFileExport
@@ -43,11 +44,9 @@ const MonitorHubPanel: React.FC = () => {
   };
 
   // 🔁 Fetch Live Data
-  const API_BASE = (import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
   const fetchStatus = async () => {
     try {
-      const url = API_BASE ? `${API_BASE.replace(/\/api$/, '')}/api/system/monitor-hub` : '/api/system/monitor-hub';
-      const json: MonitorData = await getJSON(url);
+      const json: MonitorData = await getJSON(`${API_BASE_PATH}/system/monitor-hub`);
       // Accept either {success:true, ...} or plain object
       const success = json.success ?? true;
       if (!success) throw new Error('API success=false');
@@ -99,7 +98,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📤 Export PDF Report
   const exportReport = async () => {
     try {
-      const res = await fetch('/api/reports/export?type=pdf', { credentials: 'include' });
+      const res = await fetch(`${API_BASE_PATH}/reports/export?type=pdf`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -119,7 +118,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const res = await fetch('/api/system/daily-summary-toggle', {
+      const res = await fetch(`${API_BASE_PATH}/system/daily-summary-toggle`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },

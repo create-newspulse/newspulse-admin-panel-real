@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import { FaIdCard, FaTools, FaBrain, FaFileExport } from 'react-icons/fa';
 
 type VersionEntry = {
@@ -16,7 +17,7 @@ const SystemVersionControl = () => {
   const [data, setData] = useState<VersionData | null>(null);
 
   useEffect(() => {
-    fetch('/api/system/version-log')
+    fetch(`${API_BASE_PATH}/system/version-log`)
       .then((res) => res.json())
       .then(setData)
       .catch((err) => {

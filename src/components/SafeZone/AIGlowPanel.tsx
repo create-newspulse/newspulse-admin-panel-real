@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_BASE_PATH } from '@lib/api';
 import { FaHeartbeat, FaRobot, FaBolt, FaBrain } from "react-icons/fa";
 
 interface AIStatus {
@@ -17,7 +18,7 @@ const AIGlowPanel: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('/api/ai-glow-status');
+  const res = await fetch(`${API_BASE_PATH}/ai-glow-status`);
         if (!res.ok) throw new Error('Fetch failed');
         const json = await res.json();
 

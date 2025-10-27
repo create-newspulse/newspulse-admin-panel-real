@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { api } from '@lib/api';
 
 type ActivityData = {
   autoPublished: number;
@@ -19,14 +20,11 @@ const AIActivityLog: React.FC = () => {
       setError(null);
 
       try {
-        const res = await fetch("/api/ai-activity-log");
-        if (!res.ok) throw new Error("Fetch failed");
-
-        const json = await res.json();
+        const json = await api.aiActivityLog() as any;
 
         // Accepts both { success: true, data: { ... } } and { ...fields }
         const activity: ActivityData =
-          json.data && typeof json.data === "object"
+          json?.data && typeof json.data === "object"
             ? json.data
             : json;
 

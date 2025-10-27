@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaThumbtack,
   FaBrain,
@@ -17,7 +18,7 @@ const GuardianRulesEngine = () => {
   }>(null);
 
   useEffect(() => {
-    fetch('/api/system/guardian-status')
+    fetch(`${API_BASE_PATH}/system/guardian-status`)
       .then((res) => res.json())
       .then(setStatus)
       .catch((err) => console.error('GuardianRulesEngine fetch failed:', err));

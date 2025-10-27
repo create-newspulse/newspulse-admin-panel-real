@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaBrain, FaTrafficLight, FaMoneyBill, FaHeartbeat, FaTools,
   FaExclamationTriangle, FaLock, FaRedoAlt, FaChevronDown, FaChevronUp
@@ -20,7 +21,7 @@ export default function MissionControlSidebar({
   const [lastCheck, setLastCheck] = useState<string>("");
 
   useEffect(() => {
-    fetch("/api/system/constitution-status")
+    fetch(`${API_BASE_PATH}/system/constitution-status`)
       .then(res => res.json())
       .then(data => {
         setSyncStatus(data.status === 'ok' ? 'ok' : 'fail');

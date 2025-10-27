@@ -94,6 +94,21 @@ export const api = {
   diagnostics: () => get("/system/ai-diagnostics"),
   clearLogs: () => del("/system/clear-logs"),
   askKiranOS: (prompt: string) => post<{ reply: string }>("/system/ask-kiranos", { prompt }),
+
+  // SafeZone panels
+  systemHealth: () => get("/safezone/system-health"),
+  aiActivityLog: () => get("/ai-activity-log"),
+
+  // Polls
+  pollsLiveStats: () => get("/polls/live-stats"),
+  pollsExportPdfPath: () => `${baseURL}/polls/export-pdf`,
+
+  // Revenue
+  revenue: () => get("/revenue"),
+  revenueExportPdfPath: () => `${baseURL}/revenue/export/pdf`,
 };
 
 export default apiClient;
+
+// Export resolved base path for building absolute URLs in anchors/fetch
+export const API_BASE_PATH = baseURL;

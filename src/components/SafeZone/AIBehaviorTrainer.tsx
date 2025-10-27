@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { API_BASE_PATH } from '@lib/api';
 
 type ActivityData = {
   autoPublished: number;
@@ -18,7 +19,7 @@ const AIBehaviorTrainer: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/ai-behavior-log");
+  const res = await fetch(`${API_BASE_PATH}/ai-behavior-log`);
         if (!res.ok) throw new Error("Fetch failed");
         const json = await res.json();
 

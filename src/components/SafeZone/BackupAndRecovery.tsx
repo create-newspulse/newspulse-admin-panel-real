@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_BASE_PATH } from '@lib/api';
 import { FaRedo, FaDatabase, FaCloudUploadAlt } from "react-icons/fa";
 
 const BackupAndRecovery: React.FC = () => {
@@ -12,7 +13,7 @@ const BackupAndRecovery: React.FC = () => {
     setUploadDone(false);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/system/run-backup", { method: "POST" });
+  const res = await fetch(`${API_BASE_PATH}/system/run-backup`, { method: "POST" });
       const data = await res.json();
       if (res.ok && data.success) {
         setStatus("success");
@@ -30,7 +31,7 @@ const BackupAndRecovery: React.FC = () => {
     setUploading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/system/firebase-upload-latest", { method: "POST" });
+  const res = await fetch(`${API_BASE_PATH}/system/firebase-upload-latest`, { method: "POST" });
       const data = await res.json();
       if (res.ok && data.success) {
         setUploadDone(true);
@@ -78,7 +79,7 @@ const BackupAndRecovery: React.FC = () => {
         {status === "success" && (
           <>
             <a
-              href="/backups/latest.zip"
+              href={`${API_BASE_PATH}/backups/latest.zip`}
               download
               className="text-blue-600 underline text-sm block mt-2"
             >

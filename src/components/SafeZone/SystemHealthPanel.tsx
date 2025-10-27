@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import html2pdf from 'html2pdf.js';
 import type { SystemHealth } from '../../types/SafeZone';
+import { api, API_BASE_PATH } from '@lib/api';
 
 const SystemHealthPanel = () => {
   const [healthData, setHealthData] = useState<SystemHealth | null>(null);
@@ -34,16 +35,15 @@ const SystemHealthPanel = () => {
 
   useEffect(() => {
     if (unlocked) {
-      fetch('/api/safezone/system-health')
-        .then((res) => res.json())
-        .then((data) => setHealthData(data))
+      api.systemHealth()
+        .then((data: any) => setHealthData(data))
         .catch((err) => console.error('Health fetch error:', err));
     }
   }, [unlocked]);
 
   useEffect(() => {
     if (healthData && (!healthData.apiGateway || !healthData.voiceEngine)) {
-      fetch('/api/notify-down', { method: 'POST' });
+      fetch(`${API_BASE_PATH}/notify-down`, { method: 'POST' });
     }
   }, [healthData]);
 

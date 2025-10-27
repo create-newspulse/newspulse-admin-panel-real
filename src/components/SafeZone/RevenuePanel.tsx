@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { api } from '@lib/api';
 
 type RevenueData = {
   adsense: number;
@@ -14,12 +15,8 @@ const RevenuePanel = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/revenue')
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`Server error: ${res.status}`);
-        }
-        const resData = await res.json();
+    api.revenue()
+      .then((resData: any) => {
         // Defensive: Check for required fields, not error object
         if (
           typeof resData.adsense === "number" &&
@@ -35,7 +32,7 @@ const RevenuePanel = () => {
         }
         setLoading(false);
       })
-      .catch((err) => {
+      .catch((err: any) => {
         setError("Failed to load revenue data: " + err.message);
         setLoading(false);
       });
@@ -51,7 +48,7 @@ const RevenuePanel = () => {
           ✅ RevenuePanel Loaded
         </p>
         <a
-          href="/api/revenue/export/pdf"
+          href={api.revenueExportPdfPath()}
           className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
         >
           📄 Export PDF

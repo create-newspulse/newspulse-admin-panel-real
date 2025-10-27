@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   FaClock, FaLink, FaRobot, FaBell
 } from 'react-icons/fa';
@@ -17,7 +18,7 @@ const IncidentResponseModule = () => {
 
   useEffect(() => {
     const fetchIncidents = () => {
-      fetch('/api/system/incidents')
+      fetch(`${API_BASE_PATH}/system/incidents`)
         .then((res) => res.json())
         .then((data) => {
           setIncidents(data.incidents || []);

@@ -1,6 +1,7 @@
 // ✅ File: components/SafeZone/SystemUnlockPanel.tsx
 
 import React, { useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import { FaUnlockAlt } from 'react-icons/fa';
 
 const SystemUnlockPanel: React.FC = () => {
@@ -12,7 +13,7 @@ const SystemUnlockPanel: React.FC = () => {
     setStatus('loading');
 
     try {
-      const res = await fetch('/api/system/reactivate', {
+      const res = await fetch(`${API_BASE_PATH}/system/reactivate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),

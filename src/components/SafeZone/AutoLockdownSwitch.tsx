@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_BASE_PATH } from '@lib/api';
 import { FaShieldAlt } from "react-icons/fa";
 
 const AutoLockdownSwitch: React.FC = () => {
@@ -30,7 +31,7 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("locking");
     setMessage(null);
     try {
-      const res = await fetch("/api/system/emergency-lock", {
+      const res = await fetch(`${API_BASE_PATH}/system/emergency-lock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: lockPin }),
@@ -56,7 +57,7 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("unlocking");
     setMessage(null);
     try {
-      const res = await fetch("/api/system/emergency-unlock", {
+      const res = await fetch(`${API_BASE_PATH}/system/emergency-unlock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: unlockPin }),
