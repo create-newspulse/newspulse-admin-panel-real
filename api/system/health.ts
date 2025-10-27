@@ -24,7 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `${base}/api/health`,
   ];
 
-  const fetchWithTimeout = async (url: string, timeoutMs = 4000) => {
+  // Render cold-starts can take several seconds on free plans; allow ~9s to fit Vercel's 10s limit
+  const fetchWithTimeout = async (url: string, timeoutMs = 9000) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -43,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   };
 
+  let lastError: any = null;
   for (const url of candidates) {
     try {
       const r = await fetchWithTimeout(url);
@@ -50,8 +52,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ success: true, proxied: true, target: r.url, status: r.status, latencyMs: r.ms, contentType: r.contentType, backend: r.body, ts: new Date().toISOString() });
       }
       return res.status(r.status || 502).json({ success: false, proxied: true, target: r.url, status: r.status, latencyMs: r.ms, contentType: r.contentType, backend: r.body, ts: new Date().toISOString() });
-    } catch {}
+    } catch (e) {
+      lastError = (e as Error)?.message || String(e);
+    }
   }
 
-  return res.status(502).json({ success: false, proxied: true, error: 'Failed to reach backend health endpoints', tried: candidates, ts: new Date().toISOString() });
+  return res.status(502).json({ success: false, proxied: true, error: 'Failed to reach backend health endpoints', lastError, tried: candidates, ts: new Date().toISOString() });
 }
