@@ -6,6 +6,7 @@ const nav: NavItem[] = [
   { label: 'Dashboard', href: '/admin/V2Dashboard' },
   { label: 'All News', href: '/AllNews' },
   { label: 'Manage News', href: '/ManageNews' },
+  { label: 'AI Engine', href: '/admin/ai-engine' },
   { label: 'Embeds', href: '/admin/EmbedManager' },
   { label: 'Moderation', href: '/admin/Moderation' },
   { label: 'Analytics', href: '/AnalyticsDashboard' },
