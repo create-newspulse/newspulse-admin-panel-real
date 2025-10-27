@@ -117,6 +117,26 @@ export default function SystemHealthBadge(): JSX.Element {
     return d?.proxied && d?.success === false && typeof d?.status !== 'number' && typeof d?.latencyMs !== 'number';
   }, [info]);
 
+  // When we detect waking, try a direct no-cors warm-up to the backend origin from the browser.
+  useEffect(() => {
+    if (!waking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const meta = await fetch('/api/system/backend-origin', { credentials: 'include' }).then(r => r.json()).catch(() => null as any);
+        const origin: string | null = meta?.origin || null;
+        if (!origin) return;
+        // Fire-and-forget warm-up; no-cors avoids CORS failure, we don't need the body.
+        if (!cancelled) {
+          fetch(origin, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${origin}/api/health`, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${origin}/api/system/health`, { mode: 'no-cors' }).catch(() => {});
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [waking]);
+
   return (
     <div className={`inline-flex items-center gap-3 px-3 py-2 rounded-lg border ${styles.bg} ${styles.text}`} title={info?.target ? `Health target: ${info.target}` : undefined}>
       <span className={`inline-block w-2.5 h-2.5 rounded-full ${styles.dot}`}></span>

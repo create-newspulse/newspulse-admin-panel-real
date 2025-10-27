@@ -109,6 +109,25 @@ export default function SystemHealthPanel(): JSX.Element {
     return d?.proxied && d?.success === false && typeof d?.status !== 'number' && typeof d?.latencyMs !== 'number';
   }, [env]);
 
+  // When waking, trigger a no-cors warm-up to backend origin to accelerate wake from the browser.
+  useEffect(() => {
+    if (!waking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const meta = await fetch('/api/system/backend-origin', { credentials: 'include' }).then(r => r.json()).catch(() => null as any);
+        const origin: string | null = meta?.origin || null;
+        if (!origin) return;
+        if (!cancelled) {
+          fetch(origin, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${origin}/api/health`, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${origin}/api/system/health`, { mode: 'no-cors' }).catch(() => {});
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [waking]);
+
   return (
     <section className="mt-8">
       <div className="flex items-center justify-between mb-3">
