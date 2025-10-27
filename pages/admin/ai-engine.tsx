@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';
 
 const LANGUAGES = ['English','Hindi','Spanish','French','German'];

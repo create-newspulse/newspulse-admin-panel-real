@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import api from '../../lib/api';
+import { useState } from 'react';
+import { api as apiLib } from '../../lib/api';
 
 // Simple options
 const LANGUAGES = ['English', 'Hindi', 'Spanish', 'French', 'German'];
@@ -28,7 +28,7 @@ export default function AIEngine(): JSX.Element {
     }
     setLoading(true);
     try {
-      const resp = await api.aiEngineRun({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl });
+  const resp = await apiLib.aiEngineRun({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl });
       setResult(resp.result);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to run AI Engine');

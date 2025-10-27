@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import AiEngineToggle, { AiEngine } from '../components/AiEngineToggle';
 import VoicePlayer from '../components/VoicePlayer';
+import { API_BASE_PATH } from '../lib/api';
 
 // Task type definition
 type TaskType = 'summarize' | 'headline' | 'rewrite';
@@ -22,7 +23,7 @@ const AITest: React.FC = () => {
   // Fetch articles on mount
   useEffect(() => {
     setArticleError(null);
-    fetch('/api/news/all')
+    fetch(`${API_BASE_PATH}/news/all`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error('API error: ' + res.status);
         const type = res.headers.get('content-type');
@@ -49,9 +50,10 @@ const AITest: React.FC = () => {
     setLoading(true);
     setOutput('');
     try {
-      const res = await fetch('/api/ai/explain', {
+      const res = await fetch(`${API_BASE_PATH}/ai/explain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ content: input }),
       });
 
@@ -68,9 +70,10 @@ const AITest: React.FC = () => {
 
       // Optional: Save logs only if summary
       if (summary) {
-        await fetch('/api/ai/logs/save', {
+        await fetch(`${API_BASE_PATH}/ai/logs/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ taskType, language, engine, result }),
         });
       }
@@ -99,9 +102,10 @@ const AITest: React.FC = () => {
   const handleSaveToArticle = async () => {
     const summaryText = output.replace(/^🧠.*?Output:\n/, '');
     try {
-      const res = await fetch('/api/ai/logs/save-summary-to-article', {
+      const res = await fetch(`${API_BASE_PATH}/ai/logs/save-summary-to-article`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           articleId: selectedArticleId,
           summary: summaryText,
