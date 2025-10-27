@@ -7,7 +7,7 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import api from '../lib/api';
+import api, { API_BASE_PATH } from '../lib/api';
 import { User } from '../types/User';
 
 // ✅ Auth context type
@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } else {
         // 🔐 Check server session cookie (magic-link auth)
         try {
-          const resp = await fetch('/api/admin-auth/session', { credentials: 'include' });
+          const resp = await fetch(`${API_BASE_PATH}/admin-auth/session`, { credentials: 'include' });
           if (resp.ok) {
             const data = await resp.json();
             if (data?.authenticated) {
@@ -145,7 +145,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsAuthenticated(false);
     setIsFounder(false);
     // Best-effort cookie clear on server
-    fetch('/api/admin-auth/logout', { credentials: 'include' }).catch(() => {});
+    fetch(`${API_BASE_PATH}/admin-auth/logout`, { credentials: 'include' }).catch(() => {});
   };
 
   return (

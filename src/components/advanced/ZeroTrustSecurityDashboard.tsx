@@ -1,6 +1,6 @@
 // 🛡️ Enhanced Zero-Trust Security System with Real Backend Integration
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '../../lib/api';
 import { Shield, Users, Activity, Lock, AlertTriangle, CheckCircle, XCircle, UserX } from 'lucide-react';
 
 type SecurityMetrics = {
@@ -67,9 +67,9 @@ export default function ZeroTrustSecurityDashboard(): JSX.Element {
     setLoading(true);
     try {
       if (activeTab === 'dashboard' || activeTab === 'audit') {
-        const auditRes = await axios.get('/api/security/audit?limit=50');
+  const auditRes = await apiClient.get('/security/audit?limit=50');
         setAuditLog(auditRes.data?.entries || []);
-        const statsRes = await axios.get('/api/security/audit/stats');
+  const statsRes = await apiClient.get('/security/audit/stats');
         setMetrics({
           threatLevel: 'low',
           activeSessions: statsRes.data?.stats?.totalEvents || 0,
@@ -79,13 +79,13 @@ export default function ZeroTrustSecurityDashboard(): JSX.Element {
         });
       }
       if (activeTab === 'sessions') {
-        const sessRes = await axios.get('/api/security/sessions');
+  const sessRes = await apiClient.get('/security/sessions');
         setSessions(sessRes.data?.sessions || []);
       }
       if (activeTab === 'rbac') {
         const [usersRes, rolesRes] = await Promise.all([
-          axios.get('/api/security/rbac/users'),
-          axios.get('/api/security/rbac/roles'),
+          apiClient.get('/security/rbac/users'),
+          apiClient.get('/security/rbac/roles'),
         ]);
         setRbacUsers(usersRes.data?.users || []);
         setRoles(rolesRes.data?.roles || {});
@@ -99,7 +99,7 @@ export default function ZeroTrustSecurityDashboard(): JSX.Element {
 
   async function revokeSession(sessionId: string) {
     try {
-      await axios.delete(`/api/security/sessions/${sessionId}`);
+  await apiClient.delete(`/security/sessions/${sessionId}`);
       alert('Session revoked successfully');
       loadData();
     } catch (err) {

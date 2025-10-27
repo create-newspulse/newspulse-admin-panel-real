@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '../lib/api';
 import toast from 'react-hot-toast';
 import html2pdf from 'html2pdf.js';
 import {
@@ -63,7 +63,7 @@ export default function AdminControlCenter() {
   useLockdownCheck(settings);
 
   useEffect(() => {
-    axios.get('/api/settings/load')
+    apiClient.get('/settings/load')
       .then(res => {
         const config = res.data || defaultSettings;
         setSettings(config);
@@ -76,7 +76,7 @@ export default function AdminControlCenter() {
 
   const handleSave = () => {
     toast.promise(
-      axios.post('/api/settings/save', settings),
+      apiClient.post('/settings/save', settings),
       {
         loading: 'Saving settings...',
         success: '✅ Settings saved!',

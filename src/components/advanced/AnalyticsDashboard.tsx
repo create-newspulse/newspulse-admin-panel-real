@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '../../lib/api';
 import { Line, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -75,10 +75,10 @@ export default function AnalyticsDashboard(): JSX.Element {
     setLoading(true);
     try {
       const [revRes, traffRes, adRes, abRes] = await Promise.all([
-        axios.get('/api/analytics/revenue').catch(() => ({ data: null })),
-        axios.get('/api/analytics/traffic').catch(() => ({ data: null })),
-        axios.get('/api/analytics/ad-performance').catch(() => ({ data: null })),
-        axios.get('/api/analytics/ab-tests').catch(() => ({ data: { tests: [] } })),
+        apiClient.get('/analytics/revenue').catch(() => ({ data: null } as any)),
+        apiClient.get('/analytics/traffic').catch(() => ({ data: null } as any)),
+        apiClient.get('/analytics/ad-performance').catch(() => ({ data: null } as any)),
+        apiClient.get('/analytics/ab-tests').catch(() => ({ data: { tests: [] } } as any)),
       ]);
       setRevenue(revRes.data || mockRevenue());
       setTraffic(traffRes.data || mockTraffic());

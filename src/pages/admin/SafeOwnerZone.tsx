@@ -23,6 +23,7 @@ import {
 import KiranOSPanel from "../../panels/KiranOSPanel";
 import AITrainer from "../../panels/AITrainer";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
+import { API_BASE_PATH } from "../../lib/api";
 
 interface PanelItem {
   key: string;
@@ -138,7 +139,7 @@ const SafeOwnerZone: React.FC = () => {
   }, [isDark]);
 
   useEffect(() => {
-    fetch("/api/system/ai-training-info")
+    fetch(`${API_BASE_PATH}/system/ai-training-info`)
       .then((res) => res.json())
       .then((data) => setAIStatus(data?.data?.status || data?.status || "Inactive"))
       .catch(() => setAIStatus("Inactive"));
@@ -148,7 +149,7 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchSystemHealth = async () => {
       try {
-        const response = await fetch('/api/system/health');
+  const response = await fetch(`${API_BASE_PATH}/system/health`);
         const data = await response.json();
         setSystemHealth({
           cpu: data.cpu || Math.random() * 100,
@@ -174,7 +175,7 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const response = await fetch('/api/system/alerts');
+  const response = await fetch(`${API_BASE_PATH}/system/alerts`);
         const data = await response.json();
         setSmartAlerts(data.alerts || []);
       } catch (error) {
@@ -243,7 +244,7 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchPredictions = async () => {
       try {
-        const response = await fetch('/api/system/ai-predictions');
+  const response = await fetch(`${API_BASE_PATH}/system/ai-predictions`);
         const data = await response.json();
         // Be defensive: backend may omit fields
         setAIPredictions({
@@ -275,7 +276,7 @@ const SafeOwnerZone: React.FC = () => {
   }, [systemHealth]);
 
   useEffect(() => {
-    fetch("/api/system/ai-training-info")
+    fetch(`${API_BASE_PATH}/system/ai-training-info`)
       .then((res) => res.json())
       .then((data) => setAIStatus(data?.data?.status || data?.status || "Inactive"))
       .catch(() => setAIStatus("Inactive"));
@@ -574,7 +575,7 @@ const SafeOwnerZone: React.FC = () => {
               onClick={async () => {
                 try {
                   // Reset system to healthy state
-                  await fetch('/api/system/reset-health', { method: 'POST' });
+                  await fetch(`${API_BASE_PATH}/system/reset-health`, { method: 'POST' });
                   alert('🔧 AUTO-REPAIR COMPLETED!\n\n✅ CPU normalized to 45%\n✅ Memory cleared to 55%\n✅ All critical issues resolved\n\nSystem is now healthy!');
                   // Refresh to show updated metrics
                   window.location.reload();
@@ -590,7 +591,7 @@ const SafeOwnerZone: React.FC = () => {
             <button 
               onClick={async () => {
                 try {
-                  await fetch('/api/system/force-critical', { method: 'POST' });
+                  await fetch(`${API_BASE_PATH}/system/force-critical`, { method: 'POST' });
                   alert('⚠️ CRITICAL STATE ACTIVATED!\n\nCPU: 95%\nMemory: 92%\n\nAuto-repair will trigger in 2 seconds...');
                   setTimeout(() => window.location.reload(), 100);
                 } catch (error) {

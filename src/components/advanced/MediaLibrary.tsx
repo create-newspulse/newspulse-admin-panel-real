@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '../../lib/api';
 
 type MediaItem = {
   id: string;
@@ -24,7 +24,7 @@ export default function MediaLibrary(): JSX.Element {
     setLoading(true);
     try {
       // try vault list first (backend route exists), fallback to uploads
-      const res = await axios.get('/api/vault/list').catch(() => axios.get('/api/uploads'));
+  const res = await apiClient.get('/vault/list').catch(() => apiClient.get('/uploads'));
       const data = res?.data?.items || res?.data || [];
       // normalize
       const normalized: MediaItem[] = (Array.isArray(data) ? data : []).map((m: any) => ({
@@ -52,7 +52,7 @@ export default function MediaLibrary(): JSX.Element {
       const fd = new FormData();
       fd.append('file', file);
       // backend uploads route expects form-data (there's an /api/uploads route)
-      const res = await axios.post('/api/uploads', fd, {
+      const res = await apiClient.post('/uploads', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       // optimistic refresh
@@ -70,7 +70,7 @@ export default function MediaLibrary(): JSX.Element {
   async function generateAIAlt(item: MediaItem) {
     // If backend AI endpoint exists, call it; else simulate
     try {
-      const res = await axios.post('/api/ai/alt-text', { url: item.url }).catch(() => null);
+  const res = await apiClient.post('/ai/alt-text', { url: item.url }).catch(() => null);
       if (res && res.data && res.data.alt) {
         const updated = items.map((it) => (it.id === item.id ? { ...it, aiAltText: res.data.alt } : it));
         setItems(updated);
@@ -88,7 +88,7 @@ export default function MediaLibrary(): JSX.Element {
   async function scrubEXIF(item: MediaItem) {
     try {
       // call a scrub endpoint if available
-      await axios.post('/api/uploads/scrub-exif', { url: item.url }).catch(() => null);
+  await apiClient.post('/uploads/scrub-exif', { url: item.url }).catch(() => null);
       alert('EXIF scrub requested (or simulated)');
     } catch (err) {
       console.error('EXIF scrub failed:', err);
