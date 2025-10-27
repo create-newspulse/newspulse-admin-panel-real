@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaUnlockAlt } from 'react-icons/fa';
 
 const SystemUnlockPanel: React.FC = () => {
@@ -13,14 +14,12 @@ const SystemUnlockPanel: React.FC = () => {
     setStatus('loading');
 
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/reactivate`, {
+      const data = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/system/reactivate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),
       });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success ?? true) {
         setStatus('success');
       } else {
         setStatus('error');

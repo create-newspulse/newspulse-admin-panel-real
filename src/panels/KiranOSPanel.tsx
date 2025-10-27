@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { FaTrash, FaDownload, FaComments } from 'react-icons/fa';
 import axios from 'axios';
+import { API_BASE_PATH } from '@lib/api';
 import { useAITrainingInfo } from '@context/AITrainingInfoContext';
 
 // ---------- Types ----------
@@ -49,9 +50,13 @@ declare global {
 axios.defaults.withCredentials = true;
 
 // Small helper: safe JSON fetch using axios (returns data or throws)
+const resolve = (url: string) => (url.startsWith('/api/') ? `${API_BASE_PATH}${url.slice(4)}` : url);
 const get = async <T,>(url: string) => {
-  const res = await axios.get<T>(url);
+  const res = await axios.get<T>(resolve(url), { withCredentials: true });
   return res.data;
+};
+const del = async (url: string) => {
+  await axios.delete(resolve(url), { withCredentials: true });
 };
 
 // ---------- Component ----------
@@ -99,10 +104,10 @@ export default function KiranOSPanel() {
           if (!command) return;
 
           try {
-            const res = await axios.post('/api/system/ai-command', {
+            const res = await axios.post(resolve('/api/system/ai-command'), {
               command,
               trigger: 'voice',
-            });
+            }, { withCredentials: true });
             alert(`🤖 ${res.data?.result ?? 'Done.'}`);
           } catch {
             alert('⚠️ Command failed. Check logs.');
@@ -176,7 +181,7 @@ export default function KiranOSPanel() {
     let stopped = false;
     const fetchAnalytics = async () => {
       try {
-        const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+  const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
         if (stopped) return;
 
         const topPattern =
@@ -209,7 +214,7 @@ export default function KiranOSPanel() {
   useEffect(() => {
     (async () => {
       try {
-        const data = await get<IntegrityScanRes>('/api/system/integrity-scan');
+  const data = await get<IntegrityScanRes>('/api/system/integrity-scan');
         setAiStats(data ?? null);
       } catch {
         setAiStats(null);
@@ -221,10 +226,10 @@ export default function KiranOSPanel() {
   const handleManualCommand = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && manualCommand.trim()) {
       try {
-        const res = await axios.post('/api/system/ai-command', {
+        const res = await axios.post(resolve('/api/system/ai-command'), {
           command: manualCommand.trim(),
           trigger: 'manual',
-        });
+        }, { withCredentials: true });
         alert(`🤖 ${res.data?.result ?? 'Done.'}`);
         setManualCommand('');
       } catch {
@@ -246,7 +251,7 @@ export default function KiranOSPanel() {
   const clearLogs = async () => {
     if (!window.confirm('Are you sure you want to delete all logs?')) return;
     try {
-      await axios.delete('/api/system/clear-logs');
+      await del('/api/system/clear-logs');
       alert('🗑️ Logs cleared.');
       setLogs([]);
     } catch {
@@ -288,7 +293,7 @@ export default function KiranOSPanel() {
   const handleAskKiranOS = async () => {
     if (!chatInput.trim()) return;
     try {
-      const res = await axios.post('/api/system/ask-kiranos', { prompt: chatInput.trim() });
+      const res = await axios.post(resolve('/api/system/ask-kiranos'), { prompt: chatInput.trim() }, { withCredentials: true });
       setChatResponse(res.data?.reply || '🤖 No response.');
     } catch {
       setChatResponse('⚠️ Failed to get response from KiranOS.');

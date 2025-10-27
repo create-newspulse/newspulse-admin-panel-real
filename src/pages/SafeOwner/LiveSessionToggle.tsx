@@ -1,6 +1,6 @@
 // 📁 src/pages/SafeOwner/LiveSessionToggle.tsx
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 interface LiveSessionConfig {
   isFeedOn: boolean;
@@ -14,15 +14,18 @@ const LiveSessionToggle: React.FC = () => {
   });
 
   useEffect(() => {
-    axios.get('/api/live-session')
-      .then(res => setConfig(res.data))
+    apiClient.get('/live-session')
+      .then(res => {
+        const data = (res as any)?.data ?? res;
+        setConfig(data);
+      })
       .catch(() => console.warn('Could not load session config'));
   }, []);
 
   const updateSession = (update: Partial<LiveSessionConfig>) => {
     const newConfig = { ...config, ...update };
     setConfig(newConfig);
-    axios.post('/api/live-session', newConfig)
+    apiClient.post('/live-session', newConfig)
       .then(() => console.log('✅ Session updated'))
       .catch(() => alert('Failed to update config'));
   };

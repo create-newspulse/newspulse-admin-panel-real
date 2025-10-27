@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 interface AdminUser {
   _id: string;
@@ -16,8 +16,9 @@ const AdminRoles: React.FC = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await axios.get('/api/admin/users'); // ✅ Add this route in backend
-      setUsers(res.data.users);
+  const res = await apiClient.get('/admin/users'); // ✅ Proxied via api client
+  const data = (res as any)?.data ?? res;
+  setUsers(data.users ?? []);
     } catch (error) {
       console.error('❌ Failed to fetch users', error);
     } finally {
@@ -27,7 +28,7 @@ const AdminRoles: React.FC = () => {
 
   const updateUserRole = async (userId: string, newRole: string) => {
     try {
-      await axios.put(`/api/admin/update-role/${userId}`, { role: newRole });
+  await apiClient.put(`/admin/update-role/${userId}`, { role: newRole });
       fetchUsers(); // Refresh after update
     } catch (error) {
       console.error('❌ Failed to update role', error);

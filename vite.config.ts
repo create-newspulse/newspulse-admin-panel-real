@@ -14,7 +14,7 @@ export default defineConfig(({ mode }): UserConfig => {
   // In dev, default to local backend; in prod, default to our secure proxy
   const API_HTTP = rawApi && !isLocal
     ? rawApi
-    : (mode === 'development' ? 'http://localhost:3002' : '/admin-api');
+    : (mode === 'development' ? 'http://localhost:5000' : '/admin-api');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {
@@ -41,8 +41,8 @@ export default defineConfig(({ mode }): UserConfig => {
       host: true,
       port: 5173,
       open: true,
-      // Allow auto-fallback if 5173 is busy (prevents hard exits on dev)
-      strictPort: false,
+      // Enforce consistent dev URL on 5173
+      strictPort: true,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {

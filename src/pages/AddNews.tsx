@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import toast from 'react-hot-toast';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
@@ -55,8 +55,8 @@ const AddNews: React.FC = () => {
   // Use useCallback for memoizing the fetchSettings function
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await axios.get('/api/settings/load');
-      setSettings(res.data);
+      const res = await apiClient.get('/settings/load');
+      setSettings(res.data ?? res);
     } catch (error) {
       console.error('Failed to load settings:', error);
       // Fallback to default settings in case of an error
@@ -81,7 +81,7 @@ const AddNews: React.FC = () => {
 
     setLoading(true);
     try {
-      const res = await axios.post('/api/news/add', {
+      const res = await apiClient.post('/news/add', {
         title: title.trim(),
         content: content.trim(),
         category: category.trim(),
@@ -90,9 +90,10 @@ const AddNews: React.FC = () => {
         pushSent: false, // Default value
       });
 
-      if (res.data?.success === false) {
+      const data = (res as any)?.data ?? res;
+      if (data?.success === false) {
         // Use the message from the server if available, otherwise a generic error
-        throw new Error(res.data?.message || 'Server rejected the request.');
+        throw new Error(data?.message || 'Server rejected the request.');
       }
 
       toast.success('✅ News article added successfully!');

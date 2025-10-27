@@ -19,10 +19,11 @@ const TestNotification = () => {
       const res = await fetch('/api/notifications/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ title, body }),
       });
-
-      const data = await res.json();
+      const ct = res.headers.get('content-type') || '';
+      const data = ct.includes('application/json') ? await res.json() : { success: false, message: await res.text().then(t => `Non-JSON response: ${t.slice(0,160)}`) };
       if (data.success) {
         toast.success('✅ Notification sent successfully!');
         setTitle('');

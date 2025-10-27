@@ -1,5 +1,6 @@
 // 📁 src/pages/AdminAiStats.tsx
 import React, { useEffect, useState, useRef } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 import {
   PieChart,
   Pie,
@@ -38,7 +39,12 @@ const AdminAiStats: React.FC = () => {
 
     const fetchEngineStats = async () => {
       try {
-        const res = await fetch('/api/ai/logs/engine-stats');
+        const res = await fetch(`${API_BASE_PATH}/ai/logs/engine-stats`, { credentials: 'include' });
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
+        }
         const data = await res.json();
         if (data.success && data.stats) {
           const converted: EngineStat[] = Object.entries(data.stats).map(
@@ -56,7 +62,12 @@ const AdminAiStats: React.FC = () => {
 
     const fetchDailyStats = async () => {
       try {
-        const res = await fetch('/api/ai/logs/daily-stats');
+        const res = await fetch(`${API_BASE_PATH}/ai/logs/daily-stats`, { credentials: 'include' });
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
+        }
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) {
           setDailyData(data.data);

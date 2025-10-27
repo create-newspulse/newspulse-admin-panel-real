@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
+import { API_BASE_PATH } from '@lib/api';
 
 export default function AiTrainerCard() {
-  const router = useRouter();
   const [trainingInfo, setTrainingInfo] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -10,7 +9,12 @@ export default function AiTrainerCard() {
   useEffect(() => {
     const fetchTrainingInfo = async () => {
       try {
-        const res = await fetch('/api/system/ai-training-info');
+  const res = await fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' });
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
+        }
         const json = await res.json();
 
         if (res.ok && json.success && json.data) {
@@ -32,15 +36,18 @@ export default function AiTrainerCard() {
 
   const handleViewDiagnostics = (e: React.MouseEvent) => {
     e.preventDefault();
-    router.push('/admin/diagnostics');
+    if (typeof window !== 'undefined') {
+      window.location.href = '/admin/diagnostics';
+    }
   };
 
   const handleActivateTrainer = async () => {
     try {
-      const res = await fetch('/api/system/activate-ai-trainer', {
+      const res = await fetch(`${API_BASE_PATH}/system/ai-trainer/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trigger: 'manual' })
+        body: JSON.stringify({ trigger: 'manual' }),
+        credentials: 'include',
       });
 
       const data = await res.json();

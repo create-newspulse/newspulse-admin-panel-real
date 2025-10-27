@@ -1,8 +1,11 @@
 import React, { useState } from "react";
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaRedo, FaDatabase, FaCloudUploadAlt } from "react-icons/fa";
+import { useNotification } from '@context/NotificationContext';
 
 const BackupAndRecovery: React.FC = () => {
+  const notify = useNotification();
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
@@ -13,17 +16,19 @@ const BackupAndRecovery: React.FC = () => {
     setUploadDone(false);
     setErrorMsg(null);
     try {
-  const res = await fetch(`${API_BASE_PATH}/system/run-backup`, { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/run-backup`, { method: "POST" });
+      if (data.success ?? true) {
         setStatus("success");
+        notify.success('💾 Backup completed');
       } else {
         setStatus("error");
         setErrorMsg(data?.error || "Backup failed. Check server logs.");
+        notify.error(data?.error || '❌ Backup failed');
       }
     } catch (err: any) {
       setStatus("error");
       setErrorMsg("❌ Backup Trigger Error: " + (err?.message || "Unknown error."));
+      notify.error('❌ Backup trigger error');
     }
   };
 
@@ -31,17 +36,19 @@ const BackupAndRecovery: React.FC = () => {
     setUploading(true);
     setErrorMsg(null);
     try {
-  const res = await fetch(`${API_BASE_PATH}/system/firebase-upload-latest`, { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/firebase-upload-latest`, { method: "POST" });
+      if (data.success ?? true) {
         setUploadDone(true);
+        notify.success('☁️ Backup uploaded to Firebase');
       } else {
         setUploadDone(false);
         setErrorMsg(data?.error || "Upload failed. Check server logs.");
+        notify.error(data?.error || '❌ Firebase upload failed');
       }
     } catch (err: any) {
       setUploadDone(false);
       setErrorMsg("❌ Firebase Upload Error: " + (err?.message || "Unknown error."));
+      notify.error('❌ Firebase upload error');
     } finally {
       setUploading(false);
     }

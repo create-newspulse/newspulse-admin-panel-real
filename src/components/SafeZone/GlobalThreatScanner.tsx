@@ -1,6 +1,7 @@
 // 📁 src/components/SafeZone/GlobalThreatScanner.tsx
 import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import {
   FaShieldAlt, FaLock, FaGlobe, FaCheckCircle, FaSyncAlt
 } from 'react-icons/fa';
@@ -30,17 +31,13 @@ const GlobalThreatScanner = () => {
   const [lastError, setLastError] = useState<string | null>(null);
 
   const fetchThreatData = async () => {
-    const controller = new AbortController();
     try {
       setLoading(true);
       setLastError(null);
-      const res = await fetch(`${API_BASE_PATH}/system/threat-status`, {
+      const json = await fetchJson<ThreatStatus>(`${API_BASE_PATH}/system/threat-status`, {
         cache: 'no-store',
-        signal: controller.signal,
+        timeoutMs: 15000,
       });
-      if (!res.ok) throw new Error('❌ API response not OK');
-
-      const json = await res.json();
 
       if (
         typeof json.xssDetected === 'boolean' &&
@@ -53,15 +50,11 @@ const GlobalThreatScanner = () => {
         throw new Error('⚠️ Unexpected response format');
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error('[GlobalThreatScanner]', err);
-        setLastError(err?.message || 'Unknown error');
-      }
+      console.error('[GlobalThreatScanner]', err);
+      setLastError(err?.message || 'Unknown error');
     } finally {
       setLoading(false);
     }
-
-    return () => controller.abort();
   };
 
   useEffect(() => {

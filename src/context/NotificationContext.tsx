@@ -1,10 +1,11 @@
 import React, { createContext, useContext, ReactNode } from 'react';
-import { Toaster } from 'react-hot-toast'; // Example: if you use react-hot-toast
+import { Toaster, toast } from 'react-hot-toast';
 
 // Define your context type
 interface NotificationContextType {
-  // e.g., showSuccess: (message: string) => void;
-  // e.g., showError: (message: string) => void;
+  success: (message: string) => void;
+  error: (message: string) => void;
+  info: (message: string) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -14,14 +15,14 @@ interface NotificationProviderProps {
 }
 
 export const NotificationProvider: React.FC<NotificationProviderProps> = ({ children }) => {
-  // You would implement functions here to trigger toasts/notifications
-  // const showSuccess = (message: string) => toast.success(message);
-  // const showError = (message: string) => toast.error(message);
+  const success = (message: string) => toast.success(message, { duration: 3500 });
+  const error = (message: string) => toast.error(message, { duration: 4500 });
+  const info = (message: string) => toast(message, { duration: 3000 });
 
   return (
-    <NotificationContext.Provider value={{ /* showSuccess, showError */ }}>
+    <NotificationContext.Provider value={{ success, error, info }}>
       {children}
-      <Toaster position="top-right" /> {/* Place your Toaster here */}
+      <Toaster position="top-right" />
     </NotificationContext.Provider>
   );
 };

@@ -1,23 +1,23 @@
 import { useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
+import { useNotification } from '@context/NotificationContext';
 
 const FounderControlPanel = () => {
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
+  const notify = useNotification();
 
   const handleLockdown = async () => {
     setLoading(true);
     setAction('lockdown');
     try {
-      const res = await fetch('/api/emergency-lockdown', { method: 'POST' });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        alert('🚨 Emergency Lockdown Triggered');
-      } else {
-        alert('❌ Lockdown request failed');
-      }
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/emergency-lockdown`, { method: 'POST' });
+      if (json.success ?? true) notify.success('🚨 Emergency Lockdown Triggered');
+      else notify.error('❌ Lockdown request failed');
     } catch (error) {
       console.error('Lockdown error:', error);
-      alert('⚠️ Server error during lockdown');
+      notify.error('⚠️ Server error during lockdown');
     } finally {
       setLoading(false);
       setAction(null);
@@ -28,16 +28,12 @@ const FounderControlPanel = () => {
     setLoading(true);
     setAction('export');
     try {
-      const res = await fetch('/api/export-logs', { method: 'GET' });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        alert('📤 Logs exported successfully');
-      } else {
-        alert('❌ Export failed. Try again.');
-      }
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/export-logs`, { method: 'GET' });
+      if (json.success ?? true) notify.success('📤 Logs exported successfully');
+      else notify.error('❌ Export failed. Try again.');
     } catch (error) {
       console.error('Export logs error:', error);
-      alert('⚠️ Server error during export');
+      notify.error('⚠️ Server error during export');
     } finally {
       setLoading(false);
       setAction(null);
@@ -48,16 +44,12 @@ const FounderControlPanel = () => {
     setLoading(true);
     setAction('reactivate');
     try {
-      const res = await fetch('/api/reactivate-system', { method: 'POST' });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        alert('✅ System reactivated successfully');
-      } else {
-        alert('❌ Failed to reactivate system');
-      }
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/reactivate-system`, { method: 'POST' });
+      if (json.success ?? true) notify.success('✅ System reactivated successfully');
+      else notify.error('❌ Failed to reactivate system');
     } catch (err) {
       console.error('Reactivation error:', err);
-      alert('⚠️ Server error during reactivation');
+      notify.error('⚠️ Server error during reactivation');
     } finally {
       setLoading(false);
       setAction(null);

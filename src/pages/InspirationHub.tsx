@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 const InspirationHub: React.FC = () => {
   const [embedUrl, setEmbedUrl] = useState('');
@@ -9,8 +9,9 @@ const InspirationHub: React.FC = () => {
 
   const fetchDroneVideo = async () => {
     try {
-      const res = await axios.get('/api/drone-feed'); // 🔁 Replace with your backend route
-      setEmbedUrl(res.data?.embedUrl || '');
+  const res = await apiClient.get('/drone-feed'); // 🔁 Proxied backend route
+  const data = (res as any)?.data ?? res;
+  setEmbedUrl(data?.embedUrl || '');
     } catch (err) {
       console.error('❌ Drone video fetch failed', err);
     }
@@ -18,8 +19,9 @@ const InspirationHub: React.FC = () => {
 
   const fetchCreatorSpotlight = async () => {
     try {
-      const res = await axios.get('/api/creator-spotlight');
-      setCreator(res.data);
+  const res = await apiClient.get('/creator-spotlight');
+  const data = (res as any)?.data ?? res;
+  setCreator(data);
     } catch (err) {
       console.warn('⚠️ Creator spotlight fetch failed');
     }
@@ -27,8 +29,9 @@ const InspirationHub: React.FC = () => {
 
   const fetchQuiz = async () => {
     try {
-      const res = await axios.get('/api/daily-quiz');
-      setQuiz(res.data?.question || '');
+  const res = await apiClient.get('/daily-quiz');
+  const data = (res as any)?.data ?? res;
+  setQuiz(data?.question || '');
     } catch (err) {
       console.warn('⚠️ Quiz fetch failed');
     }

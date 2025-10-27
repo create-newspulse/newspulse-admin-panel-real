@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, API_BASE_PATH } from '@lib/api';
+import { useNotification } from '@context/NotificationContext';
 import {
   FaPoll,
   FaDownload,
@@ -15,6 +16,7 @@ interface PollStats {
 }
 
 const LiveNewsPollsPanel = () => {
+  const notify = useNotification();
   const [stats, setStats] = useState<PollStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [votingEnabled, setVotingEnabled] = useState(true);
@@ -37,7 +39,13 @@ const LiveNewsPollsPanel = () => {
   const exportPDF = async () => {
     try {
       setIsExporting(true);
-      const res = await fetch(`${API_BASE_PATH}/polls/export-pdf`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_PATH}/polls/export-pdf`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const ct = res.headers.get('content-type') || '';
+      if (!/application\/(pdf|octet-stream)/i.test(ct)) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Unexpected content-type: ${ct}. Preview: ${txt.slice(0, 200)}`);
+      }
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -47,8 +55,9 @@ const LiveNewsPollsPanel = () => {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
+      notify.success('📊 Poll report exported');
     } catch (err) {
-      alert('❌ Failed to export');
+      notify.error('❌ Failed to export poll report');
     } finally {
       setIsExporting(false);
     }

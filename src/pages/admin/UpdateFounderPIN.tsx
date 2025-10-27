@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 export default function UpdateFounderPIN() {
   const [newPin, setNewPin] = useState('');
@@ -14,7 +14,7 @@ export default function UpdateFounderPIN() {
 
     setLoading(true);
     try {
-      await axios.post('/api/founder/update-pin', { pin: newPin });
+  await apiClient.post('/founder/update-pin', { pin: newPin });
       toast.success('✅ Founder PIN updated!');
       setNewPin('');
     } catch (err) {

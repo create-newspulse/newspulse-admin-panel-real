@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import { topicLabelMap } from '../lib/topicLabelMap';
 
 interface NewsItem {
@@ -20,9 +20,12 @@ const SavedFeed = () => {
 
     if (!userId) return;
 
-    axios
-      .get(`/api/saved-news?userId=${userId}`)
-      .then((res) => setSavedNews(res.data.saved || []))
+    apiClient
+      .get(`/saved-news`, { params: { userId } } as any)
+      .then((res) => {
+        const data = (res as any)?.data ?? res;
+        setSavedNews(data.saved || []);
+      })
       .catch((err) => console.error('❌ Failed to fetch saved news:', err))
       .finally(() => setLoading(false));
   }, []);

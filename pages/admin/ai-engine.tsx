@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { fetchJson } from '../../src/lib/fetchJson';
 import AdminShell from '../../src/components/adminv2/AdminShell';
 
 const LANGUAGES = ['English','Hindi','Gujarati'];
@@ -27,17 +28,11 @@ export default function AIEnginePage(): JSX.Element {
     }
     setLoading(true);
     try {
-      const r = await fetch('/api/ai-engine', {
+      const data = await fetchJson<{ result: any }>(`/api/ai-engine`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl })
       });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({ error: 'Server error' }));
-        throw new Error(e.error || `HTTP ${r.status}`);
-      }
-      const data = await r.json();
       setResult(data.result);
     } catch (e: any) {
       setError(e?.message || 'Failed to run AI Engine');

@@ -1,6 +1,7 @@
 // src/pages/admin/Diagnostics.tsx
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { API_BASE_PATH } from "@lib/api";
 import { Line } from "react-chartjs-2";
 import "chart.js/auto";
 import { Link } from "react-router-dom";
@@ -24,7 +25,7 @@ export default function Diagnostics() {
   useEffect(() => {
     const fetchDiagnostics = async () => {
       try {
-        const res = await axios.get("/api/system/ai-diagnostics");
+  const res = await axios.get(`${API_BASE_PATH}/system/ai-diagnostics`, { withCredentials: true });
         setData(res.data);
         setError(null);
         setLastRefresh(new Date().toLocaleTimeString());

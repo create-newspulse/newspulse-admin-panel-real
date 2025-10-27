@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslate } from '../hooks/useTranslate';
+import apiClient from '@lib/api';
 
 const AISummarizer: React.FC = () => {
   const t = useTranslate();
@@ -17,13 +18,8 @@ const AISummarizer: React.FC = () => {
     setSummary('');
 
     try {
-      const res = await fetch('https://newspulse-backend.onrender.com/api/ai/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: input }),
-      });
-
-      const data = await res.json();
+      const res = await apiClient.post('/ai/summarize', { content: input });
+      const data = (res as any)?.data ?? res;
 
       if (data.success && data.summary) {
         setSummary(data.summary);

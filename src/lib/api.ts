@@ -9,8 +9,15 @@ import axios, { AxiosError } from "axios";
 const isDevelopment = import.meta.env.MODE === 'development';
 const RAW_BASE = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE ?? "") + "";
 const BASE = RAW_BASE.replace(/\/$/, ""); // strip trailing slash
-// In production without explicit BASE, target the Vercel proxy at /admin-api
-const baseURL = isDevelopment ? "/api" : (BASE ? `${BASE}/api` : "/admin-api");
+// Detect if env points to our proxy path directly
+const isProxyPath = BASE.startsWith('/admin-api');
+// In production:
+//  - if BASE is a proxy path (/admin-api), use it as-is
+//  - if BASE is a full origin, append /api
+//  - otherwise, default to /admin-api
+const baseURL = isDevelopment
+  ? "/api"
+  : (BASE ? (isProxyPath ? BASE : `${BASE}/api`) : "/admin-api");
 
 console.log('🔧 API Config:', { isDevelopment, RAW_BASE, BASE, baseURL });
 // Single axios instance for all API calls

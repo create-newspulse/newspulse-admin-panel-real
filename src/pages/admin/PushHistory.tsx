@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import { FaTrash } from 'react-icons/fa';
 import moment from 'moment';
 
@@ -19,8 +19,9 @@ export default function PushHistory() {
 
   const fetchHistory = async () => {
     try {
-      const res = await axios.get<{ success: boolean; data: PushEntry[] }>('/api/push-history');
-      setData(res.data.data || []);
+  const res = await apiClient.get<{ success: boolean; data: PushEntry[] }>('/push-history');
+  const data = (res as any)?.data ?? res;
+  setData(data.data || []);
     } catch (err) {
       console.error('❌ Failed to fetch push history:', err);
       setError('❌ Failed to fetch push history');
@@ -32,7 +33,7 @@ export default function PushHistory() {
   const deleteAll = async () => {
     if (!confirm('Are you sure you want to delete all push history?')) return;
     try {
-      await axios.delete('/api/push-history');
+  await apiClient.delete('/push-history');
       setData([]);
     } catch (err) {
       console.error('❌ Delete failed:', err);

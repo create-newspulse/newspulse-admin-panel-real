@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationTriangle, FaEnvelope } from 'react-icons/fa';
 
 const SmartAlertSystem = () => {
@@ -9,9 +10,10 @@ const SmartAlertSystem = () => {
     // Simulate system check (replace with real fetch later)
     const fetchAlertConfig = async () => {
       try {
-  const res = await fetch(`${API_BASE_PATH}/system/alert-config`);
-        const data = await res.json();
-        if (data.success) {
+        const data = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/system/alert-config`, {
+          timeoutMs: 15000,
+        });
+        if (data && (data.success ?? true)) {
           setStatus('loaded');
         } else {
           throw new Error('Failed to load config');

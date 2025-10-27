@@ -1,9 +1,9 @@
 // 📁 src/utils/analytics.ts
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 export const logVisit = async (page: string, articleId?: string) => {
   try {
-    await axios.post('/api/analytics/log', {
+    await apiClient.post('/analytics/log', {
       page,
       articleId: articleId || null,
       userAgent: navigator.userAgent,

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationCircle, FaSyncAlt, FaBug, FaDownload, FaBell } from 'react-icons/fa';
 
 interface BugEntry {
@@ -17,8 +19,7 @@ const BugReportAnalyzer: React.FC = () => {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch('/api/system/bug-reports');
-      const data = await res.json();
+      const data = await fetchJson<{ logs?: BugEntry[] }>(`${API_BASE_PATH}/system/bug-reports`);
       if (Array.isArray(data.logs)) {
         setLogs(data.logs);
         setError(false);

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:frontend": "vite",
-    "dev:backend": "node admin-backend/demo-server.js",
+    "dev:backend": "npm --prefix admin-backend run dev",
+    "dev:backend:demo": "node admin-backend/demo-server.js",
     "dev:all": "concurrently -n BACKEND,FRONTEND -c green,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
     "test": "vitest",
     "build": "vite build",

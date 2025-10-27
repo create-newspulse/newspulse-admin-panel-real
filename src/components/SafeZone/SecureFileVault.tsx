@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { useNotification } from '@context/NotificationContext';
 import {
   FaFileDownload, FaClock, FaUpload, FaTrash
 } from 'react-icons/fa';
 
 const SecureFileVault = () => {
+  const notify = useNotification();
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,20 +37,31 @@ const SecureFileVault = () => {
 
     fetch(`${API_BASE_PATH}/vault/upload`, {
       method: 'POST',
+      credentials: 'include',
       body: formData,
     })
-      .then(res => res.json())
+      .then(async (res) => {
+        const ct = res.headers.get('content-type') || '';
+        if (!/application\/json/i.test(ct)) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Unexpected content-type: ${ct}. Preview: ${txt.slice(0, 200)}`);
+        }
+        return res.json();
+      })
       .then(data => {
         if (data.success) {
           setMessage('✅ Vault file uploaded securely.');
           setFile(null);
+          notify.success('🔐 Vault file uploaded');
         } else {
           setError('❌ Upload failed.');
+          notify.error('❌ Vault upload failed');
         }
       })
       .catch(err => {
         console.error('Upload error:', err);
         setError('🚫 Upload failed. Please try again.');
+        notify.error('🚫 Upload failed. Please try again.');
       });
   };
 

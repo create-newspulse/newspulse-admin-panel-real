@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 
 type ActivityData = {
   autoPublished: number;
@@ -19,9 +20,7 @@ const AIBehaviorTrainer: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-  const res = await fetch(`${API_BASE_PATH}/ai-behavior-log`);
-        if (!res.ok) throw new Error("Fetch failed");
-        const json = await res.json();
+        const json = await fetchJson<any>(`${API_BASE_PATH}/ai-behavior-log`, { timeoutMs: 15000 });
 
         // Accepts both { data: {...} } and just {...}
         const info: ActivityData =
@@ -38,7 +37,7 @@ const AIBehaviorTrainer: React.FC = () => {
           throw new Error("Invalid data shape");
         }
       } catch (err: any) {
-        if (isMounted) setError("AIBehaviorTrainer Failed");
+  if (isMounted) setError("AIBehaviorTrainer Failed");
       } finally {
         if (isMounted) setLoading(false);
       }

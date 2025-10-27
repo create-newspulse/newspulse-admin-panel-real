@@ -20,15 +20,15 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
     setLoading(true);
     setError(null);
 
-    fetch('/api/ai/engines')
+    fetch('/api/ai/engines', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error('API error: ' + res.status);
-        const text = await res.text();
-        try {
-          return JSON.parse(text);
-        } catch {
-          throw new Error('Not valid JSON: ' + text);
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const text = await res.text();
+          throw new Error('Not valid JSON: ' + text.slice(0, 160));
         }
+        return res.json();
       })
       .then((data) => {
         if (Array.isArray(data)) {

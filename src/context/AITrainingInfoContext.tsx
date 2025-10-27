@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import axios from 'axios';
+import { API_BASE_PATH } from '@lib/api';
 
 // Define the type for the training info (customize as per your real data)
 interface AITrainingInfo {
@@ -39,7 +40,7 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
 
   useEffect(() => {
     setLoading(true);
-    axios.get('/api/system/ai-training-info')
+  axios.get(`${API_BASE_PATH}/system/ai-training-info`, { withCredentials: true })
       .then(res => {
         setInfo(res.data?.data ?? null);
         setError(null);

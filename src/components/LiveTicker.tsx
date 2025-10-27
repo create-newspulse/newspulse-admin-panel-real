@@ -22,9 +22,18 @@ export default function LiveTicker({
     const fetchTicker = async () => {
       try {
         setLoading(true);
-        const res = await fetch(apiUrl, { signal });
+        const res = await fetch(apiUrl, { signal, credentials: 'include' });
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${res.statusText}. Body: ${txt.slice(0, 120)}`);
+        }
+
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 120)}`);
+        }
 
         const data = await res.json();
 

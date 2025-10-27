@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import {
   FaClock, FaLink, FaRobot, FaBell
 } from 'react-icons/fa';
@@ -17,23 +18,23 @@ const IncidentResponseModule = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchIncidents = () => {
-      fetch(`${API_BASE_PATH}/system/incidents`)
-        .then((res) => res.json())
-        .then((data) => {
-          setIncidents(data.incidents || []);
-          setLastSync(data.lastSync || null);
-          setLoading(false);
-
-          const errorLogs = data.incidents?.filter((log: Incident) => log.level === 'ERROR');
-          if (errorLogs && errorLogs.length > 0) {
-            console.warn('🚨 Critical Error Detected:', errorLogs[0].message);
-          }
-        })
-        .catch((err) => {
-          console.error('❌ Failed to fetch incidents:', err);
-          setLoading(false);
+    const fetchIncidents = async () => {
+      try {
+        const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`${API_BASE_PATH}/system/incidents`, {
+          timeoutMs: 15000,
         });
+        setIncidents(data.incidents || []);
+        setLastSync(data.lastSync || null);
+        setLoading(false);
+
+        const errorLogs = (data.incidents || []).filter((log: Incident) => log.level === 'ERROR');
+        if (errorLogs.length > 0) {
+          console.warn('🚨 Critical Error Detected:', errorLogs[0].message);
+        }
+      } catch (err) {
+        console.error('❌ Failed to fetch incidents:', err);
+        setLoading(false);
+      }
     };
 
     fetchIncidents(); // initial load

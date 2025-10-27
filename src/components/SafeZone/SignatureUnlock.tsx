@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 export default function SignatureUnlock({ onSuccess }: { onSuccess: () => void }) {
   const [pin, setPin] = useState('');
@@ -13,11 +13,12 @@ export default function SignatureUnlock({ onSuccess }: { onSuccess: () => void }
     setError('');
 
     try {
-      const response = await axios.post('/api/founder/verify-pin', { pin });
+      const response = await apiClient.post('/founder/verify-pin', { pin });
 
-      if (response.data.success) {
+      const data = (response as any)?.data ?? response;
+      if (data.success) {
         toast.success('✅ Signature verified. Lockdown bypassed.');
-        await axios.post('/api/unlock-log', {
+        await apiClient.post('/unlock-log', {
           time: new Date().toISOString(),
           method: 'signature',
           status: 'verified',
@@ -26,7 +27,7 @@ export default function SignatureUnlock({ onSuccess }: { onSuccess: () => void }
       } else {
         setError('Incorrect PIN. Please try again.');
         toast.error('❌ Invalid Signature.');
-        await axios.post('/api/unlock-log', {
+        await apiClient.post('/unlock-log', {
           time: new Date().toISOString(),
           method: 'signature',
           status: 'failed',

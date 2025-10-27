@@ -18,8 +18,16 @@ const AIGlowPanel: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-  const res = await fetch(`${API_BASE_PATH}/ai-glow-status`);
-        if (!res.ok) throw new Error('Fetch failed');
+        const res = await fetch(`${API_BASE_PATH}/ai-glow-status`, { credentials: 'include' });
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}. Body: ${txt.slice(0, 160)}`);
+        }
+        if (!/application\/json/i.test(ct)) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got ${ct}. Body: ${txt.slice(0, 160)}`);
+        }
         const json = await res.json();
 
         if (isMounted && json.systems && Array.isArray(json.systems)) {

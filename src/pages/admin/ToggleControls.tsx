@@ -1,6 +1,6 @@
 // File: src/pages/admin/ToggleControls.tsx
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 type ToggleConfig = {
   parliamentSessionEnabled: boolean;
@@ -17,9 +17,10 @@ export default function ToggleControls() {
 
   const fetchToggles = async () => {
     try {
-      const res = await axios.get('/api/toggles/parliament-session');
-      if (res.data?.success && res.data?.config) {
-        setToggles(res.data.config);
+      const res = await apiClient.get('/toggles/parliament-session');
+      const data = (res as any)?.data ?? res;
+      if (data?.success && data?.config) {
+        setToggles(data.config);
       } else {
         console.warn('⚠️ No toggle config returned from server.');
       }
@@ -32,7 +33,7 @@ export default function ToggleControls() {
     const updated = { ...toggles, [key]: !toggles[key] };
     setToggles(updated);
     try {
-      await axios.post('/api/toggles/parliament-session', updated);
+  await apiClient.post('/toggles/parliament-session', updated);
     } catch (err: any) {
       console.error(`❌ Failed to update toggle "${key}":`, err.message);
     }

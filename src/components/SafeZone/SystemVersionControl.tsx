@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaIdCard, FaTools, FaBrain, FaFileExport } from 'react-icons/fa';
 
 type VersionEntry = {
@@ -17,8 +18,7 @@ const SystemVersionControl = () => {
   const [data, setData] = useState<VersionData | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE_PATH}/system/version-log`)
-      .then((res) => res.json())
+    fetchJson<VersionData>(`${API_BASE_PATH}/system/version-log`)
       .then(setData)
       .catch((err) => {
         console.error('❌ Failed to fetch version log:', err);

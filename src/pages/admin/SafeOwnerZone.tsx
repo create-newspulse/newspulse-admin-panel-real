@@ -24,6 +24,7 @@ import KiranOSPanel from "../../panels/KiranOSPanel";
 import AITrainer from "../../panels/AITrainer";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
 import { API_BASE_PATH } from "../../lib/api";
+import ErrorBoundary from "@components/common/ErrorBoundary";
 
 interface PanelItem {
   key: string;
@@ -90,6 +91,10 @@ const SafeOwnerZone: React.FC = () => {
   const [pinned, setPinned] = useState<string[]>([]);
   const [aiStatus, setAIStatus] = useState<string>("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [useMinimalBadges, setUseMinimalBadges] = useState<boolean>(() => {
+    const v = localStorage.getItem("safezoneMinimalBadges");
+    return v === null ? true : v === 'true';
+  });
   
   // Smart System Health Monitoring
   const [systemHealth, setSystemHealth] = useState<SystemHealth>({
@@ -139,8 +144,19 @@ const SafeOwnerZone: React.FC = () => {
   }, [isDark]);
 
   useEffect(() => {
-    fetch(`${API_BASE_PATH}/system/ai-training-info`)
-      .then((res) => res.json())
+    localStorage.setItem('safezoneMinimalBadges', useMinimalBadges ? 'true' : 'false');
+  }, [useMinimalBadges]);
+
+  useEffect(() => {
+    fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' })
+      .then(async (res) => {
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got \"${ct}\". Body: ${txt.slice(0, 160)}`);
+        }
+        return res.json();
+      })
       .then((data) => setAIStatus(data?.data?.status || data?.status || "Inactive"))
       .catch(() => setAIStatus("Inactive"));
   }, []);
@@ -149,8 +165,35 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchSystemHealth = async () => {
       try {
-  const response = await fetch(`${API_BASE_PATH}/system/health`);
-        const data = await response.json();
+        // Prefer robust serverless health first
+        const tryUrls = [
+          '/api/system/health',
+          `${API_BASE_PATH}/system/health`,
+        ];
+
+        let data: any | null = null;
+        let lastErr: any = null;
+        for (const u of tryUrls) {
+          try {
+            const response = await fetch(u, { credentials: 'include' });
+            const ct = response.headers.get('content-type') || '';
+            if (!response.ok) {
+              const txt = await response.text().catch(() => '');
+              throw new Error(`HTTP ${response.status} ${response.statusText}. Body: ${txt.slice(0, 180)}`);
+            }
+            if (!/application\/json/i.test(ct)) {
+              const txt = await response.text().catch(() => '');
+              throw new Error(`Expected JSON, got ${ct}. Body: ${txt.slice(0, 180)}`);
+            }
+            const json = await response.json();
+            // Serverless returns an envelope { backend: {...} }
+            data = json?.backend && typeof json.backend === 'object' ? json.backend : json;
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!data) throw lastErr || new Error('Health fetch failed');
         setSystemHealth({
           cpu: data.cpu || Math.random() * 100,
           memory: data.memory || Math.random() * 100,
@@ -175,8 +218,19 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-  const response = await fetch(`${API_BASE_PATH}/system/alerts`);
-        const data = await response.json();
+        const response = await fetch(`${API_BASE_PATH}/system/alerts`, { credentials: 'include' });
+        const ct = response.headers.get('content-type') || '';
+        if (!response.ok) {
+          const txt = await response.text().catch(() => '');
+          throw new Error(`HTTP ${response.status} ${response.statusText}. Body: ${txt.slice(0, 200)}`);
+        }
+        let data: any;
+        try {
+          data = await response.json();
+        } catch (e) {
+          const txt = await response.text().catch(() => '');
+          throw new Error(`Invalid JSON (ct=${ct}). Body: ${txt.slice(0, 200)}`);
+        }
         setSmartAlerts(data.alerts || []);
       } catch (error) {
         // Generate smart alerts based on system status
@@ -244,8 +298,19 @@ const SafeOwnerZone: React.FC = () => {
   useEffect(() => {
     const fetchPredictions = async () => {
       try {
-  const response = await fetch(`${API_BASE_PATH}/system/ai-predictions`);
-        const data = await response.json();
+        const response = await fetch(`${API_BASE_PATH}/system/ai-predictions`, { credentials: 'include' });
+        const ct = response.headers.get('content-type') || '';
+        if (!response.ok) {
+          const txt = await response.text().catch(() => '');
+          throw new Error(`HTTP ${response.status} ${response.statusText}. Body: ${txt.slice(0, 200)}`);
+        }
+        let data: any;
+        try {
+          data = await response.json();
+        } catch (e) {
+          const txt = await response.text().catch(() => '');
+          throw new Error(`Invalid JSON (ct=${ct}). Body: ${txt.slice(0, 200)}`);
+        }
         // Be defensive: backend may omit fields
         setAIPredictions({
           expectedLoad: data?.expectedLoad ?? 'Normal',
@@ -276,8 +341,12 @@ const SafeOwnerZone: React.FC = () => {
   }, [systemHealth]);
 
   useEffect(() => {
-    fetch(`${API_BASE_PATH}/system/ai-training-info`)
-      .then((res) => res.json())
+    fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' })
+      .then(async (res) => {
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) return { status: 'Inactive' } as any;
+        return res.json();
+      })
       .then((data) => setAIStatus(data?.data?.status || data?.status || "Inactive"))
       .catch(() => setAIStatus("Inactive"));
   }, []);
@@ -491,6 +560,14 @@ const SafeOwnerZone: React.FC = () => {
           >
             {isDark ? <FaSun className="inline" /> : <FaMoon className="inline" />} {isDark ? "☀️ Light" : "🌙 Dark"}
           </button>
+
+          <button
+            onClick={() => setUseMinimalBadges(v => !v)}
+            className={`px-4 py-3 rounded-xl shadow-lg font-semibold transition-all ${useMinimalBadges ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white' : 'bg-slate-300 dark:bg-slate-600 text-slate-900 dark:text-white'}`}
+            title="Toggle simple labels for badges"
+          >
+            {useMinimalBadges ? 'Simple labels: ON' : 'Simple labels: OFF'}
+          </button>
         </div>
         
         <div className="text-xs text-slate-500 dark:text-slate-400 mt-3">
@@ -555,16 +632,19 @@ const SafeOwnerZone: React.FC = () => {
               </h2>
             </div>
             
-            {/* Minimal Priority Legend */}
-            <div className="flex gap-2 text-xs">
-              <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded font-medium">
-                🚨 Critical
+            {/* Minimal Priority Legend (emoji-free) */}
+            <div className="flex gap-2 text-xs items-center">
+              <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded font-medium inline-flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                Critical
               </span>
-              <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded font-medium">
-                ⚠️ Important
+              <span className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded font-medium inline-flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
+                Important
               </span>
-              <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded font-medium">
-                ℹ️ Standard
+              <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded font-medium inline-flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+                Standard
               </span>
             </div>
           </div>
@@ -575,7 +655,7 @@ const SafeOwnerZone: React.FC = () => {
               onClick={async () => {
                 try {
                   // Reset system to healthy state
-                  await fetch(`${API_BASE_PATH}/system/reset-health`, { method: 'POST' });
+                  await fetch(`${API_BASE_PATH}/system/reset-health`, { method: 'POST', credentials: 'include' });
                   alert('🔧 AUTO-REPAIR COMPLETED!\n\n✅ CPU normalized to 45%\n✅ Memory cleared to 55%\n✅ All critical issues resolved\n\nSystem is now healthy!');
                   // Refresh to show updated metrics
                   window.location.reload();
@@ -591,7 +671,7 @@ const SafeOwnerZone: React.FC = () => {
             <button 
               onClick={async () => {
                 try {
-                  await fetch(`${API_BASE_PATH}/system/force-critical`, { method: 'POST' });
+                  await fetch(`${API_BASE_PATH}/system/force-critical`, { method: 'POST', credentials: 'include' });
                   alert('⚠️ CRITICAL STATE ACTIVATED!\n\nCPU: 95%\nMemory: 92%\n\nAuto-repair will trigger in 2 seconds...');
                   setTimeout(() => window.location.reload(), 100);
                 } catch (error) {
@@ -607,7 +687,7 @@ const SafeOwnerZone: React.FC = () => {
               onClick={() => alert('🔄 Refreshing all panels...')}
               className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-semibold shadow-md transition-all text-sm"
             >
-              � Refresh All
+              🔄 Refresh All
             </button>
             
             <button 
@@ -617,7 +697,7 @@ const SafeOwnerZone: React.FC = () => {
               }}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-md transition-all text-sm"
             >
-              � System Status
+              🧭 System Status
             </button>
           </div>
         </div>
@@ -634,31 +714,58 @@ const SafeOwnerZone: React.FC = () => {
               whileHover={{ scale: 1.02, y: -5 }}
               className="ai-card glow-panel ai-highlight hover-glow relative group shadow-xl"
             >
-              {/* Priority Badge with Clear Icons */}
+              {/* Priority Indicator (emoji-free when minimal enabled) */}
               {priority && (
-                <div className={`absolute top-2 right-2 px-3 py-1.5 text-xs font-bold rounded-lg shadow-lg ${
-                  priority === 'critical' ? 'bg-red-600 text-white animate-pulse' :
-                  priority === 'high' ? 'bg-orange-500 text-white' :
-                  priority === 'medium' ? 'bg-blue-500 text-white' :
-                  'bg-gray-400 text-white'
-                }`}>
-                  {priority === 'critical' && '🚨 CRITICAL'}
-                  {priority === 'high' && '⚠️ IMPORTANT'}
-                  {priority === 'medium' && 'ℹ️ MEDIUM'}
-                  {priority === 'low' && '📋 LOW'}
-                </div>
+                useMinimalBadges ? (
+                  <div className="absolute top-2 right-2">
+                    <span
+                      className={`px-2 py-1 text-[10px] font-semibold rounded-md border ${
+                        priority === 'critical'
+                          ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800'
+                          : priority === 'high'
+                          ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-200 border-orange-200 dark:border-orange-800'
+                          : priority === 'medium'
+                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-800'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      {priority === 'critical' && 'Critical'}
+                      {priority === 'high' && 'Important'}
+                      {priority === 'medium' && 'Medium'}
+                      {priority === 'low' && 'Low'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className={`absolute top-2 right-2 px-3 py-1.5 text-xs font-bold rounded-lg shadow-lg ${
+                    priority === 'critical' ? 'bg-red-600 text-white animate-pulse' :
+                    priority === 'high' ? 'bg-orange-500 text-white' :
+                    priority === 'medium' ? 'bg-blue-500 text-white' :
+                    'bg-gray-400 text-white'
+                  }`}>
+                    {priority === 'critical' && '🚨 CRITICAL'}
+                    {priority === 'high' && '⚠️ IMPORTANT'}
+                    {priority === 'medium' && 'ℹ️ MEDIUM'}
+                    {priority === 'low' && '📋 LOW'}
+                  </div>
+                )
               )}
               
-              {/* Category Badge */}
+              {/* Category Badge (emoji-free when minimal enabled) */}
               {category && (
-                <div className="absolute top-2 left-2 px-2 py-1 text-xs font-semibold rounded-lg bg-slate-700 text-white">
-                  {category === 'security' && '🔒'}
-                  {category === 'ai' && '🤖'}
-                  {category === 'monitoring' && '📊'}
-                  {category === 'analytics' && '📈'}
-                  {category === 'system' && '⚙️'}
-                  {' '}{category}
-                </div>
+                useMinimalBadges ? (
+                  <div className="absolute top-2 left-2 px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600">
+                    {category}
+                  </div>
+                ) : (
+                  <div className="absolute top-2 left-2 px-2 py-1 text-xs font-semibold rounded-lg bg-slate-700 text-white">
+                    {category === 'security' && '🔒'}
+                    {category === 'ai' && '🤖'}
+                    {category === 'monitoring' && '📊'}
+                    {category === 'analytics' && '📈'}
+                    {category === 'system' && '⚙️'}
+                    {' '}{category}
+                  </div>
+                )
               )}
               
               <div className="flex justify-between items-center px-4 py-3 border-b dark:border-slate-600 bg-gradient-to-r from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-800 rounded-t-xl">
@@ -684,14 +791,16 @@ const SafeOwnerZone: React.FC = () => {
                     <span className="ml-3 text-slate-500 dark:text-slate-300">Loading...</span>
                   </div>
                 }>
-                  {Component ? (
-                    <Component />
-                  ) : (
-                    <div className="text-red-500 flex items-center gap-2 p-4">
-                      <FaExclamationTriangle />
-                      Component unavailable
-                    </div>
-                  )}
+                  <ErrorBoundary title={`${key} failed`}>
+                    {Component ? (
+                      <Component />
+                    ) : (
+                      <div className="text-red-500 flex items-center gap-2 p-4">
+                        <FaExclamationTriangle />
+                        Component unavailable
+                      </div>
+                    )}
+                  </ErrorBoundary>
                 </Suspense>
               </div>
               

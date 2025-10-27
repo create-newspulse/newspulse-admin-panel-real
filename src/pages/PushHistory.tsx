@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import api from '../lib/api';
-import axios from 'axios';
+import api, { default as apiClient } from '../lib/api';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
 interface PushEntry {
@@ -18,9 +17,9 @@ export default function PushHistory() {
   const [settings, setSettings] = useState({ lockdown: false });
 
   useEffect(() => {
-    axios
-      .get('/api/settings/load')
-      .then((res) => setSettings(res.data))
+    apiClient
+      .get('/settings/load')
+      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 
@@ -28,8 +27,9 @@ export default function PushHistory() {
 
   const fetchHistory = async () => {
     try {
-      const res = await api.get('/alerts/history');
-      setEntries(res.data.data);
+  const res = await api.get('/alerts/history');
+  const data = (res as any)?.data ?? res;
+  setEntries(data.data);
     } catch {
       alert('❌ Failed to fetch push history');
     } finally {

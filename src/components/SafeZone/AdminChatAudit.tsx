@@ -26,11 +26,20 @@ const AdminChatAudit = () => {
       setLoading(true);
       setError(null);
       try {
-  const res = await fetch(`${API_BASE_PATH}/admin-chat-audit`);
+        const res = await fetch(`${API_BASE_PATH}/admin-chat-audit`, { credentials: 'include' });
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}. Body: ${txt.slice(0, 160)}`);
+        }
+        if (!/application\/json/i.test(ct)) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got ${ct}. Body: ${txt.slice(0, 160)}`);
+        }
         const data = await res.json();
 
         // Check for both res.ok and data.logs is array
-        if (res.ok && data && Array.isArray(data.logs)) {
+        if (data && Array.isArray(data.logs)) {
           if (isMounted) setLogs(data.logs);
         } else {
           if (isMounted)
@@ -41,7 +50,7 @@ const AdminChatAudit = () => {
             );
         }
       } catch (err: any) {
-        if (isMounted) setError("Server error while fetching logs");
+        if (isMounted) setError(err?.message || "Server error while fetching logs");
       } finally {
         if (isMounted) setLoading(false);
       }

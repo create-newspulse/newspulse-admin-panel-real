@@ -7,14 +7,19 @@ import LiveTicker from '@components/LiveTicker';
 import VoicePlayer from '@components/VoicePlayer';
 import ChartComponent from '@components/ChartComponent';
 import VoiceAndExplainer from '@components/VoiceAndExplainer';
+import SystemHealthBadge from '@components/SystemHealthBadge';
+import SystemHealthPanel from '@components/SystemHealthPanel';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import apiClient from '@lib/api';
 
 type DashboardStats = {
   total: number;
+  // When arrays are available we keep them, but we also compute numeric totals for cards.
   byCategory: { _id: string | null; count: number }[];
   byLanguage: { _id: string | null; count: number }[];
+  categoriesTotal: number;
+  languagesTotal: number;
   recent: {
     _id: string;
     title: string;
@@ -33,6 +38,7 @@ const Dashboard = () => {
   const [aiCommand, setAiCommand] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [debugExpanded, setDebugExpanded] = useState(false);
 
   // Use relative /api so Vite proxy handles the active backend port in development
   const API_BASE = '/api';
@@ -52,17 +58,24 @@ const Dashboard = () => {
 
       // normalize payload into your DashboardStats shape
       const normalize = (raw: any): DashboardStats => {
-        if (raw?.total !== undefined && raw?.byCategory && raw?.byLanguage) {
-          return raw as DashboardStats;
-        }
         const totals = raw?.totals || {};
+        const byCategory = Array.isArray(raw?.byCategory) ? raw.byCategory : [];
+        const byLanguage = Array.isArray(raw?.byLanguage) ? raw.byLanguage : [];
+        const categoriesTotal = Number(
+          totals.categories ?? raw?.categories ?? (Array.isArray(byCategory) ? byCategory.length : 0)
+        );
+        const languagesTotal = Number(
+          totals.languages ?? raw?.languages ?? (Array.isArray(byLanguage) ? byLanguage.length : 0)
+        );
         return {
-          total: Number(totals.news ?? 0),
-          byCategory: Array.isArray(raw?.byCategory) ? raw.byCategory : [],
-          byLanguage: Array.isArray(raw?.byLanguage) ? raw.byLanguage : [],
+          total: Number(raw?.total ?? totals.news ?? 0),
+          byCategory,
+          byLanguage,
+          categoriesTotal,
+          languagesTotal,
           recent: Array.isArray(raw?.recent) ? raw.recent : [],
-          aiLogs: Number(raw?.aiLogs ?? 0),
-          activeUsers: Number(raw?.activeUsers ?? 0),
+          aiLogs: Number(raw?.aiLogs ?? totals.aiLogs ?? 0),
+          activeUsers: Number(raw?.activeUsers ?? totals.users ?? 0),
         };
       };
 
@@ -89,10 +102,19 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        const res = await apiClient.get('/system/ai-command');
-        setAiCommand(res.data);
+        // Use serverless health endpoint to guarantee JSON for the debug box
+        const r = await fetch('/api/system/health', { credentials: 'include' });
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const text = await r.text();
+          setAiCommand({ _nonJson: true, contentType: ct || 'unknown', preview: text.slice(0, 600) });
+          return;
+        }
+        const json = await r.json();
+        setAiCommand(json);
       } catch (err: any) {
-        console.error('❌ AI Command API Error:', err.response?.data || err.message);
+        console.error('❌ AI Command API Error:', err?.message || err);
+        setAiCommand({ _error: err?.message || 'Unknown error' });
       }
     };
 
@@ -111,6 +133,9 @@ const Dashboard = () => {
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-800 dark:text-white">
             📊 {t('dashboard')}
           </h1>
+          <div className="mt-1 sm:mt-0">
+            <SystemHealthBadge />
+          </div>
   </header>
 
         {loading && (
@@ -130,8 +155,8 @@ const Dashboard = () => {
             <section>
               <StatsCards
                 totalNews={stats.total}
-                categoryCount={stats.byCategory.length}
-                languageCount={stats.byLanguage.length}
+                categoryCount={stats.categoriesTotal}
+                languageCount={stats.languagesTotal}
                 activeUsers={stats.activeUsers}
                 aiLogs={stats.aiLogs}
               />
@@ -139,6 +164,10 @@ const Dashboard = () => {
 
             <section>
               <ChartComponent />
+            </section>
+
+            <section>
+              <SystemHealthPanel />
             </section>
 
             <section>
@@ -169,7 +198,36 @@ const Dashboard = () => {
           {aiCommand && (
             <div className="mt-10 p-4 bg-slate-100 dark:bg-slate-700 rounded">
               <h2 className="text-lg font-semibold">🔐 AI Command Debug</h2>
-              <pre className="text-sm">{JSON.stringify(aiCommand, null, 2)}</pre>
+              {aiCommand._nonJson ? (
+                <div className="text-xs text-red-200/90 bg-red-700/30 border border-red-400/40 rounded p-3 mt-2">
+                  <p className="mb-2 font-medium">Non-JSON response from /system/ai-command</p>
+                  <p className="mb-2">content-type: <code>{aiCommand.contentType}</code></p>
+                  <pre className="ai-debug-box text-[11px]">
+                    {debugExpanded ? aiCommand.preview : String(aiCommand.preview ?? '').slice(0, 300) + (String(aiCommand.preview ?? '').length > 300 ? '…' : '')}
+                  </pre>
+                  <button
+                    className="mt-2 inline-flex items-center px-3 py-1 rounded bg-slate-800 text-white text-xs hover:bg-slate-900 disabled:opacity-60"
+                    onClick={() => setDebugExpanded((v) => !v)}
+                  >
+                    {debugExpanded ? 'Show Less' : 'Show More'}
+                  </button>
+                  <p className="mt-2 opacity-80">Tip: ensure this endpoint returns application/json in production; if unauthorized, the backend should return 401 with a JSON body.</p>
+                </div>
+              ) : (
+                <div>
+                  <pre className="ai-debug-box text-sm">
+                    {debugExpanded
+                      ? JSON.stringify(aiCommand, null, 2)
+                      : JSON.stringify(aiCommand, null, 2).slice(0, 600) + (JSON.stringify(aiCommand, null, 2).length > 600 ? '…' : '')}
+                  </pre>
+                  <button
+                    className="mt-2 inline-flex items-center px-3 py-1 rounded bg-slate-800 text-white text-xs hover:bg-slate-900 disabled:opacity-60"
+                    onClick={() => setDebugExpanded((v) => !v)}
+                  >
+                    {debugExpanded ? 'Show Less' : 'Show More'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
   </section>

@@ -108,3 +108,21 @@
 
   .ai-card { @apply bg-white dark:bg-slate-800 p-5 rounded-2xl; }
 }
+
+/* 🧪 Debug output box for long strings (HTML/JSON) */
+.ai-debug-box {
+  white-space: pre-wrap;        /* wrap long lines */
+  word-wrap: break-word;        /* legacy wrap support */
+  overflow-wrap: anywhere;      /* modern wrap */
+  overflow-x: auto;             /* scroll only if needed */
+  max-width: 100%;              /* stay within container */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: #f8fafc;          /* slate-50 */
+  color: #111827;               /* slate-900 */
+  border-radius: 8px;
+  padding: 12px;
+}
+html.dark .ai-debug-box {
+  background: rgba(2,6,23,0.5); /* slate-900/50 */
+  color: #e5e7eb;               /* gray-200 */
+}

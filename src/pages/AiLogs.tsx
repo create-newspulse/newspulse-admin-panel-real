@@ -1,13 +1,21 @@
 // 📁 src/pages/AiLogs.tsx
 
 import { useEffect, useState } from 'react';
+import { API_BASE_PATH } from '@lib/api';
 
 export default function AiLogs() {
   const [logs, setLogs] = useState([]);
 
   useEffect(() => {
-    fetch('/api/ai/logs')
-      .then((res) => res.json())
+    fetch(`${API_BASE_PATH}/ai/logs`, { credentials: 'include' })
+      .then(async (res) => {
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
+        }
+        return res.json();
+      })
       .then((data) => setLogs(data.logs || []))
       .catch(() => setLogs([]));
   }, []);

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_PATH } from '@lib/api';
+import { useNotification } from '@context/NotificationContext';
+import { fetchJson } from '@lib/fetchJson';
 import {
   FaChartLine, FaTrafficLight, FaUserShield, FaMapMarkedAlt,
   FaRobot, FaShieldAlt, FaFileExport
@@ -23,30 +25,19 @@ interface MonitorData {
 }
 
 const MonitorHubPanel: React.FC = () => {
+  const notify = useNotification();
   const [data, setData] = useState<MonitorData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeUsers, setActiveUsers] = useState<number | null>(null);
 
-  // Small helper to ensure JSON & better errors
-  const getJSON = async (url: string) => {
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} ${res.statusText} :: ${text.slice(0, 180)}`);
-    }
-    const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Expected JSON, got "${ct}". Body: ${text.slice(0, 180)}`);
-    }
-    return res.json();
-  };
+  // Use shared helper with credentials, timeout, and JSON validation
+  const getJSON = async <T,>(url: string) => fetchJson<T>(url, { timeoutMs: 15000 });
 
   // 🔁 Fetch Live Data
   const fetchStatus = async () => {
     try {
-      const json: MonitorData = await getJSON(`${API_BASE_PATH}/system/monitor-hub`);
+  const json = await getJSON<MonitorData>(`${API_BASE_PATH}/system/monitor-hub`);
       // Accept either {success:true, ...} or plain object
       const success = json.success ?? true;
       if (!success) throw new Error('API success=false');
@@ -71,8 +62,16 @@ const MonitorHubPanel: React.FC = () => {
 
   // 🧠 Real-Time User Count via Socket (same-origin -> Vite proxy -> backend)
   useEffect(() => {
-    const SOCKET_URL = (import.meta.env.VITE_API_WS ?? import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '') || undefined;
-    const socket: Socket = io(SOCKET_URL || '/', {
+    const raw = (import.meta.env.VITE_API_WS ?? import.meta.env.VITE_API_URL ?? '') as string;
+    const base = raw ? raw.replace(/\/$/, '') : '';
+    const shouldConnect = !!base || import.meta.env.DEV; // only auto-fallback to "/" in dev
+
+    if (!shouldConnect) {
+      // Production without explicit WS endpoint -> skip to avoid console noise
+      return;
+    }
+
+    const socket: Socket = io(base || '/', {
       path: '/socket.io',
       transports: ['websocket'],
       withCredentials: true,
@@ -98,7 +97,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📤 Export PDF Report
   const exportReport = async () => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/reports/export?type=pdf`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE_PATH}/reports/export?type=pdf`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -109,8 +108,9 @@ const MonitorHubPanel: React.FC = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+      notify.success('📄 Report exported to PDF');
     } catch (err) {
-      alert('⚠️ PDF Export failed. Please try again.');
+      notify.error('⚠️ PDF export failed');
       console.error('PDF Export Error:', err);
     }
   };
@@ -118,17 +118,17 @@ const MonitorHubPanel: React.FC = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/daily-summary-toggle`, {
+      const json = await fetchJson<{ enabled?: boolean }>(`${API_BASE_PATH}/system/daily-summary-toggle`, {
         method: 'POST',
-        credentials: 'include',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ toggle: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      const enabled = json?.enabled ?? false;
-      alert(enabled ? '✅ Daily email summary enabled' : '❌ Email summary disabled');
+      }).catch(() => ({ enabled: false }));
+      const enabled = json.enabled ?? false;
+      if (enabled) notify.success('✅ Daily email summary enabled');
+      else notify.info('❌ Email summary disabled');
     } catch (err) {
       console.error('Email toggle failed:', err);
+      notify.error('⚠️ Failed to toggle email summary');
     }
   };
 

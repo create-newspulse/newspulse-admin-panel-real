@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import toast from 'react-hot-toast';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
@@ -11,9 +11,9 @@ const PollEditor = () => {
   const [settings, setSettings] = useState({ lockdown: false });
 
   useEffect(() => {
-    axios
-      .get('/api/settings/load')
-      .then((res) => setSettings(res.data))
+    apiClient
+      .get('/settings/load')
+      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 

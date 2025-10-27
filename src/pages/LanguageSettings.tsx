@@ -25,12 +25,17 @@ export default function LanguageSettings() {
     const response = await fetch('/api/speak', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         text: `Welcome to News Pulse in ${selected.name}`,
         languageCode: selected.code,
       }),
     });
-
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      alert(`Voice preview failed (${response.status}). ${text.slice(0, 160)}`);
+      return;
+    }
     const audioBlob = await response.blob();
     const url = URL.createObjectURL(audioBlob);
     new Audio(url).play();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import {
   FaHeartbeat,
   FaCogs,
@@ -28,8 +28,9 @@ export default function AIDiagnostics() {
     setLoading(true);
     setError(false);
     try {
-      const res = await axios.get<{ status: string; modules: string[]; lastCheck: string; warnings?: string[]; errors?: string[] }>('/api/system/ai-diagnostics');
-      setData(res.data);
+  const res = await apiClient.get<{ status: string; modules: string[]; lastCheck: string; warnings?: string[]; errors?: string[] }>('/system/ai-diagnostics');
+  const data = (res as any)?.data ?? res;
+  setData(data);
     } catch (err) {
       console.error('❌ Failed to load diagnostics:', err);
       setError(true);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 interface FeedSchedule {
   day: string;
@@ -29,13 +29,15 @@ const LiveFeedManager: React.FC = () => {
     const fetchConfig = async () => {
       try {
         const [feedRes, toggleRes] = await Promise.all([
-          axios.get('/api/live-feed-config'),
-          axios.get('/api/live-session'),
+          apiClient.get('/live-feed-config'),
+          apiClient.get('/live-session'),
         ]);
 
+        const feed = (feedRes as any)?.data ?? feedRes;
+        const toggle = (toggleRes as any)?.data ?? toggleRes;
         setConfig({
-          ...feedRes.data,
-          isFeedOn: toggleRes.data?.isFeedOn ?? true,
+          ...(feed || {}),
+          isFeedOn: toggle?.isFeedOn ?? true,
         });
       } catch (error) {
         console.error('❌ Failed to load feed config:', error);
@@ -53,8 +55,8 @@ const LiveFeedManager: React.FC = () => {
     setSaving(true);
     try {
       await Promise.all([
-        axios.post('/api/save-live-feed', config),
-        axios.post('/api/live-session', {
+        apiClient.post('/save-live-feed', config),
+        apiClient.post('/live-session', {
           isFeedOn: config.isFeedOn,
           activeFeed: config.activeFeed,
         }),

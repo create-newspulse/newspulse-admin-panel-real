@@ -1,5 +1,5 @@
 // src/utils/fetchTrainingInfo.ts
-import axios from 'axios';
+import { API_BASE_PATH } from '@lib/api';
 
 interface TrainingInfo {
   lastTrained: string;
@@ -17,15 +17,18 @@ interface TrainingInfo {
 
 export const fetchTrainingInfo = async (): Promise<TrainingInfo> => {
   try {
-    const res = await axios.get(`${import.meta.env.VITE_API_URL}/system/ai-training-info`);
-
-    const data = res?.data?.data;
-
-    if (!res.data?.success || !data || !data.lastTrained) {
-      console.warn('⚠️ AI training info missing or incomplete:', res.data);
+  const res = await fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' });
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.includes('application/json')) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`Bad response: ${res.status}. Body: ${txt.slice(0, 200)}`);
+    }
+    const json = await res.json();
+    const data = json?.data;
+    if (!json?.success || !data || !data.lastTrained) {
+      console.warn('⚠️ AI training info missing or incomplete:', json);
       throw new Error('AI training info missing required fields.');
     }
-
     return data;
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);

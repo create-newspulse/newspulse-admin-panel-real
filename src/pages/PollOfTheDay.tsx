@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
-import axios from 'axios';
+import apiClient from '@lib/api';
 
 interface Poll {
   _id: string;
@@ -23,9 +23,9 @@ const PollOfTheDay = () => {
 
   // 🔒 Load lockdown settings
   useEffect(() => {
-    axios
-      .get('/api/settings/load')
-      .then((res) => setSettings(res.data))
+    apiClient
+      .get('/settings/load')
+      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 

@@ -1,3 +1,5 @@
+import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import React, { useEffect, useState } from "react";
 import {
   FaKey,
@@ -23,8 +25,7 @@ const APIKeyVault: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/system/api-keys");
-        const data = await res.json();
+  const data = await fetchJson<any>(`${API_BASE_PATH}/system/api-keys`, { timeoutMs: 15000 });
 
         // Accepts both { keys: [...] } or { data: { keys: [...] } }
         const keysArr =
@@ -34,7 +35,7 @@ const APIKeyVault: React.FC = () => {
             ? data.data.keys
             : null;
 
-        if (res.ok && Array.isArray(keysArr)) {
+        if (Array.isArray(keysArr)) {
           if (isMounted) setKeys(keysArr);
         } else {
           if (isMounted)

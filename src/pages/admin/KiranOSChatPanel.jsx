@@ -53,9 +53,19 @@ const KiranOSChatPanel = () => {
     const res = await fetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ message: input, model: selectedAI })
     });
-
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const text = await res.text();
+      console.warn('Non-JSON reply from /api/ai/chat:', text.slice(0, 300));
+      setChat(prev => [...prev, { role: 'user', text: input }, { role: 'ai', text: 'Server returned a non-JSON response. Please try again.' }]);
+      setInput('');
+      setLoading(false);
+      setIsTyping(false);
+      return;
+    }
     const data = await res.json();
     const reply = data.reply;
 

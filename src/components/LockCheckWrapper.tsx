@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import apiClient from '@lib/api';
 import SignatureUnlock from './SafeZone/SignatureUnlock';
 
 export default function LockCheckWrapper({ children }: { children: React.ReactNode }) {
@@ -9,9 +9,9 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
   const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    axios.get('/api/settings/load')
+    apiClient.get('/settings/load')
       .then((res) => {
-        const settings = res.data || {};
+        const settings = (res as any)?.data ?? res ?? {};
         if (settings.lockdown) {
           setLocked(true);
           toast.error('🔒 Lockdown Mode is active. Signature required.');
@@ -25,7 +25,7 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
 
   const handleUnlockSuccess = async () => {
     try {
-      await axios.post('/api/unlock-log', {
+      await apiClient.post('/unlock-log', {
         time: new Date().toISOString(),
         method: 'signature',
         status: 'verified',

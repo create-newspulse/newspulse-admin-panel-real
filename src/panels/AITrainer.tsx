@@ -31,7 +31,7 @@ export default function AITrainer() {
   const activateFullTrainer = async () => {
     setActivating(true);
     try {
-      const res = await apiFetch('/api/system/ai-trainer-activate', { method: 'POST' });
+      const res = await apiFetch('/api/system/ai-trainer/activate', { method: 'POST' });
       alert(`🧬 ${res.message || 'Full AI Trainer activated.'}`);
       // Optionally trigger context refresh
     } catch (err: any) {

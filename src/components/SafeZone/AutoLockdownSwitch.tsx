@@ -1,8 +1,11 @@
 import React, { useState } from "react";
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 import { FaShieldAlt } from "react-icons/fa";
+import { useNotification } from '@context/NotificationContext';
 
 const AutoLockdownSwitch: React.FC = () => {
+  const notify = useNotification();
   const [lockPin, setLockPin] = useState("");
   const [unlockPin, setUnlockPin] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -31,24 +34,26 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("locking");
     setMessage(null);
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/emergency-lock`, {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/emergency-lock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: lockPin }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success ?? true) {
         setStatus("success");
         setMessage("✅ Lockdown activated successfully!");
         setLockPin("");
         setConfirmed(false);
+        notify.success('🚨 Lockdown activated');
       } else {
         setStatus("error");
         setMessage(data?.error || "❌ Invalid PIN or server error.");
+        notify.error(data?.error || '❌ Lockdown activation failed');
       }
-    } catch {
+    } catch (e) {
       setStatus("error");
       setMessage("❌ Server error. Please try again.");
+      notify.error('❌ Server error during lockdown');
     }
   };
 
@@ -57,23 +62,25 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("unlocking");
     setMessage(null);
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/emergency-unlock`, {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/emergency-unlock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: unlockPin }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success ?? true) {
         setStatus("success");
         setMessage("✅ Lockdown deactivated!");
         setUnlockPin("");
+        notify.success('🔓 Lockdown deactivated');
       } else {
         setStatus("error");
         setMessage(data?.error || "❌ Invalid PIN or server error.");
+        notify.error(data?.error || '❌ Unlock failed');
       }
-    } catch {
+    } catch (e) {
       setStatus("error");
       setMessage("❌ Server error. Please try again.");
+      notify.error('❌ Server error during unlock');
     }
   };
 
