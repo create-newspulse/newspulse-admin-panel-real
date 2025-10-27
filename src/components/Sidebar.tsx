@@ -10,6 +10,7 @@ import {
 import { useSidebar } from "../context/SidebarContext";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
+import { API_BASE_PATH } from "../lib/api";
 
 export default function Sidebar() {
   const { isOpen, toggleSidebar } = useSidebar();
@@ -27,7 +28,7 @@ export default function Sidebar() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/ai/logs/count")
+    fetch(`${API_BASE_PATH}/ai/logs/count`, { credentials: 'include' })
       .then((res) => res.json())
       .then((data) => setLogCount(data.count || 0))
       .catch(() => setLogCount(0));
@@ -91,10 +92,10 @@ export default function Sidebar() {
             <NavLink to="/poll-results" className={({ isActive }) => linkClass(isActive)}>
               <FaChartLine /> {isOpen && "Poll Results"}
             </NavLink>
-            <NavLink to="/ai-test" className={({ isActive }) => linkClass(isActive)}>
+            <NavLink to="/admin/ai-engine" className={({ isActive }) => linkClass(isActive)}>
               <div className="flex items-center justify-between w-full">
                 <span className="flex items-center gap-2">
-                  <FaRobot /> {isOpen && "AI Tools"}
+                  <FaRobot /> {isOpen && "AI Engine"}
                 </span>
                 {isOpen && logCount > 0 && (
                   <span className="bg-red-600 text-xs font-bold px-2 py-0.5 rounded-full ml-2">

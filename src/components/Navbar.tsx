@@ -22,7 +22,7 @@ export default function Navbar() {
     { to: '/manage-news', icon: '🗂️', label: t('manage') },
     { to: '/push-history', icon: '📣', label: t('pushHistory') },
     { to: '/media/inspiration', icon: '🌟', label: t('inspirationHub') },
-    { to: '/ai-test', icon: '�', label: t('aiPanel') },
+    { to: '/admin/ai-engine', icon: '🧠', label: 'AI Engine' },
       { to: '/admin/media-library', icon: '🖼️', label: 'Media Library' },
       { to: '/admin/ai-assistant', icon: '🤖', label: 'AI Assistant' },
       { to: '/admin/workflow', icon: '🧭', label: 'Workflow' },

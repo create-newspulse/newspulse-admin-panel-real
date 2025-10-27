@@ -31,7 +31,6 @@ import ManageNews from '@pages/ManageNews';
 import AddCategory from '@pages/AddCategory';
 import LanguageSettings from '@pages/LanguageSettings';
 import PushHistory from '@pages/PushHistory';
-import AiTest from '@pages/AiTest';
 import SavedNews from '@pages/SavedNews';
 import TestNotification from '@pages/TestNotification';
 import InspirationHub from '@pages/media/InspirationHub';
@@ -99,7 +98,7 @@ function App() {
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/ai-test" element={<ProtectedRoute><LockCheckWrapper><AiTest /></LockCheckWrapper></ProtectedRoute>} />
+              {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/media/inspiration" element={<ProtectedRoute><LockCheckWrapper><InspirationHub /></LockCheckWrapper></ProtectedRoute>} />
