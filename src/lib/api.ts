@@ -108,7 +108,7 @@ export const api = {
   revenueExportPdfPath: () => `${baseURL}/revenue/export/pdf`,
 
   // AI Engine
-  aiEngineRun: (payload: {
+  aiEngineRun: async (payload: {
     provider?: 'auto' | 'openai' | 'anthropic' | 'gemini';
     model?: string;
     language?: string;
@@ -116,10 +116,21 @@ export const api = {
     founderCommand?: string;
     sourceText?: string;
     url?: string;
-  }) => post<{ success: boolean; provider: string; model: string | null; result: any; safety: { uniquenessScore: number; note: string } }>(
-    "/ai-engine",
-    payload
-  ),
+  }): Promise<{ success: boolean; provider: string; model: string | null; result: any; safety: { uniquenessScore: number; note: string } }> => {
+    // Important: This hits the frontend's own serverless function at /api/ai-engine,
+    // not the admin backend proxy base. We use a direct fetch and include credentials.
+    const r = await fetch('/api/ai-engine', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({} as any));
+      throw { response: { data: err, status: r.status } };
+    }
+    return r.json();
+  },
 };
 
 export default apiClient;
