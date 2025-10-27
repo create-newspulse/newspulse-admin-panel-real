@@ -28,7 +28,9 @@ const ManageNews: React.FC = () => {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/all-news');
+        const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+        const API_BASE = isLocal ? 'http://localhost:5000/api' : '/admin-api';
+        const res = await fetch(`${API_BASE}/all-news`, { credentials: isLocal ? 'omit' : 'include' });
         const data = await res.json();
         if (data.success && Array.isArray(data.news)) {
           setNews(data.news);
@@ -62,7 +64,9 @@ const ManageNews: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this news item?')) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/delete-news/${id}`, { method: 'DELETE' });
+      const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      const API_BASE = isLocal ? 'http://localhost:5000/api' : '/admin-api';
+      const res = await fetch(`${API_BASE}/delete-news/${id}`, { method: 'DELETE', credentials: isLocal ? 'omit' : 'include' });
       const result = await res.json();
       if (result.success) {
         setNews(news.filter(n => n._id !== id));
