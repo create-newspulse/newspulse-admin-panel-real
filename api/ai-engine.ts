@@ -123,9 +123,11 @@ async function callAnthropic(model: string, prompt: string, apiKey?: string) {
 }
 
 async function callGemini(model: string, prompt: string, apiKey?: string) {
-  if (!apiKey) throw new Error('GOOGLE_API_KEY missing');
+  // Accept either GOOGLE_API_KEY or GEMINI_API_KEY for flexibility
+  const key = apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('Gemini API key missing (set GOOGLE_API_KEY or GEMINI_API_KEY)');
   const m = encodeURIComponent(model || 'gemini-1.5-pro');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -176,15 +178,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const prompt = buildPrompt({ language, taskType, founderCommand, sourceText, url });
 
     let chosenProvider = provider;
+    const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const hasGemini = !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
+
     if (chosenProvider === 'auto') {
-      // simple heuristic: prefer Anthropic if key present, else OpenAI, else Gemini
-      chosenProvider = process.env.ANTHROPIC_API_KEY ? 'anthropic' : (process.env.OPENAI_API_KEY ? 'openai' : 'gemini');
+      // Prefer Anthropic, then OpenAI, then Gemini when configured
+      if (hasAnthropic) chosenProvider = 'anthropic';
+      else if (hasOpenAI) chosenProvider = 'openai';
+      else if (hasGemini) chosenProvider = 'gemini';
+      else {
+        return res.status(500).json({
+          error: 'No AI provider keys configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY/GEMINI_API_KEY.'
+        });
+      }
     }
 
     let raw = '';
-    if (chosenProvider === 'openai') raw = await callOpenAI(model, prompt, process.env.OPENAI_API_KEY);
-    else if (chosenProvider === 'anthropic') raw = await callAnthropic(model, prompt, process.env.ANTHROPIC_API_KEY);
-    else if (chosenProvider === 'gemini') raw = await callGemini(model, prompt, process.env.GOOGLE_API_KEY);
+  if (chosenProvider === 'openai') raw = await callOpenAI(model, prompt, process.env.OPENAI_API_KEY);
+  else if (chosenProvider === 'anthropic') raw = await callAnthropic(model, prompt, process.env.ANTHROPIC_API_KEY);
+  else if (chosenProvider === 'gemini') raw = await callGemini(model, prompt, process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
     else return res.status(400).json({ error: 'Unsupported provider' });
 
     let parsed: any = null;
