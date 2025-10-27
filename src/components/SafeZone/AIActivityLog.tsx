@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { AxiosError } from "axios";
 import { api } from '@lib/api';
 
 type ActivityData = {
@@ -39,8 +40,15 @@ const AIActivityLog: React.FC = () => {
           throw new Error("Invalid data shape");
         }
       } catch (err: any) {
-        if (isMounted)
-          setError("⚠️ Failed to load real AI activity data.");
+        if (isMounted) {
+          // Provide clearer diagnostics for production debugging
+          const ax = err as AxiosError<any>;
+          const status = ax?.response?.status;
+          const msg = (ax?.response?.data && (ax.response.data.message || ax.response.data.error)) || ax?.message || "Unknown error";
+          setError(
+            `⚠️ Failed to load real AI activity data${status ? ` (HTTP ${status})` : ''}. ${msg}`
+          );
+        }
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -66,7 +74,13 @@ const AIActivityLog: React.FC = () => {
           ⏳ Loading real AI activity data...
         </div>
       ) : error ? (
-        <div className="text-sm text-red-500">{error}</div>
+        <div className="text-sm text-red-500 space-y-2">
+          <div>{error}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Tip: Ensure you are logged in via <a className="underline" href="/auth">/auth</a> and that the proxy <code>/admin-api</code> can reach your backend.
+            Quick check: <a className="underline" href="/admin-api/system/status" target="_blank" rel="noreferrer">/admin-api/system/status</a>
+          </div>
+        </div>
       ) : data ? (
         <ul className="text-sm space-y-2 text-slate-700 dark:text-slate-200 list-disc list-inside ml-2">
           <li>
