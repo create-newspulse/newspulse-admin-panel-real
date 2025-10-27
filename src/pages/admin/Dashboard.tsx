@@ -123,6 +123,9 @@ const Dashboard = () => {
   }, [API_BASE, t]);
 
   const langCode = (i18n.language?.split('-')[0] || 'en') as 'en' | 'hi' | 'gu';
+  // Feature flag: disable the yellow scrolling ticker by default.
+  // Enable by setting VITE_SHOW_TICKER=true at build time.
+  const SHOW_TICKER = (import.meta.env.VITE_SHOW_TICKER === 'true');
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-white to-gray-100 dark:from-slate-900 dark:to-slate-800 text-gray-900 dark:text-white transition-all duration-500">
@@ -170,9 +173,11 @@ const Dashboard = () => {
               <SystemHealthPanel />
             </section>
 
-            <section>
-              <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
-            </section>
+            {SHOW_TICKER && (
+              <section>
+                <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
+              </section>
+            )}
 
             <section>
               <VoiceAndExplainer text={t('aiSummaryBody')} />

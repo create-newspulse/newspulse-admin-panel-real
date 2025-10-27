@@ -99,3 +99,4 @@ admin-backend/.env
 config/drive-key.json
 admin-backend/.env
 **/news-pulse-*.json
+.vercel
