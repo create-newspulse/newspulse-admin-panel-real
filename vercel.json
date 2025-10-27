@@ -5,5 +5,8 @@
     { "source": "/auth", "destination": "/auth/index.html" },
     { "source": "/auth/(.*)", "destination": "/auth/$1" },
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "crons": [
+    { "path": "/api/system/health", "schedule": "*/5 * * * *" }
   ]
 }

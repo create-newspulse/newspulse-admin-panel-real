@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { AxiosError } from "axios";
 import { api } from '@lib/api';
 
@@ -13,52 +13,78 @@ const AIActivityLog: React.FC = () => {
   const [data, setData] = useState<ActivityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [waking, setWaking] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
-    const fetchData = async () => {
+  const coerceNumber = (v: any): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const n = Number(v.trim());
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
+
+  const normalize = (raw: any): ActivityData | null => {
+    const src = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+    const autoPublished = coerceNumber(src?.autoPublished);
+    const flagged = coerceNumber(src?.flagged);
+    const suggestedHeadlines = coerceNumber(src?.suggestedHeadlines);
+    let lastTrustUpdate: string | null = null;
+    const ltu = src?.lastTrustUpdate;
+    if (typeof ltu === 'string') lastTrustUpdate = ltu;
+    else if (typeof ltu === 'number' && Number.isFinite(ltu)) {
+      try { lastTrustUpdate = new Date(ltu).toISOString(); } catch {}
+    }
+
+    if (
+      autoPublished !== null &&
+      flagged !== null &&
+      suggestedHeadlines !== null &&
+      typeof lastTrustUpdate === 'string'
+    ) {
+      return { autoPublished, flagged, suggestedHeadlines, lastTrustUpdate };
+    }
+    return null;
+  };
+
+  const fetchData = useCallback(async () => {
+    let didCancel = false;
+    try {
       setLoading(true);
       setError(null);
-
-      try {
-        const json = await api.aiActivityLog() as any;
-
-        // Accepts both { success: true, data: { ... } } and { ...fields }
-        const activity: ActivityData =
-          json?.data && typeof json.data === "object"
-            ? json.data
-            : json;
-
-        if (
-          typeof activity.autoPublished === "number" &&
-          typeof activity.flagged === "number" &&
-          typeof activity.suggestedHeadlines === "number" &&
-          typeof activity.lastTrustUpdate === "string"
-        ) {
-          if (isMounted) setData(activity);
-        } else {
-          throw new Error("Invalid data shape");
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          // Provide clearer diagnostics for production debugging
-          const ax = err as AxiosError<any>;
-          const status = ax?.response?.status;
-          const msg = (ax?.response?.data && (ax.response.data.message || ax.response.data.error)) || ax?.message || "Unknown error";
-          setError(
-            `⚠️ Failed to load real AI activity data${status ? ` (HTTP ${status})` : ''}. ${msg}`
-          );
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    fetchData();
-    return () => {
-      isMounted = false;
-    };
+      const json = await api.aiActivityLog() as any;
+      const normalized = normalize(json);
+      if (!normalized) throw new Error("Invalid data shape");
+      if (!didCancel) setData(normalized);
+    } catch (err: any) {
+      const ax = err as AxiosError<any>;
+      const status = ax?.response?.status;
+      const msg = (ax?.response?.data && (ax.response.data.message || ax.response.data.error)) || ax?.message || "Unknown error";
+      if (!didCancel) setError(`⚠️ Failed to load real AI activity data${status ? ` (HTTP ${status})` : ''}. ${msg}`);
+    } finally {
+      if (!didCancel) setLoading(false);
+    }
+    return () => { didCancel = true; };
   }, []);
+
+  const wakeAndRetry = useCallback(async () => {
+    try {
+      setWaking(true);
+      // Hit serverless health to wake upstream backend (Render may be sleeping)
+      await fetch('/api/system/health', { credentials: 'include' });
+    } catch {
+      // ignore; we'll still retry
+    } finally {
+      setWaking(false);
+      fetchData();
+    }
+  }, [fetchData]);
+
+  useEffect(() => {
+    let cleanup: any;
+    (async () => { cleanup = await fetchData(); })();
+    return () => { if (typeof cleanup === 'function') cleanup(); };
+  }, [fetchData]);
 
   return (
     <section className="p-5 md:p-6 bg-purple-50 dark:bg-purple-900/10 border border-purple-300 dark:border-purple-700 rounded-2xl shadow-inner max-h-[90vh] overflow-y-auto">
@@ -74,8 +100,20 @@ const AIActivityLog: React.FC = () => {
           ⏳ Loading real AI activity data...
         </div>
       ) : error ? (
-        <div className="text-sm text-red-500 space-y-2">
+        <div className="text-sm text-red-500 space-y-3">
           <div>{error}</div>
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1.5 rounded-md bg-purple-600 text-white disabled:opacity-60"
+              onClick={wakeAndRetry}
+              disabled={waking}
+            >{waking ? 'Waking…' : 'Wake backend then retry'}</button>
+            <button
+              className="px-3 py-1.5 rounded-md border border-purple-400 text-purple-700 dark:text-purple-300"
+              onClick={fetchData}
+              disabled={loading}
+            >Retry</button>
+          </div>
           <div className="text-xs text-slate-500 dark:text-slate-400">
             Tip: Ensure you are logged in via <a className="underline" href="/auth">/auth</a> and that the proxy <code>/admin-api</code> can reach your backend.
             Quick check: <a className="underline" href="/admin-api/system/status" target="_blank" rel="noreferrer">/admin-api/system/status</a>

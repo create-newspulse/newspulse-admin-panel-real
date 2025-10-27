@@ -24,8 +24,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `${base}/api/health`,
   ];
 
-  // Render cold-starts can take several seconds on free plans; allow ~9s to fit Vercel's 10s limit
-  const fetchWithTimeout = async (url: string, timeoutMs = 9000) => {
+  // Render cold-starts can take several seconds on free plans.
+  // Keep total under Vercel’s 10s limit: do a short warm-up ping, then one longer health attempt.
+  const fetchWithTimeout = async (url: string, timeoutMs = 8000) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -43,6 +44,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       clearTimeout(id);
     }
   };
+
+  // Quick warm-up ping to help wake sleeping hosts (HEAD to base origin)
+  try {
+    const warmController = new AbortController();
+    const warmId = setTimeout(() => warmController.abort(), 1200);
+    await fetch(base, { method: 'HEAD', signal: warmController.signal } as any).catch(() => {});
+    clearTimeout(warmId);
+  } catch {}
 
   let lastError: any = null;
   for (const url of candidates) {

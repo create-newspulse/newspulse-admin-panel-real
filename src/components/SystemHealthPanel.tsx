@@ -11,6 +11,7 @@ type HealthEnvelope = {
   latencyMs?: number;
   backend?: any;
   ts?: string;
+  lastError?: string;
 };
 
 const statusChip: Record<HealthStatus, string> = {
@@ -53,6 +54,7 @@ export default function SystemHealthPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<boolean>(false);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [refreshTick, setRefreshTick] = useState<number>(0);
 
   const status: HealthStatus = useMemo(() => deriveStatus(env || {} as any), [env]);
   const latency = typeof env?.latencyMs === 'number' ? `${Math.round(env!.latencyMs!)}ms` : '—';
@@ -90,7 +92,9 @@ export default function SystemHealthPanel(): JSX.Element {
       mounted = false;
       if (timer) clearTimeout(timer);
     };
-  }, [autoRefresh]);
+  }, [autoRefresh, refreshTick]);
+
+  const refreshNow = async () => setRefreshTick((t) => t + 1);
 
   const b = env?.backend || {};
   const num = (v: any): number | null => (typeof v === 'number' && !Number.isNaN(v) ? v : null);
@@ -100,6 +104,10 @@ export default function SystemHealthPanel(): JSX.Element {
   const activeUsers = num(b.activeUsers);
   const rpm = num(b.requestsPerMinute ?? b.rpm);
   const uptime = (b.uptime || b.uptimeMs || b.uptimeSeconds || '') as string | number;
+  const waking = useMemo(() => {
+    const d = env || {} as HealthEnvelope;
+    return d?.proxied && d?.success === false && typeof d?.status !== 'number' && typeof d?.latencyMs !== 'number';
+  }, [env]);
 
   return (
     <section className="mt-8">
@@ -121,8 +129,17 @@ export default function SystemHealthPanel(): JSX.Element {
         </div>
       </div>
 
-      {error && (
+      {(waking || error) && (
         <div className="text-sm text-red-600 dark:text-red-400 mb-3">❌ {error}</div>
+      )}
+      {waking && (
+        <div className="mb-3 p-3 rounded-md border border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/15 text-sm text-purple-800 dark:text-purple-200 flex items-center justify-between">
+          <div>⏳ Backend waking… we’ll auto-refresh. You can also retry now.</div>
+          <div className="flex items-center gap-2">
+            <button className="text-xs px-2 py-1 rounded bg-purple-600 text-white" onClick={refreshNow}>Retry now</button>
+            <button className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600" onClick={() => setAutoRefresh((v) => !v)}>{autoRefresh ? 'Pause' : 'Resume'}</button>
+          </div>
+        </div>
       )}
 
       <div className="grid md:grid-cols-3 gap-4">

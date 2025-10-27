@@ -9,6 +9,7 @@ type HealthPayload = {
   latencyMs?: number;
   backend?: any;
   target?: string;
+  lastError?: string;
 };
 
 const statusStyle: Record<HealthStatus, { bg: string; text: string; dot: string; label: string }> = {
@@ -70,6 +71,7 @@ function deriveStatus(data: HealthPayload): HealthStatus {
 export default function SystemHealthBadge(): JSX.Element {
   const [info, setInfo] = useState<HealthPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const status: HealthStatus = useMemo(() => deriveStatus(info || {} as any), [info]);
   const styles = statusStyle[status];
@@ -107,7 +109,13 @@ export default function SystemHealthBadge(): JSX.Element {
       mounted = false;
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [refreshTick]);
+
+  const waking = useMemo(() => {
+    const d = info || {} as HealthPayload;
+    // Heuristic: proxied call failed without HTTP status/latency yet → likely backend waking/cold start
+    return d?.proxied && d?.success === false && typeof d?.status !== 'number' && typeof d?.latencyMs !== 'number';
+  }, [info]);
 
   return (
     <div className={`inline-flex items-center gap-3 px-3 py-2 rounded-lg border ${styles.bg} ${styles.text}`} title={info?.target ? `Health target: ${info.target}` : undefined}>
@@ -115,6 +123,12 @@ export default function SystemHealthBadge(): JSX.Element {
       <span className="text-sm font-medium">System Health: {styles.label}</span>
       <span className="text-xs opacity-70">•</span>
       <span className="text-xs">Latency: {latency}</span>
+      {waking && (
+        <>
+          <span className="text-xs opacity-70">• Backend waking…</span>
+          <button className="text-xs underline opacity-80" onClick={() => setRefreshTick((t) => t + 1)}>Retry</button>
+        </>
+      )}
       {error && <span className="text-xs opacity-70">• {error}</span>}
     </div>
   );
