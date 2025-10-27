@@ -106,6 +106,20 @@ export const api = {
   // Revenue
   revenue: () => get("/revenue"),
   revenueExportPdfPath: () => `${baseURL}/revenue/export/pdf`,
+
+  // AI Engine
+  aiEngineRun: (payload: {
+    provider?: 'auto' | 'openai' | 'anthropic' | 'gemini';
+    model?: string;
+    language?: string;
+    taskType?: string;
+    founderCommand?: string;
+    sourceText?: string;
+    url?: string;
+  }) => post<{ success: boolean; provider: string; model: string | null; result: any; safety: { uniquenessScore: number; note: string } }>(
+    "/ai-engine",
+    payload
+  ),
 };
 
 export default apiClient;

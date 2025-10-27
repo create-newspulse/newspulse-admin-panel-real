@@ -63,6 +63,7 @@ import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
+import AIEngine from '@pages/admin/AIEngine';
 
 function App() {
   const { isDark } = useDarkMode();
@@ -118,6 +119,7 @@ function App() {
               <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
+              <Route path="/admin/ai-engine" element={<FounderRoute><AIEngine /></FounderRoute>} />
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />
