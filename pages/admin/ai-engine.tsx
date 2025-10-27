@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';
 
-const LANGUAGES = ['English','Hindi','Spanish','French','German'];
+const LANGUAGES = ['English','Hindi','Gujarati'];
 const TASKS = ['Summarize','Rewrite','Creative Narrative','5W1H Story','SEO Article'];
 
 type ProviderKey = 'auto'|'anthropic'|'openai'|'gemini';

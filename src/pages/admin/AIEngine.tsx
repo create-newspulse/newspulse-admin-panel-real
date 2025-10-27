@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api as apiLib } from '../../lib/api';
 
 // Simple options
-const LANGUAGES = ['English', 'Hindi', 'Spanish', 'French', 'German'];
+const LANGUAGES = ['English', 'Hindi', 'Gujarati'];
 const TASKS = ['Summarize', 'Rewrite', 'Creative Narrative', '5W1H Story', 'SEO Article'];
 
 type ProviderKey = 'auto' | 'anthropic' | 'openai' | 'gemini';
