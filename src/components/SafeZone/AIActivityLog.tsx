@@ -13,6 +13,7 @@ const AIActivityLog: React.FC = () => {
   const [data, setData] = useState<ActivityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [waking, setWaking] = useState(false);
 
   const coerceNumber = (v: any): number | null => {
@@ -52,15 +53,32 @@ const AIActivityLog: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      setNote(null);
       const json = await api.aiActivityLog() as any;
       const normalized = normalize(json);
-      if (!normalized) throw new Error("Invalid data shape");
+      if (!normalized) {
+        // Backend may not implement this endpoint in some environments (e.g., prod Render repo).
+        // Degrade gracefully to an empty state instead of showing a red error.
+        if (!didCancel) {
+          setData({ autoPublished: 0, flagged: 0, suggestedHeadlines: 0, lastTrustUpdate: new Date(0).toISOString() });
+          setNote('AI Activity endpoint not available on this backend. Showing an empty placeholder.');
+        }
+        return;
+      }
       if (!didCancel) setData(normalized);
     } catch (err: any) {
       const ax = err as AxiosError<any>;
       const status = ax?.response?.status;
       const msg = (ax?.response?.data && (ax.response.data.message || ax.response.data.error)) || ax?.message || "Unknown error";
-      if (!didCancel) setError(`⚠️ Failed to load real AI activity data${status ? ` (HTTP ${status})` : ''}. ${msg}`);
+      if (didCancel) return;
+      // If unauthorized, surface the error (interceptor will redirect to /auth in prod)
+      if (status === 401) {
+        setError(`⚠️ Failed to load AI activity (unauthorized). ${msg}`);
+      } else {
+        // Soft-fail to empty placeholder for 404/5xx or network/shape issues
+        setData({ autoPublished: 0, flagged: 0, suggestedHeadlines: 0, lastTrustUpdate: new Date(0).toISOString() });
+        setNote('AI Activity endpoint did not return expected data. Showing an empty placeholder.');
+      }
     } finally {
       if (!didCancel) setLoading(false);
     }
@@ -136,10 +154,18 @@ const AIActivityLog: React.FC = () => {
           <li>
             <strong>Last Trust Update:</strong> {data.lastTrustUpdate}
           </li>
+          {note && (
+            <li className="list-none text-xs italic text-slate-500 dark:text-slate-400 mt-1">
+              {note}
+            </li>
+          )}
         </ul>
       ) : (
         <div className="text-sm text-gray-400 dark:text-gray-500">
           No activity data available yet.
+          {note && (
+            <div className="text-xs italic text-slate-500 dark:text-slate-400 mt-1">{note}</div>
+          )}
         </div>
       )}
     </section>
