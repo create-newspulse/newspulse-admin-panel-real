@@ -1,3 +1,11 @@
+# Prevent Vercel from detecting legacy Next.js pages and other non-build folders
+pages/
+legacy/
+admin-backend/
+newspulse-backend/
+newspulse-backend/**
+newspulse-admin-panel-real-main/**
+**/*.md
 # .vercelignore
 
 node_modules/

@@ -37,6 +37,18 @@ This README explains the recommended deployment: frontend hosted on Vercel, back
   - Request URL should be https://api-newspulse.onrender.com/api/... or proxied correctly.
   - Response should be JSON (200) not HTML (403/401 or index.html)
 
+7) Build warnings to ignore or silence
+- “Failed to fetch one or more git submodules”: This repo has no submodules. In Vercel Project Settings -> Git, turn OFF “Enable Git Submodules” to silence this warning.
+- “When using Next.js, place JavaScript Functions inside pages/api”: This project is Vite-based. We keep a legacy copy of old Next.js pages under `legacy/next-pages`, and `.vercelignore` excludes `pages/` and `legacy/`. If you still see this warning, make sure the `.vercelignore` in the root contains:
+  
+  pages/
+  legacy/
+  admin-backend/
+  newspulse-backend/
+  backend/
+  
+  and trigger a new deploy.
+
 6) Security
 - Do not commit secret files (serviceAccountKey.json, .env). If you committed secrets, rotate them and remove them from Git history.
 - I can prepare BFG/git-filter-repo commands to scrub secrets from git history on request.

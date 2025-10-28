@@ -33,6 +33,17 @@
       "@types/*": ["src/types/*"]
     }
   },
-  "include": ["src", "api", "pages", "vite.config.ts", "env.d.ts"],
-  "exclude": ["node_modules", "dist", "build"]
+  "include": ["src", "api", "vite.config.ts", "env.d.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "legacy",
+    "pages",
+    "src/pages/api",
+    "admin-backend",
+    "newspulse-backend",
+    "newspulse-backend-real",
+    "backend"
+  ]
 }
