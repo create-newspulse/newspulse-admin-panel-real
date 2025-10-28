@@ -1,1 +1,0 @@
-// placeholder type file so TS sees at least one input in pages/
