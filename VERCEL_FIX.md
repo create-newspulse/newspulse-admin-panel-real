@@ -70,3 +70,22 @@ When accessing the deployed app on Vercel, users see "❌ Access Denied – Only
 4. **Admin Features**: Full founder-level access available
 
 The app should now be fully accessible on Vercel! 🎉
+
+## Git Submodules warning on Vercel
+
+If you previously saw the Vercel build warning "Failed to fetch one or more git submodules":
+
+- This project does not use Git submodules (there is no `.gitmodules` file in the repo).
+- Recent Vercel UI updates may hide the "Enable Git Submodules" toggle under Project → Settings → Git for some accounts. If you don't see it, that's expected.
+- We already configured the project to deploy as a Vite SPA and added `.vercelignore` rules to prevent legacy folders from affecting auto-detection.
+
+What to do:
+
+1) Trigger a redeploy (any no-op commit) and check the latest deployment logs. The warning should be gone.
+2) If the warning still appears, capture the exact log line and build ID and share it with the team. It's typically cosmetic when no `.gitmodules` exists.
+3) As an additional safeguard, ensure no nested repositories are accidentally committed (no unexpected `.git/` folders inside the repo).
+
+Notes:
+
+- The submodule fetch step happens before the Build Command, so it cannot be controlled via `vercel.json`.
+- If the UI toggle is not present and there is no `.gitmodules`, Vercel will not fetch submodules and the build proceeds normally.
