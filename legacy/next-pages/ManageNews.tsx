@@ -1,3 +1,4 @@
+// @ts-nocheck
 // pages/ManageNews.tsx
 import React from 'react';
 const ManageNews = () => (

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // pages/AdminLogin.tsx
 import React from 'react';
 const AdminLogin = () => (

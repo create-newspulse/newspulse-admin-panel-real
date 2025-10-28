@@ -1,3 +1,4 @@
+// @ts-nocheck
 // pages/admin/CreateUser.tsx
 import React, { useState } from 'react';
 

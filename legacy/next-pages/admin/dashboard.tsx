@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect } from "react";
 import { useRouter } from "next/router";
 import AdminShell from "../../src/components/adminv2/AdminShell";

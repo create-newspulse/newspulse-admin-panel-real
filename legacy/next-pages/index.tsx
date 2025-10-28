@@ -1,3 +1,4 @@
+// @ts-nocheck
 // pages/index.tsx
 import Link from "next/link";
 

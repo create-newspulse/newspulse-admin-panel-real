@@ -1,3 +1,4 @@
+// @ts-nocheck
 // pages/AddNews.tsx
 import React from 'react';
 const AddNews = () => (

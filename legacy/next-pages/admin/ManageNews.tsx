@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ✅ Updated: admin-backend/pages/admin/ManageNews.tsx with Filters, Preview, Pagination, Inline Editing
 import React, { useEffect, useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';

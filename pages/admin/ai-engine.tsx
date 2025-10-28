@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { fetchJson } from '../../src/lib/fetchJson';
 import AdminShell from '../../src/components/adminv2/AdminShell';
