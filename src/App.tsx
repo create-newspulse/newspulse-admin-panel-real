@@ -29,19 +29,19 @@ import AddNews from '@pages/AddNews';
 import EditNews from '@pages/EditNews';
 import ManageNews from '@pages/ManageNews';
 import AddCategory from '@pages/AddCategory';
-import LanguageSettings from '@pages/LanguageSettings';
+import LanguageSettings from '@pages/owner/LanguageSettings';
 import PushHistory from '@pages/PushHistory';
 import SavedNews from '@pages/SavedNews';
 import TestNotification from '@pages/TestNotification';
-import InspirationHub from '@pages/media/InspirationHub';
+import InspirationHub from '@pages/inspiration/InspirationHub';
 
 // Polls
 import PollOfTheDay from '@pages/PollOfTheDay';
 import PollEditor from '@pages/PollEditor';
-import PollResultsChart from '@pages/PollResultsChart';
+import PollResultsChart from '@pages/polls/PollResultsChart';
 
 // Founder-Only Pages
-import SafeOwnerZone from '@pages/admin/SafeOwnerZone';
+import SafeOwnerZone from '@pages/owner/SafeOwnerZone';
 import LanguageManager from '@pages/SafeOwner/LanguageManager';
 import PanelGuide from '@pages/SafeOwner/PanelGuide';
 import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
