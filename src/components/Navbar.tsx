@@ -1,3 +1,5 @@
+
+
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useTranslation } from 'react-i18next';
@@ -23,14 +25,14 @@ export default function Navbar() {
     { to: '/push-history', icon: '📣', label: t('pushHistory') },
     { to: '/media/inspiration', icon: '🌟', label: t('inspirationHub') },
     { to: '/admin/ai-engine', icon: '🧠', label: 'AI Engine' },
-      { to: '/admin/media-library', icon: '🖼️', label: 'Media Library' },
-      { to: '/admin/ai-assistant', icon: '🤖', label: 'AI Assistant' },
-      { to: '/admin/workflow', icon: '🧭', label: 'Workflow' },
-      { to: '/admin/analytics', icon: '📈', label: 'Analytics' },
-      { to: '/admin/web-stories', icon: '📱', label: 'Web Stories' },
-      { to: '/admin/moderation', icon: '💬', label: 'Moderation' },
-      { to: '/admin/seo', icon: '🔍', label: 'SEO Tools' },
-      { to: '/safe-owner', icon: '🛡️', label: t('safeOwnerZone') },
+    { to: '/admin/media-library', icon: '🖼️', label: 'Media Library' },
+    { to: '/admin/ai-assistant', icon: '🤖', label: 'AI Assistant' },
+    { to: '/admin/workflow', icon: '🧭', label: 'Workflow' },
+    { to: '/admin/analytics', icon: '📈', label: 'Analytics' },
+    { to: '/admin/web-stories', icon: '📱', label: 'Web Stories' },
+    { to: '/admin/moderation', icon: '💬', label: 'Moderation' },
+    { to: '/admin/seo', icon: '🔍', label: 'SEO Tools' },
+    { to: '/safe-owner', icon: '🛡️', label: t('safeOwnerZone') },
   ];
 
   return (

@@ -1,10 +1,9 @@
 // 📁 src/App.tsx
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
-import './lib/i18n.config';
 import { I18nextProvider } from 'react-i18next';
 import i18n from './lib/i18n.config';
 
@@ -41,7 +40,7 @@ import PollEditor from '@pages/PollEditor';
 import PollResultsChart from '@pages/polls/PollResultsChart';
 
 // Founder-Only Pages
-import SafeOwnerZone from '@pages/owner/SafeOwnerZone';
+import SafeOwnerZone from '@pages/admin/SafeOwnerZone';
 import LanguageManager from '@pages/SafeOwner/LanguageManager';
 import PanelGuide from '@pages/SafeOwner/PanelGuide';
 import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
@@ -63,14 +62,30 @@ import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 import AIEngine from '@pages/admin/AIEngine';
+import GlobalCommandPalette from '@components/GlobalCommandPalette';
 
 function App() {
   const { isDark } = useDarkMode();
   const { isAuthenticated } = useAuth();
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
+
+  // Global hotkeys: Ctrl/Cmd+K to open, Esc to close
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && (e.key.toLowerCase() === 'k')) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      if (e.key === 'Escape') setPaletteOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <AITrainingInfoProvider>
@@ -137,6 +152,9 @@ function App() {
               <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
             </Routes>
           </main>
+
+          {/* 🔎 Global Command Palette (Ctrl/Cmd+K) */}
+          <GlobalCommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         </div>

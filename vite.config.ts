@@ -10,11 +10,9 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawApi = stripSlash(env.VITE_API_URL);
-  const isLocal = !!rawApi && /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(rawApi);
-  // In dev, default to local backend; in prod, default to our secure proxy
-  const API_HTTP = rawApi && !isLocal
-    ? rawApi
-    : (mode === 'development' ? 'http://localhost:5000' : '/admin-api');
+  // If VITE_API_URL is provided, always prefer it (even if it's localhost)
+  // Otherwise, in dev default to localhost:5000; in prod, to our secure proxy path
+  const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:5000' : '/admin-api');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {
@@ -37,12 +35,12 @@ export default defineConfig(({ mode }): UserConfig => {
       },
     },
 
-    server: {
+  server: {
       host: true,
       port: 5173,
       open: true,
-      // Enforce consistent dev URL on 5173
-      strictPort: true,
+  // Prefer 5173 but allow auto-fallback if busy
+  strictPort: false,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {
