@@ -38,7 +38,6 @@ services:
   - type: cron
     name: newspulse-backend-health-alarm
     env: node
-    plan: free
     region: oregon
     rootDir: admin-backend
     schedule: "*/5 * * * *"  # every 5 minutes
