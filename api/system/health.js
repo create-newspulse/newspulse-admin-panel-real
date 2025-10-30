@@ -1,21 +1,30 @@
-// Vercel Serverless Function: /api/system/health
-// - If ADMIN_BACKEND_URL is set, proxy to `${ADMIN_BACKEND_URL}/api/system/health`
-// - Otherwise, just return a lightweight 200 JSON
+// Vercel Serverless Function: health
+// Used by vercel.json cron to ping and report backend health
 
-export default async function handler(req, res) {
+export const config = { runtime: 'edge' };
+
+export default async function handler() {
+  const backend = process.env.ADMIN_BACKEND_URL || process.env.VITE_API_URL;
+  const ts = new Date().toISOString();
+  if (!backend) {
+    return new Response(JSON.stringify({ ok: false, ts, error: 'ADMIN_BACKEND_URL not set' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    });
+  }
   try {
-    const base = process.env.ADMIN_BACKEND_URL || process.env.VITE_API_URL;
-    if (base) {
-      const url = new URL('/api/system/health', base).toString();
-      const r = await fetch(url, { method: 'GET', headers: { 'accept': 'application/json' } });
-      const text = await r.text();
-      // Try to preserve JSON if possible
-      res.status(r.status).setHeader('content-type', r.headers.get('content-type') || 'application/json');
-      return res.send(text);
-    }
-    res.status(200).json({ ok: true, source: 'vercel', timestamp: new Date().toISOString() });
-  } catch (err) {
-    console.error('health proxy error:', err);
-    res.status(502).json({ ok: false, error: 'backend_unreachable', message: String(err) });
+    const r = await fetch(`${backend.replace(/\/$/, '')}/api/system/health`, { cache: 'no-store' });
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('application/json') ? await r.json() : await r.text();
+    return new Response(JSON.stringify({ ok: r.ok, backend, status: r.status, data, ts }), {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, backend, error: String(e), ts }), {
+      status: 502,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    });
   }
 }
+

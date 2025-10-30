@@ -1,60 +1,47 @@
-// Vercel catch-all proxy: /api/admin-proxy/* -> ADMIN_BACKEND_URL/*
-// Use with vercel.json rewrite: { "source": "/admin-api/(.*)", "destination": "/api/admin-proxy/$1" }
-// Set ADMIN_BACKEND_URL in Vercel Project Settings (e.g., https://api.yourdomain.com)
+// Vercel Serverless Function: admin proxy
+// Proxies /admin-api/* to your external Admin Backend (Express) defined by ADMIN_BACKEND_URL
+// Example: GET /admin-api/system/ai-health -> ${ADMIN_BACKEND_URL}/api/system/ai-health
 
-function buildTargetUrl(base, path, query) {
-  const target = new URL(path, base);
-  for (const [k, v] of Object.entries(query || {})) {
-    if (Array.isArray(v)) v.forEach((vv) => target.searchParams.append(k, vv));
-    else if (v != null) target.searchParams.append(k, String(v));
-  }
-  return target.toString();
+export const config = {
+  runtime: 'edge', // faster cold starts; supports fetch streaming
+};
+
+function joinURL(base, path) {
+  const b = base.replace(/\/$/, '');
+  const p = ('/' + path.join('/')).replace(/\/+/g, '/');
+  return `${b}/api/${p.replace(/^\//, '')}`;
 }
 
-export default async function handler(req, res) {
-  const base = process.env.ADMIN_BACKEND_URL || process.env.VITE_API_URL;
-  if (!base) {
-    return res.status(500).json({ error: 'missing_backend', message: 'ADMIN_BACKEND_URL (or VITE_API_URL) is not set in environment' });
+export default async function handler(req) {
+  const url = new URL(req.url);
+  const backend = process.env.ADMIN_BACKEND_URL || process.env.VITE_API_URL;
+  if (!backend) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'ADMIN_BACKEND_URL not configured' }),
+      { status: 500, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+    );
   }
-  try {
-    const segments = req.query.path;
-    const subPath = Array.isArray(segments) ? segments.join('/') : String(segments || '');
-    const targetUrl = buildTargetUrl(base.endsWith('/') ? base : base + '/', subPath, req.query);
 
-    const headers = { ...req.headers };
-    // Remove hop-by-hop/host headers not suitable for proxying
-    delete headers['host'];
-    delete headers['content-length'];
-    delete headers['connection'];
+  const pathParam = url.pathname.split('/').slice(3); // /api/admin-proxy/[...]
+  const target = new URL(joinURL(backend, pathParam));
+  target.search = url.search;
 
-    const method = req.method || 'GET';
-    const hasBody = !['GET', 'HEAD'].includes(method.toUpperCase());
-    const body = hasBody ? (typeof req.body === 'string' ? req.body : req.body ? JSON.stringify(req.body) : undefined) : undefined;
-    if (body && !headers['content-type']) {
-      headers['content-type'] = 'application/json';
-    }
+  const headers = new Headers(req.headers);
+  headers.delete('host');
+  // Ensure no caching on proxy
+  headers.set('x-forwarded-by', 'vercel-admin-proxy');
 
-    const response = await fetch(targetUrl, {
-      method,
-      headers,
-      body,
-    });
+  const init = {
+    method: req.method,
+    headers,
+    body: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body,
+    redirect: 'manual',
+  };
 
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    const status = response.status;
-    const buf = Buffer.from(await response.arrayBuffer());
+  const upstream = await fetch(target, init);
 
-    res.status(status).setHeader('content-type', contentType);
-    // Optionally forward other headers
-    const passHeaders = ['cache-control', 'x-ratelimit-remaining'];
-    passHeaders.forEach((h) => {
-      const v = response.headers.get(h);
-      if (v) res.setHeader(h, v);
-    });
-
-    return res.send(buf);
-  } catch (err) {
-    console.error('admin-proxy error:', err);
-    return res.status(502).json({ error: 'bad_gateway', message: String(err) });
-  }
+  // Pass-through SSE and other streaming responses
+  const resHeaders = new Headers(upstream.headers);
+  resHeaders.set('cache-control', 'no-store');
+  return new Response(upstream.body, { status: upstream.status, headers: resHeaders });
 }

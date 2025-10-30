@@ -1,0 +1,54 @@
+# Render Blueprint for admin-backend (monorepo)
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: newspulse-admin-backend
+    env: node
+    plan: free
+    region: oregon
+    rootDir: admin-backend
+    buildCommand: |
+      npm ci --legacy-peer-deps || npm install
+    startCommand: node server.mjs
+    autoDeploy: true
+    healthCheckPath: /api/system/health
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5-auto
+      - key: ALLOWED_ORIGINS
+        # Comma-separated list of allowed origins, include your Vercel domain(s)
+        value: https://your-app.vercel.app,https://your-custom-domain.tld
+      - key: SERVER_URL
+        # Optional: Public URL of this backend when assigned
+        value: 
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+  - type: cron
+    name: newspulse-backend-health-alarm
+    env: node
+    plan: free
+    region: oregon
+    rootDir: admin-backend
+    schedule: "*/5 * * * *"  # every 5 minutes
+    startCommand: node scripts/healthAlarm.js
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: BACKEND_URL
+        # Example: https://newspulse-admin-backend.onrender.com
+        value: 
+      - key: SLACK_WEBHOOK_URL
+        # Incoming Webhook for Slack (or leave empty to disable alerts)
+        sync: false

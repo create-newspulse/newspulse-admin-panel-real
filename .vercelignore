@@ -8,6 +8,10 @@ newspulse-admin-panel-real-main/**
 **/*.md
 # .vercelignore
 
+# Ignore duplicate API route implementations; keep Edge JS versions only
+api/admin-proxy/[...path].ts
+api/system/health.ts
+
 node_modules/
 dist/
 .cache/

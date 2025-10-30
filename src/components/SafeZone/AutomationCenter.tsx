@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
 import { fetchJson } from '@lib/fetchJson';
 import { FaPlay, FaPause, FaSyncAlt, FaClock, FaCogs } from 'react-icons/fa';
@@ -31,7 +31,7 @@ export default function AutomationCenter() {
     setLoading(true);
     try {
       // Try read status from backend; tolerate absence by keeping defaults
-      const data = await fetchJson<{ jobs?: Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }>(`${API_BASE_PATH}/system/jobs/status`).catch(() => ({ jobs: {} }));
+  const data = await fetchJson<{ jobs?: Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }>(`${API_BASE_PATH}/system/jobs/status`).catch(() => ({ jobs: {} as Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }));
       setJobs(prev => prev.map(j => ({
         ...j,
         running: data.jobs?.[j.key]?.running ?? j.running,
