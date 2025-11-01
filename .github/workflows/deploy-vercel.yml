@@ -1,19 +1,26 @@
-name: Trigger Vercel Deploy
+name: Trigger Vercel Deploy (Manual)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      hook:
+        description: "Vercel Deploy Hook URL"
+        required: true
+        type: string
 
 jobs:
   trigger:
-    if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Invoke Vercel Deploy Hook
-        env:
-          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        shell: bash
         run: |
+          # Read the 'hook' input from the workflow_dispatch payload without using GitHub expression contexts
+          HOOK=$(jq -r '.inputs.hook // empty' "$GITHUB_EVENT_PATH")
+          if [ -z "$HOOK" ]; then
+            echo "No hook provided. Exiting gracefully.";
+            exit 0;
+          fi
           echo "Triggering Vercel deploy hook..."
           curl -sS -X POST "$HOOK" -H 'Content-Type: application/json' -d '{"revalidate":true}'
           echo "Hook invoked"
