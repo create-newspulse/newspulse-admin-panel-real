@@ -85,17 +85,29 @@ export default defineConfig(({ mode }): UserConfig => {
       emptyOutDir: true,
       sourcemap: false,
       cssCodeSplit: true,
-      chunkSizeWarningLimit: 1500, // quiets the big-chunk warning
-      // If you want tighter chunking later, uncomment and tune:
-      // rollupOptions: {
-      //   output: {
-      //     manualChunks: {
-      //       react: ['react', 'react-dom'],
-      //       socketio: ['socket.io-client'],
-      //       html2canvas: ['html2canvas'],
-      //     },
-      //   },
-      // },
+      // Raise the warning threshold and split some heavy libs into separate chunks
+      chunkSizeWarningLimit: 3000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ['react', 'react-dom'],
+            socketio: ['socket.io-client'],
+            html2canvas: ['html2canvas'],
+            jspdf: ['jspdf', 'html2pdf.js'],
+            tiptap: [
+              '@tiptap/react',
+              '@tiptap/starter-kit',
+              '@tiptap/extension-image',
+              '@tiptap/extension-link',
+              '@tiptap/extension-placeholder',
+              '@tiptap/extension-underline',
+            ],
+            i18n: ['i18next', 'react-i18next', 'i18next-browser-languagedetector'],
+            chart: ['chart.js', 'react-chartjs-2'],
+            purify: ['dompurify'],
+          },
+        },
+      },
     },
 
     preview: {

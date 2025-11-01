@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-export type AiEngine = "gpt" | "gemini" | "claude" | "auto";
+export type AiEngine = "gpt" | "gemini";
 
 type AiEngineToggleProps = {
   engine: AiEngine;
   setEngine: (engine: AiEngine) => void;
 };
 
-const fallbackEngines: AiEngine[] = ["claude", "gpt", "gemini", "auto"];
+const fallbackEngines: AiEngine[] = ["gpt", "gemini"];
 
 const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) => {
   const { t } = useTranslation();
@@ -31,16 +31,15 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
         return res.json();
       })
       .then((data) => {
-        if (Array.isArray(data)) {
-          const validEngines = data.filter((key): key is AiEngine =>
-            fallbackEngines.includes(key)
-          );
-          // If no valid engines, set fallback and show error
-          if (validEngines.length === 0) {
-            setAvailableEngines([]);
-            setError(t("errorLoading") || "Failed to load engines");
-          } else {
+        // Accept either an array, or an object with { engines: [...] }
+        const list = Array.isArray(data) ? data : Array.isArray(data?.engines) ? data.engines : null;
+        if (Array.isArray(list)) {
+          const validEngines = list.filter((key: any): key is AiEngine => fallbackEngines.includes(key));
+          if (validEngines.length > 0) {
             setAvailableEngines(validEngines);
+            setError(null);
+          } else {
+            setAvailableEngines(fallbackEngines);
             setError(null);
           }
         } else {
@@ -59,14 +58,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
 
   const options: { key: AiEngine; label: string }[] = availableEngines.map((key) => ({
     key,
-    label:
-      key === "gpt"
-        ? "GPT-4"
-        : key === "gemini"
-        ? "Gemini 2.5"
-        : key === "claude"
-        ? "Claude Sonnet 3.7"
-        : `${t("autoMode") || "Auto"} ✅`
+    label: key === "gpt" ? "GPT‑5 Auto" : "Gemini 2.5 Pro",
   }));
 
   return (

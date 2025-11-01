@@ -7,7 +7,7 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import api, { API_BASE_PATH } from '../lib/api';
+import api, { API_BASE_PATH, setAuthToken } from '../lib/api';
 import { User } from '../types/User';
 
 // ✅ Auth context type
@@ -49,6 +49,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     const init = async () => {
+      // Hydrate auth token into API client if present
+      const existingToken = localStorage.getItem('adminToken');
+      if (existingToken) setAuthToken(existingToken);
+
       const storedUser = localStorage.getItem('currentUser');
       if (storedUser) {
         try {
@@ -113,6 +117,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const res = await api.post('/admin/login', { email, password });
 
       if (res.data.success) {
+        // Persist JWT token for authorized API calls
+        if (res.data.token) {
+          localStorage.setItem('adminToken', res.data.token);
+          setAuthToken(res.data.token);
+        }
+
         const userData: User = {
           _id: res.data.user?._id || '',
           name: res.data.user?.name || 'Admin',
@@ -141,6 +151,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = () => {
     localStorage.removeItem('currentUser');
     localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('adminToken');
+    setAuthToken(undefined);
     setUser(null);
     setIsAuthenticated(false);
     setIsFounder(false);

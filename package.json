@@ -12,7 +12,9 @@
     "test": "vitest",
     "build": "vite build",
     "preview": "vite preview --port 5173",
-    "prepare": "husky"
+  "prepare": "is-ci || husky",
+    "start": "node server.js",
+    "start:static": "npx serve -s dist -l ${PORT:-10000}"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
@@ -66,6 +68,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "husky": "^9.1.7",
+    "is-ci": "^3.0.1",
     "jsdom": "^27.0.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",

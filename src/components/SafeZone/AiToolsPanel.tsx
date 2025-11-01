@@ -106,6 +106,30 @@ const AiToolsPanel: React.FC = () => {
         >
           {loading === 'voice-script' ? 'Writing…' : 'Voice Script'}
         </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('inverted-pyramid', { text, targetLang: lang })}
+          className="px-3 py-2 bg-amber-700 text-white rounded-lg hover:bg-amber-800 disabled:opacity-50"
+        >
+          {loading === 'inverted-pyramid' ? 'Structuring…' : 'Inverted Pyramid'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('5w1h', { text, targetLang: lang })}
+          className="px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
+        >
+          {loading === '5w1h' ? 'Extracting…' : '5W1H'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('topband', { text, targetLang: lang })}
+          className="px-3 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50"
+        >
+          {loading === 'topband' ? 'Generating…' : 'Topband One‑Liners'}
+        </button>
       </div>
 
       <pre className="whitespace-pre-wrap text-sm bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 overflow-auto max-h-72">{result}</pre>

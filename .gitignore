@@ -1,4 +1,39 @@
-# ====================================================
+# Environment files and secrets
+.env
+*.env
+**/.env
+admin-backend/.env
+
+# Firebase/Service account keys (store as Secret Files in hosting provider)
+admin-backend/serviceAccountKey.json
+admin-backend/backend/serviceAccountKey.json
+admin-backend/config/serviceAccountKey.json
+admin-backend/config/news-pulse-gemini-key.json
+
+# Build output
+dist/
+.vercel/
+.render/
+
+# Logs
+**/*.log
+admin-backend/backend/logs/
+admin-backend/logs/
+
+# Node
+node_modules/
+**/node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json# ====================================================
 # ✅ Node Modules & Build Artifacts
 # ====================================================
 node_modules/

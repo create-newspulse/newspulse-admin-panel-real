@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { FaTrash, FaDownload, FaComments } from 'react-icons/fa';
 import axios from 'axios';
-import { API_BASE_PATH } from '@lib/api';
+import apiClient, { API_BASE_PATH } from '@lib/api';
 import { useAITrainingInfo } from '@context/AITrainingInfoContext';
 
 // ---------- Types ----------
@@ -47,16 +47,26 @@ declare global {
 }
 
 // ---------- Axios defaults (so cookies/auth work via proxy) ----------
-axios.defaults.withCredentials = true;
+// Prefer the shared apiClient which already has baseURL, credentials, and Authorization set by AuthContext
+axios.defaults.withCredentials = true; // keep legacy callers safe
 
-// Small helper: safe JSON fetch using axios (returns data or throws)
+// Small helper: safe JSON fetch using the shared apiClient (returns data or throws)
 const resolve = (url: string) => (url.startsWith('/api/') ? `${API_BASE_PATH}${url.slice(4)}` : url);
-const get = async <T,>(url: string) => {
-  const res = await axios.get<T>(resolve(url), { withCredentials: true });
-  return res.data;
+const get = async <T,>(path: string) => {
+  // Accept absolute URLs (legacy) and relative API paths
+  if (path.startsWith('http') || path.startsWith('/api/')) {
+    const res = await axios.get<T>(resolve(path), { withCredentials: true });
+    return res.data as T;
+  }
+  const res = await apiClient.get<T>(path);
+  return res.data as T;
 };
-const del = async (url: string) => {
-  await axios.delete(resolve(url), { withCredentials: true });
+const del = async (path: string) => {
+  if (path.startsWith('http') || path.startsWith('/api/')) {
+    await axios.delete(resolve(path), { withCredentials: true });
+    return;
+  }
+  await apiClient.delete(path);
 };
 
 // ---------- Component ----------
@@ -104,10 +114,10 @@ export default function KiranOSPanel() {
           if (!command) return;
 
           try {
-            const res = await axios.post(resolve('/api/system/ai-command'), {
+            const res = await apiClient.post('/system/ai-command', {
               command,
               trigger: 'voice',
-            }, { withCredentials: true });
+            });
             alert(`🤖 ${res.data?.result ?? 'Done.'}`);
           } catch {
             alert('⚠️ Command failed. Check logs.');
@@ -140,8 +150,8 @@ export default function KiranOSPanel() {
     const loadStatus = async () => {
       try {
         const [thinkingRes, queueRes] = await Promise.all([
-          get<ThinkingFeedRes>('/api/system/thinking-feed'),
-          get<QueueRes>('/api/system/ai-queue'),
+          get<ThinkingFeedRes>('/system/thinking-feed'),
+          get<QueueRes>('/system/ai-queue'),
         ]);
 
         if (stopped) return;
@@ -168,20 +178,23 @@ export default function KiranOSPanel() {
       }
     };
 
-    loadStatus();
-    const interval = setInterval(loadStatus, 10_000);
+    if (!showChat) {
+      // Only poll when chat modal is closed to reduce flicker and network churn
+      loadStatus();
+    }
+    const interval = showChat ? null : setInterval(loadStatus, 10_000);
     return () => {
       stopped = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
-  }, []);
+  }, [showChat]);
 
   // ---------- Analytics polling ----------
   useEffect(() => {
     let stopped = false;
     const fetchAnalytics = async () => {
       try {
-  const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+  const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
         if (stopped) return;
 
         const topPattern =
@@ -202,13 +215,15 @@ export default function KiranOSPanel() {
       }
     };
 
-    fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 10_000);
+    if (!showChat) {
+      fetchAnalytics();
+    }
+    const interval = showChat ? null : setInterval(fetchAnalytics, 10_000);
     return () => {
       stopped = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
-  }, []);
+  }, [showChat]);
 
   // ---------- Integrity scan (on load) ----------
   useEffect(() => {
@@ -226,10 +241,10 @@ export default function KiranOSPanel() {
   const handleManualCommand = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && manualCommand.trim()) {
       try {
-        const res = await axios.post(resolve('/api/system/ai-command'), {
+        const res = await apiClient.post('/system/ai-command', {
           command: manualCommand.trim(),
           trigger: 'manual',
-        }, { withCredentials: true });
+        });
         alert(`🤖 ${res.data?.result ?? 'Done.'}`);
         setManualCommand('');
       } catch {
@@ -241,7 +256,7 @@ export default function KiranOSPanel() {
   // ---------- Logs fetch, clear, export ----------
   const fetchLogs = async () => {
     try {
-      const res = await get<{ logs?: CommandLog[] }>('/api/system/view-logs');
+      const res = await get<{ logs?: CommandLog[] }>('/system/view-logs');
       setLogs(Array.isArray(res?.logs) ? res.logs : []);
     } catch {
       alert('❌ Failed to fetch logs.');
@@ -251,7 +266,7 @@ export default function KiranOSPanel() {
   const clearLogs = async () => {
     if (!window.confirm('Are you sure you want to delete all logs?')) return;
     try {
-      await del('/api/system/clear-logs');
+      await del('/system/clear-logs');
       alert('🗑️ Logs cleared.');
       setLogs([]);
     } catch {
@@ -277,7 +292,7 @@ export default function KiranOSPanel() {
   // ---------- Diagnostics alert ----------
   const fetchDiagnostics = async () => {
     try {
-      const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+      const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
       const top = res?.mostUsed ?? null;
       if (top) {
         alert(`📊 Top command: ${top[0]} (${top[1]} times)`);
@@ -293,10 +308,19 @@ export default function KiranOSPanel() {
   const handleAskKiranOS = async () => {
     if (!chatInput.trim()) return;
     try {
-      const res = await axios.post(resolve('/api/system/ask-kiranos'), { prompt: chatInput.trim() }, { withCredentials: true });
-      setChatResponse(res.data?.reply || '🤖 No response.');
-    } catch {
-      setChatResponse('⚠️ Failed to get response from KiranOS.');
+      const res = await apiClient.post('/system/ask-kiranos', { prompt: chatInput.trim() });
+      // API returns { success, answer } (legacy demos used { reply })
+      setChatResponse((res.data as any)?.answer ?? (res.data as any)?.reply ?? '🤖 No response.');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.error || err?.message || '';
+      if (status === 401 || /AI_AUTH/i.test(msg)) {
+        setChatResponse('🔐 KiranOS is locked: missing or invalid OPENAI_API_KEY on the server.');
+      } else if (status === 429 || /rate/i.test(msg)) {
+        setChatResponse('⏳ KiranOS is rate-limited. Please try again in a minute.');
+      } else {
+        setChatResponse('⚠️ Failed to get response from KiranOS.');
+      }
     }
   };
 

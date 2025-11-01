@@ -5,10 +5,10 @@ import { api as apiLib } from '../../lib/api';
 const LANGUAGES = ['English', 'Hindi', 'Gujarati'];
 const TASKS = ['Summarize', 'Rewrite', 'Creative Narrative', '5W1H Story', 'SEO Article'];
 
-type ProviderKey = 'auto' | 'anthropic' | 'openai' | 'gemini';
+type ProviderKey = 'openai' | 'gemini';
 
 export default function AIEngine(): JSX.Element {
-  const [provider, setProvider] = useState<ProviderKey>('auto');
+  const [provider, setProvider] = useState<ProviderKey>('openai');
   const [model, setModel] = useState<string>('');
   const [language, setLanguage] = useState<string>('English');
   const [task, setTask] = useState<string>('Summarize');
@@ -55,10 +55,8 @@ export default function AIEngine(): JSX.Element {
       <div className="mb-4">
         <div className="font-semibold mb-2">AI Engine:</div>
         <div className="flex flex-wrap gap-2">
-          <ProviderButton label="Claude Sonnet 4.5" keyName="anthropic" hintModel="claude-3-7-sonnet" />
-          <ProviderButton label="GPT‑5" keyName="openai" hintModel="gpt-5" />
+          <ProviderButton label="GPT‑5 Auto (OpenAI)" keyName="openai" hintModel="gpt-5-auto" />
           <ProviderButton label="Gemini 2.5 Pro" keyName="gemini" hintModel="gemini-2.5-pro" />
-          <ProviderButton label="Auto ✓" keyName="auto" />
         </div>
       </div>
 

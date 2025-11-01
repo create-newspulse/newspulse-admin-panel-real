@@ -32,6 +32,9 @@ export default function Navbar() {
     { to: '/admin/web-stories', icon: '📱', label: 'Web Stories' },
     { to: '/admin/moderation', icon: '💬', label: 'Moderation' },
     { to: '/admin/seo', icon: '🔍', label: 'SEO Tools' },
+    { to: '/admin/youth-pulse', icon: '⚡', label: 'Youth Pulse' },
+    { to: '/admin/editorial', icon: '📝', label: 'Editorial' },
+    { to: '/admin/aira', icon: '🗣️', label: 'AIRA' },
     { to: '/safe-owner', icon: '🛡️', label: t('safeOwnerZone') },
   ];
 

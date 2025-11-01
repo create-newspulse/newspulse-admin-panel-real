@@ -62,6 +62,9 @@ import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 import AIEngine from '@pages/admin/AIEngine';
+import Aira from '@pages/admin/Aira';
+import YouthPulse from '@pages/admin/YouthPulse';
+import Editorial from '@pages/admin/Editorial';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 
 function App() {
@@ -134,6 +137,9 @@ function App() {
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
               <Route path="/admin/ai-engine" element={<FounderRoute><AIEngine /></FounderRoute>} />
+              <Route path="/admin/aira" element={<FounderRoute><Aira /></FounderRoute>} />
+              <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
+              <Route path="/admin/editorial" element={<ProtectedRoute><Editorial /></ProtectedRoute>} />
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />

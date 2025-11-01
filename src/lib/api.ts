@@ -116,7 +116,7 @@ export const api = {
 
   // AI Engine
   aiEngineRun: async (payload: {
-    provider?: 'auto' | 'openai' | 'anthropic' | 'gemini';
+    provider?: 'openai' | 'gemini';
     model?: string;
     language?: string;
     taskType?: string;
@@ -124,9 +124,8 @@ export const api = {
     sourceText?: string;
     url?: string;
   }): Promise<{ success: boolean; provider: string; model: string | null; result: any; safety: { uniquenessScore: number; note: string } }> => {
-    // Important: This hits the frontend's own serverless function at /api/ai-engine,
-    // not the admin backend proxy base. We use a direct fetch and include credentials.
-    const r = await fetch('/api/ai-engine', {
+    // Call the admin backend path; in dev baseURL=/api via proxy; in prod baseURL is your backend URL + /api
+    const r = await fetch(`${baseURL}/ai-engine`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',
