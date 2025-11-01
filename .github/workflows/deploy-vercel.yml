@@ -7,17 +7,13 @@ on:
 
 jobs:
   trigger:
+    if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Invoke Vercel Deploy Hook (if configured)
+      - name: Invoke Vercel Deploy Hook
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          # Prefer repository variable over secret to avoid VS Code 'secrets' lint warnings.
-          # Set this in GitHub → Settings → Actions → Variables → VERCEL_DEPLOY_HOOK_URL
-          HOOK="${{ vars.VERCEL_DEPLOY_HOOK_URL }}"
-          if [ -z "$HOOK" ]; then
-            echo "No Vercel deploy hook configured (secret VERCEL_DEPLOY_HOOK_URL missing). Skipping.";
-            exit 0;
-          fi
           echo "Triggering Vercel deploy hook..."
           curl -sS -X POST "$HOOK" -H 'Content-Type: application/json' -d '{"revalidate":true}'
           echo "Hook invoked"
