@@ -12,19 +12,56 @@ jobs:
   deploy:
     name: Trigger Vercel Deploy
     runs-on: ubuntu-latest
-    env:
-      HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+
+    # Optional: specify environment if your secret is stored there
+    # environment: production
+
     steps:
-      - name: Invoke Vercel deploy hook
+      - name: Resolve hook URL (secret or variable)
+        shell: bash
+        env:
+          # Fallback to empty string to avoid "Context access might be invalid" when unset or scoped to an environment
+          SECRET: ${{ secrets.VERCEL_DEPLOY_HOOK_URL || '' }}
+          VAR: ${{ vars.VERCEL_DEPLOY_HOOK_URL || '' }}
+        run: |
+          set -euo pipefail
+          HOOK_URL="${SECRET:-}"
+          if [ -z "$HOOK_URL" ]; then HOOK_URL="${VAR:-}"; SOURCE="vars"; else SOURCE="secrets"; fi
+          if [ -n "$HOOK_URL" ]; then
+            echo "HOOK_URL=$HOOK_URL" >> "$GITHUB_ENV"
+            echo "::add-mask::$HOOK_URL"
+            echo "✅ Resolved HOOK_URL from $SOURCE"
+          else
+            echo "HOOK_URL=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify secret presence
         shell: bash
         run: |
-          if [ -z "$HOOK_URL" ]; then
-            echo "::error::Repository secret VERCEL_DEPLOY_HOOK_URL is not set."
-            echo "Add it at Settings → Secrets and variables → Actions → New repository secret."
+          set -euo pipefail
+          if [ -z "${HOOK_URL:-}" ]; then
+            echo "::error::Missing VERCEL_DEPLOY_HOOK_URL. Add as a Repository Secret (preferred) or Variable."
             exit 1
           fi
-          echo "Triggering Vercel deploy hook…"
-          curl -fsS -X POST "$HOOK_URL" \
+          case "$HOOK_URL" in
+            https://api.vercel.com/v1/integrations/deploy/*) echo "✅ URL format looks valid" ;;
+            *) echo "::warning::HOOK_URL doesn't look like a Vercel deploy hook URL. Proceeding anyway." ;;
+          esac
+
+      - name: Trigger Vercel deploy hook
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "🚀 Triggering Vercel deploy hook..."
+          response=$(curl -fsS --retry 3 --retry-delay 2 -X POST "$HOOK_URL" \
             -H 'Content-Type: application/json' \
-            -d '{}'
-          echo "Hook invoked"
+            -d '{}' || true)
+
+          if [ -z "$response" ]; then
+            echo "::warning::No response body (hook accepted silently or rate-limited)."
+          else
+            echo "✅ Hook response:"
+            echo "$response"
+          fi
+
+          echo "🎯 Deployment trigger completed."

@@ -58,7 +58,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
 
   const options: { key: AiEngine; label: string }[] = availableEngines.map((key) => ({
     key,
-    label: key === "gpt" ? "GPT‑5 Auto" : "Gemini 2.5 Pro",
+    label: key === "gpt" ? "OpenAI (GPT‑4o)" : "Gemini 1.5 Pro",
   }));
 
   return (

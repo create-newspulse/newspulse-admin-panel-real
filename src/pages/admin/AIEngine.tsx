@@ -55,8 +55,8 @@ export default function AIEngine(): JSX.Element {
       <div className="mb-4">
         <div className="font-semibold mb-2">AI Engine:</div>
         <div className="flex flex-wrap gap-2">
-          <ProviderButton label="GPT‑5 Auto (OpenAI)" keyName="openai" hintModel="gpt-5-auto" />
-          <ProviderButton label="Gemini 2.5 Pro" keyName="gemini" hintModel="gemini-2.5-pro" />
+          <ProviderButton label="OpenAI (GPT‑4o mini)" keyName="openai" hintModel="gpt-4o-mini" />
+          <ProviderButton label="Gemini 1.5 Pro" keyName="gemini" hintModel="gemini-1.5-pro" />
         </div>
       </div>
 
