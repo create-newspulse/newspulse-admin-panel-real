@@ -10,10 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Invoke Vercel Deploy Hook (if configured)
-        env:
-          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          if [ -z "${HOOK}" ]; then
+          HOOK="${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
+          if [ -z "$HOOK" ]; then
             echo "No Vercel deploy hook configured (secret VERCEL_DEPLOY_HOOK_URL missing). Skipping.";
             exit 0;
           fi
