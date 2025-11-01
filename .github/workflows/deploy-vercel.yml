@@ -12,10 +12,10 @@ jobs:
   deploy:
     name: Trigger Vercel Deploy
     runs-on: ubuntu-latest
+    env:
+      HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
     steps:
       - name: Invoke Vercel deploy hook
-        env:
-          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         shell: bash
         run: |
           if [ -z "$HOOK_URL" ]; then
