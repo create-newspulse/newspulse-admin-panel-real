@@ -1,0 +1,19 @@
+name: Trigger Vercel Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  trigger:
+    if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke Vercel Deploy Hook
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          echo "Triggering Vercel deploy hook..."
+          curl -sS -X POST "$HOOK" -H 'Content-Type: application/json' -d '{"revalidate":true}'
+          echo "Hook invoked"
