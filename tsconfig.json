@@ -18,7 +18,7 @@
     "noImplicitReturns": true,
     "allowJs": false,
     "baseUrl": ".",
-  "types": ["node", "react", "react-dom", "vite/client", "@vercel/node"],
+  "types": ["node", "react", "react-dom", "vite/client"],
     "paths": {
       "@/*": ["src/*"],
       "@components/*": ["src/components/*"],
@@ -33,7 +33,7 @@
       "@types/*": ["src/types/*"]
     }
   },
-  "include": ["src", "api", "vite.config.ts", "env.d.ts"],
+  "include": ["src", "api", "tests", "vite.config.ts", "env.d.ts"],
   "exclude": [
     "node_modules",
     "dist",
