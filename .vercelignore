@@ -11,6 +11,7 @@ newspulse-admin-panel-real-main/**
 # Ignore duplicate API route implementations; keep Edge JS versions only
 api/admin-proxy/[...path].ts
 api/system/health.ts
+api/**/*.js
 
 node_modules/
 dist/
