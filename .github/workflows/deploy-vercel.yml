@@ -41,14 +41,27 @@ jobs:
       - run: echo "Preview deploy skipped: set VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID to enable auto preview deploys."
 
   production:
-    name: Trigger Production (main) via Deploy Hook
+    name: Production Deploy (main): Action if secrets, else Hook
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve hook URL (secret or variable)
+      - uses: actions/checkout@v4
+
+      - name: Deploy with Vercel Action (preferred)
+        if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
+        uses: vercel/action@v3
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: "--prod --prebuilt"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Resolve deploy hook URL (fallback)
+        if: ${{ !(secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '') }}
         shell: bash
         env:
-          # Fallback to empty string to avoid errors when unset or env-scoped
           SECRET: ${{ secrets.VERCEL_DEPLOY_HOOK_URL || '' }}
           VAR: ${{ vars.VERCEL_DEPLOY_HOOK_URL || '' }}
         run: |
@@ -63,7 +76,8 @@ jobs:
             echo "HOOK_URL=" >> "$GITHUB_ENV"
           fi
 
-      - name: Verify secret presence
+      - name: Trigger Vercel deploy hook (fallback)
+        if: ${{ !(secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -71,25 +85,14 @@ jobs:
             echo "::error::Missing VERCEL_DEPLOY_HOOK_URL. Add as a Repository Secret (preferred) or Variable."
             exit 1
           fi
-          case "$HOOK_URL" in
-            https://api.vercel.com/v1/integrations/deploy/*) echo "✅ URL format looks valid" ;;
-            *) echo "::warning::HOOK_URL doesn't look like a Vercel deploy hook URL. Proceeding anyway." ;;
-          esac
-
-      - name: Trigger Vercel deploy hook
-        shell: bash
-        run: |
-          set -euo pipefail
           echo "🚀 Triggering Vercel deploy hook..."
           response=$(curl -fsS --retry 3 --retry-delay 2 -X POST "$HOOK_URL" \
             -H 'Content-Type: application/json' \
             -d '{}' || true)
-
           if [ -z "$response" ]; then
             echo "::warning::No response body (hook accepted silently or rate-limited)."
           else
             echo "✅ Hook response:"
             echo "$response"
           fi
-
-          echo "🎯 Deployment trigger completed."
+          echo "🎯 Production deployment trigger completed (fallback)."
