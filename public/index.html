@@ -1,5 +1,42 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head><meta charset="UTF-8" /><title>NewsPulse Admin</title></head>
-  <body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    
+    <!-- ✅ SEO Essentials -->
+    <title>News Pulse Admin Panel</title>
+    <meta name="description" content="News Pulse Admin Panel – Manage AI-powered, multilingual news content with advanced control and automation." />
+    <meta name="author" content="News Pulse AI Team" />
+    <meta name="robots" content="noindex,nofollow" />
+    
+    <!-- ✅ Social Meta (Optional: for internal sharing previews) -->
+    <meta property="og:title" content="News Pulse Admin Panel" />
+    <meta property="og:description" content="Secure, intelligent dashboard for managing AI-driven news." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/logo.svg" />
+    <meta property="og:url" content="https://admin.newspulse.co.in" />
+
+    <!-- ✅ Favicons -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="theme-color" content="#0f172a" />
+
+    <!-- ✅ Prevent FOUC when dark mode is toggled quickly -->
+    <script>
+      try {
+        const mode = localStorage.getItem('darkMode');
+        if (mode === 'true') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+      } catch (e) {}
+    </script>
+  </head>
+
+  <body class="bg-white text-black dark:bg-slate-900 dark:text-white transition-colors duration-300 antialiased">
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+  
 </html>
