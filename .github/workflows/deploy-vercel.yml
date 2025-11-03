@@ -1,26 +1,54 @@
-name: Vercel Deploy Hook
+name: Vercel Deploys (Preview + Production)
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - '**'         # run on all branches; jobs guard main vs non-main
+  pull_request:
+    branches:
+      - '**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: vercel-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  deploy:
-    name: Trigger Vercel Deploy
+  preview:
+    name: Deploy Preview (non-main branches)
+    if: ${{ github.ref != 'refs/heads/main' && secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vercel Preview Deploy
+        uses: vercel/action@v3
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: "--prebuilt"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-    # Optional: specify environment if your secret is stored there
-    # environment: production
+  preview-skip:
+    name: Skip Preview (missing secrets)
+    if: ${{ github.ref != 'refs/heads/main' && (secrets.VERCEL_TOKEN == '' || secrets.VERCEL_ORG_ID == '' || secrets.VERCEL_PROJECT_ID == '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Preview deploy skipped: set VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID to enable auto preview deploys."
 
+  production:
+    name: Trigger Production (main) via Deploy Hook
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Resolve hook URL (secret or variable)
         shell: bash
         env:
-          # Fallback to empty string to avoid "Context access might be invalid" when unset or scoped to an environment
+          # Fallback to empty string to avoid errors when unset or env-scoped
           SECRET: ${{ secrets.VERCEL_DEPLOY_HOOK_URL || '' }}
           VAR: ${{ vars.VERCEL_DEPLOY_HOOK_URL || '' }}
         run: |
