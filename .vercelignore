@@ -9,9 +9,8 @@ newspulse-admin-panel-real-main/**
 **/*.md
 # .vercelignore
 
-# Ignore duplicate API route implementations; keep JS versions only
-api/admin-proxy/[...path].ts
-api/system/health.ts
+# Keep only JS implementations of API routes (we deleted TS duplicates)
+ /api/**/*.ts
 
 node_modules/
 dist/
