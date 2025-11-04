@@ -4,7 +4,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/admin-api/(.*)", "destination": "/api/admin-proxy/$1" },
-    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/auth", "destination": "/auth/index.html" },
     { "source": "/auth/(.*)", "destination": "/auth/$1" },
     { "source": "/(.*)", "destination": "/" }
