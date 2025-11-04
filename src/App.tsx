@@ -17,7 +17,8 @@ import LockCheckWrapper from '@components/LockCheckWrapper';
 import ProtectedRoute from '@components/ProtectedRoute';
 import FounderRoute from '@components/FounderRoute';
 
-import LockedPage from '@pages/LockedPage';
+// Use explicit extension so Vercel resolver doesn't miss the TSX file
+import LockedPage from '@pages/LockedPage.tsx';
 import AdminLogin from '@pages/Login';
 import Unauthorized from '@pages/Unauthorized';
 import { isAllowedHost } from './lib/hostGuard';
