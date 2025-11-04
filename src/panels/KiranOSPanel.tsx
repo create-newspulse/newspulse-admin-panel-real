@@ -76,9 +76,9 @@ export default function KiranOSPanel() {
   const [logs, setLogs] = useState<CommandLog[]>([]);
   const [thinking, setThinking] = useState<string[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [showChat, setShowChat] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [chatResponse, setChatResponse] = useState<string | null>(null);
+  // Legacy Ask modal removed
+  // While typing, pause background polling and heavy glow to prevent focus flicker
+  const [isTyping, setIsTyping] = useState(false);
   const [analytics, setAnalytics] = useState<{
     mostUsed: [string, number] | null;
     sources: { manual?: number; voice?: number; api?: number };
@@ -95,6 +95,8 @@ export default function KiranOSPanel() {
 
   // ---------- Voice command effect ----------
   useEffect(() => {
+    // (Engine label intentionally hidden)
+
     const SpeechCtor =
       window.SpeechRecognition ||
       window.webkitSpeechRecognition;
@@ -178,16 +180,16 @@ export default function KiranOSPanel() {
       }
     };
 
-    if (!showChat) {
+    {
       // Only poll when chat modal is closed to reduce flicker and network churn
       loadStatus();
     }
-    const interval = showChat ? null : setInterval(loadStatus, 10_000);
+    const interval = setInterval(loadStatus, 10_000);
     return () => {
       stopped = true;
       if (interval) clearInterval(interval);
     };
-  }, [showChat]);
+  }, [isTyping]);
 
   // ---------- Analytics polling ----------
   useEffect(() => {
@@ -215,15 +217,15 @@ export default function KiranOSPanel() {
       }
     };
 
-    if (!showChat) {
+    {
       fetchAnalytics();
     }
-    const interval = showChat ? null : setInterval(fetchAnalytics, 10_000);
+    const interval = setInterval(fetchAnalytics, 10_000);
     return () => {
       stopped = true;
       if (interval) clearInterval(interval);
     };
-  }, [showChat]);
+  }, [isTyping]);
 
   // ---------- Integrity scan (on load) ----------
   useEffect(() => {
@@ -305,28 +307,11 @@ export default function KiranOSPanel() {
   };
 
   // ---------- Ask KiranOS ----------
-  const handleAskKiranOS = async () => {
-    if (!chatInput.trim()) return;
-    try {
-      const res = await apiClient.post('/system/ask-kiranos', { prompt: chatInput.trim() });
-      // API returns { success, answer } (legacy demos used { reply })
-      setChatResponse((res.data as any)?.answer ?? (res.data as any)?.reply ?? '🤖 No response.');
-    } catch (err: any) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.error || err?.message || '';
-      if (status === 401 || /AI_AUTH/i.test(msg)) {
-        setChatResponse('🔐 KiranOS is locked: missing or invalid OPENAI_API_KEY on the server.');
-      } else if (status === 429 || /rate/i.test(msg)) {
-        setChatResponse('⏳ KiranOS is rate-limited. Please try again in a minute.');
-      } else {
-        setChatResponse('⚠️ Failed to get response from KiranOS.');
-      }
-    }
-  };
+  // Legacy ask handler removed – new Command Center handles chatting
 
   // ---------- UI ----------
   return (
-    <div className="ai-card glow-panel ai-highlight hover-glow border border-blue-500 shadow-xl rounded-xl p-5 bg-white dark:bg-slate-900 transition-all duration-300">
+  <div className={`ai-card ${isTyping ? '' : 'glow-panel ai-highlight hover-glow'} border border-blue-500 shadow-xl rounded-xl p-5 bg-white dark:bg-slate-900 transition-all duration-300`}>
       {/* Manual Command */}
       <input
         type="text"
@@ -334,6 +319,9 @@ export default function KiranOSPanel() {
         value={manualCommand}
         onChange={(e) => setManualCommand(e.target.value)}
         onKeyDown={handleManualCommand}
+        onFocus={() => setIsTyping(true)}
+        onBlur={() => setIsTyping(false)}
+        autoComplete="off"
         className="mt-3 w-full px-4 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-black dark:text-white shadow-sm focus:ring-2 focus:ring-blue-400"
       />
 
@@ -343,7 +331,12 @@ export default function KiranOSPanel() {
         <button onClick={fetchDiagnostics} className="text-green-700 dark:text-green-400">🧬 Diagnostics</button>
         <button onClick={exportLogs} className="flex items-center gap-1 text-blue-500"><FaDownload /> Export</button>
         <button onClick={clearLogs} className="flex items-center gap-1 text-red-500"><FaTrash /> Clear</button>
-        <button onClick={() => setShowChat(true)} className="flex items-center gap-1 text-purple-600"><FaComments /> Ask KiranOS</button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('open-kiranos-hub'))}
+          className="flex items-center gap-1 text-purple-600"
+        >
+          <FaComments /> Ask KiranOS
+        </button>
       </div>
 
       {/* Info Blocks */}
@@ -423,30 +416,7 @@ export default function KiranOSPanel() {
         )}
       </div>
 
-      {/* Ask KiranOS Modal */}
-      {showChat && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center">
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-lg w-full max-w-lg shadow-lg border border-blue-400">
-            <h3 className="text-lg font-bold text-blue-600 dark:text-blue-300 mb-2">💬 Ask KiranOS</h3>
-            <input
-              type="text"
-              className="w-full px-3 py-2 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-black dark:text-white mb-3"
-              placeholder="Ask your question..."
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAskKiranOS(); }}
-              autoFocus
-            />
-            <button onClick={handleAskKiranOS} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 mb-2">Ask</button>
-            {chatResponse && (
-              <div className="mt-2 text-sm text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 p-3 rounded">
-                {chatResponse}
-              </div>
-            )}
-            <button onClick={() => setShowChat(false)} className="mt-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">Close</button>
-          </div>
-        </div>
-      )}
+      {/* Ask KiranOS legacy modal removed in favor of the new Command Center */}
     </div>
   );
 }

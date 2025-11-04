@@ -14,7 +14,7 @@ const FounderRoute = ({ children }: Props) => {
 
   // If there is no user, redirect to login so a preview can show the login screen
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/admin/login" replace />;
   }
 
   // If user exists but is not a founder, show unauthorized

@@ -41,9 +41,9 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
     return <>{children}</>;
   }
 
-  // 🚫 Redirect to auth if not authenticated
+  // 🚫 Redirect to admin login if not authenticated
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace state={{ from: location }} />;
+    return <Navigate to="/admin/login" replace state={{ from: location }} />;
   }
 
   // 🚫 Redirect to unauthorized if authenticated but not founder

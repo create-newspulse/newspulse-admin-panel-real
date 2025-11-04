@@ -52,7 +52,8 @@
     "slick-carousel": "^1.8.1",
     "slugify": "^1.6.6",
     "socket.io-client": "^4.8.1",
-    "jose": "^5.9.3"
+    "jose": "^5.9.3",
+    "idb": "^7.1.1"
   },
   "devDependencies": {
     "@tailwindcss/aspect-ratio": "^0.4.2",

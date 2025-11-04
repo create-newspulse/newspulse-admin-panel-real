@@ -1,30 +1,67 @@
-// Vercel Serverless Function: health
-// Used by vercel.json cron to ping and report backend health
-
-export const config = { runtime: 'edge' };
-
-export default async function handler() {
-  const backend = process.env.ADMIN_BACKEND_URL || process.env.VITE_API_URL;
-  const ts = new Date().toISOString();
-  if (!backend) {
-    return new Response(JSON.stringify({ ok: false, ts, error: 'ADMIN_BACKEND_URL not set' }), {
-      status: 500,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    });
-  }
-  try {
-    const r = await fetch(`${backend.replace(/\/$/, '')}/api/system/health`, { cache: 'no-store' });
-    const ct = r.headers.get('content-type') || '';
-    const data = ct.includes('application/json') ? await r.json() : await r.text();
-    return new Response(JSON.stringify({ ok: r.ok, backend, status: r.status, data, ts }), {
-      status: 200,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ ok: false, backend, error: String(e), ts }), {
-      status: 502,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    });
-  }
+// Serverless system health proxy for the dashboard and SafeZone panels.
+// Always returns JSON with backend health data when available.
+export default async function handler(req, res) {
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    if (req.method !== 'GET') {
+        return res.status(405).json({ success: false, error: 'Method not allowed' });
+    }
+    const base = (process.env.ADMIN_BACKEND_URL || '').replace(/\/$/, '');
+    if (!base) {
+        return res.status(200).json({
+            success: true,
+            proxied: false,
+            message: '🟢 Serverless health OK, but ADMIN_BACKEND_URL not set. Returning static status.',
+            note: 'Set ADMIN_BACKEND_URL to proxy real backend health.'
+        });
+    }
+    const candidates = [
+        `${base}/api/system/health`,
+        `${base}/api/health`,
+    ];
+    // Render cold-starts can take several seconds on free plans.
+    // Keep total under Vercel’s 10s limit: do a short warm-up ping, then one longer health attempt.
+    const fetchWithTimeout = async (url, timeoutMs = 8000) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const headers = { accept: 'application/json' };
+            if (req.headers.cookie)
+                headers['cookie'] = req.headers.cookie;
+            const started = Date.now();
+            const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+            const ms = Date.now() - started;
+            const ct = resp.headers.get('content-type') || '';
+            let body = null;
+            if (/application\/json/i.test(ct))
+                body = await resp.json().catch(() => ({ nonJson: true, text: '<invalid json>' }));
+            else
+                body = { nonJson: true, text: await resp.text().catch(() => '') };
+            return { ok: resp.ok, status: resp.status, url, ms, contentType: ct, body };
+        }
+        finally {
+            clearTimeout(id);
+        }
+    };
+    // Quick warm-up ping to help wake sleeping hosts (HEAD to base origin)
+    try {
+        const warmController = new AbortController();
+        const warmId = setTimeout(() => warmController.abort(), 1200);
+        await fetch(base, { method: 'HEAD', signal: warmController.signal }).catch(() => { });
+        clearTimeout(warmId);
+    }
+    catch { }
+    let lastError = null;
+    for (const url of candidates) {
+        try {
+            const r = await fetchWithTimeout(url);
+            if (r.ok) {
+                return res.status(200).json({ success: true, proxied: true, target: r.url, status: r.status, latencyMs: r.ms, contentType: r.contentType, backend: r.body, ts: new Date().toISOString() });
+            }
+            return res.status(r.status || 502).json({ success: false, proxied: true, target: r.url, status: r.status, latencyMs: r.ms, contentType: r.contentType, backend: r.body, ts: new Date().toISOString() });
+        }
+        catch (e) {
+            lastError = e?.message || String(e);
+        }
+    }
+    return res.status(502).json({ success: false, proxied: true, error: 'Failed to reach backend health endpoints', lastError, tried: candidates, ts: new Date().toISOString() });
 }
-

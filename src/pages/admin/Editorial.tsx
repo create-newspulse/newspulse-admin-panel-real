@@ -1,4 +1,3 @@
-import React from 'react';
 import AiToolsPanel from '../../components/SafeZone/AiToolsPanel';
 
 export default function Editorial() {

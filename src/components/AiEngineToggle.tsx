@@ -14,6 +14,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
   const { t } = useTranslation();
   const [availableEngines, setAvailableEngines] = useState<AiEngine[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openaiModel, setOpenaiModel] = useState<string>('gpt-5');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,11 +55,29 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
         setError(null); // Don't show error UI for fallback
         setLoading(false);
       });
+    // Also fetch current OpenAI model for display if available
+    fetch('/api/system/ai-health', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const m = d && (d.model || d.selectedModel);
+        if (typeof m === 'string' && m) setOpenaiModel(m);
+      })
+      .catch(() => {});
   }, []);
+
+  const pretty = (m: string) => {
+    const v = (m || 'gpt-5').trim().toLowerCase();
+    if (v === 'gpt-5' || v === 'gpt5') return 'GPT‑5 Plus';
+    if (v === 'gpt-5-auto') return 'GPT‑5 Auto';
+    return (m || 'gpt-5')
+      .replace(/^gpt-/, 'GPT-')
+      .replace(/-/g, ' ')
+      .replace(/G P T/, 'GPT');
+  };
 
   const options: { key: AiEngine; label: string }[] = availableEngines.map((key) => ({
     key,
-    label: key === "gpt" ? "OpenAI (GPT‑4o)" : "Gemini 1.5 Pro",
+    label: key === "gpt" ? `OpenAI (${pretty(openaiModel)})` : "Gemini 1.5 Pro",
   }));
 
   return (
