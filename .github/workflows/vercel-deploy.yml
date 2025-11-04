@@ -1,0 +1,28 @@
+name: Vercel Deploys (Preview + Production)
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull Vercel Env
+        uses: vercel/actions/pull@v1
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          org-id: ${{ secrets.VERCEL_ORG_ID }}
+      - name: Deploy
+        uses: vercel/actions/deploy@v1
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          # change if your app is in a subfolder:
+          working-directory: ./
+          prod: ${{ github.ref == 'refs/heads/main' }}
