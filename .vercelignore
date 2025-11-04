@@ -9,8 +9,9 @@ newspulse-admin-panel-real-main/**
 **/*.md
 # .vercelignore
 
-# Keep only JS implementations of API routes (we deleted TS duplicates)
- /api/**/*.ts
+# Keep only JS implementations of API routes (ignore TS/TSX under /api)
+api/**/*.ts
+api/**/*.tsx
 
 node_modules/
 dist/
