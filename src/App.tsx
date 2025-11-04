@@ -67,6 +67,7 @@ import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
+import EnvTest from '@components/EnvTest';
 
 function App() {
   const { isDark } = useDarkMode();
@@ -96,6 +97,8 @@ function App() {
       <I18nextProvider i18n={i18n}>
         <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-slate-900 text-white' : 'bg-white text-black'}`}>
           <Navbar />
+          {/* Optional: lightweight env overlay for debugging prod vs local differences */}
+          {import.meta.env.VITE_SHOW_ENV_TEST === 'true' && <EnvTest />}
           {isAuthenticated && <Breadcrumbs />}
 
           {/* Host allow-list guard prevents preview lockouts. Empty allow-list = allow all. */}

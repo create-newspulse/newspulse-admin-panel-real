@@ -844,7 +844,7 @@ const SafeOwnerZone: React.FC = () => {
 			</div>
 
 		{/* Floating KiranOS Command Center (founder mode) */}
-		<KiranOSCommandCenter defaultOpen={false} adminMode={true} />
+		<KiranOSCommandCenter defaultOpen={false} adminMode={true} hideLauncher={true} />
 		</main>
 	);
 };
