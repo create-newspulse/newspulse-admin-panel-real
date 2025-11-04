@@ -111,9 +111,10 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
       setMessages(prev => [...prev, assistant]);
       speakText(answer, lang);
     } catch (err: any) {
-      const status = err?.response?.status;
-      const msg = err?.message?.toLowerCase?.() || '';
-      const shouldFallback = status === 404 || status === 501 || status === 503 || msg.includes('timeout') || msg.includes('network error');
+  const status = err?.response?.status;
+  const msg = err?.message?.toLowerCase?.() || '';
+  // Treat 500 from chat-core as eligible for fallback too (e.g., upstream quota or transient errors)
+  const shouldFallback = status === 404 || status === 500 || status === 501 || status === 503 || msg.includes('timeout') || msg.includes('network error');
       if (shouldFallback) {
         // Fallback to full pipeline (adds internal/external context)
         try {
