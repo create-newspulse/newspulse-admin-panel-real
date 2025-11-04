@@ -1,5 +1,6 @@
 # Prevent Vercel from detecting legacy Next.js pages and other non-build folders
-pages/
+# Anchor to repo root so we don't accidentally ignore src/pages/
+/pages/
 legacy/
 admin-backend/
 newspulse-backend/
@@ -8,10 +9,9 @@ newspulse-admin-panel-real-main/**
 **/*.md
 # .vercelignore
 
-# Ignore duplicate API route implementations; keep Edge JS versions only
+# Ignore duplicate API route implementations; keep JS versions only
 api/admin-proxy/[...path].ts
 api/system/health.ts
-api/**/*.js
 
 node_modules/
 dist/
