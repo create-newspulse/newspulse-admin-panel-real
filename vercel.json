@@ -10,6 +10,6 @@
     { "source": "/(.*)", "destination": "/" }
   ],
   "crons": [
-    { "path": "/api/system/health", "schedule": "*/5 * * * *" }
+    { "path": "/api/system/health", "schedule": "0 0 * * *" }
   ]
 }
