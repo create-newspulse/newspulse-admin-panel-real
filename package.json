@@ -10,7 +10,7 @@
     "dev:backend:demo": "node admin-backend/demo-server.js",
     "dev:all": "concurrently -n BACKEND,FRONTEND -c green,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
     "test": "vitest",
-    "build": "vite build",
+  "build": "node scripts/write-build-info.cjs && vite build",
     "preview": "vite preview --port 5173",
   "prepare": "is-ci || husky",
     "start": "node server.js",
