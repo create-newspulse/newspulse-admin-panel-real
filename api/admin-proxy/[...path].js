@@ -74,15 +74,36 @@ export default async function handler(req, res) {
             }
         }
         const resp = await fetch(targetUrl.toString(), { method, headers, body });
-        // Stream through status and headers
+        // Buffer body first so we can optionally transform certain upstream errors (rate limits)
+        const buf = Buffer.from(await resp.arrayBuffer());
+
+        // Soft-fallback for KiranOS ask endpoints when upstream is rate limited or out of quota
+        try {
+            const isAskRoute = /kiranos\/ask|system\/ask-kiranos/i.test(joinedPath);
+            const wantSoft = (process.env.AI_PROXY_SOFT_FAIL || '1') !== '0';
+            if (isAskRoute && wantSoft && (resp.status === 429 || resp.status === 500)) {
+                // Inspect JSON body (if any) to detect quota/rate-limit signals
+                const ctype = String(resp.headers.get('content-type') || '');
+                const looksJson = ctype.includes('application/json') || ctype.includes('text/json') || ctype.includes('json');
+                let payload = null;
+                if (looksJson) {
+                    try { payload = JSON.parse(buf.toString('utf8')); } catch { payload = null; }
+                }
+                const raw = (payload && (payload.detail || payload.error || JSON.stringify(payload))) || buf.toString('utf8');
+                const quotaHit = /\b429\b|quota|rate limit|too many requests/i.test(raw);
+                if (quotaHit) {
+                    return res.status(200).json({ success: true, answer: '⏳ KiranOS is busy right now (provider limit). Please try again in a few seconds.', error: null, softFallback: true });
+                }
+            }
+        } catch { /* fall through to normal forwarding */ }
+
+        // Stream through status and headers (default path)
         res.status(resp.status);
         resp.headers.forEach((value, key) => {
             if (key.toLowerCase() === 'content-encoding')
                 return; // avoid compressed re-send
             res.setHeader(key, value);
         });
-        // Buffer the body to send once
-        const buf = Buffer.from(await resp.arrayBuffer());
         return res.send(buf);
     }
     catch (err) {
