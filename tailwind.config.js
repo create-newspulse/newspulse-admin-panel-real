@@ -20,6 +20,14 @@ export default {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       colors: {
+        // Dark Executive theme tokens
+        executive: {
+          bg: '#0b0f14',
+          card: '#0f1620',
+          cyan: '#06b6d4',
+          gold: '#f59e0b',
+          purple: '#a78bfa',
+        },
         primary: {
           50: '#eff6ff',
           100: '#dbeafe',
@@ -44,10 +52,15 @@ export default {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
         },
+        pulseGlow: {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(6,182,212,0.4)' },
+          '50%': { boxShadow: '0 0 0 8px rgba(6,182,212,0)' },
+        },
       },
       animation: {
         fadeIn: 'fadeIn 0.5s ease-out forwards',
         slideInRight: 'slideInRight 0.4s ease-out forwards',
+        pulseGlow: 'pulseGlow 2s ease-in-out infinite',
       },
     },
   },

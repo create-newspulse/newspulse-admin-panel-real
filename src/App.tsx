@@ -56,6 +56,7 @@ import AIEditorialAssistant from '@components/advanced/AIEditorialAssistant';
 import EnhancedSecurityDashboard from '@components/advanced/EnhancedSecurityDashboard';
 import EditorialWorkflowEngine from '@components/advanced/EditorialWorkflowEngine';
 import FounderControlCenter from '@components/advanced/FounderControlCenter';
+import FounderControlPage from '@pages/admin/founder-control';
 import MediaLibrary from '@components/advanced/MediaLibrary';
 import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
@@ -151,9 +152,12 @@ function App() {
               <Route path="/admin/moderation" element={<ProtectedRoute><CommentModerationDashboard /></ProtectedRoute>} />
               <Route path="/admin/seo" element={<ProtectedRoute><SEOToolsDashboard /></ProtectedRoute>} />
               <Route path="/admin/founder-control" element={<FounderRoute><FounderControlCenter /></FounderRoute>} />
+              {/* New Founder Control route alias */}
+              <Route path="/admin/founder" element={<FounderRoute><FounderControlPage /></FounderRoute>} />
 
               {/* 🔐 Login + Fallback */}
               <Route path="/login" element={<AdminLogin />} />
+              <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
             </Routes>

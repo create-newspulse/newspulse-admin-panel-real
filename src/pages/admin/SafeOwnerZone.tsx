@@ -21,6 +21,7 @@ import {
 } from "react-icons/fa";
 
 import KiranOSPanel from "../../panels/KiranOSPanel";
+import KiranOSCommandCenter from "../../components/KiranOSCommandCenter";
 import AITrainer from "../../panels/AITrainer";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
 import { API_BASE_PATH } from "../../lib/api";
@@ -841,6 +842,9 @@ const SafeOwnerZone: React.FC = () => {
 					))}
 				</div>
 			</div>
+
+		{/* Floating KiranOS Command Center (founder mode) */}
+		<KiranOSCommandCenter defaultOpen={false} adminMode={true} />
 		</main>
 	);
 };

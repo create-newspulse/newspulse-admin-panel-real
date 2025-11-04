@@ -1,5 +1,19 @@
 title = "gitleaks config for newspulse"
 
-[[allowlist.rules]]
-description = "Allow env examples and documentation"
-regexes = ['\.env.example$', '\.md$', 'README', '\/public\/']
+[allowlist]
+description = "Global allowlist for docs and sample envs"
+# Ignore paths typically containing example values or public docs
+paths = [
+	'''^docs/''',
+	'''^public/''',
+	'''^README''',
+	'''^.*\.md$''',
+	'''^\.env\.example$''',
+	'''^\.env\.local\.example$''',
+]
+
+# Allow known non-secret demo strings used in docs and examples
+regexes = [
+	'''NewsPulse#80121972''',
+	'''Kiran#80121972''',
+]

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api as apiLib } from '../../lib/api';
+import { useEffect, useState } from 'react';
+import { api as apiLib, API_BASE_PATH } from '../../lib/api';
 
 // Simple options
 const LANGUAGES = ['English', 'Hindi', 'Gujarati'];
@@ -10,6 +10,7 @@ type ProviderKey = 'openai' | 'gemini';
 export default function AIEngine(): JSX.Element {
   const [provider, setProvider] = useState<ProviderKey>('openai');
   const [model, setModel] = useState<string>('');
+  const [serverModel, setServerModel] = useState<string>('');
   const [language, setLanguage] = useState<string>('English');
   const [task, setTask] = useState<string>('Summarize');
   const [founderCommand, setFounderCommand] = useState<string>('');
@@ -37,6 +38,17 @@ export default function AIEngine(): JSX.Element {
     }
   };
 
+  const prettyModel = (m?: string) => {
+    const v = (m || '').toLowerCase();
+    if (v === 'gpt-5' || v === 'gpt5') return 'GPT‑5 Plus';
+    if (v === 'gpt-5-auto') return 'GPT‑5 Auto';
+    if (!v) return 'GPT‑5 Plus';
+    return (m || 'gpt-5')
+      .replace(/^gpt-/, 'GPT-')
+      .replace(/-/g, ' ')
+      .replace(/G P T/, 'GPT');
+  };
+
   const ProviderButton = ({ label, keyName, hintModel }: { label: string; keyName: ProviderKey; hintModel?: string }) => (
     <button
       onClick={() => { setProvider(keyName); setModel(hintModel || ''); }}
@@ -45,6 +57,17 @@ export default function AIEngine(): JSX.Element {
       {label}
     </button>
   );
+
+  // Fetch current backend OpenAI model for display/hint
+  useEffect(() => {
+    fetch(`${API_BASE_PATH}/system/ai-health`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => {
+        const m = (data && (data.model || data.selectedModel)) || '';
+        if (typeof m === 'string' && m) setServerModel(m);
+      })
+      .catch(() => {/* silent fallback */});
+  }, []);
 
   return (
     <div className="max-w-5xl mx-auto p-4">
@@ -55,7 +78,11 @@ export default function AIEngine(): JSX.Element {
       <div className="mb-4">
         <div className="font-semibold mb-2">AI Engine:</div>
         <div className="flex flex-wrap gap-2">
-          <ProviderButton label="OpenAI (GPT‑4o mini)" keyName="openai" hintModel="gpt-4o-mini" />
+          <ProviderButton
+            label={`OpenAI (${prettyModel(serverModel)})`}
+            keyName="openai"
+            hintModel={serverModel || 'gpt-5'}
+          />
           <ProviderButton label="Gemini 1.5 Pro" keyName="gemini" hintModel="gemini-1.5-pro" />
         </div>
       </div>

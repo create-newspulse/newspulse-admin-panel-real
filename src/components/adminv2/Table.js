@@ -1,0 +1,4 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+export default function Table({ rows, columns }) {
+    return (_jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "min-w-full divide-y divide-slate-200 dark:divide-slate-700", children: [_jsx("thead", { className: "bg-slate-50 dark:bg-slate-800/60", children: _jsx("tr", { children: columns.map(col => (_jsx("th", { className: "px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-300 uppercase tracking-wide", children: col.header }, String(col.key)))) }) }), _jsx("tbody", { className: "divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900/40", children: rows.map(row => (_jsx("tr", { className: "hover:bg-slate-50 dark:hover:bg-slate-800/60", children: columns.map(col => (_jsx("td", { className: "px-4 py-2 text-sm", children: col.render ? col.render(row) : row[col.key] }, String(col.key)))) }, row.id))) })] }) }));
+}

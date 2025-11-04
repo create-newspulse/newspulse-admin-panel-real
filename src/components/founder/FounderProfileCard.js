@@ -1,0 +1,9 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useEffect, useState } from 'react';
+import { founderApi } from '@/lib/founderApi';
+export default function FounderProfileCard() {
+    const [profile, setProfile] = useState(null);
+    useEffect(() => { founderApi.getProfile().then(setProfile); }, []);
+    const p = profile?.profile;
+    return (_jsxs("div", { className: "rounded-2xl p-4 md:p-6 bg-executive-card/90 text-white shadow-xl border border-white/5", children: [_jsx("h3", { className: "text-lg font-semibold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent", children: "Identity & Access" }), _jsxs("div", { className: "mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm", children: [_jsxs("div", { children: ["Name: ", _jsx("span", { className: "font-medium text-cyan-300", children: p?.name || '—' })] }), _jsxs("div", { children: ["Founder ID: ", _jsx("span", { className: "font-mono text-purple-300", children: p?.founderId || '—' })] }), _jsxs("div", { children: ["Access: ", _jsx("span", { className: "text-emerald-300", children: p?.accessLevel || '—' })] }), _jsxs("div", { children: ["Last Login: ", _jsx("span", { className: "text-slate-300", children: p?.lastLogin ? new Date(p.lastLogin).toLocaleString() : '—' })] })] }), _jsxs("div", { className: "mt-3", children: [_jsx("div", { className: "text-xs uppercase text-slate-400", children: "Devices" }), _jsx("ul", { className: "list-disc list-inside text-slate-200", children: p?.devices?.map((d) => (_jsx("li", { children: d }, d))) || _jsx("li", { children: "\u2014" }) })] }), _jsxs("div", { className: "mt-3 text-sm", children: ["2FA: ", _jsx("span", { className: p?.twoFA?.enabled ? 'text-emerald-300' : 'text-rose-300', children: p?.twoFA?.enabled ? 'Enabled' : 'Disabled' })] })] }));
+}
