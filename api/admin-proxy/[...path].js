@@ -23,21 +23,28 @@ export default async function handler(req, res) {
         }
         const backendBase = process.env.ADMIN_BACKEND_URL.replace(/\/$/, '');
         const secret = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
-        // Check session cookie
-        const cookies = parseCookies(req.headers.cookie);
-        const token = cookies['np_admin'];
-        if (!token)
-            return res.status(401).json({ error: 'Unauthorized' });
-        // Verify session JWT
-        try {
-            await jwtVerify(token, secret, { audience: 'admin', issuer: 'newspulse' });
-        }
-        catch (e) {
-            const err = e;
-            return res.status(401).json({ error: 'Invalid session', detail: err.message });
-        }
         const pathParam = req.query.path || [];
         const joinedPath = pathParam.join('/');
+        // Allow unauthenticated access for explicit public endpoints
+        // - admin/login: credential-based login to obtain a JWT (no session yet)
+        // - admin/auth/ping: health check
+        const isPublic = joinedPath === 'admin/login' || joinedPath === 'admin/auth/ping';
+
+        // Check session cookie only for non-public endpoints
+        if (!isPublic) {
+            const cookies = parseCookies(req.headers.cookie);
+            const token = cookies['np_admin'];
+            if (!token)
+                return res.status(401).json({ error: 'Unauthorized' });
+            // Verify session JWT
+            try {
+                await jwtVerify(token, secret, { audience: 'admin', issuer: 'newspulse' });
+            }
+            catch (e) {
+                const err = e;
+                return res.status(401).json({ error: 'Invalid session', detail: err.message });
+            }
+        }
         const targetUrl = new URL(`${backendBase}/api/${joinedPath}`);
         // Append query string
         const q = req.query;
