@@ -1,6 +1,6 @@
 import React, { Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 // Explicit extension to force TS source (App.tsx) on CI and avoid stale App.js
 import App from "./App.tsx";
@@ -17,6 +17,9 @@ import { SidebarProvider } from "./context/SidebarContext";
 import { NotificationProvider } from "./context/NotificationContext";
 import { LanguageProvider } from "./context/LanguageContext";
 import { bootstrapAuth } from "./lib/auth";
+import AppShell from '@/components/layout/AppShell';
+import PanelDashboard from '@/pages/panel/Dashboard';
+import { RequireAuth, RequireRole } from '@/routes/guards';
 bootstrapAuth();
 // Initialize DOMPurify in the browser to make window.DOMPurify available
 import initDomPurify from './lib/initDomPurify';
@@ -37,7 +40,7 @@ const queryClient = new QueryClient({
 
 const Providers: React.FC<React.PropsWithChildren> = ({ children }) => (
   <React.StrictMode>
-    <BrowserRouter>
+  <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <NotificationProvider>
           <AuthProvider>
@@ -64,6 +67,13 @@ createRoot(rootEl).render(
       <Suspense fallback={<div style={{ padding:16 }}>Loading…</div>}>
         <ErrorBoundary title="Application error">
           <App />
+          {/* New role-based panel shell and routes */}
+          <Routes>
+            <Route path="/panel" element={<RequireAuth><AppShell><PanelDashboard /></AppShell></RequireAuth>} />
+            <Route path="/panel/founder/*" element={<RequireRole allow={['founder']}><AppShell><PanelDashboard /></AppShell></RequireRole>} />
+            <Route path="/panel/admin/*" element={<RequireRole allow={['founder','admin']}><AppShell><PanelDashboard /></AppShell></RequireRole>} />
+            <Route path="/panel/employee/*" element={<RequireRole allow={['founder','admin','employee']}><AppShell><PanelDashboard /></AppShell></RequireRole>} />
+          </Routes>
         </ErrorBoundary>
       </Suspense>
     </SystemErrorBoundary>

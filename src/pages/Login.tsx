@@ -5,6 +5,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useEffect } from 'react';
+import { useAuth as useRoleAuth } from '@/store/auth';
 
 export default function Login(): JSX.Element {
   const navigate = useNavigate();
@@ -45,7 +46,12 @@ export default function Login(): JSX.Element {
         localStorage.removeItem('np_force_logout');
       } catch {}
   // Revert: always go to admin dashboard after login
-  navigate('/admin/dashboard', { replace: true });
+  // Also hydrate the lightweight UI store for panel routes
+  try {
+    const role = email.toLowerCase().includes('founder') || email.toLowerCase().includes('admin') ? (email.toLowerCase().includes('founder') ? 'founder' : 'admin') : 'employee';
+    useRoleAuth.getState().setUser({ id: 'self', name: email.split('@')[0], email, role: role as any });
+  } catch {}
+  navigate('/panel', { replace: true });
     } else {
       setError('Invalid email or password.');
     }
@@ -94,6 +100,19 @@ export default function Login(): JSX.Element {
           >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
+          <div className="text-xs text-slate-500 pt-2 space-y-1">
+            <button type="button" className="underline" onClick={() => useRoleAuth.getState().setUser({ id:'1', name:'Kiran Parmar', email:'founder@newspulse.co.in', role:'founder' })}>
+              Temporary Founder login (UI only)
+            </button>
+            <div className="space-x-2">
+              <button type="button" className="underline" onClick={() => useRoleAuth.getState().setUser({ id:'2', name:'Admin User', email:'admin@newspulse.co.in', role:'admin' })}>
+                Admin login (UI only)
+              </button>
+              <button type="button" className="underline" onClick={() => useRoleAuth.getState().setUser({ id:'3', name:'Employee', email:'employee@newspulse.co.in', role:'employee' })}>
+                Employee login (UI only)
+              </button>
+            </div>
+          </div>
         </form>
 
         <div className="text-center">
