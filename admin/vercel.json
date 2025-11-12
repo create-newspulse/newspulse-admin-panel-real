@@ -1,0 +1,9 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/admin-api/(.*)", "destination": "/api/admin-proxy/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
