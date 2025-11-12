@@ -2,6 +2,8 @@
 // Multi-stage approvals • PTI compliance • Legal tools • Embargo handling • Red Team review
 
 import React, { useMemo, useState } from 'react';
+import PushHistory from '@/pages/PushHistory';
+import { useSearchParams } from 'react-router-dom';
 import {
   CheckCircle, Clock, Calendar, Users, UserCheck,
   Shield, FileText, Gavel, Flag, Ban, MessageSquare,
@@ -113,6 +115,9 @@ const stages: WorkflowStage[] = [
 ];
 
 const EditorialWorkflowEngine: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = (searchParams.get('tab') || 'queue').toLowerCase();
+  const setTab = (t: string) => setSearchParams({ tab: t });
   const [items, setItems] = useState<WorkflowItem[]>(initialItems);
   const [search, setSearch] = useState('');
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -176,6 +181,42 @@ const EditorialWorkflowEngine: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      {/* Tabs */}
+      <div className="px-6 pt-4">
+        <div className="flex flex-wrap gap-2">
+          {[
+            { key:'queue', label:'Queue' },
+            { key:'schedules', label:'Schedules' },
+            { key:'automation', label:'Automation' },
+            { key:'push-history', label:'Push History' },
+            { key:'logs', label:'Logs' },
+          ].map(t => (
+            <button key={t.key} onClick={()=> setTab(t.key)} className={`px-3 py-1.5 rounded border text-sm ${tab===t.key? 'bg-emerald-600 border-emerald-600':'bg-slate-800 border-slate-700'}`}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Push History Tab */}
+      {tab === 'push-history' && (
+        <div className="p-6">
+          <PushHistory />
+        </div>
+      )}
+
+      {/* Placeholder Tabs */}
+      {tab === 'schedules' && (
+        <div className="p-6 text-slate-300">Coming soon: calendar of embargoes and scheduled publications.</div>
+      )}
+      {tab === 'automation' && (
+        <div className="p-6 text-slate-300">Coming soon: rules and automations for routing, tagging, and AI triage.</div>
+      )}
+      {tab === 'logs' && (
+        <div className="p-6 text-slate-300">Coming soon: workflow execution logs and audit trails.</div>
+      )}
+
+      {/* Header (Queue tab only) */}
+      {tab === 'queue' && (
+      <>
       {/* Header */}
       <div className="bg-gradient-to-r from-emerald-900/30 to-blue-900/30 border-b border-emerald-700/30">
         <div className="px-6 py-4 flex items-center justify-between">
@@ -211,7 +252,7 @@ const EditorialWorkflowEngine: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 xl:grid-cols-3 gap-6">
+  <div className="p-6 grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Pipeline Columns */}
         <div className="xl:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
           {stages.slice(0, 6).map(stage => (
@@ -434,6 +475,8 @@ const EditorialWorkflowEngine: React.FC = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

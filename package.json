@@ -10,13 +10,14 @@
     "dev:backend:demo": "node admin-backend/demo-server.js",
     "dev:all": "concurrently -n BACKEND,FRONTEND -c green,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
     "test": "vitest",
-  "build": "node scripts/write-build-info.cjs && vite build",
+    "build": "node scripts/write-build-info.cjs && vite build",
     "preview": "vite preview --port 5173",
-  "prepare": "is-ci || husky",
+    "prepare": "is-ci || husky",
     "start": "node server.js",
     "start:static": "npx serve -s dist -l ${PORT:-10000}"
   },
   "dependencies": {
+    "@prisma/client": "^5.20.0",
     "@tanstack/react-query": "^5.90.5",
     "@tiptap/extension-image": "^3.4.4",
     "@tiptap/extension-link": "^3.4.4",
@@ -34,6 +35,8 @@
     "html2pdf.js": "^0.12.1",
     "i18next": "^25.5.2",
     "i18next-browser-languagedetector": "^8.2.0",
+    "idb": "^7.1.1",
+    "jose": "^5.9.3",
     "jspdf": "^3.0.3",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.548.0",
@@ -44,7 +47,6 @@
     "react-hot-toast": "^2.6.0",
     "react-i18next": "^15.7.3",
     "react-icons": "^5.5.0",
-    
     "react-router-dom": "^7.9.1",
     "react-slick": "^0.31.0",
     "react-toastify": "^11.0.5",
@@ -52,8 +54,7 @@
     "slick-carousel": "^1.8.1",
     "slugify": "^1.6.6",
     "socket.io-client": "^4.8.1",
-    "jose": "^5.9.3",
-    "idb": "^7.1.1"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@tailwindcss/aspect-ratio": "^0.4.2",
@@ -65,6 +66,7 @@
     "@types/react": "^19.1.15",
     "@types/react-dom": "^19.1.9",
     "@types/react-slick": "^0.23.13",
+    "@vercel/node": "^5.5.5",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
@@ -72,11 +74,19 @@
     "is-ci": "^3.0.1",
     "jsdom": "^27.0.1",
     "postcss": "^8.5.6",
+    "prisma": "^5.20.0",
     "tailwindcss": "^3.4.17",
     "ts-morph": "^27.0.2",
     "typescript": "^5.9.2",
     "vite": "^6.3.6",
-    "vitest": "^4.0.3",
-    "@vercel/node": "^3.2.26"
+    "vitest": "^4.0.3"
+  },
+  "overrides": {
+    "path-to-regexp": "^6.3.0",
+    "undici": "^5.29.0",
+    "esbuild": ">=0.24.3",
+    "@vercel/node": {
+      "esbuild": ">=0.24.3"
+    }
   }
 }

@@ -65,6 +65,22 @@ const startFrontend = () => {
   return frontend;
 };
 
+// Start Next.js Advanced Auth
+const startNextAuth = () => {
+  console.log('🔐 Starting Next.js Advanced Auth...');
+  const nextAuth = spawn('npm', ['run', 'dev'], {
+    cwd: path.join(__dirname, 'next-auth'),
+    stdio: 'inherit',
+    shell: true
+  });
+
+  nextAuth.on('error', (err) => {
+    console.error('❌ Next-Auth Error:', err.message);
+  });
+
+  return nextAuth;
+};
+
 // Main execution
 const main = async () => {
   try {
@@ -89,13 +105,15 @@ const main = async () => {
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Start frontend
-    const frontendProcess = startFrontend();
+  const frontendProcess = startFrontend();
+  const nextAuthProcess = startNextAuth();
 
     // Handle process termination
     process.on('SIGINT', () => {
       console.log('\n🛑 Shutting down servers...');
       backendProcess.kill();
       frontendProcess.kill();
+      nextAuthProcess.kill();
       process.exit(0);
     });
 

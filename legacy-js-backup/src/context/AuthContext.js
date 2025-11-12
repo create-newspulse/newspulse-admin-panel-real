@@ -1,0 +1,147 @@
+﻿import { jsx as _jsx } from "react/jsx-runtime";
+// ≡ƒôü src/context/AuthContext.tsx
+import { createContext, useContext, useEffect, useState, } from 'react';
+import api, { API_BASE_PATH, setAuthToken } from '../lib/api';
+const AuthContext = createContext(undefined);
+export const AuthProvider = ({ children }) => {
+    const [user, setUser] = useState(null);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [isFounder, setIsFounder] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    // ≡ƒ¢í∩╕Å SECURE: Environment-controlled demo access
+    const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
+    const isVercelPreview = window.location.hostname.includes('vercel.app');
+    // ≡ƒöÆ Auto-login logic: Only on Vercel when NOT explicitly disabled
+    const allowAutoLogin = demoModeEnv !== 'false' && isVercelPreview;
+    // Debug logging
+    console.log('≡ƒöº AuthContext Debug:', {
+        demoModeEnv,
+        isVercelPreview,
+        allowAutoLogin,
+        hostname: window.location.hostname
+    });
+    useEffect(() => {
+        const init = async () => {
+            // Hydrate auth token into API client if present
+            const existingToken = localStorage.getItem('adminToken');
+            if (existingToken)
+                setAuthToken(existingToken);
+            const storedUser = localStorage.getItem('currentUser');
+            if (storedUser) {
+                try {
+                    const parsedUser = JSON.parse(storedUser);
+                    setUser(parsedUser);
+                    setIsAuthenticated(true);
+                    setIsFounder(parsedUser.role === 'founder');
+                }
+                catch (err) {
+                    console.error('Γ¥î Invalid session data:', err);
+                    localStorage.removeItem('currentUser');
+                }
+            }
+            else if (allowAutoLogin) {
+                // ≡ƒÄ» CONTROLLED: Only auto-login when explicitly enabled for demos
+                console.log('≡ƒÜÇ Demo mode enabled - Auto-authenticating for preview');
+                const demoUser = {
+                    _id: 'demo-founder',
+                    name: 'Demo User',
+                    email: 'demo@newspulse.ai',
+                    role: 'founder',
+                    avatar: '',
+                    bio: 'Demo account - Preview mode only'
+                };
+                setUser(demoUser);
+                setIsAuthenticated(true);
+                setIsFounder(true);
+                localStorage.setItem('currentUser', JSON.stringify(demoUser));
+                localStorage.setItem('isFounder', 'true');
+            }
+            else {
+                // ≡ƒöÉ Check server session cookie (magic-link auth)
+                try {
+                    const resp = await fetch(`${API_BASE_PATH}/admin-auth/session`, { credentials: 'include' });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data?.authenticated) {
+                            const sessionUser = {
+                                _id: data.email || 'admin-user',
+                                name: data.email?.split('@')[0] || 'Admin',
+                                email: data.email,
+                                role: 'founder', // Treat authenticated admins as founders for panel access
+                                avatar: '',
+                                bio: ''
+                            };
+                            setUser(sessionUser);
+                            setIsAuthenticated(true);
+                            setIsFounder(true);
+                            // Persist minimal user to avoid blank reloads
+                            localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+                            localStorage.setItem('isFounder', 'true');
+                        }
+                    }
+                }
+                catch (e) {
+                    // Ignore and keep unauthenticated state
+                }
+            }
+            setIsLoading(false);
+        };
+        init();
+    }, [allowAutoLogin]);
+    const login = async (email, password) => {
+        try {
+            const res = await api.post('/admin/login', { email, password });
+            if (res.data.success) {
+                // Persist JWT token for authorized API calls
+                if (res.data.token) {
+                    localStorage.setItem('adminToken', res.data.token);
+                    setAuthToken(res.data.token);
+                }
+                const userData = {
+                    _id: res.data.user?._id || '',
+                    name: res.data.user?.name || 'Admin',
+                    email: res.data.user?.email || email,
+                    role: res.data.user?.role || 'editor',
+                    avatar: res.data.user?.avatar || '',
+                    bio: res.data.user?.bio || '',
+                };
+                localStorage.setItem('currentUser', JSON.stringify(userData));
+                localStorage.setItem('isLoggedIn', 'true');
+                setUser(userData);
+                setIsAuthenticated(true);
+                setIsFounder(userData.role === 'founder');
+                return true;
+            }
+            return false;
+        }
+        catch (err) {
+            console.error('Γ¥î Login Error:', err);
+            return false;
+        }
+    };
+    const logout = () => {
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('adminToken');
+        setAuthToken(undefined);
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsFounder(false);
+        // Best-effort cookie clear on server
+        fetch(`${API_BASE_PATH}/admin-auth/logout`, { credentials: 'include' }).catch(() => { });
+    };
+    return (_jsx(AuthContext.Provider, { value: {
+            user,
+            isAuthenticated,
+            isLoading,
+            isFounder,
+            login,
+            logout,
+        }, children: children }));
+};
+export const useAuth = () => {
+    const context = useContext(AuthContext);
+    if (!context)
+        throw new Error('useAuth must be used within an AuthProvider');
+    return context;
+};

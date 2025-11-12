@@ -10,7 +10,7 @@ import LegalOwnership from '@/components/founder/LegalOwnership';
 import Monetization from '@/components/founder/Monetization';
 import FounderAnalytics from '@/components/founder/FounderAnalytics';
 import SecurityEmergency from '@/components/founder/SecurityEmergency';
-import FounderRoute from '@/routes/FounderRoute';
+import FounderRoute from '@/components/FounderRoute';
 import { founderApi } from '@/lib/founderApi';
 
 const tabs = [

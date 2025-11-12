@@ -1,8 +1,15 @@
 # Environment files and secrets
 .env
+.env.*
 *.env
 **/.env
 admin-backend/.env
+
+# Keep example env files tracked
+!.env.example
+!.env.*.example
+!.env.local.example
+!.env.production.example
 
 # Firebase/Service account keys (store as Secret Files in hosting provider)
 admin-backend/serviceAccountKey.json

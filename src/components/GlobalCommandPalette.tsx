@@ -31,14 +31,15 @@ export default function GlobalCommandPalette({
   const commands: Command[] = useMemo(
     () => [
       { label: 'Go: Dashboard', hint: 'Admin overview', path: '/admin/dashboard' },
-      { label: 'Go: Safe Owner Zone', hint: 'Founder hub', path: '/safe-owner' },
+  { label: 'Go: Safe Owner Zone', hint: 'Founder hub', path: '/safeownerzone/founder' },
       { label: 'Go: Add News', path: '/add' },
       { label: 'Go: Manage News', path: '/manage-news' },
       { label: 'Go: AI Engine', path: '/admin/ai-engine' },
-      { label: 'Go: Analytics', path: '/admin/analytics' },
+  { label: 'Go: Analytics', path: '/admin/analytics' },
+  { label: 'Go: Live TV Control', path: '/admin/live' },
       { label: 'Go: Poll Editor', path: '/poll-editor' },
       { label: 'Go: Poll Results', path: '/poll-results' },
-      { label: 'Go: Inspiration Hub', path: '/media/inspiration' },
+      // Inspiration Hub removed
       {
         label: 'Toggle Theme',
         hint: 'Light/Dark',

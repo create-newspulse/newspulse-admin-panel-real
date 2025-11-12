@@ -3,12 +3,12 @@ import React, {
 	useState,
 	useMemo,
 	useCallback,
-	lazy,
 	Suspense,
 	type ReactNode,
 	type ComponentType,
 	type LazyExoticComponent,
 } from "react";
+import { useSearchParams } from 'react-router-dom';
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import debounce from "lodash.debounce";
@@ -23,9 +23,11 @@ import {
 import KiranOSPanel from "../../panels/KiranOSPanel";
 import KiranOSCommandCenter from "../../components/KiranOSCommandCenter";
 import AITrainer from "../../panels/AITrainer";
+import AdminControlCenter from "../../components/AdminControlCenter";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
 import { API_BASE_PATH } from "../../lib/api";
 import ErrorBoundary from "../../components/common/ErrorBoundary";
+import { safeLazy } from "@/utils/safeLazy";
 
 interface PanelItem {
 	key: string;
@@ -85,10 +87,21 @@ const panels: PanelItem[] = [
 const moduleMap = import.meta.glob("../../components/SafeZone/*.tsx") as Record<string, () => Promise<{ default: ComponentType }>>;
 panels.forEach((p) => {
 	const path = `../../components/SafeZone/${p.key}.tsx`;
-	if (moduleMap[path]) p.Component = lazy(moduleMap[path]);
+	if (moduleMap[path]) p.Component = safeLazy(moduleMap[path], p.key);
 });
 
 const SafeOwnerZone: React.FC = () => {
+	const [searchParams, setSearchParams] = useSearchParams();
+	const tab = (searchParams.get('tab') || 'overview').toLowerCase();
+	const setTab = (t: string) => setSearchParams({ tab: t });
+
+	const tabs: { key: string; label: string }[] = [
+		{ key: 'overview', label: 'Overview' },
+		{ key: 'settings', label: 'Settings' },
+		{ key: 'ai', label: 'AI' },
+		{ key: 'security', label: 'Security' },
+		{ key: 'analytics', label: 'Analytics' },
+	];
 	const { t } = useTranslation();
 	const [search, setSearch] = useState("");
 	const [isDark, setIsDark] = useState<boolean>(() => localStorage.getItem("darkMode") === "true");
@@ -387,6 +400,76 @@ const SafeOwnerZone: React.FC = () => {
 			id="safezone-root"
 			className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-white px-4 py-8 space-y-6"
 		>
+			{/* Tabs */}
+			<div className="max-w-7xl mx-auto">
+				<div className="flex flex-wrap gap-2 mb-4">
+					{tabs.map(t => (
+						<button
+							key={t.key}
+							onClick={() => setTab(t.key)}
+							className={`px-3 py-2 rounded-lg text-sm border ${tab===t.key? 'bg-blue-600 text-white border-blue-600':'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'}`}
+						>
+							{t.label}
+						</button>
+					))}
+				</div>
+			</div>
+
+			{/* Settings Tab */}
+			{tab === 'settings' && (
+				<div className="max-w-7xl mx-auto">
+					<AdminControlCenter />
+				</div>
+			)}
+
+			{/* Security Tab (lightweight placeholder to avoid heavy imports if not needed) */}
+			{tab === 'security' && (
+				<div className="max-w-7xl mx-auto">
+					<div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-6 border border-slate-200 dark:border-slate-700">
+						<h2 className="text-2xl font-bold mb-2">Security Dashboard</h2>
+						<p className="text-slate-600 dark:text-slate-300">Visit the Security module for detailed controls and audits.</p>
+					</div>
+				</div>
+			)}
+
+			{/* Analytics Tab (placeholder) */}
+			{tab === 'analytics' && (
+				<div className="max-w-7xl mx-auto">
+					<div className="bg-white dark:bg-slate-800 rounded-2xl shadow p-6 border border-slate-200 dark:border-slate-700">
+						<h2 className="text-2xl font-bold mb-2">Analytics</h2>
+						<p className="text-slate-600 dark:text-slate-300">Coming soon: traffic, engagement, and revenue analytics.</p>
+					</div>
+				</div>
+			)}
+
+			{/* AI Tab - show the two core panels only */}
+			{tab === 'ai' && (
+				<section id="ai-glow-panels" className="grid gap-6 md:grid-cols-2 xl:grid-cols-2 mt-2 max-w-7xl mx-auto">
+					<motion.div 
+						initial={{ opacity: 0, x: -50 }}
+						animate={{ opacity: 1, x: 0 }}
+						transition={{ duration: 0.5 }}
+						className="relative group"
+					>
+						<div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl blur opacity-25 group-hover:opacity-75 transition duration-1000"></div>
+						<div className="relative"><KiranOSPanel /></div>
+					</motion.div>
+					<motion.div 
+						initial={{ opacity: 0, x: 50 }}
+						animate={{ opacity: 1, x: 0 }}
+						transition={{ duration: 0.5 }}
+						className="relative group"
+					>
+						<div className="relative">
+							<AITrainer />
+						</div>
+					</motion.div>
+				</section>
+			)}
+
+			{/* Overview Tab (existing content) */}
+			{tab === 'overview' && (
+			<>
 			{/* Advanced Header with System Status */}
 			<div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 border-2 border-blue-500/30">
 				<div className="flex justify-between items-start mb-6">
@@ -842,7 +925,8 @@ const SafeOwnerZone: React.FC = () => {
 					))}
 				</div>
 			</div>
-
+			</>
+			)}
 		{/* Floating KiranOS Command Center (founder mode) */}
 		<KiranOSCommandCenter defaultOpen={false} adminMode={true} hideLauncher={true} />
 		</main>

@@ -1,0 +1,5 @@
+﻿import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+const Settings = () => {
+    return (_jsxs("div", { className: "p-6", children: [_jsx("h1", { className: "text-2xl font-bold text-blue-700", children: "\u2699\uFE0F Founder Settings" }), _jsx("p", { className: "mt-2 text-slate-600 dark:text-slate-300", children: "This page will contain advanced settings for the Founder role." }), _jsxs("div", { className: "mt-6 space-y-4", children: [_jsxs("div", { className: "bg-white dark:bg-slate-800 p-4 rounded shadow", children: [_jsx("h2", { className: "font-semibold mb-2", children: "\uD83D\uDEE1\uFE0F Security Options" }), _jsx("p", { className: "text-sm text-slate-500", children: "Manage PIN, login methods, and emergency access." })] }), _jsxs("div", { className: "bg-white dark:bg-slate-800 p-4 rounded shadow", children: [_jsx("h2", { className: "font-semibold mb-2", children: "\uD83C\uDF9B\uFE0F Panel Preferences" }), _jsx("p", { className: "text-sm text-slate-500", children: "Toggle modules and customize dashboard layout." })] })] })] }));
+};
+export default Settings;

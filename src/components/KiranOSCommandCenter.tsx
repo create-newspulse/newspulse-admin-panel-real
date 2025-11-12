@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { FaMicrophone, FaMicrophoneSlash, FaTimes, FaGripLines, FaPaperPlane, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
 import apiClient from '@lib/api';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from '@lib/sanitize';
 import { saveSession, loadSession } from '@lib/idb';
 
 export interface KiranOSCommandCenterProps {
@@ -101,11 +101,27 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
 
     try {
       // Fast path: lightweight chat-core (skips external data fetch)
-      const core = await apiClient.post('/ai/chat-core', {
+      const attempt = async (timeoutMs: number) => apiClient.post('/ai/chat-core', {
         messages: [{ role: 'user', content: q }],
-        max_tokens: 220,
-        temperature: 0.5,
-      }, { timeout: 7000 });
+        max_tokens: 180,
+        temperature: 0.45,
+      }, { timeout: timeoutMs });
+
+      let core;
+      try {
+        core = await attempt(6000);
+      } catch (e1: any) {
+        const status = e1?.response?.status;
+        const msg = e1?.message?.toLowerCase?.() || '';
+        const retryable = status === 429 || status === 503 || msg.includes('timeout') || msg.includes('network');
+        if (retryable) {
+          await new Promise(r => setTimeout(r, 300));
+          core = await attempt(7000);
+        } else {
+          throw e1;
+        }
+      }
+
       const answer = (core.data?.content || core.data?.result || '—').toString();
       const assistant: ChatMsg = { role: 'assistant', content: answer, ts: Date.now() };
       setMessages(prev => [...prev, assistant]);
@@ -138,7 +154,8 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
         }
       } else {
         const msg = err?.response?.data?.error || err.message || 'Request failed';
-        setMessages(prev => [...prev, { role: 'system', content: `⚠️ ${msg}`, ts: Date.now() }]);
+        const show = /busy|rate|limit|over/i.test(msg) ? '⏳ KiranOS is busy right now. Retrying in a few seconds…' : `⚠️ ${msg}`;
+        setMessages(prev => [...prev, { role: 'system', content: show, ts: Date.now() }]);
       }
     } finally {
       setBusy(false);
@@ -146,8 +163,8 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
   };
 
   const contentHtml = useMemo(() => (text: string) => {
-    // Minimal safe rendering; can be upgraded to markdown-it
-    const clean = DOMPurify.sanitize(text);
+    // Hardened sanitize wrapper (DOMPurify with strict allowlist or safe fallback)
+    const clean = sanitizeHtml(String(text || ''));
     return { __html: clean };
   }, []);
 

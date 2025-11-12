@@ -15,6 +15,11 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   // 🛡️ SECURE: Environment-controlled demo access
   const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
   const isVercelPreview = window.location.hostname.includes('vercel.app');
+  // 🔧 Local development helper: allow authenticated users through founder gates
+  // Enable by setting VITE_DEV_LOOSEN_FOUNDER_ROUTES=true in .env.local
+  const devLoosenEnv = (import.meta.env as any).VITE_DEV_LOOSEN_FOUNDER_ROUTES;
+  const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const allowDevLoosen = String(devLoosenEnv).toLowerCase() === 'true' && isLocalhost;
   
   // 🔒 SECURITY: Demo mode logic
   // - If VITE_DEMO_MODE is explicitly 'false', require authentication
@@ -37,7 +42,7 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   }
 
   // ✅ Proper authentication check OR controlled demo access
-  if ((isAuthenticated && isFounder) || isDemoMode) {
+  if ((isAuthenticated && isFounder) || isDemoMode || (allowDevLoosen && isAuthenticated)) {
     return <>{children}</>;
   }
 

@@ -1,14 +1,13 @@
-import { useEffect } from "react";
-
+// ✅ Fixed: remove auto-redirect to /auth to stop loop; /login is canonical now.
 export default function LoginPage() {
-  useEffect(() => {
-    window.location.replace('/auth');
-  }, []);
-
   return (
     <div style={{ padding: 24 }}>
-      <h2>Redirecting to secure sign-in…</h2>
-      <p>If you are not redirected, <a href="/auth">click here</a>.</p>
+      <h2>Login</h2>
+      <p>
+        Use the primary login page.
+        {' '}<a href="/login">Go to /login</a>
+        {' '}or use the advanced auth at <a href="/auth">/auth</a>.
+      </p>
     </div>
   );
 }

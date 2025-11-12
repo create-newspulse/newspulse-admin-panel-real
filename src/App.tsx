@@ -1,7 +1,7 @@
 // 📁 src/App.tsx
 
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
 import { I18nextProvider } from 'react-i18next';
@@ -33,7 +33,6 @@ import LanguageSettings from '@pages/owner/LanguageSettings';
 import PushHistory from '@pages/PushHistory';
 import SavedNews from '@pages/SavedNews';
 import TestNotification from '@pages/TestNotification';
-import InspirationHub from '@pages/inspiration/InspirationHub';
 
 // Polls
 import PollOfTheDay from '@pages/PollOfTheDay';
@@ -41,13 +40,13 @@ import PollEditor from '@pages/PollEditor';
 import PollResultsChart from '@pages/polls/PollResultsChart';
 
 // Founder-Only Pages
-import SafeOwnerZone from '@pages/admin/SafeOwnerZone';
+// Legacy SafeOwnerZone page is no longer imported (redirect handles the path)
 import LanguageManager from '@pages/SafeOwner/LanguageManager';
 import PanelGuide from '@pages/SafeOwner/PanelGuide';
 import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
 import AdminControlCenter from '@components/AdminControlCenter';
-import FeatureHelpPanel from '@components/SafeZone/FeatureHelpPanel';
 import LiveFeedManager from '@pages/admin/LiveFeedManager';
+import LiveTVControl from '@pages/admin/LiveTVControl';
 import EmbedManager from '@pages/admin/EmbedManager';
 import ToggleControls from '@pages/admin/ToggleControls';
 import ControlConstitution from '@pages/admin/ControlConstitution';
@@ -64,15 +63,20 @@ import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 import AIEngine from '@pages/admin/AIEngine';
+import ChangePassword from '@pages/admin/ChangePassword';
 import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
+import NotFound from '@pages/NotFound';
+import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 
 function App() {
   const { isDark } = useDarkMode();
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
+  const isAuthPage = ['/login','/admin/login','/employee/login'].includes(location.pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -100,7 +104,7 @@ function App() {
           <Navbar />
           {/* Optional: lightweight env overlay for debugging prod vs local differences */}
           {import.meta.env.VITE_SHOW_ENV_TEST === 'true' && <EnvTest />}
-          {isAuthenticated && <Breadcrumbs />}
+          {isAuthenticated && !isAuthPage && <Breadcrumbs />}
 
           {/* Host allow-list guard prevents preview lockouts. Empty allow-list = allow all. */}
           {!isAllowedHost() ? (
@@ -113,38 +117,50 @@ function App() {
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
 
               {/* 🔐 Admin Protected Routes */}
-              <Route path="/add" element={<ProtectedRoute><LockCheckWrapper><AddNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Legacy /add now redirects to /admin/add-news (updated editor) */}
+              <Route path="/add" element={<AddNews />} />
               <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/push-history" element={<ProtectedRoute><LockCheckWrapper><PushHistory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/add-category" element={<ProtectedRoute><LockCheckWrapper><AddCategory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Manage News canonical route + admin aliases for navbar consistency */}
               <Route path="/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* New alias: /admin/news -> ManageNews (fixes Back to News button path) */}
+              <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/media/inspiration" element={<ProtectedRoute><LockCheckWrapper><InspirationHub /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll" element={<ProtectedRoute><LockCheckWrapper><PollOfTheDay /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/locked" element={<LockedPage />} />
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
-              <Route path="/safe-owner" element={<FounderRoute><SafeOwnerZone /></FounderRoute>} />
-              <Route path="/safe-owner/help" element={<FounderRoute><FeatureHelpPanel /></FounderRoute>} />
+              {/* Legacy path kept as redirect for backward compatibility */}
+              <Route path="/safe-owner" element={<Navigate to="/safeownerzone/founder" replace />} />
               <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />
               <Route path="/safe-owner/language-settings" element={<FounderRoute><LanguageManager /></FounderRoute>} />
               <Route path="/safe-owner/panel-guide" element={<FounderRoute><PanelGuide /></FounderRoute>} />
               <Route path="/safe-owner/update-pin" element={<FounderRoute><UpdateFounderPIN /></FounderRoute>} />
               <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
               <Route path="/admin/embed-manager" element={<FounderRoute><EmbedManager /></FounderRoute>} />
+              {/* Live TV */}
+              <Route path="/admin/live" element={<ProtectedRoute><LiveTVControl /></ProtectedRoute>} />
               <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
               <Route path="/admin/ai-engine" element={<FounderRoute><AIEngine /></FounderRoute>} />
+              <Route path="/admin/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
               <Route path="/admin/aira" element={<FounderRoute><Aira /></FounderRoute>} />
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
               <Route path="/admin/editorial" element={<ProtectedRoute><Editorial /></ProtectedRoute>} />
+
+              {/* 🧩 Founder-only Safe Owner Zone v5 (React Router adaptation) */}
+              {/* Base path redirects to default module via OwnerZoneRoute */}
+              <Route path="/safeownerzone" element={<OwnerZoneRoute />} />
+              <Route path="/safeownerzone/:module" element={<OwnerZoneRoute />} />
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />
@@ -159,11 +175,16 @@ function App() {
               {/* New Founder Control route alias */}
               <Route path="/admin/founder" element={<FounderRoute><FounderControlPage /></FounderRoute>} />
 
+
               {/* 🔐 Login + Fallback */}
-              <Route path="/login" element={<AdminLogin />} />
+              {/* ✅ Fixed: support legacy /auth path by redirecting to /login */}
+              <Route path="/auth" element={<Navigate to="/login" replace />} />
+              <Route path="/login" element={<Navigate to="/admin/login" replace />} />
               <Route path="/admin/login" element={<AdminLogin />} />
+              {/* Placeholder employee login redirect (no separate UI yet) */}
+              <Route path="/employee/login" element={<AdminLogin />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
-              <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </main>
 
@@ -178,3 +199,4 @@ function App() {
 }
 
 export default App;
+

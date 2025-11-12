@@ -74,9 +74,11 @@ export default function AIEngine(): JSX.Element {
       <h1 className="text-3xl font-bold mb-2">🧠 News Pulse AI Engine</h1>
       <p className="text-slate-600 dark:text-slate-300 mb-6">Paste any news content or URL and generate a fresh, publication-ready article. Original narrative with 5W1H framing and SEO extras.</p>
 
+      {/* Task selection is handled via the Task Type dropdown below; tab presets removed for simplicity. */}
+
       {/* Provider */}
-      <div className="mb-4">
-        <div className="font-semibold mb-2">AI Engine:</div>
+      <div className="mb-4" aria-label="AI Engine Provider">
+        <div className="text-sm font-medium mb-1">AI Engine:</div>
         <div className="flex flex-wrap gap-2">
           <ProviderButton
             label={`OpenAI (${prettyModel(serverModel)})`}
@@ -96,12 +98,14 @@ export default function AIEngine(): JSX.Element {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Task Type</label>
+          {/* When tabs are used, sync the task selection */}
           <select value={task} onChange={(e) => setTask(e.target.value)} className="w-full border rounded px-3 py-2">
             {TASKS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
       </div>
 
+      {/* Tool-specific helpers */}
       <div className="grid md:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="block text-sm font-medium mb-1">Founder Command (override)</label>
@@ -120,7 +124,10 @@ export default function AIEngine(): JSX.Element {
 
       {error && <div className="text-red-600 mb-3">❌ {error}</div>}
 
-      <button disabled={loading} onClick={run} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded disabled:opacity-60">
+      <button disabled={loading} onClick={() => {
+        // Use the currently selected Task Type directly
+        run();
+      }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded disabled:opacity-60">
         {loading ? 'Running…' : 'Run AI Task'}
       </button>
 

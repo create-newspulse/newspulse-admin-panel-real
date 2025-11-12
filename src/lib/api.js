@@ -36,13 +36,13 @@ apiClient.interceptors.response.use((r) => r, (err) => {
     const msg = (data && (data.message || data.error)) || err.message;
     console.error(`API ${status ?? ""}: ${msg}`, data);
     // On unauthorized in production, steer to auth page
-    if (status === 401 && typeof window !== 'undefined' && !isDevelopment) {
-        // avoid loops if already on auth page
-        const path = window.location.pathname;
-        if (!path.startsWith('/auth')) {
-            window.location.href = '/auth';
+        if (status === 401 && typeof window !== 'undefined' && !isDevelopment) {
+            // ✅ Fixed: standardize to /login to avoid loops with /auth<->/login.
+            const path = window.location.pathname;
+            if (path !== '/login') {
+                window.location.href = '/login';
+            }
         }
-    }
     return Promise.reject(err);
 });
 // Optional: auth header helper

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthenticatedLayoutProps {
@@ -10,20 +10,23 @@ interface AuthenticatedLayoutProps {
 const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, requiredRoles }) => {
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
 
     if (!isAuthenticated) {
-      navigate('/login', { replace: true });
+      const p = location.pathname || '';
+      const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+      navigate(dest, { replace: true });
       return;
     }
 
     if (requiredRoles && user && !requiredRoles.includes(user.role)) {
       navigate('/unauthorized', { replace: true });
     }
-  }, [isLoading, isAuthenticated, user, requiredRoles, navigate]);
+  }, [isLoading, isAuthenticated, user, requiredRoles, navigate, location.pathname]);
 
   const toggleSidebar = useCallback(() => {
     setMobileSidebarOpen((prev) => !prev);

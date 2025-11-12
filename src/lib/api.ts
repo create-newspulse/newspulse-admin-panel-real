@@ -40,13 +40,11 @@ apiClient.interceptors.response.use(
     const data = err.response?.data as any;
     const msg = (data && (data.message || data.error)) || err.message;
     console.error(`API ${status ?? ""}: ${msg}`, data);
-    // On unauthorized in production, steer to auth page
+    // On unauthorized in production, steer to correct auth page for area
     if (status === 401 && typeof window !== 'undefined' && !isDevelopment) {
-      // avoid loops if already on auth page
-      const path = window.location.pathname;
-      if (!path.startsWith('/auth')) {
-        window.location.href = '/auth';
-      }
+      const path = window.location.pathname || '';
+      const dest = path.startsWith('/employee') ? '/employee/login' : '/admin/login';
+      if (path !== dest) window.location.href = dest;
     }
     return Promise.reject(err);
   }

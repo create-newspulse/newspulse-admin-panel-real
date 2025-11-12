@@ -5,7 +5,26 @@ const Breadcrumbs = () => {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
 
-  const formatLabel = (segment: string) => {
+  // Friendly labels for specific segments (applies to any position)
+  const SEGMENT_LABELS: Record<string, string> = {
+    admin: "Admin",
+    safeownerzone: "Safe Owner Zone",
+    'ai-engine': 'AI Engine',
+  };
+
+  // Full-path overrides for clarity between similarly named areas
+  // e.g., distinguish Admin Security vs Founder Security
+  const PATH_LABELS: Record<string, string> = {
+    "/admin/security": "Zero-Trust Security",
+    "/safeownerzone/security": "Security & Lockdown",
+  };
+
+  const formatLabel = (segment: string, path: string) => {
+    // Full path wins first
+    if (PATH_LABELS[path]) return PATH_LABELS[path];
+    // Semantic segment mapping next
+    if (SEGMENT_LABELS[segment]) return SEGMENT_LABELS[segment];
+    // Default prettifier
     return decodeURIComponent(segment)
       .replaceAll("-", " ")
       .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -31,14 +50,14 @@ const Breadcrumbs = () => {
               <FaChevronRight className="text-gray-400 text-xs" />
               {isLast ? (
                 <span className="font-semibold text-gray-800 dark:text-white">
-                  {formatLabel(seg)}
+                  {formatLabel(seg, path)}
                 </span>
               ) : (
                 <Link
                   to={path}
                   className="text-blue-600 dark:text-blue-400 hover:underline"
                 >
-                  {formatLabel(seg)}
+                  {formatLabel(seg, path)}
                 </Link>
               )}
             </li>

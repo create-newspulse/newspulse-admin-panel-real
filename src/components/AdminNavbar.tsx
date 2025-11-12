@@ -1,19 +1,18 @@
 // 📂 components/Admin/AdminNavbar.tsx
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 
 export default function AdminNavbar() {
-  const navigate = useNavigate();
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const { logout } = useAuth();
 
   const handleLogout = () => {
     const confirm =
       confirmLogout || window.confirm("Are you sure you want to logout?");
     if (confirm) {
-      localStorage.removeItem("adminToken");
-      localStorage.removeItem("sessionId");
-      // Optional: clear other secure keys here
-      navigate("/admin");
+  // ✅ Fix: use shared logout which redirects correctly per area
+  logout();
     } else {
       setConfirmLogout(true);
     }

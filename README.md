@@ -60,6 +60,52 @@ You can drop your own screenshots into the `docs/img/` folder using the file nam
 - Dev stays unchanged: Vite uses `/api` which you proxy to your local backend via `vite.config.ts`.
 - Production on Vercel switches base to `/admin-api` automatically.
 
+### Manage News Module
+
+The admin UI provides a full Manage News panel at `/admin/manage-news` (protected route). An alias is also available at `/manage-news` for convenience. It includes:
+
+- Server-side pagination & filters (search text, status, language, date range)
+- Multi-select category filter chips (maps to CSV list in query; backend supports `$in`)
+- Inline status / PTI / trust score badges
+- Add / Edit (drawer form) with automatic slug generation
+- Tags chip input with add/remove
+- Archive / Restore / Soft Delete actions with optimistic updates
+- CSV bulk upload (drag-n-drop) with result summary (created / updated / skipped / errors)
+- Badge counts in navbar (Published / Drafts / Flagged)
+
+Backend endpoints (`/api/articles`):
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | /api/articles | List with filters & pagination |
+| GET | /api/articles/meta | Counts for navbar badges |
+| GET | /api/articles/:idOrSlug | Fetch single article by ObjectId or slug |
+| POST | /api/articles | Create article (editor+) |
+| PUT | /api/articles/:id | Update article (editor+) |
+| PATCH | /api/articles/:id/archive | Archive (sets status=archived) |
+| PATCH | /api/articles/:id/restore | Restore archived to draft |
+| DELETE | /api/articles/:id | Soft delete (status=deleted) |
+| POST | /api/articles/bulk-upload | CSV bulk import (field `file`) |
+
+CSV template headers:
+
+```
+title,summary,content,category,tags,imageUrl,sourceName,sourceUrl,language,status,scheduledAt
+```
+
+Sample requests: see `requests/articles.http`.
+
+### Navigation consolidation
+
+- AI Assistant merged into AI Engine — `/admin/ai-assistant` now redirects to `/admin/ai-engine`.
+- Founder Control merged into Safe Owner Zone — `/admin/founder-control` and `/admin/founder` redirect to `/safe-owner`.
+- Settings merged into Safe Owner Zone — `/admin/settings` redirects to `/safe-owner?tab=settings`.
+- Push History integrated under Workflow — `/push-history` redirects to `/admin/workflow?tab=push-history`.
+- Panel Guide moved to private docs; route removed.
+
+Safe Owner Zone now supports tabs via the `?tab=` query param: `overview`, `settings`, `ai`, `security`, `analytics`.
+Editorial Workflow Engine supports internal tabs via `?tab=`: `queue`, `push-history`, `schedules`, `automation`, `logs`.
+
 ## Deploying the backend on Render (blueprint)
 
 This repo includes a `render.yaml` to deploy the backend (`admin-backend/`) and a cron-based health alarm.

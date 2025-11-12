@@ -52,6 +52,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Hydrate auth token into API client if present
       const existingToken = localStorage.getItem('adminToken');
       if (existingToken) setAuthToken(existingToken);
+      // If user just logged out, temporarily suppress auto re-auth from cookie
+      const recentLogoutAt = Number(sessionStorage.getItem('np_recent_logout') || '0');
+      const justLoggedOut = recentLogoutAt && (Date.now() - recentLogoutAt < 20000);
+      const forceLogout = sessionStorage.getItem('np_force_logout') === '1' || localStorage.getItem('np_force_logout') === '1';
 
       const storedUser = localStorage.getItem('currentUser');
       if (storedUser) {
@@ -64,7 +68,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.error('❌ Invalid session data:', err);
           localStorage.removeItem('currentUser');
         }
-      } else if (allowAutoLogin) {
+  } else if (allowAutoLogin && !forceLogout) {
         // 🎯 CONTROLLED: Only auto-login when explicitly enabled for demos
         console.log('🚀 Demo mode enabled - Auto-authenticating for preview');
         const demoUser: User = {
@@ -83,6 +87,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } else {
         // 🔐 Check server session cookie (magic-link auth)
         try {
+          if (justLoggedOut || forceLogout) {
+            // Skip cookie check right after logout to avoid flicker and re-auth from stale cookie
+            throw new Error('skip-session-check-after-logout');
+          }
           const resp = await fetch(`${API_BASE_PATH}/admin-auth/session`, { credentials: 'include' });
           if (resp.ok) {
             const data = await resp.json();
@@ -114,9 +122,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
+      // Note: default import is axios instance; res.data contains JSON
       const res = await api.post('/admin/login', { email, password });
 
       if (res.data.success) {
+        try {
+          // Clear any force-logout flags if present
+          sessionStorage.removeItem('np_force_logout');
+          localStorage.removeItem('np_force_logout');
+        } catch {}
         // Persist JWT token for authorized API calls
         if (res.data.token) {
           localStorage.setItem('adminToken', res.data.token);
@@ -156,8 +170,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
     setIsAuthenticated(false);
     setIsFounder(false);
-    // Best-effort cookie clear on server
-    fetch(`${API_BASE_PATH}/admin-auth/logout`, { credentials: 'include' }).catch(() => {});
+  // Best-effort cookie clear on server
+  fetch(`${API_BASE_PATH}/admin-auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+    // ✅ Fixed: logout now clears session and routes to /login instead of missing /auth.
+    // Use hard navigation to ensure state is reset and protected routes re-evaluate.
+    try {
+      sessionStorage.setItem('np_recent_logout', String(Date.now()));
+      // Block any auto-login (demo) and any cookie-based session hydration
+      sessionStorage.setItem('np_force_logout', '1');
+      localStorage.setItem('np_force_logout', '1');
+      // Proactively attempt to drop visible cookies (HttpOnly won't be affected, but harmless)
+      try {
+        const hosts = [window.location.hostname];
+        const parts = window.location.hostname.split('.');
+        if (parts.length > 2) hosts.push(`.${parts.slice(-2).join('.')}`);
+        const attrs = ['path=/', 'SameSite=Lax', 'SameSite=None; Secure'];
+        for (const h of hosts) {
+          for (const a of attrs) {
+            document.cookie = `np_admin=; Max-Age=0; ${a}; domain=${h}`;
+          }
+        }
+        // Also attempt host-only delete (no domain attribute)
+        document.cookie = 'np_admin=; Max-Age=0; path=/';
+      } catch {}
+  // ✅ Fix: proper logout + redirect per area (Admin -> /admin/login, Employee -> /employee/login)
+  const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
+  const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+  window.location.replace(dest);
+    } catch {
+      // Fallback if window is not available (unlikely in client context)
+    }
   };
 
   return (

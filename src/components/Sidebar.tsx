@@ -54,9 +54,7 @@ export default function Sidebar() {
         <NavLink to="/push-history" className={({ isActive }) => linkClass(isActive)}>
           � {isOpen && <span className="font-bold">Push History</span>}
         </NavLink>
-        <NavLink to="/media/inspiration" className={({ isActive }) => linkClass(isActive)}>
-          🌟 {isOpen && <span className="font-bold">Inspiration Hub</span>}
-        </NavLink>
+        {/* Inspiration Hub removed */}
         <NavLink to="/admin/ai-engine" className={({ isActive }) => linkClass(isActive)}>
           🧠 {isOpen && <span className="font-bold">AI Engine</span>}
         </NavLink>
@@ -81,8 +79,9 @@ export default function Sidebar() {
         <NavLink to="/admin/seo" className={({ isActive }) => linkClass(isActive)}>
           🔍 {isOpen && <span className="font-bold">SEO Tools</span>}
         </NavLink>
-        <NavLink to="/safe-owner" className={({ isActive }) => linkClass(isActive)}>
-          �️ {isOpen && <span className="font-bold">Safe Owner Zone</span>}
+        {/* Route consolidation: point to new v5 founder module */}
+        <NavLink to="/safeownerzone/founder" className={({ isActive }) => linkClass(isActive)}>
+          🧩 {isOpen && <span className="font-bold">Founder Command</span>}
         </NavLink>
       </nav>
 

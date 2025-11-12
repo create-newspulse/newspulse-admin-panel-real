@@ -6,7 +6,9 @@ export default function useAuthGuard() {
     useEffect(() => {
         const token = localStorage.getItem('adminToken');
         if (!token) {
-            navigate('/login');
+            const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
+            const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+            navigate(dest, { replace: true });
         }
     }, [navigate]);
 }

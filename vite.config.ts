@@ -16,8 +16,8 @@ export default defineConfig(({ mode }): UserConfig => {
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {
-    plugins: [react()],
     envPrefix: 'VITE_',
+    base: '/',
 
     resolve: {
       alias: {
@@ -32,6 +32,7 @@ export default defineConfig(({ mode }): UserConfig => {
         '@utils': r('./src/utils'),
         '@config': r('./src/config'),
         '@types': r('./src/types'),
+        '@features': r('./src/features'),
       },
     },
 
@@ -114,6 +115,17 @@ export default defineConfig(({ mode }): UserConfig => {
       port: 4173,
       open: true,
     },
+    plugins: [react(), {
+      name: 'diagnostic-html-guard',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url && /\.[tj]sx?$/.test(req.url)) {
+            // noop: kept for potential future logging
+          }
+          next();
+        });
+      }
+    }],
 
     // Speed up dev for common deps (optional)
     optimizeDeps: {

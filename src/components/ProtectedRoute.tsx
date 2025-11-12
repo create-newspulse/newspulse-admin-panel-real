@@ -18,7 +18,10 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
   }
 
   if (!isAuthenticated || !user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // ✅ Fix: redirect to correct login for area (admin vs employee)
+    const p = location.pathname || '';
+    const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+    return <Navigate to={dest} state={{ from: location }} replace />;
   }
 
   if (role && user.role !== role) {

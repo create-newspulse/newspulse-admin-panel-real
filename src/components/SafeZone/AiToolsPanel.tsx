@@ -6,10 +6,12 @@ const AiToolsPanel: React.FC = () => {
   const [lang, setLang] = useState<'Gujarati'|'Hindi'|'English'>('Gujarati');
   const [loading, setLoading] = useState<string | null>(null);
   const [result, setResult] = useState<string>('');
+  const [lastReq, setLastReq] = useState<{ path: string; body: any } | null>(null);
 
   async function callTool(path: string, body: any) {
     setLoading(path);
     setResult('');
+    setLastReq({ path, body });
     try {
       const res = await fetch(`${API_BASE_PATH}/ai/tools/${path}`, {
         method: 'POST',
@@ -18,9 +20,36 @@ const AiToolsPanel: React.FC = () => {
         body: JSON.stringify(body),
       });
       const ct = res.headers.get('content-type') || '';
-      if (!res.ok || !/application\/json/i.test(ct)) {
+      if (!res.ok) {
+        // Try to parse JSON error body for nicer messages
+        let errJson: any = null;
+        if (/application\/json/i.test(ct)) {
+          errJson = await res.json().catch(() => null);
+        } else {
+          const txt = await res.text().catch(() => '');
+          errJson = { detail: txt };
+        }
+        if (res.status === 401) {
+          setResult('AI auth not configured on backend (401 AI_AUTH). Please set OPENAI_API_KEY and restart the admin-backend.');
+          return;
+        }
+        if (res.status === 429) {
+          const limitedBy = res.headers.get('X-Rate-Limited-By') || '';
+          const hint = limitedBy === 'queue' ? 'AI is busy right now. Wait a few seconds, then retry.' : 'Too many requests or upstream quota hit. Please retry shortly.';
+          const detail = errJson?.message || errJson?.detail || '';
+          setResult(`AI rate limited (429).
+${hint}
+${detail ? `Details: ${detail}` : ''}`.trim());
+          return;
+        }
+        // Fallback generic error
+        const msg = (errJson && (errJson.message || errJson.error || errJson.detail)) || `HTTP ${res.status}`;
+        setResult(`Error: ${msg}`);
+        return;
+      }
+      if (!/application\/json/i.test(ct)) {
         const txt = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}. Body: ${txt.slice(0, 200)}`);
+        throw new Error(`Unexpected response. HTTP ${res.status}. Body: ${txt.slice(0, 200)}`);
       }
       const json = await res.json();
       if (json?.ok && (json.result || json.raw)) {
@@ -31,7 +60,18 @@ const AiToolsPanel: React.FC = () => {
         setResult(JSON.stringify(json, null, 2));
       }
     } catch (e: any) {
-      setResult(`Error: ${e?.message || String(e)}`);
+      const msg = e?.message || String(e);
+      // Friendlier guidance for classic network failures from fetch
+      if (/Failed to fetch|NetworkError|TypeError: fetch failed|ECONNREFUSED|ENOTFOUND/i.test(msg)) {
+        setResult([
+          'Error: Failed to reach backend.',
+          '• For local dev, ensure the admin-backend is running (npm run dev:backend or dev:all).',
+          '• Vite proxy expects the backend at http://localhost:5000 (see vite.config.ts).',
+          `• API base path: ${API_BASE_PATH}`,
+        ].join('\n'));
+      } else {
+        setResult(`Error: ${msg}`);
+      }
     } finally {
       setLoading(null);
     }
@@ -132,6 +172,16 @@ const AiToolsPanel: React.FC = () => {
         </button>
       </div>
 
+      <div className="flex items-center gap-2 mb-2">
+        {result && lastReq && !loading && (
+          <button
+            onClick={() => callTool(lastReq.path, lastReq.body)}
+            className="px-2 py-1 text-xs bg-slate-200 dark:bg-slate-700 rounded hover:bg-slate-300 dark:hover:bg-slate-600"
+          >
+            Retry
+          </button>
+        )}
+      </div>
       <pre className="whitespace-pre-wrap text-sm bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 overflow-auto max-h-72">{result}</pre>
     </div>
   );
