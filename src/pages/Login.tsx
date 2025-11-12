@@ -4,6 +4,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useEffect } from 'react';
 
 export default function Login(): JSX.Element {
   const navigate = useNavigate();
@@ -12,6 +13,15 @@ export default function Login(): JSX.Element {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ✅ Fix: clear any persistent force-logout flags when arriving at login page
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem('np_force_logout');
+      // Legacy cleanup from older versions
+      localStorage.removeItem('np_force_logout');
+    } catch {}
+  }, []);
 
   // Build advanced auth link. In dev, point to Next.js on :3000. In prod, use /auth (likely routed).
   const advancedHref = useMemo(() => {

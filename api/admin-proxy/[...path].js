@@ -30,15 +30,22 @@ export default async function handler(req, res) {
         // - admin/auth/ping: health check
         const isPublic = joinedPath === 'admin/login' || joinedPath === 'admin/auth/ping';
 
-        // Check session cookie only for non-public endpoints
+        // Check session/token only for non-public endpoints
         if (!isPublic) {
+            // ✅ Accept either cookie np_admin OR Authorization: Bearer <jwt>
+            // This aligns with SPA flows that store JWT in localStorage and send Authorization header.
+            const authHeader = (req.headers['authorization'] || req.headers['Authorization'] || '').toString();
+            const bearer = authHeader.toLowerCase().startsWith('bearer ')
+                ? authHeader.slice(7).trim()
+                : '';
             const cookies = parseCookies(req.headers.cookie);
-            const token = cookies['np_admin'];
-            if (!token)
+            const cookieToken = cookies['np_admin'];
+            const tokenToVerify = bearer || cookieToken;
+            if (!tokenToVerify)
                 return res.status(401).json({ error: 'Unauthorized' });
             // Verify session JWT
             try {
-                await jwtVerify(token, secret, { audience: 'admin', issuer: 'newspulse' });
+                await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
             }
             catch (e) {
                 const err = e;

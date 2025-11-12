@@ -53,9 +53,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const existingToken = localStorage.getItem('adminToken');
       if (existingToken) setAuthToken(existingToken);
       // If user just logged out, temporarily suppress auto re-auth from cookie
-      const recentLogoutAt = Number(sessionStorage.getItem('np_recent_logout') || '0');
-      const justLoggedOut = recentLogoutAt && (Date.now() - recentLogoutAt < 20000);
-      const forceLogout = sessionStorage.getItem('np_force_logout') === '1' || localStorage.getItem('np_force_logout') === '1';
+  const recentLogoutAt = Number(sessionStorage.getItem('np_recent_logout') || '0');
+  const justLoggedOut = recentLogoutAt && (Date.now() - recentLogoutAt < 20000);
+  // ✅ Fix: do NOT persist force flag across sessions; use sessionStorage only
+  const forceLogout = sessionStorage.getItem('np_force_logout') === '1';
 
       const storedUser = localStorage.getItem('currentUser');
       if (storedUser) {
@@ -88,8 +89,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // 🔐 Check server session cookie (magic-link auth)
         try {
           if (justLoggedOut || forceLogout) {
-            // Skip cookie check right after logout to avoid flicker and re-auth from stale cookie
-            throw new Error('skip-session-check-after-logout');
+            // ✅ Fix: still allow cookie check when user is on login/auth pages
+            const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
+            const onAuthPage = p.includes('/login') || p.startsWith('/auth');
+            if (!onAuthPage) {
+              // Skip cookie check right after logout to avoid flicker
+              throw new Error('skip-session-check-after-logout');
+            }
           }
           const resp = await fetch(`${API_BASE_PATH}/admin-auth/session`, { credentials: 'include' });
           if (resp.ok) {
@@ -178,7 +184,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       sessionStorage.setItem('np_recent_logout', String(Date.now()));
       // Block any auto-login (demo) and any cookie-based session hydration
       sessionStorage.setItem('np_force_logout', '1');
-      localStorage.setItem('np_force_logout', '1');
+  // Do not persist force flag in localStorage (prevents being locked out on next session)
       // Proactively attempt to drop visible cookies (HttpOnly won't be affected, but harmless)
       try {
         const hosts = [window.location.hostname];
