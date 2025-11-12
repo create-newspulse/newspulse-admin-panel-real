@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import { MENU } from '@/config/menu';
-import { useAuth } from '@/store/auth';
+import { useAuthZ } from '@/store/auth';
 import { useStats } from '@/store/stats';
 import { motion } from 'framer-motion';
 
 export default function Sidebar() {
-  const { user } = useAuth();
+  const { user } = useAuthZ();
   const { stats } = useStats();
   const role = user?.role;
 

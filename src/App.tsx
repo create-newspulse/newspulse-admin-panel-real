@@ -71,6 +71,7 @@ import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
+import PanelRouter from '@/routes/PanelRouter';
 
 function App() {
   const { isDark } = useDarkMode();
@@ -115,6 +116,8 @@ function App() {
             <Routes>
               {/* 🧭 Default Redirect to Admin Dashboard */}
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
+              {/* New role-based panel (founder/admin/employee) */}
+              <Route path="/panel/*" element={<PanelRouter />} />
 
               {/* 🔐 Admin Protected Routes */}
               {/* Legacy /add now redirects to /admin/add-news (updated editor) */}

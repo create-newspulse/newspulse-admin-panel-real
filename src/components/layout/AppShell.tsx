@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
-import { useAuth } from '@/store/auth';
+import { useAuthZ } from '@/store/auth';
 import { useTranslation } from 'react-i18next';
 import { useStats } from '@/store/stats';
 import { mockStats } from '@/lib/mock';
 import { Link } from 'react-router-dom';
+import { Toaster } from 'sonner';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user } = useAuthZ();
   const { i18n } = useTranslation();
   const { setStats } = useStats();
   const [theme, setTheme] = useState<'light'|'dark'>(() => (localStorage.getItem('np_theme') as 'light'|'dark') || 'light');
@@ -48,6 +49,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+      <Toaster position="top-right" richColors />
     </div>
   );
 }

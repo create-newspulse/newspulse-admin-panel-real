@@ -11,7 +11,7 @@ type State = {
   hasRole: (roles: Role | Role[]) => boolean;
 };
 
-export const useAuth = create<State>((set, get) => ({
+export const useAuthZ = create<State>((set, get) => ({
   user: null,
   token: null,
   setUser: (u) => set({ user: u }),
