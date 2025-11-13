@@ -2,32 +2,32 @@ import { getAllowedHosts } from './embedConfig';
 
 export function extractIframeSrc(input: string): string | null {
   if (!input) return null;
-  // If input is a plain URL
-  try {
-    const trimmed = input.trim();
-    // Try absolute URL first
-    const maybeUrl = new URL(trimmed);
-    if (maybeUrl && maybeUrl.hostname) return maybeUrl.toString();
-  } catch (e) {
-    // Try with base URL if available
+  const trimmed = input.trim();
+
+  // If the string looks like raw HTML, only attempt to extract from an <iframe>
+  const looksLikeHtml = /<[^>]+>/.test(trimmed);
+  if (!looksLikeHtml) {
+    // Treat as a plain URL only
     try {
-      const maybeUrl = new URL(input.trim(), window?.location?.href || undefined);
-      if (maybeUrl && maybeUrl.hostname) return maybeUrl.toString();
-    } catch (e2) {
-      // not a plain url
+      const u = new URL(trimmed);
+      return u.toString();
+    } catch {
+      return null;
     }
   }
 
-  const m = /<iframe[^>]+src=["']([^"']+)["']/i.exec(input);
-  if (m && m[1]) {
-    try {
-      const resolved = new URL(m[1], window?.location?.href || undefined);
-      return resolved.toString();
-    } catch (e) {
-      return m[1];
-    }
+  // Extract src from an iframe tag (case-insensitive, supports single/double quotes)
+  const m = /<iframe[^>]*\s+src=(["'])(.*?)\1/i.exec(trimmed);
+  if (!m || !m[2]) return null;
+
+  try {
+    const base = typeof window !== 'undefined' ? window.location.href : undefined;
+    const resolved = new URL(m[2], base);
+    return resolved.toString();
+  } catch {
+    // If it's not a resolvable URL, treat as invalid
+    return null;
   }
-  return null;
 }
 
 export function isHostAllowed(src: string): boolean {

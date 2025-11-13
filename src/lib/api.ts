@@ -141,3 +141,29 @@ export default apiClient;
 
 // Export resolved base path for building absolute URLs in anchors/fetch
 export const API_BASE_PATH = baseURL;
+
+// ---- Unified Auth API (stubs-compatible) ----
+// AxiosResponse type no longer needed after refactor
+export type LoginDTO = { email: string; password: string };
+export type LoginResp = { token: string; user: { id: string; name: string; email: string; role: 'founder'|'admin'|'employee' } };
+
+export const AuthAPI = {
+  // Map to backend alias mounted at /api/admin/login
+  login: async (body: LoginDTO): Promise<LoginResp> => {
+    const r = await apiClient.post('/admin/login', body);
+    const d: any = r.data || {};
+    const token = d.token || d?.data?.token || '';
+    const u = d.user || d?.data?.user || {};
+    const user = {
+      id: String(u.id || u._id || ''),
+      name: String(u.name || ''),
+      email: String(u.email || ''),
+      role: (u.role || 'employee') as LoginResp['user']['role'],
+    };
+    return { token, user };
+  },
+  // Keep OTP endpoints as stubs; implement on backend later
+  otpRequest: (email: string) => apiClient.post('/auth/password/otp-request', { email }).then(r => r.data),
+  otpVerify: (email: string, otp: string) => apiClient.post('/auth/password/otp-verify', { email, otp }).then(r => r.data),
+  passwordReset: (email: string, otp: string, newPassword: string) => apiClient.post('/auth/password/reset', { email, otp, newPassword }).then(r => r.data),
+};

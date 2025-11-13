@@ -76,6 +76,8 @@ export default function Navbar() {
 
           </nav>
         )}
+
+        {/* Login link removed — keeping only the React (NewsPulse) login flow */}
       </div>
     </header>
   );

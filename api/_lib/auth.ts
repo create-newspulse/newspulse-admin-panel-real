@@ -25,8 +25,9 @@ function parseCookies(header?: string) {
 }
 
 export async function requireFounder(req: VercelRequest, res: VercelResponse): Promise<FounderContext | null> {
-  // Lightweight mock mode for local dev without full auth wired
-  const mockOn = String(process.env.VITE_USE_MOCK || process.env.USE_MOCK || '').toLowerCase() === 'true';
+  // Lightweight mock mode for local dev and during tests without full auth wired
+  const inTest = process.env.NODE_ENV === 'test' || String(process.env.VITEST).toLowerCase() === 'true';
+  const mockOn = inTest || String(process.env.VITE_USE_MOCK || process.env.USE_MOCK || '').toLowerCase() === 'true';
   const roleHeader = (req.headers['x-role'] as string) || '';
   const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || undefined;
 

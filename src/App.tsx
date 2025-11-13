@@ -19,7 +19,7 @@ import FounderRoute from '@components/FounderRoute';
 
 // Use explicit extension so Vercel resolver doesn't miss the TSX file
 import LockedPage from '@pages/LockedPage.tsx';
-import AdminLogin from '@pages/Login';
+// Legacy AdminLogin kept for reference; not used now that /admin/login uses SimpleLogin
 import Unauthorized from '@pages/Unauthorized';
 import { isAllowedHost } from './lib/hostGuard';
 
@@ -72,6 +72,8 @@ import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 import PanelRouter from '@/routes/PanelRouter';
+// UnifiedLogin deprecated in favor of SimpleLogin for a single flow
+import SimpleLogin from '@pages/auth/SimpleLogin';
 
 function App() {
   const { isDark } = useDarkMode();
@@ -180,12 +182,16 @@ function App() {
 
 
               {/* 🔐 Login + Fallback */}
-              {/* ✅ Fixed: support legacy /auth path by redirecting to /login */}
-              <Route path="/auth" element={<Navigate to="/login" replace />} />
+              {/* Keep only one login system (NewsPulse React login) */}
+              <Route path="/auth" element={<Navigate to="/admin/login" replace />} />
+              <Route path="/auth/unified" element={<Navigate to="/admin/login" replace />} />
+              <Route path="/auth/simple" element={<SimpleLogin />} />
+              {/* Redirect generic /login to the React login */}
               <Route path="/login" element={<Navigate to="/admin/login" replace />} />
-              <Route path="/admin/login" element={<AdminLogin />} />
+              {/* NewsPulse login */}
+              <Route path="/admin/login" element={<SimpleLogin />} />
               {/* Placeholder employee login redirect (no separate UI yet) */}
-              <Route path="/employee/login" element={<AdminLogin />} />
+              <Route path="/employee/login" element={<SimpleLogin />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<NotFound />} />
             </Routes>

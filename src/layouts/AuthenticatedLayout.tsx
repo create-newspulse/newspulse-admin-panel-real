@@ -108,7 +108,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
       {/* Main Content */}
       <div className="flex-1 md:ml-60 flex flex-col">
         <header className="bg-white dark:bg-gray-800 shadow px-6 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-blue-600">NewsPulse Admin</h1>
+          <h1 className="text-xl font-bold text-blue-600">News Pulse Admin</h1>
           {user && (
             <div className="text-sm">
               Welcome, <span className="font-semibold">{user.email}</span>{' '}
@@ -120,7 +120,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
         <main className="flex-1 px-4 py-6 max-w-7xl mx-auto w-full">{children}</main>
 
         <footer className="text-center py-4 text-xs text-gray-400 border-t border-gray-200 dark:border-gray-700 mt-auto">
-          © {new Date().getFullYear()} NewsPulse. All rights reserved.
+          © {new Date().getFullYear()} News Pulse. All rights reserved.
         </footer>
       </div>
     </div>

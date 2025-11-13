@@ -16,8 +16,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path='/' element={<AppLayout />}>
             <Route index element={<Navigate to='/admin/manage-news' replace />} />
+            {/* Canonical admin shortcuts and legacy paths */}
+            <Route path='admin' element={<Navigate to='/admin/manage-news' replace />} />
+            <Route path='admin/login' element={<Navigate to='/admin/manage-news' replace />} />
+            <Route path='admin/dashboard' element={<Navigate to='/admin/manage-news' replace />} />
             <Route path='admin/add-news' element={<AddNewsPage />} />
             <Route path='admin/manage-news' element={<ManageNewsPage />} />
+            {/* Fallback for any unknown path within this SPA */}
+            <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
           </Route>
         </Routes>
       </BrowserRouter>

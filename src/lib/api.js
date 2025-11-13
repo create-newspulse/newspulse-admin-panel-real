@@ -110,3 +110,27 @@ export const api = {
 export default apiClient;
 // Export resolved base path for building absolute URLs in anchors/fetch
 export const API_BASE_PATH = baseURL;
+
+// ---- Unified Auth API (JS mirror) ----
+// Keep this in sync with src/lib/api.ts to avoid import resolution issues during dev.
+export const AuthAPI = {
+    // Use backend alias mounted at /api/admin/login
+    login: async (body) => {
+        const r = await apiClient.post('/admin/login', body);
+        const d = r.data || {};
+        const token = d.token || (d.data && d.data.token) || '';
+        const u = d.user || (d.data && d.data.user) || {};
+        return {
+            token,
+            user: {
+                id: String(u.id || u._id || ''),
+                name: String(u.name || ''),
+                email: String(u.email || ''),
+                role: u.role || 'employee',
+            }
+        };
+    },
+    otpRequest: (email) => apiClient.post('/auth/password/otp-request', { email }).then((r) => r.data),
+    otpVerify: (email, otp) => apiClient.post('/auth/password/otp-verify', { email, otp }).then((r) => r.data),
+    passwordReset: (email, otp, newPassword) => apiClient.post('/auth/password/reset', { email, otp, newPassword }).then((r) => r.data),
+};

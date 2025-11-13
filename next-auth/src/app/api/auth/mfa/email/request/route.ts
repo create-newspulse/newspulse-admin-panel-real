@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
   const code = genCode();
   await setOtp(user.id, code);
-  const appName = process.env.APP_NAME || 'NewsPulse';
+  const appName = process.env.APP_NAME || 'News Pulse';
   await sendDevEmail(user.email, `${appName} sign-in code`, `<p>Your ${appName} sign-in code is: <b>${code}</b> (valid for 5 minutes)</p>`);
 
   return NextResponse.json({ ok: true, message: 'Code sent' });

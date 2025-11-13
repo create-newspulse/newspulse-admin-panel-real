@@ -4,13 +4,11 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { useAuthZ } from '@/store/auth';
 import { useEffect } from 'react';
 
 export default function Login(): JSX.Element {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const roleAuth = useAuthZ();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -105,27 +103,7 @@ export default function Login(): JSX.Element {
           <p className="text-xs text-gray-500 mt-2">Advanced auth uses the Next.js flow (OTP/passkeys/MFA).</p>
         </div>
 
-        {/* Dev-only bootstrap buttons */}
-        <div className="text-center space-y-2">
-          <button
-            type="button"
-            className="w-full border px-4 py-2 rounded text-sm"
-            onClick={() => { roleAuth.setUser({ id:'1', name:'Kiran Parmar', email:'founder@newspulse.co.in', role:'founder' }); navigate('/panel', { replace: true }); }}
-          >Temporary Founder Login</button>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="flex-1 border px-3 py-2 rounded text-sm"
-              onClick={() => { roleAuth.setUser({ id:'2', name:'Admin User', email:'admin@newspulse.co.in', role:'admin' }); navigate('/panel', { replace: true }); }}
-            >Admin</button>
-            <button
-              type="button"
-              className="flex-1 border px-3 py-2 rounded text-sm"
-              onClick={() => { roleAuth.setUser({ id:'3', name:'Employee User', email:'employee@newspulse.co.in', role:'employee' }); navigate('/panel', { replace: true }); }}
-            >Employee</button>
-          </div>
-          <p className="text-[11px] text-gray-500">TODO: replace with real role hydration after auth</p>
-        </div>
+        {/* Removed temporary role login buttons */}
       </div>
     </div>
   );

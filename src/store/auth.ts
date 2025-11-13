@@ -22,3 +22,18 @@ export const useAuthZ = create<State>((set, get) => ({
     return Array.isArray(roles) ? roles.includes(r) : r === roles;
   },
 }));
+
+// Unified login store (spec-compliant) – kept separate to avoid conflicts with legacy context
+type UnifiedState = {
+  user: User | null;
+  token: string | null;
+  setAuth: (user: User, token: string) => void;
+  clear: () => void;
+};
+
+export const useAuth = create<UnifiedState>((set) => ({
+  user: null,
+  token: null,
+  setAuth: (user, token) => set({ user, token }),
+  clear: () => set({ user: null, token: null }),
+}));
