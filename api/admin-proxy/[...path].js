@@ -14,6 +14,16 @@ function parseCookies(header) {
     return cookies;
 }
 const REQUIRED_ENV = ['ADMIN_BACKEND_URL', 'ADMIN_JWT_SECRET'];
+
+// Simple host recursion guard (avoid misconfiguration where ADMIN_BACKEND_URL points back to the Vercel site)
+function isRecursiveTarget(backendBase, reqHost) {
+    try {
+        const b = new URL(backendBase);
+        const hostA = (b.host || '').toLowerCase();
+        const hostB = (reqHost || '').toLowerCase();
+        return hostA === hostB;
+    } catch { return false; }
+}
 export default async function handler(req, res) {
     try {
         for (const key of REQUIRED_ENV) {
@@ -22,6 +32,10 @@ export default async function handler(req, res) {
             }
         }
         const backendBase = process.env.ADMIN_BACKEND_URL.replace(/\/$/, '');
+        // Guard against recursion (calling proxy -> proxy) which can manifest as 405 or timeouts
+        if (isRecursiveTarget(backendBase, req.headers.host)) {
+            return res.status(500).json({ error: 'ADMIN_BACKEND_URL points to the frontend host. Set it to your backend origin (e.g. https://api.yourdomain.com or Render URL).', host: req.headers.host });
+        }
         const secret = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
         const pathParam = req.query.path || [];
         const joinedPath = pathParam.join('/');
@@ -52,7 +66,7 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Invalid session', detail: err.message });
             }
         }
-        const targetUrl = new URL(`${backendBase}/api/${joinedPath}`);
+    const targetUrl = new URL(`${backendBase}/api/${joinedPath}`);
         // Append query string
         const q = req.query;
         Object.keys(q).forEach((k) => {
@@ -66,7 +80,7 @@ export default async function handler(req, res) {
         });
         // Prepare fetch options
         const method = req.method || 'GET';
-        const headers = {};
+    const headers = {};
         for (const [k, v] of Object.entries(req.headers)) {
             if (!v)
                 continue;
@@ -78,6 +92,8 @@ export default async function handler(req, res) {
         // Always forward cookies to backend if any (session is only validated at proxy)
         if (req.headers.cookie)
             headers['cookie'] = req.headers.cookie;
+        // Signal downstream this came via proxy (useful for debugging backend logs)
+        headers['x-admin-proxy'] = 'vercel';
         let body = undefined;
         if (!['GET', 'HEAD'].includes(method)) {
             body = req.body;
@@ -87,7 +103,13 @@ export default async function handler(req, res) {
                 body = JSON.stringify(body);
             }
         }
-        const resp = await fetch(targetUrl.toString(), { method, headers, body });
+        let resp;
+        try {
+            resp = await fetch(targetUrl.toString(), { method, headers, body });
+        } catch (fetchErr) {
+            console.error('Proxy fetch error:', fetchErr);
+            return res.status(502).json({ error: 'Upstream unreachable', detail: fetchErr.message || String(fetchErr) });
+        }
         // Buffer body first so we can optionally transform certain upstream errors (rate limits)
         const buf = Buffer.from(await resp.arrayBuffer());
 
@@ -122,6 +144,6 @@ export default async function handler(req, res) {
     }
     catch (err) {
         console.error('Admin proxy error:', err);
-        return res.status(500).json({ error: 'Proxy failure' });
+        return res.status(500).json({ error: 'Proxy failure', detail: err?.message || String(err) });
     }
 }
