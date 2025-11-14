@@ -1,23 +1,21 @@
 // src/lib/api.ts
 import axios from "axios";
-/**
- * Backend origin:
- * - In development: use "/api" to let Vite proxy handle requests
- * - In production: use VITE_API_URL with /api appended
- */
+// JavaScript mirror of src/lib/api.ts (keep in sync)
 const isDevelopment = import.meta.env.MODE === 'development';
-const RAW_BASE = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE ?? "") + "";
-const BASE = RAW_BASE.replace(/\/$/, ""); // strip trailing slash
-// Detect if env points to our proxy path directly
-const isProxyPath = BASE.startsWith('/admin-api');
-// In production:
-//  - if BASE is a proxy path (/admin-api), use it as-is
-//  - if BASE is a full origin, append /api
-//  - otherwise, default to /admin-api
-const baseURL = isDevelopment
-    ? "/api"
-    : (BASE ? (isProxyPath ? BASE : `${BASE}/api`) : "/admin-api");
-console.log('🔧 API Config:', { isDevelopment, RAW_BASE, BASE, baseURL });
+const ADMIN_API_BASE_URL_RAW = (import.meta.env.VITE_ADMIN_API_BASE_URL || '') + '';
+const API_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '') + '';
+const LEGACY_URL_RAW = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || '') + '';
+const normalizeRoot = (v) => (v || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+const candidates = [
+    normalizeRoot(ADMIN_API_BASE_URL_RAW),
+    normalizeRoot(API_ROOT_RAW),
+    normalizeRoot(LEGACY_URL_RAW),
+    isDevelopment ? 'http://localhost:5000' : '/admin-api'
+];
+const API_ROOT = candidates.find(Boolean);
+const isRelative = /^\//.test(API_ROOT);
+const baseURL = isRelative ? API_ROOT : `${API_ROOT}/api`;
+console.log('🔧 API JS Config:', { MODE: import.meta.env.MODE, API_ROOT, baseURL });
 // Single axios instance for all API calls
 const apiClient = axios.create({
     baseURL,
@@ -66,6 +64,8 @@ const del = async (path) => {
     return res.data;
 };
 // Public API surface (adjust paths to match your router mounted at `/api`)
+// Direct backend fallback (Render) when proxy misroutes
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
 export const api = {
     // KPI cards
     stats: () => get("/stats"),

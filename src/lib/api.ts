@@ -6,6 +6,8 @@ import adminApi from './adminApi';
 // Prefer VITE_API_ROOT (no trailing /api), fallback to legacy VITE_API_URL (may include /api),
 // and finally sensible defaults for dev/prod.
 const isDevelopment = import.meta.env.MODE === 'development';
+// New canonical admin API base override (highest precedence)
+const ADMIN_API_BASE_URL_RAW = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').toString().trim();
 const ENV_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '').toString().trim();
 const LEGACY_URL_RAW = (import.meta.env.VITE_API_URL || '').toString().trim();
 
@@ -19,11 +21,20 @@ const normalizeRoot = (v: string) =>
 // If only the legacy VITE_API_URL is provided, strip any trailing '/api' to get the root
 const LEGACY_ROOT = normalizeRoot(LEGACY_URL_RAW);
 
+// Resolution order (first non-empty wins):
+// 1. VITE_ADMIN_API_BASE_URL (expected to include protocol, no trailing /api)
+// 2. VITE_API_ROOT (modern root variable)
+// 3. VITE_API_URL (legacy variable that MAY include /api suffix)
+// 4. Default: dev -> localhost backend; prod -> relative proxy path (rewrites) OR direct host
+// If production and no envs set, we prefer the relative proxy '/admin-api' so Vercel rewrites handle routing.
 const DEFAULT_ROOT = isDevelopment
   ? 'http://localhost:5000'
-  : 'https://newspulse-backend-real.onrender.com';
+  : '/admin-api';
 
-export const API_ROOT = normalizeRoot(ENV_ROOT_RAW) || LEGACY_ROOT || DEFAULT_ROOT;
+export const API_ROOT = normalizeRoot(ADMIN_API_BASE_URL_RAW)
+  || normalizeRoot(ENV_ROOT_RAW)
+  || LEGACY_ROOT
+  || DEFAULT_ROOT;
 // If API_ROOT is a relative proxy path (e.g., "/admin-api"), don't append "/api" again.
 const isRelative = /^\//.test(API_ROOT);
 export const API_BASE_PATH = isRelative ? API_ROOT : `${API_ROOT}/api`;
@@ -60,7 +71,8 @@ apiClient.interceptors.request.use((config) => {
 // Fallback base for when Vercel custom domain still points to an old project
 // and /admin-api proxy returns HTML/404. We retry a few read-only endpoints directly.
 // Use the confirmed production backend host for fallbacks (matches README Direct Mode setup)
-const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
+// Exported fallback host (direct Render backend) used when proxy HTML/404 occurs.
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
 const FALLBACK_PATHS = new Set([
   '/dashboard-stats',
   '/stats',

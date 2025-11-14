@@ -1,4 +1,4 @@
-import { API_BASE_PATH } from '@lib/api';
+import { API_BASE_PATH, ADMIN_BACKEND_FALLBACK } from '@lib/api';
 
 export type FetchJsonOptions = RequestInit & {
   timeoutMs?: number;
@@ -21,7 +21,6 @@ export async function fetchJson<T = any>(url: string, options: FetchJsonOptions 
     let ct = res.headers.get('content-type') || '';
 
     // If proxied through /admin-api and the response is 404/405 or HTML, retry against Render admin-backend
-  const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
   const isAdminApiProxy = url.startsWith(API_BASE_PATH) && API_BASE_PATH.startsWith('/admin-api');
     const shouldFallback = isAdminApiProxy && (!res.ok || !/application\/json/i.test(ct));
 
