@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@context/AuthContext';
 import OtpModal from '@/components/auth/OtpModal';
+import { API_BASE_PATH } from '@/lib/api';
 
 export default function SimpleLogin() {
   const navigate = useNavigate();
@@ -24,15 +25,28 @@ export default function SimpleLogin() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    console.log('🔐 SimpleLogin submit fired');
+    console.log('API_BASE_PATH:', API_BASE_PATH);
+    console.log('Submitting payload:', { email }); // do not log password
     try {
       const ok = await login(email, password);
-      if (!ok) throw new Error('Invalid email or password');
+      if (!ok) {
+        console.warn('⚠️ Login returned false (no success flag)');
+        toast.error('Invalid email or password');
+        return;
+      }
       const role = (user?.role || 'admin') as any;
       toast.success(`Welcome ${user?.name || 'Admin'}`);
-      // Keep destination simple and valid for all roles
       navigate(role === 'founder' ? '/admin/dashboard' : '/admin/dashboard', { replace: true });
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Invalid email or password');
+      console.error('❌ Login exception:', err);
+      if (err?.response) {
+        console.error('Server responded (error):', err.response.status, err.response.data);
+        toast.error(err.response.data?.message || 'Login failed');
+      } else {
+        // Fail-safe: only show toast for network errors if we truly cannot reach backend
+        toast.error('Network error - could not reach login API');
+      }
     } finally { setLoading(false); }
   };
 

@@ -2,27 +2,23 @@
 import axios, { AxiosError } from "axios";
 
 /**
- * Backend origin:
- * - In development: use "/api" to let Vite proxy handle requests
- * - In production: use VITE_API_URL with /api appended
+ * Simplified backend origin resolution per new requirements:
+ * Use VITE_API_URL directly. If missing, warn and fallback to '/admin-api'.
+ * In development (vite), if VITE_API_URL is absent, fallback to '/api'.
  */
 const isDevelopment = import.meta.env.MODE === 'development';
-const RAW_BASE = (import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE ?? "") + "";
-const BASE = RAW_BASE.replace(/\/$/, ""); // strip trailing slash
-// Detect if env points to our proxy path directly
-const isProxyPath = BASE.startsWith('/admin-api');
-// In production:
-//  - if BASE is a proxy path (/admin-api), use it as-is
-//  - if BASE is a full origin, append /api
-//  - otherwise, default to /admin-api
-const baseURL = isDevelopment
-  ? "/api"
-  : (BASE ? (isProxyPath ? BASE : `${BASE}/api`) : "/admin-api");
+const RAW_ENV_BASE = (import.meta.env.VITE_API_URL || '').toString().trim();
+if (!RAW_ENV_BASE) {
+  console.warn('⚠️ VITE_API_URL is missing in production. Falling back to proxy path.');
+}
+// Determine fallback path depending on environment
+const FALLBACK_BASE = isDevelopment ? '/api' : '/admin-api';
+const RESOLVED_BASE = (RAW_ENV_BASE || FALLBACK_BASE).replace(/\/$/, '');
+console.log('🔧 API Base Resolution:', { MODE: import.meta.env.MODE, VITE_API_URL: RAW_ENV_BASE || null, RESOLVED_BASE });
 
-console.log('🔧 API Config:', { isDevelopment, RAW_BASE, BASE, baseURL });
-// Single axios instance for all API calls
+// Single axios instance for all API calls (no auto /api suffix logic now)
 const apiClient = axios.create({
-  baseURL,
+  baseURL: RESOLVED_BASE,
   withCredentials: true,
   timeout: 20_000,
 });
@@ -140,7 +136,7 @@ export const api = {
 export default apiClient;
 
 // Export resolved base path for building absolute URLs in anchors/fetch
-export const API_BASE_PATH = baseURL;
+export const API_BASE_PATH = RESOLVED_BASE;
 
 // ---- Unified Auth API (stubs-compatible) ----
 // AxiosResponse type no longer needed after refactor
@@ -148,9 +144,10 @@ export type LoginDTO = { email: string; password: string };
 export type LoginResp = { token: string; user: { id: string; name: string; email: string; role: 'founder'|'admin'|'employee' } };
 
 export const AuthAPI = {
-  // Map to backend alias mounted at /api/admin/login
+  // Updated: backend route mounted at /admin/auth/login (proxy adds /api prefix when using /admin-api)
   login: async (body: LoginDTO): Promise<LoginResp> => {
-    const r = await apiClient.post('/admin/login', body);
+    console.log('🔐 AuthAPI.login -> POST /admin/auth/login', { base: RESOLVED_BASE, body });
+    const r = await apiClient.post('/admin/auth/login', body);
     const d: any = r.data || {};
     const token = d.token || d?.data?.token || '';
     const u = d.user || d?.data?.user || {};

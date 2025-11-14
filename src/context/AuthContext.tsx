@@ -127,22 +127,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [allowAutoLogin]);
 
   const login = async (email: string, password: string): Promise<boolean> => {
+    console.log('🚀 Submitting login request...');
+    console.log('API URL (base):', API_BASE_PATH);
+    console.log('Payload:', { email }); // do not log password for security
     try {
-      // Note: default import is axios instance; res.data contains JSON
-      const res = await api.post('/admin/login', { email, password });
-
+      const res = await api.post('/admin/auth/login', { email, password });
+      console.log('✅ Login response raw:', res.data);
       if (res.data.success) {
+        // Clear any force-logout flags if present
         try {
-          // Clear any force-logout flags if present
           sessionStorage.removeItem('np_force_logout');
           localStorage.removeItem('np_force_logout');
         } catch {}
-        // Persist JWT token for authorized API calls
         if (res.data.token) {
           localStorage.setItem('adminToken', res.data.token);
           setAuthToken(res.data.token);
         }
-
         const userData: User = {
           _id: res.data.user?._id || '',
           name: res.data.user?.name || 'Admin',
@@ -151,19 +151,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           avatar: res.data.user?.avatar || '',
           bio: res.data.user?.bio || '',
         };
-
         localStorage.setItem('currentUser', JSON.stringify(userData));
         localStorage.setItem('isLoggedIn', 'true');
-
         setUser(userData);
         setIsAuthenticated(true);
         setIsFounder(userData.role === 'founder');
         return true;
+      } else {
+        console.warn('⚠️ Login unsuccessful:', res.data);
+        return false;
       }
-
-      return false;
-    } catch (err) {
-      console.error('❌ Login Error:', err);
+    } catch (err: any) {
+      console.error('❌ Login error (network/server):', err);
+      if (err?.response) {
+        console.error('Server responded:', err.response.status, err.response.data);
+      }
       return false;
     }
   };
