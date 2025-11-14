@@ -2,11 +2,12 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/admin-api/(.*)", "destination": "/api/admin-proxy/$1" },
-    { "source": "/auth", "destination": "/auth/index.html" },
-    { "source": "/auth/(.*)", "destination": "/auth/$1" },
-    { "source": "/(.*)", "destination": "/" }
+  "routes": [
+    { "src": "/admin-api/(.*)", "dest": "/api/admin-proxy/$1" },
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "handle": "filesystem" },
+    { "src": "/auth", "dest": "/auth/index.html" },
+    { "src": "/auth/(.*)", "dest": "/auth/$1" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
