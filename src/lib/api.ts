@@ -5,19 +5,24 @@ import axios, { AxiosError } from "axios";
 // Prefer VITE_API_ROOT (no trailing /api), fallback to legacy VITE_API_URL (may include /api),
 // and finally sensible defaults for dev/prod.
 const isDevelopment = import.meta.env.MODE === 'development';
-const ENV_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '').toString().trim().replace(/\/$/, '');
+const ENV_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '').toString().trim();
 const LEGACY_URL_RAW = (import.meta.env.VITE_API_URL || '').toString().trim();
 
+const normalizeRoot = (v: string) =>
+  (v || '')
+    .toString()
+    .trim()
+    .replace(/\/+$/, '')       // drop trailing slashes
+    .replace(/\/api$/i, '');   // if someone appended '/api', strip it to get ROOT
+
 // If only the legacy VITE_API_URL is provided, strip any trailing '/api' to get the root
-const LEGACY_ROOT = LEGACY_URL_RAW
-  ? LEGACY_URL_RAW.replace(/\/?api\/?$/, '').replace(/\/$/, '')
-  : '';
+const LEGACY_ROOT = normalizeRoot(LEGACY_URL_RAW);
 
 const DEFAULT_ROOT = isDevelopment
   ? 'http://localhost:5000'
   : 'https://newspulse-backend-real.onrender.com';
 
-export const API_ROOT = (ENV_ROOT_RAW || LEGACY_ROOT || DEFAULT_ROOT).replace(/\/$/, '');
+export const API_ROOT = normalizeRoot(ENV_ROOT_RAW) || LEGACY_ROOT || DEFAULT_ROOT;
 export const API_BASE_PATH = `${API_ROOT}/api`;
 
 console.log('🔧 API Base Resolution:', {
