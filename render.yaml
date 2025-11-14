@@ -45,5 +45,7 @@ services:
         value: gpt-4o-mini
       - key: CLIENT_ORIGIN
         value: https://newspulse-admin-panel-real.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://admin.newspulse.co.in,https://newspulse-admin-panel-real.vercel.app
       - key: SLACK_WEBHOOK_URL
         sync: false

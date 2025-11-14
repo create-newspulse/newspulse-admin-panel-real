@@ -97,7 +97,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               throw new Error('skip-session-check-after-logout');
             }
           }
-          const resp = await fetch(`${API_BASE_PATH}/admin-auth/session`, { credentials: 'include' });
+          // Fallback-aware fetch: try proxied /admin-api first, then direct Render admin-backend if 404/HTML
+          const FALLBACK_ADMIN_API = 'https://newspulse-admin-backend.onrender.com/api';
+          const useFallback = API_BASE_PATH.startsWith('/admin-api');
+          const doFetch = async (base: string) => fetch(`${base}/admin-auth/session`, { credentials: 'include' });
+          let resp = await doFetch(API_BASE_PATH);
+          const ct = resp.headers.get('content-type') || '';
+          const looksHtml = ct.includes('text/html');
+          if (useFallback && (!resp.ok || looksHtml || resp.status === 404)) {
+            try { resp = await doFetch(FALLBACK_ADMIN_API); } catch {}
+          }
           if (resp.ok) {
             const data = await resp.json();
             if (data?.authenticated) {
@@ -184,7 +193,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsAuthenticated(false);
     setIsFounder(false);
   // Best-effort cookie clear on server
-  fetch(`${API_BASE_PATH}/admin-auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+  // Try proxied logout; if it fails with 404/HTML, hit Render admin-backend directly
+  (async () => {
+    try {
+      const r = await fetch(`${API_BASE_PATH}/admin-auth/logout`, { method: 'POST', credentials: 'include' });
+      const ct = r.headers.get('content-type') || '';
+      if (!r.ok || ct.includes('text/html')) {
+        const FALLBACK_ADMIN_API = 'https://newspulse-admin-backend.onrender.com/api';
+        await fetch(`${FALLBACK_ADMIN_API}/admin-auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+      }
+    } catch {}
+  })();
     // ✅ Fixed: logout now clears session and routes to /login instead of missing /auth.
     // Use hard navigation to ensure state is reset and protected routes re-evaluate.
     try {

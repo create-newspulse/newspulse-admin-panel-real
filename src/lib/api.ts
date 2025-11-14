@@ -57,18 +57,63 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 // Centralized error logging (helps debug 404/500 quickly)
+// Fallback base for when Vercel custom domain still points to an old project
+// and /admin-api proxy returns HTML/404. We retry a few read-only endpoints directly.
+const ADMIN_BACKEND_FALLBACK = 'https://newspulse-admin-backend.onrender.com/api';
+const FALLBACK_PATHS = new Set([
+  '/dashboard-stats',
+  '/stats',
+  '/system/ai-training-info',
+  '/admin-auth/session',
+]);
+
 apiClient.interceptors.response.use(
   (r) => r,
-  (err: AxiosError<any>) => {
+  async (err: AxiosError<any>) => {
     const status = err.response?.status;
     const data = err.response?.data as any;
     const msg = (data && (data.message || data.error)) || err.message;
-    console.error(`API ${status ?? ""}: ${msg}`, data);
+    const cfg: any = err.config || {};
+    const method = (cfg.method || 'get').toString().toLowerCase();
+    const reqUrl = (cfg.url || '').toString();
+    const base = (cfg.baseURL || '').toString();
+
+    // Helper to normalize path from axios config.url (may already be a path)
+    const normalizePath = (u: string) => {
+      try {
+        if (/^https?:\/\//i.test(u)) {
+          const url = new URL(u);
+          return url.pathname + (url.search || '');
+        }
+      } catch {}
+      return u.startsWith('/') ? u : `/${u}`;
+    };
+
+    // Opportunistic client-side fallback for GETs on critical dashboard/session endpoints
+    const path = normalizePath(reqUrl);
+    const isCandidate = method === 'get' && base.startsWith('/admin-api') && FALLBACK_PATHS.has(path.replace(/\?.*$/, ''));
+    const alreadyRetried = cfg.__retriedFallback === true;
+
+    if (!alreadyRetried && isCandidate && (status === 404 || status === 405)) {
+      try {
+        const url = `${ADMIN_BACKEND_FALLBACK}${path}`;
+        const resp = await axios.get(url, { withCredentials: true, timeout: 20_000 });
+        // Return as if axios resolved normally, preserving config
+        (resp as any).config = cfg;
+        return resp;
+      } catch (e) {
+        // fall through to normal error flow
+      } finally {
+        cfg.__retriedFallback = true;
+      }
+    }
+
+    console.error(`API ${status ?? ''}: ${msg}`, data);
     // On unauthorized in production, steer to correct auth page for area
     if (status === 401 && typeof window !== 'undefined' && !isDevelopment) {
-      const path = window.location.pathname || '';
-      const dest = path.startsWith('/employee') ? '/employee/login' : '/admin/login';
-      if (path !== dest) window.location.href = dest;
+      const pathNow = window.location.pathname || '';
+      const dest = pathNow.startsWith('/employee') ? '/employee/login' : '/admin/login';
+      if (pathNow !== dest) window.location.href = dest;
     }
     return Promise.reject(err);
   }
