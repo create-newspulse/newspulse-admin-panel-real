@@ -1,5 +1,6 @@
 // src/lib/api.ts
 import axios, { AxiosError } from "axios";
+import adminApi from './adminApi';
 
 // Unified API root and base
 // Prefer VITE_API_ROOT (no trailing /api), fallback to legacy VITE_API_URL (may include /api),
@@ -23,7 +24,9 @@ const DEFAULT_ROOT = isDevelopment
   : 'https://newspulse-backend-real.onrender.com';
 
 export const API_ROOT = normalizeRoot(ENV_ROOT_RAW) || LEGACY_ROOT || DEFAULT_ROOT;
-export const API_BASE_PATH = `${API_ROOT}/api`;
+// If API_ROOT is a relative proxy path (e.g., "/admin-api"), don't append "/api" again.
+const isRelative = /^\//.test(API_ROOT);
+export const API_BASE_PATH = isRelative ? API_ROOT : `${API_ROOT}/api`;
 
 console.log('🔧 API Base Resolution:', {
   MODE: import.meta.env.MODE,
@@ -166,10 +169,11 @@ export type LoginDTO = { email: string; password: string };
 export type LoginResp = { token: string; user: { id: string; name: string; email: string; role: 'founder'|'admin'|'employee' } };
 
 export const AuthAPI = {
-  // Updated: backend route mounted at /admin/auth/login (proxy adds /api prefix when using /admin-api)
+  // Use unified admin API client -> base: /api/admin (dev) or /admin-api/admin (prod)
+  // Backend route is POST /api/admin/login (router.post('/login') mounted at /api/admin)
   login: async (body: LoginDTO): Promise<LoginResp> => {
-  console.log('🔐 AuthAPI.login -> POST /admin/auth/login', { base: API_BASE_PATH, body });
-    const r = await apiClient.post('/admin/auth/login', body);
+    console.log('🔐 AuthAPI.login -> POST /login', { base: (adminApi.defaults.baseURL || '(unset)') });
+    const r = await adminApi.post('/login', body);
     const d: any = r.data || {};
     const token = d.token || d?.data?.token || '';
     const u = d.user || d?.data?.user || {};

@@ -3,6 +3,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    {
+      "source": "/admin-api/:path*",
+      "destination": "https://newspulse-backend-real.onrender.com/api/:path*"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

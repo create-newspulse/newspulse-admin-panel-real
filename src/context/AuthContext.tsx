@@ -7,7 +7,7 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import api, { API_BASE_PATH, setAuthToken } from '../lib/api';
+import { API_BASE_PATH, setAuthToken, AuthAPI } from '../lib/api';
 import { User } from '../types/User';
 
 // ✅ Auth context type
@@ -131,25 +131,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('API URL (base):', API_BASE_PATH);
     console.log('Payload:', { email }); // do not log password for security
     try {
-      const res = await api.post('/admin/auth/login', { email, password });
-      console.log('✅ Login response raw:', res.data);
-      if (res.data.success) {
+      const res = await AuthAPI.login({ email, password });
+      console.log('✅ Login response token/user:', { hasToken: !!res.token, user: res.user?.email });
+      if (res?.token && res?.user) {
         // Clear any force-logout flags if present
         try {
           sessionStorage.removeItem('np_force_logout');
           localStorage.removeItem('np_force_logout');
         } catch {}
-        if (res.data.token) {
-          localStorage.setItem('adminToken', res.data.token);
-          setAuthToken(res.data.token);
+        if (res.token) {
+          localStorage.setItem('adminToken', res.token);
+          setAuthToken(res.token);
         }
         const userData: User = {
-          _id: res.data.user?._id || '',
-          name: res.data.user?.name || 'Admin',
-          email: res.data.user?.email || email,
-          role: res.data.user?.role || 'editor',
-          avatar: res.data.user?.avatar || '',
-          bio: res.data.user?.bio || '',
+          _id: (res.user as any)?.id || (res.user as any)?._id || '',
+          name: res.user?.name || 'Admin',
+          email: res.user?.email || email,
+          role: (res.user?.role as any) || 'editor',
+          avatar: (res.user as any)?.avatar || '',
+          bio: (res.user as any)?.bio || '',
         };
         localStorage.setItem('currentUser', JSON.stringify(userData));
         localStorage.setItem('isLoggedIn', 'true');
@@ -158,13 +158,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setIsFounder(userData.role === 'founder');
         return true;
       } else {
-        console.warn('⚠️ Login unsuccessful:', res.data);
+        console.warn('⚠️ Login unsuccessful (missing token/user)');
         return false;
       }
     } catch (err: any) {
       console.error('❌ Login error (network/server):', err);
       if (err?.response) {
         console.error('Server responded:', err.response.status, err.response.data);
+        if (err.response.status === 401) {
+          console.error('Invalid email or password');
+        } else if (err.response.status === 405) {
+          console.error('Login 405: Check HTTP method or URL mismatch', err.response);
+        }
       }
       return false;
     }

@@ -2,12 +2,13 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
-import { AuthAPI, type LoginDTO } from '@/lib/api';
+import { type LoginDTO } from '@/lib/api';
+import { loginAdmin } from '@/lib/adminApi';
 import { useAuth } from '@/store/auth';
 import { toast } from 'sonner';
 import OtpModal from './OtpModal';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
-import { useNavigate } from 'react-router-dom';
+// import { useNavigate } from 'react-router-dom';
 
 const Schema = z.object({
   email: z.string().email(),
@@ -21,23 +22,34 @@ export default function LoginForm() {
   const [showPw, setShowPw] = useState(false);
   const [otpOpen, setOtpOpen] = useState(false);
   const setAuth = useAuth(s => s.setAuth);
-  const navigate = useNavigate();
+  // const navigate = useNavigate();
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     try {
-      const res = await AuthAPI.login(data as LoginDTO);
-      setAuth(res.user, res.token);
-      toast.success(`Welcome ${res.user.name} (${res.user.role})`);
-      // Route by role
-      navigate(
-        res.user.role === 'founder' ? '/founder/command'
-        : res.user.role === 'admin' ? '/admin/news'
-        : '/employee/news/new',
-        { replace: true }
-      );
+      // Shared admin client: base already includes /admin
+      // Try modern /login first; fallback to /auth/login automatically (handled in loginAdmin)
+      const { token, user } = await loginAdmin(data as LoginDTO);
+      if (token && user) {
+        setAuth(user, token);
+        toast.success(`Welcome ${user.name} (${user.role})`);
+        // Spec: route to admin dashboard
+        window.location.href = '/admin/dashboard';
+      } else {
+        throw { response: { status: 500, data: { message: 'Malformed login response' } } };
+      }
     } catch (e:any) {
-      toast.error(e?.response?.data?.message || 'Login failed');
+      const status = e?.response?.status;
+      if (status === 401) {
+        toast.error('Invalid email or password');
+      } else if (status === 405) {
+        console.error('Login 405: Check HTTP method or URL mismatch', e?.response);
+        toast.error('Login endpoint misconfigured (405 Method Not Allowed).');
+      } else if (status === 404) {
+        toast.error('Login endpoint not found even after fallback – verify backend routes');
+      } else {
+        toast.error(e?.response?.data?.message || 'Unexpected error. Please try again later.');
+      }
     } finally { setIsLoading(false); }
   };
 

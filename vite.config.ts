@@ -51,6 +51,13 @@ export default defineConfig(({ mode }): UserConfig => {
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
+        // Mirror Vercel rewrite for local dev
+        '/admin-api': {
+          target: 'http://localhost:5000/api',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/admin-api/, ''),
+        },
         '/socket.io': {
           target: API_WS,
           ws: true,

@@ -49,13 +49,13 @@ Use the proxy route (frontend domain) so JWT validation logic matches production
 ### PowerShell (Invoke-WebRequest)
 ```powershell
 $body = @{ email = "newspulse.team@gmail.com"; password = "News@123"; force = $true } | ConvertTo-Json
-Invoke-WebRequest -Uri "https://<your-vercel-domain>/admin-api/admin/auth/seed-founder" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing | Select-Object -ExpandProperty Content
+Invoke-WebRequest -Uri "https://<your-vercel-domain>/admin-api/admin/seed-founder" -Method POST -Body $body -ContentType "application/json" -UseBasicParsing | Select-Object -ExpandProperty Content
 ```
 
 ### Alternative: Native curl.exe syntax (if installed)
 ```powershell
 $body = '{"email":"newspulse.team@gmail.com","password":"News@123","force":true}'
-curl.exe -X POST "https://<your-vercel-domain>/admin-api/admin/auth/seed-founder" -H "content-type: application/json" -d $body
+curl.exe -X POST "https://<your-vercel-domain>/admin-api/admin/seed-founder" -H "content-type: application/json" -d $body
 ```
 
 If success, response should indicate user created or updated.
@@ -64,8 +64,8 @@ If success, response should indicate user created or updated.
 ## 5. Test Login
 Open: `https://<your-vercel-domain>/` (admin panel)
 - Enter founder email/password.
-- Check network tab: `POST /admin-api/admin/auth/login` returns token.
-- Verify a protected request (e.g. `GET /admin-api/admin/auth/me`).
+- Check network tab: `POST /admin-api/admin/login` returns token.
+- Verify a protected request (e.g. `GET /admin-api/admin/me`).
 
 ---
 ## 6. Common Pitfalls
@@ -78,7 +78,35 @@ Open: `https://<your-vercel-domain>/` (admin panel)
 
 ---
 ## 7. Optional Direct Mode
-If backend has stable CORS and you want to skip proxy, set `VITE_API_URL` in Vercel environment to `https://<backend-host>/api` and rebuild. Ensure CORS allows frontend origin.
+If backend has stable CORS and you want to skip the (currently failing) Vercel proxy functions, run in direct mode.
+
+### Direct Mode Setup (Recommended while functions are not deploying)
+1. Backend host (Render): `https://newspulse-backend-real.onrender.com`
+2. In Vercel Project → Environment Variables (Production):
+	- `VITE_API_URL=https://newspulse-backend-real.onrender.com/api`
+	- `ADMIN_BACKEND_URL=https://newspulse-backend-real.onrender.com` (still keep for future proxy recovery)
+	- `JWT_SECRET` (match backend) or `ADMIN_JWT_SECRET`
+	- `VITE_DEMO_MODE=false`
+3. Ensure backend CORS `ALLOWED_ORIGINS` includes:
+	- `https://admin.newspulse.co.in`
+	- (Optional) your Vercel preview domain(s) `https://*.vercel.app`
+4. Redeploy frontend (push a commit or use Vercel redeploy).
+5. Open browser DevTools Network tab and submit login; the request should go directly to:
+	- `https://newspulse-backend-real.onrender.com/api/admin/login`
+
+### Seed Founder in Direct Mode
+Run this once (PowerShell):
+```powershell
+$body = '{"email":"newspulse.team@gmail.com","password":"News@123","force":true}'
+curl.exe -X POST "https://newspulse-backend-real.onrender.com/api/admin/seed-founder" -H "content-type: application/json" -d $body
+```
+Expected JSON: `{ "success": true, "message": "Founder created" }` or `Founder password reset`.
+
+### Verify Login
+After seeding, use the UI. Successful login returns token; check Local Storage for `adminToken` and Network for 200 response.
+
+### When Proxy Functions Start Working Again
+Remove `VITE_API_URL` (or set it blank) to fall back to `/admin-api` proxy, ensuring serverless path security features are used. Keep CORS list updated.
 
 ---
 ## 8. Re-Seeding
@@ -91,7 +119,7 @@ Use `force = true` to reset password safely if founder already exists. Avoid cha
 Invoke-WebRequest -Uri "https://<backend-host>/api/health" -UseBasicParsing | Select-Object -ExpandProperty Content
 
 # Inspect headers from proxy seed endpoint
-$response = Invoke-WebRequest -Uri "https://<your-vercel-domain>/admin-api/admin/auth/seed-founder" -Method POST -Body $body -ContentType "application/json"
+$response = Invoke-WebRequest -Uri "https://<your-vercel-domain>/admin-api/admin/seed-founder" -Method POST -Body $body -ContentType "application/json"
 $response.Headers
 $response.Content
 ```
