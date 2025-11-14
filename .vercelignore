@@ -3,14 +3,16 @@
 # Allow only essential serverless functions
 # Important: When ignoring a folder, you must un-ignore the folder itself and parents
 # to allow specific files inside it to be included.
-api/**
-!api/
-!api/admin-proxy/
-!api/admin-proxy/**
-!api/system/
-!api/system/health.js
-!api/system/backend-origin.js
-!api/system/proxy-selftest.js
+# TEMP: disable broad api/ ignore while debugging 405 so all serverless functions deploy
+# (After confirming health endpoints, restore minimal ignores.)
+# api/**
+# !api/
+# !api/admin-proxy/
+# !api/admin-proxy/**
+# !api/system/
+# !api/system/health.js
+# !api/system/backend-origin.js
+# !api/system/proxy-selftest.js
 
 # Remove TypeScript versions of API routes to reduce function count
 api/**/*.ts
