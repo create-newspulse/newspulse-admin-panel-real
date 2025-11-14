@@ -23,6 +23,10 @@ const apiClient = axios.create({
   timeout: 20_000,
 });
 
+// Backwards-compatible alias for existing code that still references `baseURL`
+// (Some helper paths below were written before the refactor.)
+const baseURL = RESOLVED_BASE;
+
 // Debug interceptor to log requests
 apiClient.interceptors.request.use((config) => {
   console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
