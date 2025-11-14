@@ -98,7 +98,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             }
           }
           // Fallback-aware fetch: try proxied /admin-api first, then direct Render admin-backend if 404/HTML
-          const FALLBACK_ADMIN_API = 'https://newspulse-admin-backend.onrender.com/api';
+          const FALLBACK_ADMIN_API = 'https://newspulse-backend-real.onrender.com/api';
           const useFallback = API_BASE_PATH.startsWith('/admin-api');
           const doFetch = async (base: string) => fetch(`${base}/admin-auth/session`, { credentials: 'include' });
           let resp = await doFetch(API_BASE_PATH);
@@ -199,7 +199,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const r = await fetch(`${API_BASE_PATH}/admin-auth/logout`, { method: 'POST', credentials: 'include' });
       const ct = r.headers.get('content-type') || '';
       if (!r.ok || ct.includes('text/html')) {
-        const FALLBACK_ADMIN_API = 'https://newspulse-admin-backend.onrender.com/api';
+  const FALLBACK_ADMIN_API = 'https://newspulse-backend-real.onrender.com/api';
         await fetch(`${FALLBACK_ADMIN_API}/admin-auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
       }
     } catch {}

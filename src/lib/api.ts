@@ -59,7 +59,8 @@ apiClient.interceptors.request.use((config) => {
 // Centralized error logging (helps debug 404/500 quickly)
 // Fallback base for when Vercel custom domain still points to an old project
 // and /admin-api proxy returns HTML/404. We retry a few read-only endpoints directly.
-const ADMIN_BACKEND_FALLBACK = 'https://newspulse-admin-backend.onrender.com/api';
+// Use the confirmed production backend host for fallbacks (matches README Direct Mode setup)
+const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
 const FALLBACK_PATHS = new Set([
   '/dashboard-stats',
   '/stats',
