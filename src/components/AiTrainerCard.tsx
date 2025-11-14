@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 
 export default function AiTrainerCard() {
   const [trainingInfo, setTrainingInfo] = useState<any>(null);
@@ -9,19 +10,12 @@ export default function AiTrainerCard() {
   useEffect(() => {
     const fetchTrainingInfo = async () => {
       try {
-  const res = await fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' });
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !ct.includes('application/json')) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
-        }
-        const json = await res.json();
-
-        if (res.ok && json.success && json.data) {
-          setTrainingInfo(json.data); // ✅ Correct assignment
+        const json = await fetchJson(`${API_BASE_PATH}/system/ai-training-info`);
+        if (json?.success && json?.data) {
+          setTrainingInfo(json.data);
         } else {
           console.error('⚠️ Training Info API Error:', json);
-          setError(json.message || '❌ Failed to load training info.');
+          setError(json?.message || '❌ Failed to load training info.');
         }
       } catch (err) {
         console.error('❌ AI Training Info Fetch Error:', err);
@@ -43,20 +37,17 @@ export default function AiTrainerCard() {
 
   const handleActivateTrainer = async () => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/ai-trainer/activate`, {
+      const data = await fetchJson(`${API_BASE_PATH}/system/ai-trainer/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trigger: 'manual' }),
-        credentials: 'include',
       });
 
-      const data = await res.json();
-
-      if (res.ok) {
+      if ((data as any)) {
         alert('✅ Full AI Trainer activated!');
         console.log('🧠 Activation Response:', data);
       } else {
-        alert('❌ Activation failed: ' + data.message);
+        alert('❌ Activation failed');
       }
     } catch (err) {
       alert('❌ Failed to activate trainer. Check backend logs.');

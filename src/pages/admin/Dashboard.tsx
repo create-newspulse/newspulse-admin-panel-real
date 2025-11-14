@@ -10,6 +10,7 @@ import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
 import { API_BASE_PATH } from '@lib/api';
+import { fetchJson } from '@lib/fetchJson';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import apiClient from '@lib/api';
@@ -103,19 +104,13 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-  // Call backend health via resolved base (serverless disabled in prod)
-  const r = await fetch(`${API_BASE}/system/health`, { credentials: 'include' });
-        const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-          const text = await r.text();
-          setAiCommand({ _nonJson: true, contentType: ct || 'unknown', preview: text.slice(0, 600) });
-          return;
-        }
-        const json = await r.json();
+        // Use fallback-aware helper to handle misrouted /admin-api proxy
+        const json = await fetchJson(`${API_BASE}/system/health`);
         setAiCommand(json);
       } catch (err: any) {
         console.error('❌ AI Command API Error:', err?.message || err);
-        setAiCommand({ _error: err?.message || 'Unknown error' });
+        // If the server returned HTML/Not Found, surface that preview in the panel
+        setAiCommand({ _nonJson: true, contentType: 'unknown', preview: String(err?.message || 'Unknown error') });
       }
     };
 
