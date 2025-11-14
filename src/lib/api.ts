@@ -9,10 +9,12 @@ import axios, { AxiosError } from "axios";
 const isDevelopment = import.meta.env.MODE === 'development';
 const RAW_ENV_BASE = (import.meta.env.VITE_API_URL || '').toString().trim();
 if (!RAW_ENV_BASE) {
-  console.warn('⚠️ VITE_API_URL is missing in production. Falling back to proxy path.');
+  console.warn('⚠️ VITE_API_URL is missing. Falling back to direct backend URL in production.');
 }
 // Determine fallback path depending on environment
-const FALLBACK_BASE = isDevelopment ? '/api' : '/admin-api';
+const FALLBACK_BASE = isDevelopment
+  ? '/api'
+  : 'https://newspulse-backend-real.onrender.com/api';
 const RESOLVED_BASE = (RAW_ENV_BASE || FALLBACK_BASE).replace(/\/$/, '');
 console.log('🔧 API Base Resolution:', { MODE: import.meta.env.MODE, VITE_API_URL: RAW_ENV_BASE || null, RESOLVED_BASE });
 
