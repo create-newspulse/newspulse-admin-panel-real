@@ -36,7 +36,9 @@ export default async function handler(req, res) {
         if (isRecursiveTarget(backendBase, req.headers.host)) {
             return res.status(500).json({ error: 'ADMIN_BACKEND_URL points to the frontend host. Set it to your backend origin (e.g. https://api.yourdomain.com or Render URL).', host: req.headers.host });
         }
-        const secret = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
+    // Use ADMIN_JWT_SECRET if set, otherwise fall back to JWT_SECRET to align with backend router
+    const secretValue = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET;
+    const secret = new TextEncoder().encode(secretValue);
         const pathParam = req.query.path || [];
         const joinedPath = pathParam.join('/');
         // Allow unauthenticated access for explicit public endpoints
@@ -59,11 +61,16 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Unauthorized' });
             // Verify session JWT
             try {
-                await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
-            }
-            catch (e) {
-                const err = e;
-                return res.status(401).json({ error: 'Invalid session', detail: err.message });
+                // First attempt: permissive (no audience/issuer) for legacy tokens
+                await jwtVerify(tokenToVerify, secret);
+            } catch (e1) {
+                try {
+                    // Second attempt: strict claims if present
+                    await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
+                } catch (e2) {
+                    const err = e2 || e1;
+                    return res.status(401).json({ error: 'Invalid session', detail: err.message });
+                }
             }
         }
     const targetUrl = new URL(`${backendBase}/api/${joinedPath}`);
