@@ -1,41 +1,50 @@
 // src/lib/api.ts
 import axios, { AxiosError } from "axios";
 
-/**
- * Simplified backend origin resolution per new requirements:
- * Use VITE_API_URL directly. If missing, warn and fallback to '/admin-api'.
- * In development (vite), if VITE_API_URL is absent, fallback to '/api'.
- */
+// Unified API root and base
+// Prefer VITE_API_ROOT (no trailing /api), fallback to legacy VITE_API_URL (may include /api),
+// and finally sensible defaults for dev/prod.
 const isDevelopment = import.meta.env.MODE === 'development';
-const RAW_ENV_BASE = (import.meta.env.VITE_API_URL || '').toString().trim();
-if (!RAW_ENV_BASE) {
-  console.warn('⚠️ VITE_API_URL is missing. Falling back to direct backend URL in production.');
-}
-// Determine fallback path depending on environment
-const FALLBACK_BASE = isDevelopment
-  ? '/api'
-  : 'https://newspulse-backend-real.onrender.com/api';
-const RESOLVED_BASE = (RAW_ENV_BASE || FALLBACK_BASE).replace(/\/$/, '');
-console.log('🔧 API Base Resolution:', { MODE: import.meta.env.MODE, VITE_API_URL: RAW_ENV_BASE || null, RESOLVED_BASE });
+const ENV_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '').toString().trim().replace(/\/$/, '');
+const LEGACY_URL_RAW = (import.meta.env.VITE_API_URL || '').toString().trim();
+
+// If only the legacy VITE_API_URL is provided, strip any trailing '/api' to get the root
+const LEGACY_ROOT = LEGACY_URL_RAW
+  ? LEGACY_URL_RAW.replace(/\/?api\/?$/, '').replace(/\/$/, '')
+  : '';
+
+const DEFAULT_ROOT = isDevelopment
+  ? 'http://localhost:5000'
+  : 'https://newspulse-backend-real.onrender.com';
+
+export const API_ROOT = (ENV_ROOT_RAW || LEGACY_ROOT || DEFAULT_ROOT).replace(/\/$/, '');
+export const API_BASE_PATH = `${API_ROOT}/api`;
+
+console.log('🔧 API Base Resolution:', {
+  MODE: import.meta.env.MODE,
+  VITE_API_ROOT: ENV_ROOT_RAW || null,
+  VITE_API_URL: LEGACY_URL_RAW || null,
+  API_ROOT,
+  API_BASE_PATH,
+});
 
 // Single axios instance for all API calls (no auto /api suffix logic now)
 const apiClient = axios.create({
-  baseURL: RESOLVED_BASE,
+  baseURL: API_BASE_PATH,
   withCredentials: true,
   timeout: 20_000,
 });
 
 // Backwards-compatible alias for existing code that still references `baseURL`
 // (Some helper paths below were written before the refactor.)
-const baseURL = RESOLVED_BASE;
+const baseURL = API_BASE_PATH;
 
 // Debug interceptor to log requests
 apiClient.interceptors.request.use((config) => {
   // Normalize accidental double '/api' (e.g., base '/api' + url '/api/x')
+  // Drop any leading '/api' if base already includes '/api'
   const baseEndsWithApi = (config.baseURL || '').replace(/\/$/, '').endsWith('/api');
-  if (baseEndsWithApi && (config.url || '').startsWith('/api/')) {
-    config.url = (config.url || '').slice(4); // drop leading '/api'
-  }
+  if (baseEndsWithApi && (config.url || '').startsWith('/api/')) config.url = (config.url || '').slice(4);
   console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
   return config;
 });
@@ -146,9 +155,6 @@ export const api = {
 
 export default apiClient;
 
-// Export resolved base path for building absolute URLs in anchors/fetch
-export const API_BASE_PATH = RESOLVED_BASE;
-
 // ---- Unified Auth API (stubs-compatible) ----
 // AxiosResponse type no longer needed after refactor
 export type LoginDTO = { email: string; password: string };
@@ -157,7 +163,7 @@ export type LoginResp = { token: string; user: { id: string; name: string; email
 export const AuthAPI = {
   // Updated: backend route mounted at /admin/auth/login (proxy adds /api prefix when using /admin-api)
   login: async (body: LoginDTO): Promise<LoginResp> => {
-    console.log('🔐 AuthAPI.login -> POST /admin/auth/login', { base: RESOLVED_BASE, body });
+  console.log('🔐 AuthAPI.login -> POST /admin/auth/login', { base: API_BASE_PATH, body });
     const r = await apiClient.post('/admin/auth/login', body);
     const d: any = r.data || {};
     const token = d.token || d?.data?.token || '';
