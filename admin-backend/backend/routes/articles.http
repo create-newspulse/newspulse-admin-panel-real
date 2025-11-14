@@ -1,0 +1,43 @@
+### Articles API Examples
+
+GET http://localhost:5000/api/articles?page=1&limit=5
+Accept: application/json
+
+### Search
+GET http://localhost:5000/api/articles?q=Sample&page=1&limit=5
+Accept: application/json
+
+### Meta Counts
+GET http://localhost:5000/api/articles/meta
+Accept: application/json
+
+### Get One (replace ID)
+GET http://localhost:5000/api/articles/{{ARTICLE_ID}}
+Accept: application/json
+
+### Create (requires Bearer token)
+POST http://localhost:5000/api/articles
+Content-Type: application/json
+Authorization: Bearer {{TOKEN}}
+
+{
+  "title": "CLI Created Article",
+  "summary": "Created from .http collection",
+  "content": "<p>Body</p>",
+  "category": "Breaking",
+  "tags": ["cli","test"],
+  "language": "en",
+  "status": "draft"
+}
+
+### Archive
+PATCH http://localhost:5000/api/articles/{{ARTICLE_ID}}/archive
+Authorization: Bearer {{TOKEN}}
+
+### Restore
+PATCH http://localhost:5000/api/articles/{{ARTICLE_ID}}/restore
+Authorization: Bearer {{TOKEN}}
+
+### Soft Delete
+DELETE http://localhost:5000/api/articles/{{ARTICLE_ID}}
+Authorization: Bearer {{TOKEN}}

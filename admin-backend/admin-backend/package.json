@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "admin-backend": "file:.."
+  }
+}

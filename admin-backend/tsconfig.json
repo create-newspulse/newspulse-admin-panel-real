@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "lib": ["es2022"],
+    "types": ["node", "express"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": false
+  },
+  "include": ["./**/*.ts", "./**/*.js", "./**/*.mjs"],
+  "exclude": ["node_modules", "uploads", "backend/data"]
+}

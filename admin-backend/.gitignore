@@ -1,0 +1,164 @@
+# ===================================================
+# 📰 NewsPulse Project – Secure Git Ignore
+# ===================================================
+# Covers Frontend, Backend, Admin Panel, and AI Modules
+# Protects secrets, cache, build files, and local configs
+# ===================================================
+
+# ===================================================
+# 🚫 Logs
+# ===================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# ===================================================
+# 🚫 Diagnostic Reports
+# ===================================================
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# ===================================================
+# 🚫 Runtime Data
+# ===================================================
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ===================================================
+# 🧪 Coverage & Testing
+# ===================================================
+coverage/
+*.lcov
+.nyc_output/
+.cache/
+.parcel-cache/
+jest-html-reporters-*/
+
+# ===================================================
+# 🔧 Tools & Caches
+# ===================================================
+.grunt/
+bower_components/
+.lock-wscript
+build/
+dist/
+node_modules/
+jspm_packages/
+.web_modules/
+.docusaurus/
+.serverless/
+.fusebox/
+.dynamodb/
+.firebase/
+.tern-port
+.tmp/
+.temp/
+
+# ===================================================
+# 🔐 Secrets & Config (MOST IMPORTANT)
+# ===================================================
+# Prevent exposure of sensitive files and keys
+**/serviceAccountKey.json
+backend/serviceAccountKey.json
+config/*.json
+uploads/
+data/
+*.pem
+*.key
+*.crt
+firebase/
+firebase-adminsdk.json
+firebase-secrets.json
+
+# ===================================================
+# ⚙️ Environment & Settings
+# ===================================================
+.env
+.env.*
+*.env
+!.env.example
+.eslintcache
+.stylelintcache
+.node_repl_history
+*.tsbuildinfo
+.yarn-integrity
+.vscode-test
+.vscode/
+
+# ===================================================
+# 🧩 Yarn (v3+)
+# ===================================================
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# ===================================================
+# ⚙️ Framework Output
+# ===================================================
+# Next.js
+.next/
+out/
+
+# Nuxt.js
+.nuxt/
+dist/
+
+# Gatsby
+.cache/
+
+# VuePress
+.vuepress/dist/
+.temp/
+.cache/
+
+# VitePress
+**/.vitepress/dist/
+**/.vitepress/cache/
+
+# SvelteKit
+.svelte-kit/
+
+# ===================================================
+# 🖼️ Static / Generated Files
+# ===================================================
+public/build/
+public/uploads/
+public/assets/generated/
+uploads/
+backups/
+ai-logs/
+ai-temp/
+ai-history/
+ai-cache/
+
+# ===================================================
+# 🧠 KiranOS / AI Modules
+# ===================================================
+# Generated AI logs, training cache, and JSON stats
+ai/*.json
+system-ai/
+kiranos-cache/
+diagnostics/
+security-logs/
+trust-meter/
+compliance-logs/
+
+# ===================================================
+# 🛠️ IDEs & Editors
+# ===================================================
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+Thumbs.db
