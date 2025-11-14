@@ -9,6 +9,7 @@ import ChartComponent from '@components/ChartComponent';
 import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
+import { API_BASE_PATH } from '@lib/api';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import apiClient from '@lib/api';
@@ -40,8 +41,8 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [debugExpanded, setDebugExpanded] = useState(false);
 
-  // Use relative /api so Vite proxy handles the active backend port in development
-  const API_BASE = '/api';
+  // Use resolved API base (Render in production, proxy in dev)
+  const API_BASE = API_BASE_PATH;
 
   const articles = useMemo(
     () => [
@@ -102,8 +103,8 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        // Use serverless health endpoint to guarantee JSON for the debug box
-        const r = await fetch('/api/system/health', { credentials: 'include' });
+  // Call backend health via resolved base (serverless disabled in prod)
+  const r = await fetch(`${API_BASE}/system/health`, { credentials: 'include' });
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
           const text = await r.text();
