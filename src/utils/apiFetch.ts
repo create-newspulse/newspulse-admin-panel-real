@@ -4,11 +4,17 @@ import { API_BASE_PATH } from '@lib/api';
 type ApiOptions = RequestInit & { headers?: Record<string, string> };
 
 function resolveUrl(url: string) {
-  // Route backend system calls through the authenticated proxy in production
-  if (url.startsWith('/api/system')) {
-    return `${API_BASE_PATH}${url.slice(4)}`; // '/api/system/x' -> `${API_BASE_PATH}/system/x`
+  // If caller mistakenly prefixes with '/api' and our base already ends with '/api', drop duplication
+  const baseEndsWithApi = /\/api$/i.test(API_BASE_PATH.replace(/\/$/, ''));
+  if (baseEndsWithApi && url.startsWith('/api/')) {
+    url = url.slice(4); // remove the leading '/api'
   }
-  return url; // keep other serverless endpoints (e.g., /api/ai-engine) untouched
+  // Route backend system calls via resolved base in production
+  if (url.startsWith('/system/')) {
+    return `${API_BASE_PATH.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+  // For absolute or already-resolved URLs, return as-is
+  return url;
 }
 
 export async function apiFetch<T = any>(url: string, options: ApiOptions = {}): Promise<T> {

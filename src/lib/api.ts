@@ -31,6 +31,11 @@ const baseURL = RESOLVED_BASE;
 
 // Debug interceptor to log requests
 apiClient.interceptors.request.use((config) => {
+  // Normalize accidental double '/api' (e.g., base '/api' + url '/api/x')
+  const baseEndsWithApi = (config.baseURL || '').replace(/\/$/, '').endsWith('/api');
+  if (baseEndsWithApi && (config.url || '').startsWith('/api/')) {
+    config.url = (config.url || '').slice(4); // drop leading '/api'
+  }
   console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
   return config;
 });
