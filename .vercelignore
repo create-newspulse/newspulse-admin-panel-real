@@ -1,3 +1,32 @@
+# Keep Vite frontend; prune serverless functions to stay under Hobby plan limits (12)
+
+# Ignore most API functions; allowlist only the proxy and minimal diagnostics
+api/**
+!api/_lib/**
+!api/admin-proxy/**
+!api/system/health.js
+!api/system/backend-origin.js
+!api/system/proxy-selftest.js
+
+# Exclude backend servers and legacy apps from Vercel build context
+admin-backend/
+backend/
+newspulse-backend/
+render-backend-real/
+legacy/
+legacy-js-backup/
+pages/
+admin/
+kiranos/
+requests/
+tests/
+tmp-hook-test/
+
+# Misc
+*.log
+*.local
+*.env*
+serviceAccountKey.json
 # Prevent Vercel from detecting legacy Next.js pages and other non-build folders
 # Anchor to repo root so we don't accidentally ignore src/pages/
 /pages/
