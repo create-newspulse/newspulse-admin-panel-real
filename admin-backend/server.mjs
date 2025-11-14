@@ -160,6 +160,12 @@ const PROD_ORIGINS = (() => {
   return Array.from(new Set(list));
 })();
 const ALLOWED_ORIGINS = isProd ? PROD_ORIGINS : DEV_ORIGINS;
+// Additional automatic allow patterns (to reduce redeploy friction for new preview domains)
+const AUTO_ALLOW_HOST_PATTERNS = [
+  /newspulse-admin-panel-real-[a-z0-9-]+\.vercel\.app$/i, // Vercel preview deployments for this project
+  /newspulse.*\.vercel\.app$/i,                          // broader newspulse Vercel previews
+  /newspulse\.co\.in$/i                                  // production custom domain
+];
 
 // ====== Socket.IO (v4) ======
 const io = new SocketIOServer(server, {
@@ -193,9 +199,14 @@ io.on('connection', (socket) => {
 // ====== Core middleware (before routes)
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // same-origin / curl
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    if (!isProd) return cb(null, true);
+    try {
+      const host = origin.replace(/^https?:\/\//, '').split('/')[0];
+      if (AUTO_ALLOW_HOST_PATTERNS.some(re => re.test(host))) return cb(null, true);
+    } catch {}
+    if (!isProd) return cb(null, true); // allow all in dev
+    console.warn('❌ CORS blocked origin:', origin, 'Allowed list:', ALLOWED_ORIGINS);
     return cb(new Error('Not allowed by CORS'), false);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
