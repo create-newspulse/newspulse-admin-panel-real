@@ -3,9 +3,17 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    // Ensure API routes are not swallowed by the SPA catch-all rewrite
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+
+    // Proxy admin API through serverless function
     { "source": "/admin-api/(.*)", "destination": "/api/admin-proxy/$1" },
+
+    // Static auth sub-app rewrites (if used)
     { "source": "/auth", "destination": "/auth/index.html" },
     { "source": "/auth/(.*)", "destination": "/auth/$1" },
+
+    // SPA fallback for Vite app (kept last)
     { "source": "/(.*)", "destination": "/" }
   ]
 }
