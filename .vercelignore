@@ -1,8 +1,13 @@
 # Vercel Ignore – trimmed to keep hobby plan under 12 functions while preserving Vite src/**
 
 # Allow only essential serverless functions
+# Important: When ignoring a folder, you must un-ignore the folder itself and parents
+# to allow specific files inside it to be included.
 api/**
+!api/
+!api/admin-proxy/
 !api/admin-proxy/**
+!api/system/
 !api/system/health.js
 !api/system/backend-origin.js
 !api/system/proxy-selftest.js
