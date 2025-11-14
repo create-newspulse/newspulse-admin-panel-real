@@ -12,7 +12,7 @@
     "test": "vitest",
     "build": "node scripts/write-build-info.cjs && vite build",
     "preview": "vite preview --port 5173",
-    "prepare": "is-ci || husky",
+    "prepare": "node -e \"process.exit(process.env.CI ? 0 : 1)\" || husky || true",
     "start": "node server.js",
     "start:static": "npx serve -s dist -l ${PORT:-10000}",
   "auth:diagnose": "node scripts/admin-auth-diagnose.mjs --email newspulse.team@gmail.com --password News@123 --login",
