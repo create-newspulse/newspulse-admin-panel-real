@@ -2,6 +2,15 @@ Deployment guide - Admin Panel (frontend on Vercel, backend on Render)
 
 This README explains the recommended deployment: frontend hosted on Vercel, backend (Express) hosted on Render (or Railway/Fly). It includes the exact environment variables you must set and quick verification steps.
 
+Quick setup (2025 update)
+- Proxy mode (recommended): leave `VITE_API_URL` unset in Vercel. The app calls `/admin-api/*` which Vercel rewrites to your backend (see `vercel.json`). This avoids CORS entirely.
+- Direct mode (optional): set ONE of
+  - `VITE_ADMIN_API_BASE_URL=https://<backend-root>` (no trailing `/api`)
+  - `VITE_API_ROOT=https://<backend-root>` (no trailing `/api`)
+  - `VITE_API_URL=https://<backend-root>` (legacy; trailing `/api` is stripped if present)
+- Important: `.env.production.local` is intentionally blank in the repo so builds don’t force localhost. Do not reintroduce localhost values there.
+- If using direct mode, ensure backend CORS allows your Vercel preview and production domains. Our backend has pattern-based CORS that already admits `*.vercel.app` and your custom domain.
+
 1) Deploy the backend (Render example)
 - Go to https://dashboard.render.com -> New -> Web Service -> Connect to GitHub -> select this repo.
 - Choose branch: main
