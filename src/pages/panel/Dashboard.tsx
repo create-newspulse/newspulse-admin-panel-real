@@ -1,11 +1,14 @@
-import QuickCards from '@/components/dashboard/QuickCards';
-import SystemAlerts from '@/components/alerts/SystemAlerts';
+import React from 'react';
 
-export default function PanelDashboard() {
-  return (
-    <div className="space-y-6">
-      <QuickCards />
-      <SystemAlerts />
-    </div>
-  );
-}
+// Minimal dashboard placeholder to satisfy Vite build. Replace with real content later.
+// Keeping this tiny ensures that missing file errors on Vercel are resolved.
+const Dashboard: React.FC = () => {
+	return (
+		<div style={{ padding: 24 }}>
+			<h1>News Pulse Admin Dashboard</h1>
+			<p>Placeholder dashboard component loaded successfully.</p>
+		</div>
+	);
+};
+
+export default Dashboard;

@@ -1,74 +1,50 @@
-# Keep Vite frontend; prune serverless functions to stay under Hobby plan limits (12)
+# Vercel Ignore – trimmed to keep hobby plan under 12 functions while preserving Vite src/**
 
-# Ignore most API functions; allowlist only the proxy and minimal diagnostics
+# Allow only essential serverless functions
 api/**
-!api/_lib/**
 !api/admin-proxy/**
 !api/system/health.js
 !api/system/backend-origin.js
 !api/system/proxy-selftest.js
 
-# Exclude backend servers and legacy apps from Vercel build context
-admin-backend/
-backend/
-newspulse-backend/
-render-backend-real/
-legacy/
-legacy-js-backup/
-pages/
-admin/
-kiranos/
-requests/
-tests/
-tmp-hook-test/
+# Remove TypeScript versions of API routes to reduce function count
+api/**/*.ts
+api/**/*.tsx
 
-# Misc
+# Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
+/admin-backend/
+/backend/
+/newspulse-backend/
+/render-backend-real/
+/legacy/
+/legacy-js-backup/
+/kiranos/
+/requests/
+/tests/
+/tmp-hook-test/
+
+# Ignore ONLY the root Next.js pages directory, keep src/pages for Vite
+/pages/
+
+# General junk / secrets / build artifacts
 *.log
 *.local
 *.env*
 serviceAccountKey.json
-# Prevent Vercel from detecting legacy Next.js pages and other non-build folders
-# Anchor to repo root so we don't accidentally ignore src/pages/
-/pages/
-legacy/
-admin-backend/
-newspulse-backend/
-newspulse-backend/**
-newspulse-admin-panel-real-main/**
-**/*.md
-# .vercelignore
-
-# Keep only JS implementations of API routes (ignore TS/TSX under /api)
-api/**/*.ts
-api/**/*.tsx
-
 node_modules/
 dist/
 .cache/
 .next/
 out/
-
-.env*
-*.env
-admin-backend/.env*
-frontend/.env*
-
-admin-backend
-uploads
-backups
-*.md
-*.log
-
+uploads/
+backups/
+logs/
 *.key
 *.pem
 *.p12
 *.crt
 *.enc
 *.bak
-serviceAccountKey.json
-
-logs/
-*.log
 .vscode/
 .idea/
 .DS_Store
