@@ -419,6 +419,8 @@ app.use('/api/system/sentinel-check', sentinelCheck);
 app.use('/api/system/secure-data', secureData);
 app.use('/api/system/threat-status', threatStatus);
 app.use('/api/system/status', systemStatus);
+// Alias to support existing UI components requesting /api/system/health
+app.use('/api/system/health', systemStatus);
 app.use('/api/dashboard/threat-stats', dashboardThreatStats);
 app.use('/api/system/logs', logs);
 // Live content (Inspiration Hub / Live TV)
@@ -432,6 +434,8 @@ app.use('/api/news', news);
 app.use('/api/polls/live-poll-stats', livePollStatsRoute);
 app.use('/api/polls', polls);
 app.use('/api/dashboard-stats', dashboardStats);
+// Legacy alias for older code requesting /api/stats
+app.use('/api/stats', dashboardStats);
 app.use('/api/reports', exportReportRoute);
 app.use('/api/revenue', revenueRoutes);
 // Mount assist route

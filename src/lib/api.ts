@@ -8,7 +8,14 @@ import adminApi from './adminApi';
 // We keep the exported name API_BASE_PATH for compatibility with existing imports.
 const isDevelopment = import.meta.env.MODE === 'development';
 const RAW = (import.meta.env.VITE_API_URL || '').trim();
-const API_BASE_PATH = RAW ? RAW.replace(/\/$/, '') : 'http://localhost:5000/api';
+let API_BASE_PATH = RAW ? RAW.replace(/\/$/, '') : 'http://localhost:5000/api';
+// If a custom VITE_API_URL was provided without trailing /api or /admin-api, normalize to include /api
+if (RAW) {
+  const lowered = API_BASE_PATH.toLowerCase();
+  if (!/(\/api|\/admin-api)$/.test(lowered)) {
+    API_BASE_PATH = API_BASE_PATH + '/api';
+  }
+}
 export { API_BASE_PATH };
 export const API_ROOT = API_BASE_PATH.replace(/\/api$/i, '');
 console.log('🔧 API Base Resolution (simplified):', { MODE: import.meta.env.MODE, API_BASE_PATH, API_ROOT });

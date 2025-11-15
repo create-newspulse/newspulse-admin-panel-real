@@ -537,6 +537,8 @@ app.use('/api/system/sentinel-check', sentinelCheck);
 app.use('/api/system/secure-data', secureData);
 app.use('/api/system/threat-status', threatStatus);
 app.use('/api/system/status', systemStatus);
+// Alias: some frontend builds still call /api/system/health
+app.use('/api/system/health', systemStatus);
 app.use('/api/dashboard/threat-stats', dashboardThreatStats);
 app.use('/api/system/logs', logs);
 // Live content (Inspiration Hub / Live TV)
