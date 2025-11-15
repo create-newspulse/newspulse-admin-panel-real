@@ -617,6 +617,29 @@ app.use('/api/kiranos', kiranosRoutes);
 // Alias for /api/stats to satisfy frontend calls
 app.use('/api/stats', dashboardStats);
 
+// ===== Legacy / Unprefixed Path Aliases (dev convenience) =====
+// Some local UI code still calls endpoints without the /api prefix (e.g. http://localhost:5000/system/ai-training-info)
+// To avoid blocking local development we expose a limited alias set when not in production.
+if (!isProd) {
+  // System feature aliases
+  app.use('/system/ai-training-info', aiTrainingInfo);
+  app.use('/system/monitor-hub', monitorHubRoute);
+  app.use('/system/status', systemStatus);
+  app.use('/system/health', systemStatus);
+  app.use('/system/thinking-feed', thinkingFeedRoute);
+  app.use('/system/ai-queue', aiQueue);
+  app.use('/system/ai-diagnostics', aiDiagnosticsRoutes);
+  // Stats aliases
+  app.use('/stats', dashboardStats);
+  app.use('/dashboard-stats', dashboardStats);
+  // Admin auth aliases (mount full router so /admin/login works)
+  app.use('/admin', adminAuth);
+  // Minimal session probe for legacy code expecting /admin-auth/session
+  app.get('/admin-auth/session', (req, res) => {
+    res.json({ ok: true, authenticated: false, message: 'Legacy /admin-auth/session alias. Use /api/admin/login for auth.' });
+  });
+}
+
 // Bundle index (keep at end)
 app.use(backendIndex);
 
