@@ -1,9 +1,9 @@
 import axios, { AxiosError } from 'axios';
+import { API_BASE_PATH } from './api';
 
-// Centralized Admin Backend client
-// Uses relative proxy base so preview/prod work uniformly via Vercel rewrites
-const base = (import.meta.env.VITE_ADMIN_API_BASE || '/admin-api').replace(/\/$/, '');
-export const ADMIN_API_BASE = `${base}/admin`;
+// Centralized Admin Backend client now derives from unified API_BASE_PATH
+// Backend mounts admin auth at /api/admin/* so we append '/admin'
+export const ADMIN_API_BASE = `${API_BASE_PATH.replace(/\/$/, '')}/admin`;
 
 export const adminApi = axios.create({
   baseURL: ADMIN_API_BASE,

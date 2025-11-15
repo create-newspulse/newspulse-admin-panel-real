@@ -80,30 +80,32 @@ Open: `https://<your-vercel-domain>/` (admin panel)
 ## 7. Optional Direct Mode
 If backend has stable CORS and you want to skip the (currently failing) Vercel proxy functions, run in direct mode.
 
-### Direct Mode Setup (Recommended while functions are not deploying)
-1. Backend host (Render): `https://newspulse-backend-real.onrender.com`
+### Direct Mode Setup (Recommended while proxy functions are inactive)
+1. Admin backend host (Render service exposing `/api/admin/*`): `https://newspulse-admin-backend.onrender.com`
 2. In Vercel Project → Environment Variables (Production):
-	- `VITE_API_URL=https://newspulse-backend-real.onrender.com/api`
-	- `ADMIN_BACKEND_URL=https://newspulse-backend-real.onrender.com` (still keep for future proxy recovery)
-	- `JWT_SECRET` (match backend) or `ADMIN_JWT_SECRET`
+	- `VITE_API_URL=https://newspulse-admin-backend.onrender.com/api`  ← single source of truth
+	- `ADMIN_BACKEND_URL=https://newspulse-admin-backend.onrender.com` (optional legacy usage)
+	- `ADMIN_JWT_SECRET` (or `JWT_SECRET`) – must equal backend secret
 	- `VITE_DEMO_MODE=false`
-3. Ensure backend CORS `ALLOWED_ORIGINS` includes:
+3. Backend CORS must allow:
+	- `http://localhost:5173`, `http://localhost:3000`
 	- `https://admin.newspulse.co.in`
-	- (Optional) your Vercel preview domain(s) `https://*.vercel.app`
-4. Redeploy frontend (push a commit or use Vercel redeploy).
-5. Open browser DevTools Network tab and submit login; the request should go directly to:
-	- `https://newspulse-backend-real.onrender.com/api/admin/login`
+	- Preview domains matching `newspulse-admin-panel-real-*.vercel.app`
+4. Redeploy frontend.
+5. Network login flow should POST directly to:
+	- `https://newspulse-admin-backend.onrender.com/api/admin/login`
 
 ### Seed Founder in Direct Mode
 Run this once (PowerShell):
 ```powershell
 $body = '{"email":"newspulse.team@gmail.com","password":"News@123","force":true}'
-curl.exe -X POST "https://newspulse-backend-real.onrender.com/api/admin/seed-founder" -H "content-type: application/json" -d $body
+curl.exe -X POST "https://newspulse-admin-backend.onrender.com/api/admin/seed-founder" -H "content-type: application/json" -d $body
 ```
 Expected JSON: `{ "success": true, "message": "Founder created" }` or `Founder password reset`.
 
 ### Verify Login
 After seeding, use the UI. Successful login returns token; check Local Storage for `adminToken` and Network for 200 response.
+If you still see 404 HTML, confirm you are NOT hitting the general backend `newspulse-backend-real` (it lacks `/api/admin/*`).
 
 ### When Proxy Functions Start Working Again
 Remove `VITE_API_URL` (or set it blank) to fall back to `/admin-api` proxy, ensuring serverless path security features are used. Keep CORS list updated.

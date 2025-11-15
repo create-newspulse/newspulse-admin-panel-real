@@ -1,21 +1,10 @@
-// src/lib/api.ts
+// JS mirror simplified (VITE_API_URL or localhost)
 import axios from "axios";
-// JavaScript mirror of src/lib/api.ts (keep in sync)
 const isDevelopment = import.meta.env.MODE === 'development';
-const ADMIN_API_BASE_URL_RAW = (import.meta.env.VITE_ADMIN_API_BASE_URL || '') + '';
-const API_ROOT_RAW = (import.meta.env.VITE_API_ROOT || '') + '';
-const LEGACY_URL_RAW = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || '') + '';
-const normalizeRoot = (v) => (v || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
-const candidates = [
-    normalizeRoot(ADMIN_API_BASE_URL_RAW),
-    normalizeRoot(API_ROOT_RAW),
-    normalizeRoot(LEGACY_URL_RAW),
-    isDevelopment ? 'http://localhost:5000' : '/admin-api'
-];
-const API_ROOT = candidates.find(Boolean);
-const isRelative = /^\//.test(API_ROOT);
-const baseURL = isRelative ? API_ROOT : `${API_ROOT}/api`;
-console.log('🔧 API JS Config:', { MODE: import.meta.env.MODE, API_ROOT, baseURL });
+const RAW = (import.meta.env.VITE_API_URL || '').trim();
+const baseURL = RAW ? RAW.replace(/\/$/, '') : 'http://localhost:5000/api';
+const API_ROOT = baseURL.replace(/\/api$/i, '');
+console.log('🔧 API JS Config (simplified):', { MODE: import.meta.env.MODE, baseURL, API_ROOT });
 // Single axios instance for all API calls
 const apiClient = axios.create({
     baseURL,
@@ -65,7 +54,7 @@ const del = async (path) => {
 };
 // Public API surface (adjust paths to match your router mounted at `/api`)
 // Direct backend fallback (Render) when proxy misroutes
-export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-admin-backend.onrender.com/api';
 export const api = {
     // KPI cards
     stats: () => get("/stats"),
