@@ -124,7 +124,7 @@ try { require('./backend/utils/firebaseAdmin.js'); } catch {}
 const openaiClient = require('./openaiClient.js');
 // Allow fallback if an unsupported model is provided (e.g., placeholder "gpt-5")
 let MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const SUPPORTED_MODELS = ['gpt-4o', 'gpt-4o-mini', 'o4-mini'];
+const SUPPORTED_MODELS = ['gpt-4o', 'gpt-4o-mini', 'o4-mini', 'gpt-5'];
 const allowAny = process.env.ALLOW_ANY_OPENAI_MODEL === '1' || process.env.OPENAI_MODEL_STRICT === '0';
 if (!SUPPORTED_MODELS.includes(MODEL)) {
   if (allowAny) {
@@ -596,6 +596,25 @@ app.use('/api/vault/upload', vaultUpload);
 app.use('/api/vault/delete', vaultDelete);
 app.use('/api/vault', vaultList);
 
+// ---- Compatibility aliases (non-/api paths) ----
+// Some local/frontend code may still hit endpoints without the /api prefix.
+// These aliases forward to the real handlers to avoid 404s during development.
+try {
+  app.use('/system/ai-training-info', aiTrainingInfo);
+  app.use('/system/health', systemStatus);
+  app.use('/system/monitor-hub', monitorHubRoute);
+  app.use('/stats', dashboardStats);
+  app.use('/dashboard-stats', dashboardStats);
+  // Admin auth alias so POST /admin/login works (router provides /login)
+  app.use('/admin', adminAuth);
+  // Password reset OTP aliases so /auth/password/* works without /api prefix
+  app.use('/auth/password', passwordResetRoute);
+  // Minimal legacy session probe
+  app.get('/admin-auth/session', (req, res) => {
+    res.json({ ok: true, authenticated: false, message: 'Legacy /admin-auth/session alias. Use /api/admin/login for auth.' });
+  });
+} catch {}
+
 // ====== Core AI endpoints (GPT-5 Auto)
 // Shared retry helper for upstream 429/RateLimit errors
 async function retryWithBackoff(fn, {
@@ -628,7 +647,26 @@ async function retryWithBackoff(fn, {
 
 // Health for AI configuration
 app.get('/api/system/ai-health', (_req, res) => {
-  res.json({ ok: true, model: MODEL, keyLoaded: !!process.env.OPENAI_API_KEY, ts: new Date().toISOString() });
+  res.json({
+    ok: true,
+    model: MODEL,
+    openaiKey: !!process.env.OPENAI_API_KEY,
+    googleKey: !!process.env.GOOGLE_API_KEY,
+    geminiKey: !!process.env.GEMINI_API_KEY,
+    ts: new Date().toISOString(),
+  });
+});
+
+// Alias (non-API) for local dev compatibility
+app.get('/system/ai-health', (_req, res) => {
+  res.json({
+    ok: true,
+    model: MODEL,
+    openaiKey: !!process.env.OPENAI_API_KEY,
+    googleKey: !!process.env.GOOGLE_API_KEY,
+    geminiKey: !!process.env.GEMINI_API_KEY,
+    ts: new Date().toISOString(),
+  });
 });
 
 // Non-streaming chat core
