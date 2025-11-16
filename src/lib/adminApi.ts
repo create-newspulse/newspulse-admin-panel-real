@@ -1,9 +1,22 @@
 import axios, { AxiosError } from 'axios';
 import { API_BASE_PATH } from './api';
 
-// Centralized Admin Backend client now derives from unified API_BASE_PATH
-// Backend mounts admin auth at /api/admin/* so we append '/admin'
-export const ADMIN_API_BASE = `${API_BASE_PATH.replace(/\/$/, '')}/admin`;
+// Centralized Admin Backend client derives from env with optional override.
+// Prefer VITE_ADMIN_API_URL if provided; else fall back to `${API_BASE_PATH}/admin`.
+const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_URL || '').trim();
+let ADMIN_API_BASE = RAW_ADMIN || `${API_BASE_PATH.replace(/\/$/, '')}/admin`;
+// Normalize if user provides host without trailing /admin or /api/admin
+if (RAW_ADMIN) {
+  const lowered = ADMIN_API_BASE.toLowerCase();
+  // If value ends with /api, append /admin; if ends with /admin already, keep; else if ends with /api/admin, keep.
+  if (/\/api\/?$/.test(lowered)) ADMIN_API_BASE = ADMIN_API_BASE.replace(/\/$/, '') + '/admin';
+  if (!/\/(api\/)?admin\/?$/.test(lowered)) {
+    // If user gave a plain origin (no /api or /admin), append /api/admin
+    const hasPath = /\/\w/.test(new URL(ADMIN_API_BASE).pathname || '/');
+    if (!hasPath) ADMIN_API_BASE = ADMIN_API_BASE.replace(/\/$/, '') + '/api/admin';
+  }
+}
+export { ADMIN_API_BASE };
 
 export const adminApi = axios.create({
   baseURL: ADMIN_API_BASE,
