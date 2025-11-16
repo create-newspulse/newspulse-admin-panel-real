@@ -159,7 +159,9 @@ const PROD_ORIGINS = (() => {
   if (process.env.CORS_ORIGIN) list.push(process.env.CORS_ORIGIN);
   return Array.from(new Set(list));
 })();
-const ALLOWED_ORIGINS = isProd ? PROD_ORIGINS : DEV_ORIGINS;
+// Baseline allow list; always include admin.newspulse.co.in for production frontend
+const BASELINE_ALLOWED = ['https://admin.newspulse.co.in'];
+const ALLOWED_ORIGINS = Array.from(new Set([...(isProd ? PROD_ORIGINS : DEV_ORIGINS), ...BASELINE_ALLOWED]));
 // Additional automatic allow patterns (to reduce redeploy friction for new preview domains)
 const AUTO_ALLOW_HOST_PATTERNS = [
   /newspulse-admin-panel-real-[a-z0-9-]+\.vercel\.app$/i, // Vercel preview deployments for this project
@@ -197,22 +199,35 @@ io.on('connection', (socket) => {
 });
 
 // ====== Core middleware (before routes)
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // same-origin / curl
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    try {
-      const host = origin.replace(/^https?:\/\//, '').split('/')[0];
-      if (AUTO_ALLOW_HOST_PATTERNS.some(re => re.test(host))) return cb(null, true);
-    } catch {}
-    if (!isProd) return cb(null, true); // allow all in dev
-    console.warn('❌ CORS blocked origin:', origin, 'Allowed list:', ALLOWED_ORIGINS);
-    return cb(new Error('Not allowed by CORS'), false);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-}));
+// Explicit CORS allow-list with credentials and robust OPTIONS handling
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://admin.newspulse.co.in',
+  ...ALLOWED_ORIGINS,
+]);
+const corsOptionsDelegate = (origin, cb) => {
+  if (!origin) return cb(null, { origin: true, credentials: true });
+  try {
+    const url = new URL(origin);
+    const host = url.host.toLowerCase();
+    const passList = allowedOrigins.has(origin) || Array.from(AUTO_ALLOW_HOST_PATTERNS).some(re => re.test(host));
+    if (passList || !isProd) {
+      return cb(null, {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        optionsSuccessStatus: 204,
+      });
+    }
+  } catch {}
+  console.warn('❌ CORS blocked origin:', origin, 'Allowed list:', Array.from(allowedOrigins));
+  return cb(new Error('Not allowed by CORS'));
+};
+app.use(cors(corsOptionsDelegate));
+// Preflight handling for all routes
+app.options('*', cors(corsOptionsDelegate));
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 // Allow moderately large JSON bodies from the admin UI (articles pasted for AI tools)
