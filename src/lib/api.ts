@@ -43,7 +43,7 @@ apiClient.interceptors.request.use((config) => {
 // Centralized error logging (helps debug 404/500 quickly)
 // Fallback host for opportunistic retries (update to actual admin backend host)
 // This should point to the service exposing /api/admin/* (Render service: newspulse-admin-backend).
-export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-admin-backend.onrender.com/api';
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
 const FALLBACK_PATHS = new Set([
   '/dashboard-stats',
   '/stats',

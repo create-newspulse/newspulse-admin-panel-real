@@ -54,7 +54,7 @@ const del = async (path) => {
 };
 // Public API surface (adjust paths to match your router mounted at `/api`)
 // Direct backend fallback (Render) when proxy misroutes
-export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-admin-backend.onrender.com/api';
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
 export const api = {
     // KPI cards
     stats: () => get("/stats"),
