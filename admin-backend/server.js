@@ -144,9 +144,11 @@ io.on('connection', (socket) => {
 // ====== Core middleware (before routes)
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // same-origin / server-to-server
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    if (!isProd) return cb(null, true);
+    // Allow any Vercel preview deployment (*.vercel.app) without needing redeploy
+    if (/\.vercel\.app$/i.test(origin)) return cb(null, true);
+    if (!isProd) return cb(null, true); // dev flexibility
     return cb(new Error('Not allowed by CORS'), false);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -170,6 +172,24 @@ await fs.mkdir(UPLOADS_VAULT_PATH, { recursive: true });
 await fs.mkdir(COVERS_DIR, { recursive: true });
 app.use('/uploads/vault', express.static(UPLOADS_VAULT_PATH));
 app.use('/uploads/covers', express.static(COVERS_DIR));
+
+// ===== Legacy frontend convenience (dev only) =====
+// Some older UI code calls endpoints without the `/api` prefix (e.g. `/system/monitor-hub`).
+// In development we transparently rewrite those requests to `/api/*` so they route correctly.
+if (!isProd) {
+  const LEGACY_PREFIXES = new Set([
+    'system', 'uploads', 'vault', 'alerts', 'dashboard', 'seo', 'reports', 'analytics',
+    'polls', 'stats', 'charts', 'news', 'admin', 'ai', 'safezone', 'monitor-hub', 'live', 'uploads'
+  ]);
+  app.use((req, _res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    const seg = (req.path.split('/')[1] || '').toLowerCase();
+    if (LEGACY_PREFIXES.has(seg)) {
+      req.url = '/api' + req.url;
+    }
+    return next();
+  });
+}
 
 // ====== OpenAI (KiranOS) ======
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -419,6 +439,8 @@ app.use('/api/system/sentinel-check', sentinelCheck);
 app.use('/api/system/secure-data', secureData);
 app.use('/api/system/threat-status', threatStatus);
 app.use('/api/system/status', systemStatus);
+// Always expose the legacy unprefixed monitor-hub path so older UI code works
+app.use('/system/monitor-hub', monitorHubRoute);
 // Alias to support existing UI components requesting /api/system/health
 app.use('/api/system/health', systemStatus);
 app.use('/api/dashboard/threat-stats', dashboardThreatStats);
@@ -621,23 +643,22 @@ app.use('/api/stats', dashboardStats);
 // Some local UI code still calls endpoints without the /api prefix (e.g. http://localhost:5000/system/ai-training-info)
 // To avoid blocking local development we expose a limited alias set when not in production.
 if (!isProd) {
-  // System feature aliases
-  app.use('/system/ai-training-info', aiTrainingInfo);
-  app.use('/system/monitor-hub', monitorHubRoute);
-  app.use('/system/status', systemStatus);
-  app.use('/system/health', systemStatus);
-  app.use('/system/thinking-feed', thinkingFeedRoute);
-  app.use('/system/ai-queue', aiQueue);
-  app.use('/system/ai-diagnostics', aiDiagnosticsRoutes);
-  // Stats aliases
-  app.use('/stats', dashboardStats);
-  app.use('/dashboard-stats', dashboardStats);
-  // Admin auth aliases (mount full router so /admin/login works)
-  app.use('/admin', adminAuth);
-  // Minimal session probe for legacy code expecting /admin-auth/session
-  app.get('/admin-auth/session', (req, res) => {
-    res.json({ ok: true, authenticated: false, message: 'Legacy /admin-auth/session alias. Use /api/admin/login for auth.' });
-  });
+// ===== Root-level Compatibility Aliases (now enabled in all envs) ======
+// Provide stable paths without /api prefix to align with updated frontend base URL.
+app.use('/system/ai-training-info', aiTrainingInfo);        // GET /system/ai-training-info
+app.use('/system/monitor-hub', monitorHubRoute);            // GET /system/monitor-hub
+app.use('/system/status', systemStatus);                    // GET /system/status
+app.use('/system/health', systemStatus);                    // GET /system/health
+app.use('/system/thinking-feed', thinkingFeedRoute);        // GET /system/thinking-feed
+app.use('/system/ai-queue', aiQueue);                       // GET /system/ai-queue
+app.use('/system/ai-diagnostics', aiDiagnosticsRoutes);     // GET /system/ai-diagnostics
+app.use('/stats', dashboardStats);                          // GET /stats
+app.use('/dashboard-stats', dashboardStats);                // GET /dashboard-stats
+app.use('/admin', adminAuth);                               // POST /admin/login
+// Minimal session probe for legacy code expecting /admin-auth/session
+app.get('/admin-auth/session', (req, res) => {
+  res.json({ ok: true, authenticated: false, message: 'Session probe (root). Use /admin/login to authenticate.' });
+});
 }
 
 // Bundle index (keep at end)
