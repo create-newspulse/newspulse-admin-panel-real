@@ -2,19 +2,19 @@
 import axios, { AxiosError } from "axios";
 import adminApi from './adminApi';
 
-// Simplified unified base resolution (Step A/B standardization)
-// In production set VERCEL env: VITE_API_URL=https://<ADMIN_BACKEND_HOST>/api
-// Locally (dev) fallback to http://localhost:5000/api
-// We keep the exported name API_BASE_PATH for compatibility with existing imports.
+// Unified base resolution
+// - In production (default): use the Vercel proxy at `/admin-api` to avoid CORS.
+// - In development (default): use local backend `http://localhost:5000/api`.
+// - If `VITE_API_URL` is provided, use it; normalize to include `/api` when missing.
 const isDevelopment = import.meta.env.MODE === 'development';
 const RAW = (import.meta.env.VITE_API_URL || '').trim();
-let API_BASE_PATH = RAW ? RAW.replace(/\/$/, '') : 'http://localhost:5000/api';
-// If a custom VITE_API_URL was provided without trailing /api or /admin-api, normalize to include /api
+let API_BASE_PATH = '';
 if (RAW) {
+  API_BASE_PATH = RAW.replace(/\/$/, '');
   const lowered = API_BASE_PATH.toLowerCase();
-  if (!/(\/api|\/admin-api)$/.test(lowered)) {
-    API_BASE_PATH = API_BASE_PATH + '/api';
-  }
+  if (!/(\/api|\/admin-api)$/.test(lowered)) API_BASE_PATH = API_BASE_PATH + '/api';
+} else {
+  API_BASE_PATH = isDevelopment ? 'http://localhost:5000/api' : '/admin-api';
 }
 export { API_BASE_PATH };
 export const API_ROOT = API_BASE_PATH.replace(/\/api$/i, '');
