@@ -642,8 +642,7 @@ app.use('/api/stats', dashboardStats);
 // ===== Legacy / Unprefixed Path Aliases (dev convenience) =====
 // Some local UI code still calls endpoints without the /api prefix (e.g. http://localhost:5000/system/ai-training-info)
 // To avoid blocking local development we expose a limited alias set when not in production.
-if (!isProd) {
-// ===== Root-level Compatibility Aliases (now enabled in all envs) ======
+// ===== Root-level Compatibility Aliases (enabled in all environments) ======
 // Provide stable paths without /api prefix to align with updated frontend base URL.
 app.use('/system/ai-training-info', aiTrainingInfo);        // GET /system/ai-training-info
 app.use('/system/monitor-hub', monitorHubRoute);            // GET /system/monitor-hub
@@ -659,7 +658,6 @@ app.use('/admin', adminAuth);                               // POST /admin/login
 app.get('/admin-auth/session', (req, res) => {
   res.json({ ok: true, authenticated: false, message: 'Session probe (root). Use /admin/login to authenticate.' });
 });
-}
 
 // Bundle index (keep at end)
 app.use(backendIndex);
