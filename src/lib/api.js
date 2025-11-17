@@ -1,10 +1,12 @@
 // JS mirror simplified (VITE_API_URL or localhost)
 import axios from "axios";
 const isDevelopment = import.meta.env.MODE === 'development';
+const RAW_NEW = (import.meta.env.VITE_ADMIN_API_URL || '').trim();
 const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').trim();
 const RAW_LEGACY = (import.meta.env.VITE_API_URL || '').trim();
-const API_ROOT = (RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
-const baseURL = `${API_ROOT}/api`;
+const API_ROOT = (RAW_NEW || RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
+// Base URL now WITHOUT automatic '/api'. Strip any leading '/api' from legacy calls.
+const baseURL = API_ROOT;
 console.log('🔧 API JS Config (simplified):', { MODE: import.meta.env.MODE, baseURL, API_ROOT });
 // Single axios instance for all API calls
 const apiClient = axios.create({
@@ -14,6 +16,9 @@ const apiClient = axios.create({
 });
 // Debug interceptor to log requests
 apiClient.interceptors.request.use((config) => {
+    if ((config.url || '').startsWith('/api/')) {
+        config.url = (config.url || '').slice(4);
+    }
     console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
     return config;
 });
@@ -55,7 +60,7 @@ const del = async (path) => {
 };
 // Public API surface (adjust paths to match your router mounted at `/api`)
 // Direct backend fallback (Render) when proxy misroutes
-export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com';
 export const api = {
     // KPI cards
     stats: () => get("/stats"),

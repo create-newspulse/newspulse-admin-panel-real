@@ -11,9 +11,11 @@ const isDevelopment = import.meta.env.MODE === 'development';
 const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').trim();
 const RAW_LEGACY = (import.meta.env.VITE_API_URL || '').trim();
 // Core API root (no trailing slash)
-const API_ROOT = (RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
-// Axios expects the /api prefix for backend routes
-const API_BASE_PATH = `${API_ROOT}/api`;
+// Prefer new VITE_ADMIN_API_URL (no /api suffix) but remain backward compatible with VITE_ADMIN_API_BASE_URL
+const RAW_NEW = (import.meta.env.VITE_ADMIN_API_URL || '').trim();
+const API_ROOT = (RAW_NEW || RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
+// Base path NOW intentionally WITHOUT automatic '/api' suffix. Routes mounted at root (e.g. /admin-auth/session)
+const API_BASE_PATH = API_ROOT;
 export { API_BASE_PATH, API_ROOT };
 console.log('🔧 API Base Resolution (simplified):', { MODE: import.meta.env.MODE, API_BASE_PATH, API_ROOT });
 
@@ -30,17 +32,17 @@ const baseURL = API_BASE_PATH;
 
 // Debug interceptor to log requests
 apiClient.interceptors.request.use((config) => {
-  // Normalize accidental double '/api' (e.g., base '/api' + url '/api/x')
-  // Drop any leading '/api' if base already includes '/api'
-  const baseEndsWithApi = (config.baseURL || '').replace(/\/$/, '').endsWith('/api');
-  if (baseEndsWithApi && (config.url || '').startsWith('/api/')) config.url = (config.url || '').slice(4);
+  // If legacy code still passes '/api/xyz', strip leading '/api' because base no longer has it.
+  if ((config.url || '').startsWith('/api/')) {
+    config.url = (config.url || '').slice(4);
+  }
   console.log('🚀 API Request:', config.method?.toUpperCase(), config.url, 'Full URL:', (config.baseURL || '') + (config.url || ''));
   return config;
 });
 // Centralized error logging (helps debug 404/500 quickly)
 // Fallback host for opportunistic retries (update to actual admin backend host)
 // This should point to the service exposing /api/admin/* (Render service: newspulse-admin-backend).
-export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com/api';
+export const ADMIN_BACKEND_FALLBACK = 'https://newspulse-backend-real.onrender.com';
 const FALLBACK_PATHS = new Set([
   '/dashboard-stats',
   '/stats',

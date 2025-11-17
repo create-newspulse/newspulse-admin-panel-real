@@ -262,7 +262,8 @@ const io = new SocketIOServer(server, {
   cors: {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (allowedOrigins.includes(origin)) return cb(null, true);
+      // Allow explicit list + any Vercel preview domain (*.vercel.app)
+      if (allowedOrigins.includes(origin) || /\.vercel\.app$/i.test(origin)) return cb(null, true);
       return cb(new Error('Not allowed by Socket.IO CORS'), false);
     },
     methods: ['GET', 'POST'],
@@ -285,19 +286,22 @@ io.on('connection', (socket) => {
 });
 
 // ====== Core middleware (before routes)
-// Centralized CORS config (explicit allow list — do NOT use '*')
+// Centralized CORS (no wildcard). Allow explicit local dev + production + dynamic Vercel previews.
 const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://admin.newspulse.co.in",
-  "https://newspulse.co.in"
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'https://admin.newspulse.co.in'
 ];
+
+function isVercelPreview(origin) {
+  return typeof origin === 'string' && origin.endsWith('.vercel.app');
+}
 
 const corsOptions = {
   origin(origin, callback) {
-    // Allow non-browser clients or same-origin requests (no origin header)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin) return callback(null, true); // non-browser / same-origin
+    if (allowedOrigins.includes(origin) || isVercelPreview(origin)) return callback(null, true);
     console.warn('❌ BLOCKED CORS:', origin);
     return callback(new Error(`CORS blocked for origin ${origin}`));
   },
