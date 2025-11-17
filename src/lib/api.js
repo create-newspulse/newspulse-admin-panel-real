@@ -1,9 +1,10 @@
 // JS mirror simplified (VITE_API_URL or localhost)
 import axios from "axios";
 const isDevelopment = import.meta.env.MODE === 'development';
-const RAW = (import.meta.env.VITE_API_URL || '').trim();
-const baseURL = RAW ? RAW.replace(/\/$/, '') : 'http://localhost:5000/api';
-const API_ROOT = baseURL.replace(/\/api$/i, '');
+const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').trim();
+const RAW_LEGACY = (import.meta.env.VITE_API_URL || '').trim();
+const API_ROOT = (RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
+const baseURL = `${API_ROOT}/api`;
 console.log('🔧 API JS Config (simplified):', { MODE: import.meta.env.MODE, baseURL, API_ROOT });
 // Single axios instance for all API calls
 const apiClient = axios.create({

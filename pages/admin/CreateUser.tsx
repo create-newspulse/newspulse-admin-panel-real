@@ -1,5 +1,6 @@
 // pages/admin/CreateUser.tsx
 import React, { useState } from 'react';
+import { API_BASE_PATH } from '../../src/lib/api';
 
 const CreateUser = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'editor' });
@@ -15,7 +16,7 @@ const CreateUser = () => {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('http://localhost:5000/api/create-user', {
+      const res = await fetch(`${API_BASE_PATH}/create-user`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

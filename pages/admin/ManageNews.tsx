@@ -1,6 +1,7 @@
 // ✅ Updated: admin-backend/pages/admin/ManageNews.tsx with Filters, Preview, Pagination, Inline Editing
 import React, { useEffect, useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';
+import { API_BASE_PATH } from '../../src/lib/api';
 import AiAnchorPlayer from '../../src/components/AiAnchorPlayer';
 
 interface NewsItem {
@@ -31,9 +32,7 @@ const ManageNews: React.FC = () => {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-            const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-            const API_BASE = isLocal ? 'http://localhost:5000' : '';
-            const res = await fetch(`${API_BASE}/api/news/get-all-news/all`, { credentials: isLocal ? 'omit' : 'include' });
+            const res = await fetch(`${API_BASE_PATH}/news/get-all-news/all`, { credentials: 'include' });
         const data = await res.json();
         if (data.success && Array.isArray(data.news)) {
           setNews(data.news);
@@ -67,11 +66,9 @@ const ManageNews: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this news item?')) return;
     try {
-          const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-          const API_BASE = isLocal ? 'http://localhost:5000' : '';
-          const res = await fetch(`${API_BASE}/api/articles/${id}`, {
+          const res = await fetch(`${API_BASE_PATH}/articles/${id}`, {
             method: 'DELETE',
-            credentials: isLocal ? 'omit' : 'include',
+            credentials: 'include',
             headers: {
               'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
             }

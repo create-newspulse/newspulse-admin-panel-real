@@ -3,21 +3,18 @@ import axios, { AxiosError } from "axios";
 import adminApi from './adminApi';
 
 // Unified base resolution
-// - In production (default): use the Vercel proxy at `/admin-api` to avoid CORS.
-// - In development (default): use local backend `http://localhost:5000/api`.
-// - If `VITE_API_URL` is provided, use it; normalize to include `/api` when missing.
+// Preference order:
+// 1. VITE_ADMIN_API_BASE_URL (recommended)
+// 2. VITE_API_URL (legacy)
+// 3. Fallback to localhost for local dev
 const isDevelopment = import.meta.env.MODE === 'development';
-const RAW = (import.meta.env.VITE_API_URL || '').trim();
-let API_BASE_PATH = '';
-if (RAW) {
-  API_BASE_PATH = RAW.replace(/\/$/, '');
-  const lowered = API_BASE_PATH.toLowerCase();
-  if (!/(\/api|\/admin-api)$/.test(lowered)) API_BASE_PATH = API_BASE_PATH + '/api';
-} else {
-  API_BASE_PATH = isDevelopment ? 'http://localhost:5000/api' : '/admin-api';
-}
-export { API_BASE_PATH };
-export const API_ROOT = API_BASE_PATH.replace(/\/api$/i, '');
+const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').trim();
+const RAW_LEGACY = (import.meta.env.VITE_API_URL || '').trim();
+// Core API root (no trailing slash)
+const API_ROOT = (RAW_ADMIN || RAW_LEGACY || (isDevelopment ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')).replace(/\/$/, '');
+// Axios expects the /api prefix for backend routes
+const API_BASE_PATH = `${API_ROOT}/api`;
+export { API_BASE_PATH, API_ROOT };
 console.log('🔧 API Base Resolution (simplified):', { MODE: import.meta.env.MODE, API_BASE_PATH, API_ROOT });
 
 // Single axios instance for all API calls (no auto /api suffix logic now)

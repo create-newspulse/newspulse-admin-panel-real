@@ -10,7 +10,7 @@ import http from 'http';
 import { exec } from 'child_process';
 import express from 'express';
 import mongoose from 'mongoose';
-import cors from 'cors';
+import cors from "cors";
 import morgan from 'morgan';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -22,19 +22,22 @@ import fsSync from 'fs';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import { verifySmtp, isSmtpConfigured } from './backend/utils/mailer.mjs';
-// Debug helper: instrument path-to-regexp to log the pattern causing startup crash
-try {
-  const ptr = await import('path-to-regexp');
-  if (ptr && ptr.parse) {
-    const origParse = ptr.parse;
-    ptr.parse = function patchedParse(str, options) {
-      try { console.log('[ptr.parse] pattern:', str); } catch {}
-      return origParse(str, options);
-    };
-    console.log('🔍 path-to-regexp parse() instrumentation active');
-  }
-} catch (e) {
-  console.warn('⚠️ Failed to instrument path-to-regexp parse:', e?.message || e);
+// Debug helper (optional): instrument path-to-regexp parse()
+// Enable by setting DEBUG_PATH_TO_REGEXP=1 to avoid noisy warnings in production/dev
+if (process.env.DEBUG_PATH_TO_REGEXP === '1') {
+  try {
+    const ptr = await import('path-to-regexp');
+    // Some module builds freeze exports; only patch if writable
+    const desc = Object.getOwnPropertyDescriptor(ptr, 'parse');
+    if (ptr && typeof ptr.parse === 'function' && desc && desc.writable) {
+      const origParse = ptr.parse;
+      ptr.parse = function patchedParse(str, options) {
+        try { console.log('[ptr.parse] pattern:', str); } catch {}
+        return origParse(str, options);
+      };
+      console.log('🔍 path-to-regexp parse() instrumentation active');
+    }
+  } catch {}
 }
 try {
   console.log('🔍 env git.new scan:', Object.entries(process.env).filter(([k,v]) => typeof v === 'string' && v.includes('git.new')));
@@ -259,8 +262,7 @@ const io = new SocketIOServer(server, {
   cors: {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      if (!isProd) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error('Not allowed by Socket.IO CORS'), false);
     },
     methods: ['GET', 'POST'],
@@ -283,40 +285,29 @@ io.on('connection', (socket) => {
 });
 
 // ====== Core middleware (before routes)
-// Explicit CORS allow-list with credentials and robust OPTIONS handling
-const allowedOrigins = new Set([
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://admin.newspulse.co.in',
-  ...ALLOWED_ORIGINS,
-]);
-const corsOptionsDelegate = (origin, cb) => {
-  if (!origin) return cb(null, { origin: true, credentials: true });
-  try {
-    const url = new URL(origin);
-    const host = url.host.toLowerCase();
-    const passList = allowedOrigins.has(origin) || Array.from(AUTO_ALLOW_HOST_PATTERNS).some(re => re.test(host));
-    if (passList || !isProd) {
-      return cb(null, {
-        origin: true,
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
-        optionsSuccessStatus: 204,
-      });
-    }
-  } catch {}
-  console.warn('❌ CORS blocked origin:', origin, 'Allowed list:', Array.from(allowedOrigins));
-  return cb(new Error('Not allowed by CORS'));
+// Centralized CORS config (explicit allow list — do NOT use '*')
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://admin.newspulse.co.in",
+  "https://newspulse.co.in"
+];
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser clients or same-origin requests (no origin header)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    console.warn('❌ BLOCKED CORS:', origin);
+    return callback(new Error(`CORS blocked for origin ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 };
-app.use(cors(corsOptionsDelegate));
-// Preflight handling for all routes (Express v5 + path-to-regexp@8)
-// Use a named catch-all param that matches slashes.
-// To avoid regex group parsing issues, prefer the star modifier form.
-// '/:all*' matches all subpaths safely in v8.
-// Express 5 + path-to-regexp v8 catch-all OPTIONS route: use wildcard token
-// Valid patterns tested: /*all or /{*all}; choose /*all for simplicity.
-app.options('/*all', cors(corsOptionsDelegate));
+
+app.use(cors(corsOptions));
+
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 // Allow moderately large JSON bodies from the admin UI (articles pasted for AI tools)
@@ -345,7 +336,7 @@ app.use((err, _req, res, next) => {
 // ---- Lightweight health endpoints mounted EARLY (before other /api/system handlers)
 const setHealthHeaders = (res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS handled centrally by `cors(corsOptions)` middleware above.
 };
 app.get('/api/system/health', (_req, res) => {
   setHealthHeaders(res);
@@ -383,6 +374,34 @@ app.get('/api', (_req, res) => {
   res.status(200).json({ ok: true, message: 'NewsPulse Admin API root', health: '/api/system/health' });
 });
 
+// --- Root-level aliases for frontends that omit the "/api" prefix ---
+// (Mounted AFTER route imports; placeholders here deferred via a setup function.)
+function mountRootAliases() {
+  // Health alias
+  app.get('/system/health', (_req, res) => {
+    setHealthHeaders(res);
+    res.status(200).json({ success: true, message: 'Backend is healthy ✅', ts: new Date().toISOString() });
+  });
+  app.head('/system/health', (_req, res) => { setHealthHeaders(res); res.sendStatus(200); });
+
+  // Stats and dashboard aliases
+  app.use('/dashboard-stats', dashboardStats);
+  app.use('/stats', dashboardStats);
+
+  // Settings/load alias
+  app.use('/settings', settings);
+
+  // Articles alias
+  app.use('/articles', articles);
+
+  // AIRA alias
+  app.use('/aira', airaRoute);
+
+  // Revenue/report aliases
+  app.use('/revenue', revenueRoutes);
+  app.use('/reports', exportReportRoute);
+}
+
 // ====== Static Files ======
 const UPLOADS_VAULT_PATH = path.join(__dirname, 'uploads', 'vault');
 const COVERS_DIR = path.join(__dirname, 'uploads', 'covers');
@@ -393,6 +412,24 @@ await fs.mkdir(BULLETINS_DIR, { recursive: true });
 app.use('/uploads/vault', express.static(UPLOADS_VAULT_PATH));
 app.use('/uploads/covers', express.static(COVERS_DIR));
 app.use('/uploads/bulletins', express.static(BULLETINS_DIR));
+
+// ===== Legacy frontend convenience (dev only) =====
+// Some older UI code calls endpoints without the `/api` prefix (e.g. `/system/monitor-hub`).
+// In development we transparently rewrite those requests to `/api/*` so they route correctly.
+if (!isProd) {
+  const LEGACY_PREFIXES = new Set([
+    'system', 'uploads', 'vault', 'alerts', 'dashboard', 'seo', 'reports', 'analytics',
+    'polls', 'stats', 'charts', 'news', 'admin', 'ai', 'safezone', 'monitor-hub', 'live', 'auth'
+  ]);
+  app.use((req, _res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    const seg = (req.path.split('/')[1] || '').toLowerCase();
+    if (LEGACY_PREFIXES.has(seg)) {
+      req.url = '/api' + req.url;
+    }
+    return next();
+  });
+}
 
 // ====== AI-specific rate limit and concurrency gate ======
 const aiLimiter = rateLimit({
@@ -598,10 +635,16 @@ const commentModRoute = await loadRoute('./backend/routes/moderation/comments.mj
 const seoToolsRoute = await loadRoute('./backend/routes/seo/tools.mjs');
 // Auth: password reset via OTP (simple in-memory store)
 const passwordResetRoute = await loadRoute('./backend/routes/auth/password.mjs');
+// Minimal root-level auth & system routers (non-/api prefix)
+const adminAuthRouter = await loadRoute('./backend/routes/adminAuth.mjs');
+const systemRouter = await loadRoute('./backend/routes/system.mjs');
 
 // (legacy bundle/index not used to avoid mixed module issues)
 
 // ====== Route Mounts ======
+// Root mounts (new simplified endpoints without /api prefix)
+app.use('/', adminAuthRouter);
+app.use('/', systemRouter);
 app.use('/api/system/ai-command', aiCommandRoute);
 app.use('/api/system/ai-diagnostics', aiDiagnosticsRoutes);
 app.use('/api/system/clear-command-logs', clearCommandLogs);
@@ -700,24 +743,10 @@ app.use('/api/vault/upload', vaultUpload);
 app.use('/api/vault/delete', vaultDelete);
 app.use('/api/vault', vaultList);
 
-// ---- Compatibility aliases (non-/api paths) ----
-// Some local/frontend code may still hit endpoints without the /api prefix.
-// These aliases forward to the real handlers to avoid 404s during development.
-try {
-  app.use('/system/ai-training-info', aiTrainingInfo);
-  app.use('/system/health', systemStatus);
-  app.use('/system/monitor-hub', monitorHubRoute);
-  app.use('/stats', dashboardStats);
-  app.use('/dashboard-stats', dashboardStats);
-  // Admin auth alias so POST /admin/login works (router provides /login)
-  safeMount('/admin', adminAuth);
-  // Password reset OTP aliases so /auth/password/* works without /api prefix
-  app.use('/auth/password', passwordResetRoute);
-  // Minimal legacy session probe
-  app.get('/admin-auth/session', (req, res) => {
-    res.json({ ok: true, authenticated: false, message: 'Legacy /admin-auth/session alias. Use /api/admin/login for auth.' });
-  });
-} catch {}
+// Removed legacy compatibility alias block (now using dedicated root routers)
+
+// Mount root-level aliases now that all route modules are loaded
+mountRootAliases();
 
 // ====== Core AI endpoints (GPT-5 Auto)
 // Shared retry helper for upstream 429/RateLimit errors
@@ -912,8 +941,8 @@ app.post('/api/ai/alt-text', async (req, res) => {
 // ====== Health & Utility Endpoints ======
 // (moved early versions above to short-circuit heavy routers)
 // Fallback root-level health (for external pingers)
-app.get('/health', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('Access-Control-Allow-Origin', '*'); res.status(200).json({ ok: true, ts: new Date().toISOString() }); });
-app.head('/health', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('Access-Control-Allow-Origin', '*'); res.sendStatus(200); });
+app.get('/health', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.status(200).json({ ok: true, ts: new Date().toISOString() }); });
+app.head('/health', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendStatus(200); });
 app.get('/api/system/alerts', (_req, res) => {
   res.json({ success: true, alerts: [] });
 });
@@ -986,25 +1015,19 @@ connectDB()
       console.warn('⚠️  Skipping SystemSettings init (DB degraded mode).');
     }
 
-    // Resilient port binding: try PORT..PORT+3 to avoid dev collisions
-    const base = Number(process.env.PORT) || 5000;
-    const tryListen = (port, attemptsLeft) => {
-      server.listen(port, '0.0.0.0')
-        .once('listening', () => {
-          process.env.PORT = String(port);
-          console.log(`🚀 Server running at http://localhost:${port}`);
-        })
-        .once('error', (err) => {
-          if (err && err.code === 'EADDRINUSE' && attemptsLeft > 0) {
-            console.warn(`⚠️ Port ${port} in use, retrying on ${port + 1}...`);
-            tryListen(port + 1, attemptsLeft - 1);
-          } else {
-            console.error('❌ Failed to bind port:', err?.message || err);
-            process.exit(1);
-          }
-        });
-    };
-    tryListen(base, 3);
+    // Single-port binding (no fallback retries). If the port is busy, exit clearly.
+    const port = Number(process.env.PORT) || 5000;
+    server.listen(port, '0.0.0.0', () => {
+      process.env.PORT = String(port);
+      console.log(`🚀 Server running at http://localhost:${port}`);
+    }).on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${port} already in use. Stop the other process (e.g., close previous nodemon) and retry.`);
+      } else {
+        console.error('❌ Failed to bind port:', err?.message || err);
+      }
+      process.exit(1);
+    });
   })
   .catch((err) => {
     console.error('❌ MongoDB connection failed:', err.message);

@@ -5,14 +5,12 @@ import axios from "axios";
 const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, "") : u);
 
 // Read from Vite env (only VITE_* are exposed)
-const FROM_ENV = stripSlash(import.meta.env?.VITE_API_URL);
-
-// Fallback for local dev
-const API_BASE = FROM_ENV || "http://localhost:5000";
-
-// Compose final baseURL -> {API_BASE}/api
+const RAW_ADMIN = stripSlash(import.meta.env?.VITE_ADMIN_API_BASE_URL);
+const RAW_LEGACY = stripSlash(import.meta.env?.VITE_API_URL);
+const API_ROOT = RAW_ADMIN || RAW_LEGACY || (import.meta.env.MODE === 'development' ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com');
+// Compose final baseURL -> {API_ROOT}/api
 const api = axios.create({
-  baseURL: `${API_BASE}/api`,
+  baseURL: `${API_ROOT.replace(/\/$/, '')}/api`,
   withCredentials: true, // keep cookies/sessions if backend uses them
   headers: {
     Accept: "application/json",

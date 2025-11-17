@@ -4,7 +4,6 @@
   "outputDirectory": "dist",
   "routes": [
     { "handle": "filesystem" },
-    { "src": "/admin-api/(.*)", "dest": "/api/admin-proxy/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
