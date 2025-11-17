@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+import { AI_TRAINING_INFO_URL } from '@lib/apiBase';
 import { fetchJson } from '@lib/fetchJson';
 
 export default function AiTrainerCard() {
@@ -10,7 +10,7 @@ export default function AiTrainerCard() {
   useEffect(() => {
     const fetchTrainingInfo = async () => {
       try {
-        const json = await fetchJson(`${API_BASE_PATH}/system/ai-training-info`);
+        const json = await fetchJson(AI_TRAINING_INFO_URL);
         if (json?.success && json?.data) {
           setTrainingInfo(json.data);
         } else {
@@ -37,7 +37,7 @@ export default function AiTrainerCard() {
 
   const handleActivateTrainer = async () => {
     try {
-      const data = await fetchJson(`${API_BASE_PATH}/system/ai-trainer/activate`, {
+      const data = await fetchJson(`${AI_TRAINING_INFO_URL.replace('/ai-training-info','')}/ai-trainer/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trigger: 'manual' }),

@@ -7,7 +7,8 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { API_BASE_PATH, setAuthToken, AuthAPI, ADMIN_BACKEND_FALLBACK } from '../lib/api';
+import { setAuthToken, AuthAPI, ADMIN_BACKEND_FALLBACK } from '../lib/api';
+import { ADMIN_LOGIN_URL, ADMIN_SESSION_URL } from '../lib/apiBase';
 import { User } from '../types/User';
 
 // ✅ Auth context type
@@ -99,13 +100,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
           // Fallback-aware fetch: try proxied /admin-api first, then direct Render admin-backend if 404/HTML
           const FALLBACK_ADMIN_API = ADMIN_BACKEND_FALLBACK;
-          const useFallback = API_BASE_PATH.startsWith('/admin-api');
-          const doFetch = async (base: string) => fetch(`${base}/admin-auth/session`, { credentials: 'include' });
-          let resp = await doFetch(API_BASE_PATH);
+          const doFetch = async (full: string) => fetch(full, { credentials: 'include' });
+          let resp = await doFetch(ADMIN_SESSION_URL);
           const ct = resp.headers.get('content-type') || '';
           const looksHtml = ct.includes('text/html');
-          if (useFallback && (!resp.ok || looksHtml || resp.status === 404)) {
-            try { resp = await doFetch(FALLBACK_ADMIN_API); } catch {}
+          if ((!resp.ok || looksHtml || resp.status === 404)) {
+            try { resp = await doFetch(`${FALLBACK_ADMIN_API}/admin-auth/session`); } catch {}
           }
           if (resp.ok) {
             const data = await resp.json();
@@ -137,7 +137,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     console.log('🚀 Submitting login request...');
-    console.log('API URL (base):', API_BASE_PATH);
+    console.log('API URL (login):', ADMIN_LOGIN_URL);
     console.log('Payload:', { email }); // do not log password for security
     try {
       const res = await AuthAPI.login({ email, password });
@@ -196,7 +196,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Try proxied logout; if it fails with 404/HTML, hit Render admin-backend directly
   (async () => {
     try {
-      const r = await fetch(`${API_BASE_PATH}/admin-auth/logout`, { method: 'POST', credentials: 'include' });
+      const r = await fetch(ADMIN_SESSION_URL.replace('/session','/logout'), { method: 'POST', credentials: 'include' });
       const ct = r.headers.get('content-type') || '';
       if (!r.ok || ct.includes('text/html')) {
   const FALLBACK_ADMIN_API = ADMIN_BACKEND_FALLBACK;

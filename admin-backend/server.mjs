@@ -286,22 +286,19 @@ io.on('connection', (socket) => {
 });
 
 // ====== Core middleware (before routes)
-// Centralized CORS (no wildcard). Allow explicit local dev + production + dynamic Vercel previews.
+// Explicit CORS whitelist – NO wildcard. Update list when adding new preview domains.
 const allowedOrigins = [
   'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:3000',
-  'https://admin.newspulse.co.in'
+  'https://admin.newspulse.co.in',
+  'https://newspulse-backend-real.onrender.com',
+  // Example fixed preview (replace with current Vercel preview if needed)
+  'https://newspulse-admin-panel-real-ib02jbpm9-newspulse-creates-projects.vercel.app'
 ];
-
-function isVercelPreview(origin) {
-  return typeof origin === 'string' && origin.endsWith('.vercel.app');
-}
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true); // non-browser / same-origin
-    if (allowedOrigins.includes(origin) || isVercelPreview(origin)) return callback(null, true);
+    if (!origin) return callback(null, true); // non-browser / server-side tools
+    if (allowedOrigins.includes(origin)) return callback(null, true);
     console.warn('❌ BLOCKED CORS:', origin);
     return callback(new Error(`CORS blocked for origin ${origin}`));
   },

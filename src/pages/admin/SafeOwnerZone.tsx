@@ -165,7 +165,7 @@ const SafeOwnerZone: React.FC = () => {
 	}, [useMinimalBadges]);
 
 	useEffect(() => {
-		fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' })
+		fetch(AI_TRAINING_INFO_URL, { credentials: 'include' })
 			.then(async (res) => {
 				const ct = res.headers.get('content-type') || '';
 				if (!res.ok || !ct.includes('application/json')) {
@@ -358,7 +358,7 @@ const SafeOwnerZone: React.FC = () => {
 	}, [systemHealth]);
 
 	useEffect(() => {
-		fetch(`${API_BASE_PATH}/system/ai-training-info`, { credentials: 'include' })
+		fetch(AI_TRAINING_INFO_URL, { credentials: 'include' })
 			.then(async (res) => {
 				const ct = res.headers.get('content-type') || '';
 				if (!res.ok || !ct.includes('application/json')) return { status: 'Inactive' } as any;
