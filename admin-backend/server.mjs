@@ -22,6 +22,23 @@ import fsSync from 'fs';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import { verifySmtp, isSmtpConfigured } from './backend/utils/mailer.mjs';
+// Debug helper: instrument path-to-regexp to log the pattern causing startup crash
+try {
+  const ptr = await import('path-to-regexp');
+  if (ptr && ptr.parse) {
+    const origParse = ptr.parse;
+    ptr.parse = function patchedParse(str, options) {
+      try { console.log('[ptr.parse] pattern:', str); } catch {}
+      return origParse(str, options);
+    };
+    console.log('🔍 path-to-regexp parse() instrumentation active');
+  }
+} catch (e) {
+  console.warn('⚠️ Failed to instrument path-to-regexp parse:', e?.message || e);
+}
+try {
+  console.log('🔍 env git.new scan:', Object.entries(process.env).filter(([k,v]) => typeof v === 'string' && v.includes('git.new')));
+} catch {}
 
 // ---- __dirname / __filename in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -145,6 +162,73 @@ app.set('trust proxy', 1);
 
 const server = http.createServer(app);
 
+// Small helper to surface path-to-regexp errors with clear context during mounts
+function safeMount(pathStr, router) {
+  try {
+    app.use(pathStr, router);
+  } catch (err) {
+    console.error('❌ Route mount failed:', { path: pathStr, err: err?.message || String(err) });
+    throw err;
+  }
+}
+
+// Monkey-patch app.use to log any accidental full-URL mounts that break path-to-regexp
+try {
+  const __origUse = app.use.bind(app);
+  app.use = function patchedUse(...args) {
+    try {
+      const first = args[0];
+      if (typeof first === 'string') {
+        console.log('➡️  app.use mount path:', first);
+      }
+      if (typeof first === 'string' && /:\/\//.test(first)) {
+        // Normalize accidental full URL passed as mount path (Express v5 + path-to-regexp will choke on 'https://')
+        try {
+          const u = new URL(first);
+          const fixed = u.pathname || '/';
+          console.warn('⚠️ Normalized full URL mount path to', fixed, 'from', first);
+          args[0] = fixed || '/';
+        } catch {
+          console.error('❌ Invalid mount path (looks like URL):', first);
+        }
+      }
+      return __origUse(...args);
+    } catch (e) {
+      const first = args[0];
+      console.error('❌ app.use mount error:', { first, message: e?.message || String(e) });
+      throw e;
+    }
+  };
+} catch {}
+
+// Instrument express.Router to log route registrations and pinpoint invalid paths
+try {
+  const origRouterFactory = express.Router.bind(express);
+  express.Router = function patchedRouter(...args) {
+    const router = origRouterFactory(...args);
+    const verbs = ['use', 'get', 'post', 'put', 'delete', 'patch', 'all'];
+    for (const v of verbs) {
+      const orig = router[v].bind(router);
+      router[v] = function patchedVerb(...vArgs) {
+        const first = vArgs[0];
+        if (typeof first === 'string') {
+          try { console.log(`➡️  router.${v} path:`, first); } catch {}
+          if (/:\/\//.test(first)) {
+            console.error(`❌ Invalid router path (looks like URL) for ${v}:`, first);
+          }
+        }
+        try {
+          return orig(...vArgs);
+        } catch (e) {
+          console.error(`❌ router.${v} failed for path:`, first, '-', e?.message || String(e));
+          throw e;
+        }
+      };
+    }
+    return router;
+  };
+} catch {}
+
 const isProd = process.env.NODE_ENV === 'production';
 const DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'];
 // Support multiple production origins via ALLOWED_ORIGINS (comma-separated)
@@ -226,8 +310,13 @@ const corsOptionsDelegate = (origin, cb) => {
   return cb(new Error('Not allowed by CORS'));
 };
 app.use(cors(corsOptionsDelegate));
-// Preflight handling for all routes
-app.options('*', cors(corsOptionsDelegate));
+// Preflight handling for all routes (Express v5 + path-to-regexp@8)
+// Use a named catch-all param that matches slashes.
+// To avoid regex group parsing issues, prefer the star modifier form.
+// '/:all*' matches all subpaths safely in v8.
+// Express 5 + path-to-regexp v8 catch-all OPTIONS route: use wildcard token
+// Valid patterns tested: /*all or /{*all}; choose /*all for simplicity.
+app.options('/*all', cors(corsOptionsDelegate));
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 // Allow moderately large JSON bodies from the admin UI (articles pasted for AI tools)
@@ -590,10 +679,10 @@ app.use('/api/admin/update-role', adminUpdateRole);
 // Auth password reset (OTP)
 app.use('/api/auth/password', passwordResetRoute);
 // Mount auth router under both prefixes for compatibility with existing frontend calls
-app.use('/api/admin/auth', adminAuth);
-app.use('/api/admin', adminAuth); // provides /api/admin/login as alias
+safeMount('/api/admin/auth', adminAuth);
+safeMount('/api/admin', adminAuth); // provides /api/admin/login as alias
 // Compatibility layer for SPA auth checks
-app.use('/api/admin-auth', adminMagicAuth);
+safeMount('/api/admin-auth', adminMagicAuth);
 // SafeZone activity endpoints used by panels
 app.use('/api/ai-activity-log', aiActivityLog);
 app.use('/api/ai-behavior-log', aiBehaviorLog);
@@ -621,7 +710,7 @@ try {
   app.use('/stats', dashboardStats);
   app.use('/dashboard-stats', dashboardStats);
   // Admin auth alias so POST /admin/login works (router provides /login)
-  app.use('/admin', adminAuth);
+  safeMount('/admin', adminAuth);
   // Password reset OTP aliases so /auth/password/* works without /api prefix
   app.use('/auth/password', passwordResetRoute);
   // Minimal legacy session probe

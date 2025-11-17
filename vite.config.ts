@@ -11,8 +11,8 @@ export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawApi = stripSlash(env.VITE_API_URL);
   // If VITE_API_URL is provided, always prefer it (even if it's localhost)
-  // Otherwise, in dev default to localhost:5000; in prod, to our secure proxy path
-  const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:5000' : '/admin-api');
+  // Otherwise, in dev default to localhost:5000; in prod, fall back to the Render backend host
+  const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
 
   return {

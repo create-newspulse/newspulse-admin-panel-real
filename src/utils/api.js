@@ -6,13 +6,11 @@ const BASE = RAW_BASE.replace(/\/$/, '');
 const isProxyPath = BASE.startsWith('/admin-api');
 // If BASE looks like localhost/127.* in a production build, ignore it
 const looksLocal = /^(http:\/\/|https:\/\/)?(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(BASE);
-// In dev use vite proxy /api; in prod prefer:
-//  - explicit BASE (no suffix) if it's our proxy path (/admin-api)
-//  - BASE/api if it's a remote origin
-//  - otherwise fall back to our secure vercel proxy at /admin-api
+// In dev use vite proxy /api; in prod prefer remote origin BASE (append /api if missing)
+// If BASE is not provided in prod, fall back to the Render backend
 const baseURL = isDev
     ? '/api'
-    : (BASE && !looksLocal ? (isProxyPath ? BASE : `${BASE}/api`) : '/admin-api');
+    : (BASE && !looksLocal ? (isProxyPath ? BASE : `${BASE}/api`) : 'https://newspulse-backend-real.onrender.com/api');
 const api = axios.create({
     baseURL,
     withCredentials: true,

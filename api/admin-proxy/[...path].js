@@ -1,6 +1,8 @@
 // Vercel Serverless Function: Admin Proxy
 // Proxies requests from /admin-api/* to your trusted backend (ADMIN_BACKEND_URL)
-// Requires a valid admin session cookie (np_admin) signed with ADMIN_JWT_SECRET.
+// Validates admin session via cookie or Bearer token.
+// If ADMIN_JWT_SECRET/JWT_SECRET is provided and the token looks like a JWT, it will be verified.
+// Otherwise, presence of a session token/cookie is accepted (soft mode) to support simpler backends.
 import { jwtVerify } from 'jose';
 // Simple cookie parser
 function parseCookies(header) {
@@ -13,7 +15,7 @@ function parseCookies(header) {
     });
     return cookies;
 }
-const REQUIRED_ENV = ['ADMIN_BACKEND_URL', 'ADMIN_JWT_SECRET'];
+const REQUIRED_ENV = ['ADMIN_BACKEND_URL'];
 
 // Simple host recursion guard (avoid misconfiguration where ADMIN_BACKEND_URL points back to the Vercel site)
 function isRecursiveTarget(backendBase, reqHost) {
@@ -37,8 +39,8 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'ADMIN_BACKEND_URL points to the frontend host. Set it to your backend origin (e.g. https://api.yourdomain.com or Render URL).', host: req.headers.host });
         }
     // Use ADMIN_JWT_SECRET if set, otherwise fall back to JWT_SECRET to align with backend router
-    const secretValue = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET;
-    const secret = new TextEncoder().encode(secretValue);
+    const secretValue = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || '';
+    const secret = secretValue ? new TextEncoder().encode(secretValue) : null;
         const pathParam = req.query.path || [];
         const joinedPath = pathParam.join('/');
         // Allow unauthenticated access for explicit public endpoints
@@ -48,8 +50,7 @@ export default async function handler(req, res) {
 
         // Check session/token only for non-public endpoints
         if (!isPublic) {
-            // ✅ Accept either cookie np_admin OR Authorization: Bearer <jwt>
-            // This aligns with SPA flows that store JWT in localStorage and send Authorization header.
+            // ✅ Accept either cookie np_admin OR Authorization: Bearer <token>
             const authHeader = (req.headers['authorization'] || req.headers['Authorization'] || '').toString();
             const bearer = authHeader.toLowerCase().startsWith('bearer ')
                 ? authHeader.slice(7).trim()
@@ -57,23 +58,30 @@ export default async function handler(req, res) {
             const cookies = parseCookies(req.headers.cookie);
             const cookieToken = cookies['np_admin'];
             const tokenToVerify = bearer || cookieToken;
-            if (!tokenToVerify)
-                return res.status(401).json({ error: 'Unauthorized' });
-            // Verify session JWT
-            try {
-                // First attempt: permissive (no audience/issuer) for legacy tokens
-                await jwtVerify(tokenToVerify, secret);
-            } catch (e1) {
+            if (!tokenToVerify) return res.status(401).json({ error: 'Unauthorized' });
+
+            // If a secret is provided AND the token appears to be a JWT (has two dots), verify it.
+            // Otherwise, accept presence as a soft session (supports simpler backends that set np_admin cookie).
+            const looksJwt = typeof tokenToVerify === 'string' && tokenToVerify.split('.').length === 3;
+            if (secret && looksJwt) {
                 try {
-                    // Second attempt: strict claims if present
-                    await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
-                } catch (e2) {
-                    const err = e2 || e1;
-                    return res.status(401).json({ error: 'Invalid session', detail: err.message });
+                    // First attempt: permissive (no audience/issuer) for legacy tokens
+                    await jwtVerify(tokenToVerify, secret);
+                } catch (e1) {
+                    try {
+                        // Second attempt: strict claims if present
+                        await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
+                    } catch (e2) {
+                        const err = e2 || e1;
+                        return res.status(401).json({ error: 'Invalid session', detail: err.message });
+                    }
                 }
             }
         }
-    const targetUrl = new URL(`${backendBase}/api/${joinedPath}`);
+    // Build target URL, avoiding accidental double "/api" when client paths already include it
+    const needsApiPrefix = !/^api\//i.test(joinedPath);
+    const targetPath = needsApiPrefix ? `api/${joinedPath}` : joinedPath;
+    const targetUrl = new URL(`${backendBase}/${targetPath}`);
         // Append query string
         const q = req.query;
         Object.keys(q).forEach((k) => {

@@ -1,5 +1,6 @@
 // Vercel Serverless Function: Admin Proxy (admin subproject)
 // Mirrors the root-level /api/admin-proxy to support projects whose Vercel root is ./admin
+// Soft session mode: validates presence of cookie or Bearer; verifies JWT only if secret is set and token looks like JWT.
 import { jwtVerify } from 'jose';
 
 function parseCookies(header) {
@@ -12,7 +13,7 @@ function parseCookies(header) {
   return cookies;
 }
 
-const REQUIRED_ENV = ['ADMIN_BACKEND_URL', 'ADMIN_JWT_SECRET'];
+const REQUIRED_ENV = ['ADMIN_BACKEND_URL'];
 
 export default async function handler(req, res) {
   try {
@@ -23,7 +24,8 @@ export default async function handler(req, res) {
     }
 
     const backendBase = process.env.ADMIN_BACKEND_URL.replace(/\/$/, '');
-    const secret = new TextEncoder().encode(process.env.ADMIN_JWT_SECRET);
+    const secretValue = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || '';
+    const secret = secretValue ? new TextEncoder().encode(secretValue) : null;
 
     const pathParam = req.query.path || [];
     const joinedPath = pathParam.join('/');
@@ -40,11 +42,15 @@ export default async function handler(req, res) {
       const cookieToken = cookies['np_admin'];
       const tokenToVerify = bearer || cookieToken;
       if (!tokenToVerify) return res.status(401).json({ error: 'Unauthorized' });
-      try {
-        await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
-      } catch (e) {
-        const err = e;
-        return res.status(401).json({ error: 'Invalid session', detail: err.message });
+      // Soft mode: verify JWT only if we have a secret and the token appears to be a JWT
+      const looksJwt = typeof tokenToVerify === 'string' && tokenToVerify.split('.').length === 3;
+      if (secret && looksJwt) {
+        try {
+          await jwtVerify(tokenToVerify, secret, { audience: 'admin', issuer: 'newspulse' });
+        } catch (e) {
+          const err = e;
+          return res.status(401).json({ error: 'Invalid session', detail: err.message });
+        }
       }
     }
 

@@ -4,6 +4,7 @@ This README explains the recommended deployment: frontend hosted on Vercel, back
 
 Quick setup (2025 update)
 - Proxy mode (recommended): leave `VITE_API_URL` unset in Vercel. The app calls `/admin-api/*` which Vercel rewrites to your backend (see `vercel.json`). This avoids CORS entirely.
+- Proxy envs: set `ADMIN_BACKEND_URL` in Vercel to your backend origin (e.g., `https://newspulse-backend-real.onrender.com`). Optionally set `ADMIN_JWT_SECRET`/`JWT_SECRET` if your backend issues JWTs; if omitted, the proxy accepts presence of cookie/Bearer for session (soft mode).
 - Direct mode (optional): set ONE of
   - `VITE_ADMIN_API_BASE_URL=https://<backend-root>` (no trailing `/api`)
   - `VITE_API_ROOT=https://<backend-root>` (no trailing `/api`)
@@ -28,9 +29,9 @@ Quick setup (2025 update)
 
 2) Configure Vercel (frontend)
 - In Vercel Dashboard for this project -> Settings -> Environment Variables, add:
-  - VITE_API_BASE = https://api-newspulse.onrender.com
-  - VITE_API_WS   = wss://api-newspulse.onrender.com  (if using websockets)
-  - VITE_API_URL  = https://api-newspulse.onrender.com/api  (optional)
+  - ADMIN_BACKEND_URL = https://<your-backend-origin>   (used by `/api/admin-proxy/*`)
+  - ADMIN_JWT_SECRET  = <optional-if-backend-issues-jwt> (leave blank for cookie-only backends)
+  - VITE_API_URL      = (leave unset in proxy mode)
 - Set these for both Preview and Production environments.
 
 3) CORS and credentials

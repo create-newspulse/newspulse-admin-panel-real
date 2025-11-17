@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AxiosError } from "axios";
 import { api } from '@lib/api';
+import { API_BASE_PATH } from '@/lib/api';
 
 type ActivityData = {
   autoPublished: number;
@@ -89,7 +90,7 @@ const AIActivityLog: React.FC = () => {
     try {
       setWaking(true);
       // Hit serverless health to wake upstream backend (Render may be sleeping)
-      await fetch('/api/system/health', { credentials: 'include' });
+      await fetch(`${API_BASE_PATH}/system/health`, { credentials: 'include' });
     } catch {
       // ignore; we'll still retry
     } finally {

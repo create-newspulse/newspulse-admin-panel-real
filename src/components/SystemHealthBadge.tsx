@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { API_BASE_PATH } from '@/lib/api';
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -83,7 +84,7 @@ export default function SystemHealthBadge(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await fetch('/api/system/health', { credentials: 'include' });
+        const r = await fetch(`${API_BASE_PATH}/system/health`, { credentials: 'include' });
         const ct = r.headers.get('content-type') || '';
         if (!/application\/json/i.test(ct)) {
           const text = await r.text().catch(() => '');
