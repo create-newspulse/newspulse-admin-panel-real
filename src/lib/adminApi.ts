@@ -9,6 +9,9 @@ if (!forceDirect) {
   if (isProdHost) rawBase = '/admin-api';
 }
 if (!rawBase) rawBase = '/admin-api';
+// Canonicalize accidental duplicated '/admin-api/api' or trailing '/api' on proxy
+rawBase = rawBase.replace(/\/admin-api\/api$/,'/admin-api');
+rawBase = rawBase.replace(/\/admin-api\/$/,'/admin-api');
 
 // Remove any trailing slashes without using a regex
 function stripTrailingSlashes(url: string): string {
@@ -67,4 +70,32 @@ export async function resetPasswordWithOtp(email: string, otp: string, password:
 export async function resetPasswordWithToken(email: string, resetToken: string, password: string) {
   const path = resolveAdminPath('/api/auth/otp/reset');
   return (await adminApi.post(path, { email, resetToken, newPassword: password })).data;
+}
+
+// Unified admin login with automatic path fallback
+export interface LoginDTO { email: string; password: string }
+export async function loginAdmin(dto: LoginDTO) {
+  const paths = [resolveAdminPath('/admin/login'), resolveAdminPath('/api/admin/login')];
+  let lastErr: any = null;
+  for (const p of paths) {
+    try {
+      const res = await adminApi.post(p, dto);
+      const data = res.data || {};
+      const user = data.user || data.data?.user || {
+        id: data.id || data._id,
+        email: data.email,
+        name: data.name,
+        role: data.role,
+      };
+      const token = data.token || data.accessToken || null;
+      return { ok: true, token, user };
+    } catch (e: any) {
+      lastErr = e;
+      const status = e?.response?.status;
+      // Fallback only on 404/405; abort early on auth errors
+      if (status === 401 || status === 403) break;
+      continue;
+    }
+  }
+  throw lastErr || new Error('Login failed');
 }

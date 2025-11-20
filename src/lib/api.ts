@@ -10,6 +10,9 @@ if (!forceDirect) {
   if (isProdHost) base = '/admin-api';
 }
 if (!base) base = '/admin-api';
+// Canonicalize accidental duplication
+base = base.replace(/\/admin-api\/api$/,'/admin-api');
+base = base.replace(/\/admin-api\/$/,'/admin-api');
 const API_BASE_URL = base;
 
 // Extend axios instance with monitorHub helper

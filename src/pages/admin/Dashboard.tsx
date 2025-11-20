@@ -10,7 +10,7 @@ import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
 import { fetchJson } from '@lib/fetchJson';
-import { adminRoot } from '@lib/adminApi';
+import { adminRoot, resolveAdminPath } from '@lib/adminApi';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import apiClient from '@lib/api';
@@ -104,12 +104,12 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        // Use fallback-aware helper to handle misrouted /admin-api proxy
-        const json = await fetchJson(`${API_BASE}/system/health`);
+        // Build health endpoint with duplication-safe resolver
+        const healthPath = resolveAdminPath('/api/system/health');
+        const json = await fetchJson(healthPath);
         setAiCommand(json);
       } catch (err: any) {
         console.error('❌ AI Command API Error:', err?.message || err);
-        // If the server returned HTML/Not Found, surface that preview in the panel
         setAiCommand({ _nonJson: true, contentType: 'unknown', preview: String(err?.message || 'Unknown error') });
       }
     };
