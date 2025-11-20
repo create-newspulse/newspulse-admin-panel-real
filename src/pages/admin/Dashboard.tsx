@@ -10,6 +10,7 @@ import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
 import { fetchJson } from '@lib/fetchJson';
+import { adminRoot } from '@lib/adminApi';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import apiClient from '@lib/api';
@@ -41,9 +42,8 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [debugExpanded, setDebugExpanded] = useState(false);
 
-  // Derive backend API origin from env (never localhost fallback)
-  const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-  const API_BASE = `${API_ORIGIN}/api`;
+  // Build base aware of proxy usage. If adminRoot is '/admin-api' we do not append '/api'.
+  const API_BASE = adminRoot.startsWith('/admin-api') ? adminRoot : `${adminRoot}/api`;
 
   const articles = useMemo(
     () => [

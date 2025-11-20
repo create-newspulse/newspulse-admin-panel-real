@@ -1,12 +1,16 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Unified resolution order (no trailing slash, no implicit /api):
-// 1. VITE_ADMIN_API_BASE_URL
-// 2. VITE_API_URL
-// 3. fallback Render production URL
-const rawAdmin = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').toString().replace(/\/+$/, '');
-const rawLegacy = (import.meta.env.VITE_API_URL || '').toString().replace(/\/+$/, '');
-const API_BASE_URL = rawAdmin || rawLegacy || 'https://newspulse-backend-real.onrender.com';
+// Prefer relative proxy '/admin-api' on production hosts unless forced.
+const forceDirect = (import.meta.env.VITE_FORCE_DIRECT_BACKEND as string | undefined) === '1';
+const explicit = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || '').toString().replace(/\/+$/, '');
+let base = explicit;
+if (!forceDirect) {
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  const isProdHost = /vercel\.app$/i.test(host) || /admin\.newspulse\.co\.in$/i.test(host);
+  if (isProdHost) base = '/admin-api';
+}
+if (!base) base = '/admin-api';
+const API_BASE_URL = base;
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -58,9 +62,6 @@ export function setAuthToken(token: string | null) {
 }
 
 // Dev visibility of resolved base
-if (import.meta.env.DEV) {
-  // eslint-disable-next-line no-console
-  console.log('[api] baseURL resolved =', API_BASE_URL);
-}
+try { console.info('[api] baseURL resolved =', API_BASE_URL, 'forceDirect=', forceDirect); } catch {}
 
 export default api;
