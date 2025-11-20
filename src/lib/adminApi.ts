@@ -1,9 +1,17 @@
 import axios from "axios";
 
-const rawBase =
-  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) ||
-  (import.meta.env.VITE_API_URL as string | undefined) ||
-  "https://newspulse-backend-real.onrender.com";
+// Decide API base: prefer proxy mode (relative /admin-api) in production unless forced.
+const forceDirect = (import.meta.env.VITE_FORCE_DIRECT_BACKEND as string | undefined) === '1';
+let rawBase = (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) || (import.meta.env.VITE_API_URL as string | undefined) || '';
+if (!forceDirect) {
+  // If running on Vercel/admin domain and not explicitly forcing direct, use relative path so CORS avoided via rewrite.
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  const isProdHost = /vercel\.app$/i.test(host) || /admin\.newspulse\.co\.in$/i.test(host);
+  if (isProdHost) {
+    rawBase = '/admin-api';
+  }
+}
+if (!rawBase) rawBase = '/admin-api';
 
 // Remove any trailing slashes without using a regex
 function stripTrailingSlashes(url: string): string {
@@ -18,10 +26,7 @@ function stripTrailingSlashes(url: string): string {
 export const adminRoot = stripTrailingSlashes(rawBase);
 
 // Shared axios client for admin APIs
-export const adminApi = axios.create({
-  baseURL: adminRoot,
-  withCredentials: true,
-});
+export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
 // OTP Password Reset helpers (backend exposes /api/auth/otp/*)
 export async function requestPasswordOtp(email: string) {
