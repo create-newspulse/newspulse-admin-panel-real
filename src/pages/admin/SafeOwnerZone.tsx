@@ -25,7 +25,9 @@ import KiranOSCommandCenter from "../../components/KiranOSCommandCenter";
 import AITrainer from "../../panels/AITrainer";
 import AdminControlCenter from "../../components/AdminControlCenter";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
-import { API_BASE_PATH } from "../../lib/api";
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
+const AI_TRAINING_INFO_URL = `${API_BASE}/system/ai-training-info`;
 import ErrorBoundary from "../../components/common/ErrorBoundary";
 import { safeLazy } from "@/utils/safeLazy";
 
@@ -185,7 +187,7 @@ const SafeOwnerZone: React.FC = () => {
 				// Prefer robust serverless health first
 				const tryUrls = [
 					'/api/system/health',
-					`${API_BASE_PATH}/system/health`,
+					`${API_BASE}/system/health`,
 				];
 
 				let data: any | null = null;
@@ -235,7 +237,7 @@ const SafeOwnerZone: React.FC = () => {
 	useEffect(() => {
 		const fetchAlerts = async () => {
 			try {
-				const response = await fetch(`${API_BASE_PATH}/system/alerts`, { credentials: 'include' });
+				const response = await fetch(`${API_BASE}/system/alerts`, { credentials: 'include' });
 				const ct = response.headers.get('content-type') || '';
 				if (!response.ok) {
 					const txt = await response.text().catch(() => '');
@@ -315,7 +317,7 @@ const SafeOwnerZone: React.FC = () => {
 	useEffect(() => {
 		const fetchPredictions = async () => {
 			try {
-				const response = await fetch(`${API_BASE_PATH}/system/ai-predictions`, { credentials: 'include' });
+				const response = await fetch(`${API_BASE}/system/ai-predictions`, { credentials: 'include' });
 				const ct = response.headers.get('content-type') || '';
 				if (!response.ok) {
 					const txt = await response.text().catch(() => '');
@@ -742,7 +744,7 @@ const SafeOwnerZone: React.FC = () => {
 							onClick={async () => {
 								try {
 									// Reset system to healthy state
-									await fetch(`${API_BASE_PATH}/system/reset-health`, { method: 'POST', credentials: 'include' });
+									await fetch(`${API_BASE}/system/reset-health`, { method: 'POST', credentials: 'include' });
 									alert('🔧 AUTO-REPAIR COMPLETED!\n\n✅ CPU normalized to 45%\n✅ Memory cleared to 55%\n✅ All critical issues resolved\n\nSystem is now healthy!');
 									// Refresh to show updated metrics
 									window.location.reload();
@@ -758,7 +760,7 @@ const SafeOwnerZone: React.FC = () => {
 						<button 
 							onClick={async () => {
 								try {
-									await fetch(`${API_BASE_PATH}/system/force-critical`, { method: 'POST', credentials: 'include' });
+									await fetch(`${API_BASE}/system/force-critical`, { method: 'POST', credentials: 'include' });
 									alert('⚠️ CRITICAL STATE ACTIVATED!\n\nCPU: 95%\nMemory: 92%\n\nAuto-repair will trigger in 2 seconds...');
 									setTimeout(() => window.location.reload(), 100);
 								} catch (error) {

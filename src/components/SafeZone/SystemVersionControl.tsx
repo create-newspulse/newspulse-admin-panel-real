@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaIdCard, FaTools, FaBrain, FaFileExport } from 'react-icons/fa';
 
@@ -18,7 +19,7 @@ const SystemVersionControl = () => {
   const [data, setData] = useState<VersionData | null>(null);
 
   useEffect(() => {
-    fetchJson<VersionData>(`${API_BASE_PATH}/system/version-log`)
+    fetchJson<VersionData>(`${API_BASE}/system/version-log`)
       .then(setData)
       .catch((err) => {
         console.error('❌ Failed to fetch version log:', err);

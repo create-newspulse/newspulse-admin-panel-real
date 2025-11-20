@@ -19,9 +19,8 @@ const connectDB = async () => {
       await mongoose.disconnect();
     }
 
+    // Modern Mongoose (v6+) no longer needs useNewUrlParser/useUnifiedTopology
     await mongoose.connect(MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
     });
 

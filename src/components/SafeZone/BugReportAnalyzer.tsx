@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationCircle, FaSyncAlt, FaBug, FaDownload, FaBell } from 'react-icons/fa';
 
@@ -19,7 +21,7 @@ const BugReportAnalyzer: React.FC = () => {
 
   const fetchLogs = async () => {
     try {
-      const data = await fetchJson<{ logs?: BugEntry[] }>(`${API_BASE_PATH}/system/bug-reports`);
+      const data = await fetchJson<{ logs?: BugEntry[] }>(`${API_BASE}/system/bug-reports`);
       if (Array.isArray(data.logs)) {
         setLogs(data.logs);
         setError(false);

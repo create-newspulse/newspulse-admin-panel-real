@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api as apiLib, API_BASE_PATH } from '../../lib/api';
+import { api as apiLib } from '../../lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 // Simple options
 const LANGUAGES = ['English', 'Hindi', 'Gujarati'];
@@ -60,7 +63,7 @@ export default function AIEngine(): JSX.Element {
 
   // Fetch current backend OpenAI model for display/hint
   useEffect(() => {
-    fetch(`${API_BASE_PATH}/system/ai-health`, { credentials: 'include' })
+    fetch(`${API_BASE}/system/ai-health`, { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         const m = (data && (data.model || data.selectedModel)) || '';

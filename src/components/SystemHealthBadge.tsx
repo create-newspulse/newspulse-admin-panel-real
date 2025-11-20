@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE_PATH } from '@/lib/api';
+
+// Derive backend origin from env; fallback to Render backend
+const ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const HEALTH_URL = `${ORIGIN}/api/system/health`;
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -84,7 +87,7 @@ export default function SystemHealthBadge(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await fetch(`${API_BASE_PATH}/system/health`, { credentials: 'include' });
+        const r = await fetch(HEALTH_URL, { credentials: 'include' });
         const ct = r.headers.get('content-type') || '';
         if (!/application\/json/i.test(ct)) {
           const text = await r.text().catch(() => '');

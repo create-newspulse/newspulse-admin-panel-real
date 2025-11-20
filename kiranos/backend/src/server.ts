@@ -9,7 +9,12 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("tiny"));
 
-const allowed = process.env.ALLOWED_ORIGIN || "*";
+const DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:5174'];
+const envOrigins = (process.env.ALLOWED_ORIGIN || process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const allowed = envOrigins.length ? envOrigins : DEV_ORIGINS;
 app.use(cors({ origin: allowed, credentials: true }));
 
 // Simple founder auth guard

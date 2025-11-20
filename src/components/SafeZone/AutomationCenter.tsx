@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaPlay, FaPause, FaSyncAlt, FaClock, FaCogs } from 'react-icons/fa';
 
@@ -31,7 +33,7 @@ export default function AutomationCenter() {
     setLoading(true);
     try {
       // Try read status from backend; tolerate absence by keeping defaults
-  const data = await fetchJson<{ jobs?: Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }>(`${API_BASE_PATH}/system/jobs/status`).catch(() => ({ jobs: {} as Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }));
+  const data = await fetchJson<{ jobs?: Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }>(`${API_BASE}/system/jobs/status`).catch(() => ({ jobs: {} as Partial<Record<JobKey, { running: boolean; lastRun?: string }>> }));
       setJobs(prev => prev.map(j => ({
         ...j,
         running: data.jobs?.[j.key]?.running ?? j.running,
@@ -50,7 +52,7 @@ export default function AutomationCenter() {
   const toggleJob = async (key: JobKey, start: boolean) => {
     try {
       const path = start ? 'start' : 'stop';
-      const res = await fetch(`${API_BASE_PATH}/system/jobs/${path}`, {
+      const res = await fetch(`${API_BASE}/system/jobs/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
@@ -66,7 +68,7 @@ export default function AutomationCenter() {
 
   const runOnce = async (key: JobKey) => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/system/jobs/run-once`, {
+      const res = await fetch(`${API_BASE}/system/jobs/run-once`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',

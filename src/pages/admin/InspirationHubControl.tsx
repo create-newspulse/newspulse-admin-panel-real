@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import apiClient, { API_BASE_PATH } from '@lib/api';
+import apiClient from '@lib/api';
 import { io, Socket } from 'socket.io-client';
 import { extractIframeSrc, isHostAllowed } from '@lib/embedUtils';
 import AuthenticatedLayout from '@/layouts/AuthenticatedLayout';
@@ -29,10 +29,10 @@ const InspirationHubControl: React.FC = () => {
 
   // Socket for real-time changes (use REST origin)
   useEffect(() => {
+    const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
     let s: Socket | null = null;
     try {
-      const base = API_BASE_PATH.replace(/\/$/, '');
-      s = io(base, { path: '/socket.io', transports: ['websocket'] });
+      s = io(API_ORIGIN, { path: '/socket.io', transports: ['websocket'] });
       s.on('connect', () => console.log('🧩 socket connected for live-content'));
       s.on('live-content-updated', (p: any) => {
         console.log('📡 live-content-updated', p);

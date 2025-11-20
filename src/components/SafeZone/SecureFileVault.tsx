@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { useNotification } from '@context/NotificationContext';
 import {
   FaFileDownload, FaClock, FaUpload, FaTrash
@@ -20,7 +21,7 @@ const SecureFileVault = () => {
   const handleDownload = () => {
     setMessage(null);
     setError(null);
-  window.open(`${API_BASE_PATH}/backups/latest.zip`, '_blank');
+  window.open(`${API_BASE}/backups/latest.zip`, '_blank');
   };
 
   const handleUpload = () => {
@@ -35,7 +36,7 @@ const SecureFileVault = () => {
     const formData = new FormData();
     formData.append('vault', file);
 
-    fetch(`${API_BASE_PATH}/vault/upload`, {
+    fetch(`${API_BASE}/vault/upload`, {
       method: 'POST',
       credentials: 'include',
       body: formData,

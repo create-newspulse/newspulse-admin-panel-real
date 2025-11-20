@@ -1,6 +1,7 @@
 // 📁 src/components/SafeZone/GlobalThreatScanner.tsx
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaShieldAlt, FaLock, FaGlobe, FaCheckCircle, FaSyncAlt
@@ -34,7 +35,7 @@ const GlobalThreatScanner = () => {
     try {
       setLoading(true);
       setLastError(null);
-      const json = await fetchJson<ThreatStatus>(`${API_BASE_PATH}/system/threat-status`, {
+      const json = await fetchJson<ThreatStatus>(`${API_BASE}/system/threat-status`, {
         cache: 'no-store',
         timeoutMs: 15000,
       });

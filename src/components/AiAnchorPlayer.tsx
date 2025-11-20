@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE_PATH } from '../lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 export interface AnchorSource {
   title: string;
@@ -75,7 +77,7 @@ export const AiAnchorPlayer: React.FC<Props> = ({ open, onClose, source }) => {
           category: source.category || '',
           language: source.language || 'en',
         };
-        const r = await fetch(`${API_BASE_PATH}/ai/tools/voice-script`, {
+        const r = await fetch(`${API_BASE}/ai/tools/voice-script`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',

@@ -20,9 +20,7 @@ router.get('/', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    if (process.env.NODE_ENV !== 'production') {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    }
+    // CORS handled globally by server.mjs; avoid setting Access-Control-Allow-Origin here.
 
     return res.status(200).json({ success: true, data });
   } catch (err) {

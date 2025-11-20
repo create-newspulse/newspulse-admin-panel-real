@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 type RegionHit = { code: string; count: number };
 
@@ -54,7 +56,7 @@ export default function RealtimeTrafficGlobe() {
     let mounted = true;
     const fetchData = async () => {
       try {
-        const res = await fetch(`${API_BASE_PATH}/system/monitor-hub`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/system/monitor-hub`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok || !/application\/json/i.test(ct)) throw new Error('bad');
         const data = await res.json();

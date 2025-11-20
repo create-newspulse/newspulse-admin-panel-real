@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 // import { useAuth } from '../context/AuthContext'; // Optional if roles are implemented
 
 interface AiLog {
@@ -25,7 +27,7 @@ const AdminAiLogs: React.FC = () => {
 
   const fetchLogs = () => {
     setLoading(true);
-    fetch(`${API_BASE_PATH}/ai/logs/all`, { credentials: 'include' })
+    fetch(`${API_BASE}/ai/logs/all`, { credentials: 'include' })
       .then(async (res) => {
         const ct = res.headers.get('content-type') || '';
         if (!res.ok || !ct.includes('application/json')) {

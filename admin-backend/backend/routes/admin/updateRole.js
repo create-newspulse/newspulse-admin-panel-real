@@ -1,4 +1,4 @@
-import express from 'express';
+const express = require('express');
 const router = express.Router();
 
 // ✅ Only Founder can update roles
@@ -31,4 +31,4 @@ router.put('/update-role/:id', async (req, res) => {
   }
 });
 
-export default router;
+module.exports = router;

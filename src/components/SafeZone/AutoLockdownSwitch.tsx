@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaShieldAlt } from "react-icons/fa";
 import { useNotification } from '@context/NotificationContext';
@@ -34,7 +35,7 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("locking");
     setMessage(null);
     try {
-      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/emergency-lock`, {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE}/system/emergency-lock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: lockPin }),
@@ -62,7 +63,7 @@ const AutoLockdownSwitch: React.FC = () => {
     setStatus("unlocking");
     setMessage(null);
     try {
-      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/emergency-unlock`, {
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE}/system/emergency-unlock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: unlockPin }),

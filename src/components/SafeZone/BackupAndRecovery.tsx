@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { API_BASE_PATH } from '@lib/api';
 import { fetchJson } from '@lib/fetchJson';
 import { FaRedo, FaDatabase, FaCloudUploadAlt } from "react-icons/fa";
 import { useNotification } from '@context/NotificationContext';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 const BackupAndRecovery: React.FC = () => {
   const notify = useNotification();
@@ -16,7 +18,7 @@ const BackupAndRecovery: React.FC = () => {
     setUploadDone(false);
     setErrorMsg(null);
     try {
-      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/run-backup`, { method: "POST" });
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE}/system/run-backup`, { method: "POST" });
       if (data.success ?? true) {
         setStatus("success");
         notify.success('💾 Backup completed');
@@ -36,7 +38,7 @@ const BackupAndRecovery: React.FC = () => {
     setUploading(true);
     setErrorMsg(null);
     try {
-      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE_PATH}/system/firebase-upload-latest`, { method: "POST" });
+      const data = await fetchJson<{ success?: boolean; error?: string }>(`${API_BASE}/system/firebase-upload-latest`, { method: "POST" });
       if (data.success ?? true) {
         setUploadDone(true);
         notify.success('☁️ Backup uploaded to Firebase');
@@ -86,7 +88,7 @@ const BackupAndRecovery: React.FC = () => {
         {status === "success" && (
           <>
             <a
-              href={`${API_BASE_PATH}/backups/latest.zip`}
+              href={`${API_BASE}/backups/latest.zip`}
               download
               className="text-blue-600 underline text-sm block mt-2"
             >

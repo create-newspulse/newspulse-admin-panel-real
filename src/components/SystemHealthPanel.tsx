@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE_PATH } from '@/lib/api';
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -50,6 +49,10 @@ function deriveStatus(data: HealthEnvelope): HealthStatus {
   }
 }
 
+// Backend origin derived from env; fallback to Render deployment.
+const ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const HEALTH_URL = `${ORIGIN}/api/system/health`;
+
 export default function SystemHealthPanel(): JSX.Element {
   const [env, setEnv] = useState<HealthEnvelope | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +69,7 @@ export default function SystemHealthPanel(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await fetch(`${API_BASE_PATH}/system/health`, { credentials: 'include' });
+        const r = await fetch(HEALTH_URL, { credentials: 'include' });
         const ct = r.headers.get('content-type') || '';
         if (!/application\/json/i.test(ct)) {
           const txt = await r.text().catch(() => '');
@@ -182,7 +185,7 @@ export default function SystemHealthPanel(): JSX.Element {
         <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
           <div className="text-xs text-slate-500 mb-1">Storage</div>
           <div className="text-2xl font-bold">{storage !== null ? `${storage.toFixed(1)}%` : '—'}</div>
-          <div className="mt-2 h-2 rounded bg-slate-2 00 dark:bg-slate-700">
+          <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
             <div className={`h-2 rounded ${storage !== null ? (storage > 90 ? 'bg-red-500' : storage > 75 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-slate-400'}`} style={{ width: `${Math.max(0, Math.min(100, storage ?? 0))}%` }} />
           </div>
         </div>
@@ -193,7 +196,7 @@ export default function SystemHealthPanel(): JSX.Element {
           <div className="text-xs text-slate-500 mt-1">Target: {env?.target || '—'}</div>
         </div>
 
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-8 00 border-slate-200 dark:border-slate-700">
+        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
           <div className="text-xs text-slate-500 mb-1">Active Users</div>
           <div className="text-2xl font-bold">{activeUsers !== null ? activeUsers : '—'}</div>
         </div>

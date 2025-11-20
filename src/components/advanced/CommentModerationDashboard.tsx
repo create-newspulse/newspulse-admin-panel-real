@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { MessageSquare, CheckCircle, XCircle, Flag, Ban, TrendingDown, TrendingUp } from 'lucide-react';
 
-const API_BASE = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || '/admin-api').replace(/\/$/, '');
+const HOST_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${HOST_BASE}/api`;
 
 export default function CommentModerationDashboard() {
   const [comments, setComments] = useState<any[]>([]);

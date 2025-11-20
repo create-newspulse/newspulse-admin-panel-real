@@ -1,11 +1,11 @@
 // src/utils/apiFetch.ts
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 function resolveUrl(url) {
-    // Route backend system calls through the authenticated proxy in production
-    if (url.startsWith('/api/system')) {
-        return `${API_BASE_PATH}${url.slice(4)}`; // '/api/system/x' -> `${API_BASE_PATH}/system/x`
-    }
-    return url; // keep other serverless endpoints (e.g., /api/ai-engine) untouched
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith('/api/')) return `${API_ORIGIN}${url}`;
+    if (url.startsWith('/')) return `${API_BASE}${url}`;
+    return `${API_BASE}/${url}`;
 }
 export async function apiFetch(url, options = {}) {
     const finalUrl = resolveUrl(url);

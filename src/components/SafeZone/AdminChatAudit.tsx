@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import {
   FaComments,
   FaRobot,
@@ -26,7 +28,7 @@ const AdminChatAudit = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${API_BASE_PATH}/admin-chat-audit`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/admin-chat-audit`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok) {
           const txt = await res.text().catch(() => '');

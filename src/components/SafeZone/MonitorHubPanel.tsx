@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { useNotification } from '@context/NotificationContext';
 import { fetchJson } from '@lib/fetchJson';
 import {
@@ -37,7 +38,7 @@ const MonitorHubPanel: React.FC = () => {
   // 🔁 Fetch Live Data
   const fetchStatus = async () => {
     try {
-      const json = await getJSON<MonitorData>(`${API_BASE_PATH}/system/monitor-hub`);
+      const json = await getJSON<MonitorData>(`${API_BASE}/system/monitor-hub`);
       // Accept either {success:true, ...} or plain object
       const success = json.success ?? true;
       if (!success) throw new Error('API success=false');
@@ -111,7 +112,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📤 Export PDF Report
   const exportReport = async () => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/reports/export?type=pdf`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/reports/export?type=pdf`, { credentials: 'include' });
       if (!res.ok || res.headers.get('content-type')?.includes('text/html')) {
         notify.info('Feature not available on this backend');
         return;
@@ -135,7 +136,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const json = await fetchJson<{ enabled?: boolean }>(`${API_BASE_PATH}/system/daily-summary-toggle`, {
+      const json = await fetchJson<{ enabled?: boolean }>(`${API_BASE}/system/daily-summary-toggle`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ toggle: true }),

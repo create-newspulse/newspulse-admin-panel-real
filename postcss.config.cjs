@@ -1,17 +1,8 @@
 // postcss.config.cjs
-// Use the official PostCSS adapter for Tailwind when available
-// (some Tailwind versions moved the PostCSS adapter to '@tailwindcss/postcss')
-const tailwindPostcss = (() => {
-  try {
-    return require('@tailwindcss/postcss');
-  } catch (e) {
-    return require('tailwindcss');
-  }
-})();
-
+// Reverted to Tailwind v3 plugin usage after downgrade.
 module.exports = {
   plugins: {
-    [tailwindPostcss.postcssPlugin || 'tailwindcss']: tailwindPostcss === require('tailwindcss') ? {} : {},
+    tailwindcss: {},
     autoprefixer: {},
   },
 };

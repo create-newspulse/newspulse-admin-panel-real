@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { FaMicrophone, FaMicrophoneSlash, FaTimes, FaGripLines, FaPaperPlane, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
 import apiClient from '@lib/api';
-import { sanitizeHtml } from '@lib/sanitize';
+import DOMPurify from 'dompurify';
 import { saveSession, loadSession } from '@lib/idb';
 
 export interface KiranOSCommandCenterProps {
@@ -149,7 +149,7 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
             speakText(answer, lang);
           } catch (err3: any) {
             const msg3 = err3?.response?.data?.error || err3.message || 'Request failed';
-            setMessages(prev => [...prev, { role: 'system', content: `⚠️ ${msg3}. If you are running locally, make sure the backend is running at http://localhost:5000 (try: set DB_DEGRADED=1 and run npm run dev in admin-backend).`, ts: Date.now() }]);
+            setMessages(prev => [...prev, { role: 'system', content: `⚠️ ${msg3}. The backend API seems unreachable. Please check your internet connection or the NewsPulse backend status.`, ts: Date.now() }]);
           }
         }
       } else {
@@ -163,8 +163,8 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
   };
 
   const contentHtml = useMemo(() => (text: string) => {
-    // Hardened sanitize wrapper (DOMPurify with strict allowlist or safe fallback)
-    const clean = sanitizeHtml(String(text || ''));
+    // Minimal safe rendering; can be upgraded to markdown-it
+    const clean = DOMPurify.sanitize(text);
     return { __html: clean };
   }, []);
 

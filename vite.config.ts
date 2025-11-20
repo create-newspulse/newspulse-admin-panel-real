@@ -9,11 +9,10 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
-  const rawApi = stripSlash(env.VITE_API_URL);
-  // If VITE_API_URL is provided, always prefer it (even if it's localhost)
-  // Otherwise, in dev default to localhost:5000; in prod, fall back to the Render backend host
-  const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com');
-  const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host
+  const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
+  // Prefer explicit origin when provided; otherwise keep empty in production so client defaults to '/admin-api'
+  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:5000' : '');
+  const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
 
   return {
     envPrefix: 'VITE_',
@@ -46,14 +45,14 @@ export default defineConfig(({ mode }): UserConfig => {
       // Proxy all API + sockets to backend in dev
       proxy: {
         '/api': {
-          target: API_HTTP,
+          target: `${API_HTTP}`,
           changeOrigin: true,
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
         // Mirror Vercel rewrite for local dev
         '/admin-api': {
-          target: 'http://localhost:5000/api',
+          target: `${API_HTTP}/api`,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/admin-api/, ''),
@@ -82,6 +81,7 @@ export default defineConfig(({ mode }): UserConfig => {
     },
 
     define: {
+      'import.meta.env.VITE_ADMIN_API_BASE_URL': JSON.stringify(API_HTTP),
       'import.meta.env.VITE_API_URL': JSON.stringify(API_HTTP),
       'import.meta.env.VITE_API_WS': JSON.stringify(API_WS),
       'import.meta.env.VITE_SITE_NAME': JSON.stringify(env.VITE_SITE_NAME ?? ''),
@@ -107,7 +107,7 @@ export default defineConfig(({ mode }): UserConfig => {
               '@tiptap/starter-kit',
               '@tiptap/extension-image',
               '@tiptap/extension-link',
-              '@tiptap/extension-placeholder',
+              // placeholder extension removed from manualChunks list (not installed)
               '@tiptap/extension-underline',
             ],
             i18n: ['i18next', 'react-i18next', 'i18next-browser-languagedetector'],

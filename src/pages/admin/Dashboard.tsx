@@ -9,7 +9,6 @@ import ChartComponent from '@components/ChartComponent';
 import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
-import { API_BASE_PATH } from '@lib/api';
 import { fetchJson } from '@lib/fetchJson';
 
 // api client from src/lib/api.ts (default export = axios instance)
@@ -42,8 +41,9 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [debugExpanded, setDebugExpanded] = useState(false);
 
-  // Use resolved API base (Render in production, proxy in dev)
-  const API_BASE = API_BASE_PATH;
+  // Derive backend API origin from env (never localhost fallback)
+  const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+  const API_BASE = `${API_ORIGIN}/api`;
 
   const articles = useMemo(
     () => [

@@ -1,6 +1,7 @@
 // 📁 frontend/components/SafeZone/ThreatDashboard.tsx
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import type { ReactNode } from 'react';
 import {
@@ -31,7 +32,7 @@ const ThreatDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const json = await fetchJson<StatsResponse>(`${API_BASE_PATH}/dashboard/threat-stats`);
+      const json = await fetchJson<StatsResponse>(`${API_BASE}/dashboard/threat-stats`);
       if (json && json.success) setStats(json);
       else throw new Error('Invalid data structure');
     } catch (err) {

@@ -1,5 +1,5 @@
 // src/utils/fetchTrainingInfo.ts
-import apiClient from '@lib/api';
+import { adminApi } from '@lib/adminApi';
 
 interface TrainingInfo {
   lastTrained: string;
@@ -17,7 +17,7 @@ interface TrainingInfo {
 
 export const fetchTrainingInfo = async (): Promise<TrainingInfo> => {
   try {
-    const res = await apiClient.get('/system/ai-training-info');
+    const res = await adminApi.get('/system/ai-training-info');
     const json = res.data as any;
     const data = json?.data;
     if (!json?.success || !data || !data.lastTrained) {

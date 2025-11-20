@@ -1,258 +1,126 @@
-// 📁 src/context/AuthContext.tsx
+import React, { createContext, useContext, useState, useCallback } from 'react';
+import apiClient, { setAuthToken } from '@/lib/api';
+import { loginAdmin, adminApi } from '@/lib/adminApi';
 
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  ReactNode,
-} from 'react';
-import { setAuthToken, AuthAPI, ADMIN_BACKEND_FALLBACK } from '../lib/api';
-import { ADMIN_LOGIN_URL, ADMIN_SESSION_URL } from '../lib/apiBase';
-import { User } from '../types/User';
+type User = { id: string; email: string; name?: string; role?: string };
 
-// ✅ Auth context type
-interface AuthContextType {
+export interface AuthContextValue {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
-  isLoading: boolean;
   isFounder: boolean;
+  isLoading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isFounder, setIsFounder] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [token, setTokenState] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // 🛡️ SECURE: Environment-controlled demo access
-  const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
-  const isVercelPreview = window.location.hostname.includes('vercel.app');
-  
-  // 🔒 Auto-login logic: Only on Vercel when NOT explicitly disabled
-  const allowAutoLogin = demoModeEnv !== 'false' && isVercelPreview;
-  
-  // Debug logging
-  console.log('🔧 AuthContext Debug:', {
-    demoModeEnv,
-    isVercelPreview,
-    allowAutoLogin,
-    hostname: window.location.hostname
-  });
+  // Consider cookie-session success (no token) as authenticated if we have user
+  const isAuthenticated = !!user;
+  const isFounder = (user?.role || '').toLowerCase() === 'founder';
 
-  useEffect(() => {
-    const init = async () => {
-      // Hydrate auth token into API client if present
-      const existingToken = localStorage.getItem('adminToken');
-      if (existingToken) setAuthToken(existingToken);
-      // If user just logged out, temporarily suppress auto re-auth from cookie
-  const recentLogoutAt = Number(sessionStorage.getItem('np_recent_logout') || '0');
-  const justLoggedOut = recentLogoutAt && (Date.now() - recentLogoutAt < 20000);
-  // ✅ Fix: do NOT persist force flag across sessions; use sessionStorage only
-  const forceLogout = sessionStorage.getItem('np_force_logout') === '1';
+  // PRODUCTION ADMIN LOGIN (Vercel):
+  // POST /admin/login on https://newspulse-backend-real.onrender.com
+  // Expects response: { ok: true, user: {...}, ... } (token may be absent)
+  const LOGIN_PATH = '/admin/login';
 
-      const storedUser = localStorage.getItem('currentUser');
-      if (storedUser) {
-        try {
-          const parsedUser: User = JSON.parse(storedUser);
-          setUser(parsedUser);
-          setIsAuthenticated(true);
-          setIsFounder(parsedUser.role === 'founder');
-        } catch (err) {
-          console.error('❌ Invalid session data:', err);
-          localStorage.removeItem('currentUser');
-        }
-  } else if (allowAutoLogin && !forceLogout) {
-        // 🎯 CONTROLLED: Only auto-login when explicitly enabled for demos
-        console.log('🚀 Demo mode enabled - Auto-authenticating for preview');
-        const demoUser: User = {
-          _id: 'demo-founder',
-          name: 'Demo User',
-          email: 'demo@newspulse.ai',
-          role: 'founder',
-          avatar: '',
-          bio: 'Demo account - Preview mode only'
-        };
-        setUser(demoUser);
-        setIsAuthenticated(true);
-        setIsFounder(true);
-        localStorage.setItem('currentUser', JSON.stringify(demoUser));
-        localStorage.setItem('isFounder', 'true');
-      } else {
-        // 🔐 Check server session cookie (magic-link auth)
-        try {
-          if (justLoggedOut || forceLogout) {
-            // ✅ Fix: still allow cookie check when user is on login/auth pages
-            const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
-            const onAuthPage = p.includes('/login') || p.startsWith('/auth');
-            if (!onAuthPage) {
-              // Skip cookie check right after logout to avoid flicker
-              throw new Error('skip-session-check-after-logout');
-            }
-          }
-          // Fallback-aware fetch: try proxied /admin-api first, then direct Render admin-backend if 404/HTML
-          const FALLBACK_ADMIN_API = ADMIN_BACKEND_FALLBACK;
-          const doFetch = async (full: string) => fetch(full, { credentials: 'include' });
-          let resp = await doFetch(ADMIN_SESSION_URL);
-          const ct = resp.headers.get('content-type') || '';
-          const looksHtml = ct.includes('text/html');
-          if ((!resp.ok || looksHtml || resp.status === 404)) {
-            try { resp = await doFetch(`${FALLBACK_ADMIN_API}/admin-auth/session`); } catch {}
-          }
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data?.authenticated) {
-              const sessionUser: User = {
-                _id: data.email || 'admin-user',
-                name: data.email?.split('@')[0] || 'Admin',
-                email: data.email,
-                role: 'founder', // Treat authenticated admins as founders for panel access
-                avatar: '',
-                bio: ''
-              };
-              setUser(sessionUser);
-              setIsAuthenticated(true);
-              setIsFounder(true);
-              // Persist minimal user to avoid blank reloads
-              localStorage.setItem('currentUser', JSON.stringify(sessionUser));
-              localStorage.setItem('isFounder', 'true');
-            }
-          }
-        } catch (e) {
-          // Ignore and keep unauthenticated state
-        }
-      }
-      setIsLoading(false);
-    };
-    init();
-  }, [allowAutoLogin]);
-
-  const login = async (email: string, password: string): Promise<boolean> => {
-    console.log('🚀 Submitting login request...');
-    console.log('API URL (login):', ADMIN_LOGIN_URL);
-    console.log('Payload:', { email }); // do not log password for security
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    setIsLoading(true);
+    const trimmedEmail = email.trim();
+    if (import.meta.env.DEV) {
+      console.log('[Auth] login request', {
+        baseURL: adminApi.defaults.baseURL,
+        path: LOGIN_PATH,
+        email: trimmedEmail,
+      });
+    }
     try {
-      const res = await AuthAPI.login({ email, password });
-      console.log('✅ Login response token/user:', { hasToken: !!res.token, user: res.user?.email });
-      if (res?.token && res?.user) {
-        // Clear any force-logout flags if present
-        try {
-          sessionStorage.removeItem('np_force_logout');
-          localStorage.removeItem('np_force_logout');
-        } catch {}
-        if (res.token) {
-          localStorage.setItem('adminToken', res.token);
-          setAuthToken(res.token);
-        }
-        const userData: User = {
-          _id: (res.user as any)?.id || (res.user as any)?._id || '',
-          name: res.user?.name || 'Admin',
-          email: res.user?.email || email,
-          role: (res.user?.role as any) || 'editor',
-          avatar: (res.user as any)?.avatar || '',
-          bio: (res.user as any)?.bio || '',
-        };
-        localStorage.setItem('currentUser', JSON.stringify(userData));
-        localStorage.setItem('isLoggedIn', 'true');
-        setUser(userData);
-        setIsAuthenticated(true);
-        setIsFounder(userData.role === 'founder');
-        return true;
-      } else {
-        console.warn('⚠️ Login unsuccessful (missing token/user)');
+      const res = await adminApi.post(LOGIN_PATH, { email: trimmedEmail, password });
+      const data = res.data ?? {};
+      const successFlag =
+        data.ok === true ||
+        data.success === true ||
+        !!data.user ||
+        !!data.token ||
+        !!data.accessToken;
+
+      if (!successFlag) {
+        if (import.meta.env.DEV) console.warn('[Auth] unexpected login response shape', data);
         return false;
       }
+
+      const tokenVal = data.token || data.accessToken || null;
+      if (tokenVal) {
+        setAuthToken(tokenVal);
+        setTokenState(String(tokenVal));
+      } else {
+        // Ensure Authorization header is cleared if no token returned
+        setAuthToken(null);
+        setTokenState(null);
+      }
+
+      const u = data.user || data.data?.user || {
+        id: data.id,
+        email: data.email,
+        role: data.role,
+        name: data.name,
+      };
+      setUser({
+        id: String(u.id || u._id || ''),
+        email: String(u.email || ''),
+        name: String(u.name || ''),
+        role: String(u.role || ''),
+      });
+      if (import.meta.env.DEV) console.log('[Auth] login success', data);
+      return true;
     } catch (err: any) {
-      console.error('❌ Login error (network/server):', err);
-      if (err?.response) {
-        console.error('Server responded:', err.response.status, err.response.data);
-        if (err.response.status === 401) {
-          console.error('Invalid email or password');
-        } else if (err.response.status === 405) {
-          console.error('Login 405: Check HTTP method or URL mismatch', err.response);
-        }
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.');
+      if (import.meta.env.DEV) {
+        console.error('[Auth] Login error', {
+          status,
+          data: err?.response?.data,
+          message: err?.message,
+          surfacedMessage: msg,
+          baseURL: adminApi.defaults.baseURL,
+          path: LOGIN_PATH,
+        });
       }
       return false;
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, []);
 
-  const logout = () => {
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('adminToken');
-    setAuthToken(undefined);
+  const logout = useCallback(() => {
+    setAuthToken(null);
+    setTokenState(null);
     setUser(null);
-    setIsAuthenticated(false);
-    setIsFounder(false);
-  // Best-effort cookie clear on server
-  // Try proxied logout; if it fails with 404/HTML, hit Render admin-backend directly
-  (async () => {
-    try {
-      const r = await fetch(ADMIN_SESSION_URL.replace('/session','/logout'), { method: 'POST', credentials: 'include' });
-      const ct = r.headers.get('content-type') || '';
-      if (!r.ok || ct.includes('text/html')) {
-  const FALLBACK_ADMIN_API = ADMIN_BACKEND_FALLBACK;
-        await fetch(`${FALLBACK_ADMIN_API}/admin-auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
-      }
-    } catch {}
-  })();
-    // ✅ Fixed: logout now clears session and routes to /login instead of missing /auth.
-    // Use hard navigation to ensure state is reset and protected routes re-evaluate.
-    try {
-      sessionStorage.setItem('np_recent_logout', String(Date.now()));
-      // Block any auto-login (demo) and any cookie-based session hydration
-      sessionStorage.setItem('np_force_logout', '1');
-  // Do not persist force flag in localStorage (prevents being locked out on next session)
-      // Proactively attempt to drop visible cookies (HttpOnly won't be affected, but harmless)
-      try {
-        const hosts = [window.location.hostname];
-        const parts = window.location.hostname.split('.');
-        if (parts.length > 2) hosts.push(`.${parts.slice(-2).join('.')}`);
-        const attrs = ['path=/', 'SameSite=Lax', 'SameSite=None; Secure'];
-        for (const h of hosts) {
-          for (const a of attrs) {
-            document.cookie = `np_admin=; Max-Age=0; ${a}; domain=${h}`;
-          }
-        }
-        // Also attempt host-only delete (no domain attribute)
-        document.cookie = 'np_admin=; Max-Age=0; path=/';
-      } catch {}
-  // ✅ Fix: proper logout + redirect per area (Admin -> /admin/login, Employee -> /employee/login)
-  const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
-  const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
-  window.location.replace(dest);
-    } catch {
-      // Fallback if window is not available (unlikely in client context)
-    }
+  }, []);
+
+  const value: AuthContextValue = {
+    user,
+    token,
+    isAuthenticated,
+    isFounder,
+    isLoading,
+    login,
+    logout,
   };
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated,
-        isLoading,
-        isFounder,
-        login,
-        logout,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context)
-    throw new Error('useAuth must be used within an AuthProvider');
-  return context;
+export const useAuth = (): AuthContextValue => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
 };
+
+export default AuthProvider;

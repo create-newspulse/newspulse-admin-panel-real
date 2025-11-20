@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import apiClient from '@lib/api';
+import { adminRoot, adminApi } from '@lib/adminApi';
 
 // Define the type for the training info (customize as per your real data)
 interface AITrainingInfo {
@@ -39,7 +39,7 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
 
   useEffect(() => {
     setLoading(true);
-  apiClient.get('/system/ai-training-info')
+  adminApi.get('/system/ai-training-info')
       .then(res => {
         setInfo((res.data as any)?.data ?? null);
         setError(null);

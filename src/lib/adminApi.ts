@@ -1,101 +1,40 @@
-import axios, { AxiosError } from 'axios';
-import { API_BASE_PATH } from './api';
+import axios from "axios";
 
-// Centralized Admin Backend client derives from env with optional override.
-// Prefer VITE_ADMIN_API_URL if provided; else fall back to `${API_BASE_PATH}/admin`.
-const RAW_ADMIN = (import.meta.env.VITE_ADMIN_API_URL || '').trim();
-let ADMIN_API_BASE = RAW_ADMIN || `${API_BASE_PATH.replace(/\/$/, '')}/admin`;
-// Normalize if user provides host without trailing /admin or /api/admin
-if (RAW_ADMIN) {
-  const lowered = ADMIN_API_BASE.toLowerCase();
-  // If value ends with /api, append /admin; if ends with /admin already, keep; else if ends with /api/admin, keep.
-  if (/\/api\/?$/.test(lowered)) ADMIN_API_BASE = ADMIN_API_BASE.replace(/\/$/, '') + '/admin';
-  if (!/\/(api\/)?admin\/?$/.test(lowered)) {
-    // If user gave a plain origin (no /api or /admin), append /api/admin
-    const hasPath = /\/\w/.test(new URL(ADMIN_API_BASE).pathname || '/');
-    if (!hasPath) ADMIN_API_BASE = ADMIN_API_BASE.replace(/\/$/, '') + '/api/admin';
+const rawBase =
+  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) ||
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  "https://newspulse-backend-real.onrender.com";
+
+// Remove any trailing slashes without using a regex
+function stripTrailingSlashes(url: string): string {
+  let out = (url || "").trim();
+  while (out.endsWith("/")) {
+    out = out.slice(0, -1);
   }
+  return out;
 }
-export { ADMIN_API_BASE };
 
+// Clean backend host (no path suffix)
+export const adminRoot = stripTrailingSlashes(rawBase);
+
+// Shared axios client for admin APIs
 export const adminApi = axios.create({
-  baseURL: ADMIN_API_BASE,
+  baseURL: adminRoot,
   withCredentials: true,
-  timeout: 20000,
 });
 
-// Optional: attach token if present
-export const attachAdminToken = () => {
-  try {
-    const t = localStorage.getItem('adminToken');
-    if (t) adminApi.defaults.headers.common['Authorization'] = `Bearer ${t}`;
-    else delete adminApi.defaults.headers.common['Authorization'];
-  } catch {}
-};
-
-// Optional: redirect to login on 401 (only if we're not already there)
-adminApi.interceptors.response.use(
-  (res) => res,
-  (error) => {
-    if (error?.response?.status === 401 && typeof window !== 'undefined') {
-      const path = window.location.pathname;
-      if (!/\/admin\/login$/.test(path)) window.location.href = '/admin/login';
-    }
-    return Promise.reject(error);
-  }
-);
-
-// ---- Convenience helpers with automatic legacy fallback ----
-// Some older deployments may still expose /auth/login or /auth/seed-founder. We try modern path first.
-export type AdminLoginDTO = { email: string; password: string };
-export type AdminLoginResp = { token: string; user: { id: string; name: string; email: string; role: 'founder' | 'admin' | 'employee' } };
-
-const extractTokenUser = (data: any) => {
-  const d = data || {};
-  const token = d.token || d?.data?.token || '';
-  const u = d.user || d?.data?.user || {};
-  const rawRole = String(u.role || 'employee');
-  const allowed: string[] = ['founder','admin','employee'];
-  const role = allowed.includes(rawRole) ? rawRole : 'employee';
-  return {
-    token,
-    user: {
-      id: String(u.id || u._id || ''),
-      name: String(u.name || ''),
-      email: String(u.email || ''),
-      role: role as 'founder' | 'admin' | 'employee',
-    },
-  };
-};
-
-export async function loginAdmin(body: AdminLoginDTO): Promise<AdminLoginResp> {
-  try {
-    const r = await adminApi.post('/login', body);
-    return extractTokenUser(r.data) as AdminLoginResp;
-  } catch (err) {
-    const e = err as AxiosError & { response?: any };
-    const status = e?.response?.status;
-    if (status === 404) {
-      // fallback to legacy path
-      const r2 = await adminApi.post('/auth/login', body);
-      return extractTokenUser(r2.data) as AdminLoginResp;
-    }
-    throw err;
-  }
+// OTP Password Reset helpers (backend exposes /api/auth/otp/*)
+export async function requestPasswordOtp(email: string) {
+  const res = await adminApi.post('/api/auth/otp/request', { email });
+  return res.data;
 }
 
-export async function seedFounder(params: { email: string; password: string; force?: boolean }): Promise<any> {
-  try {
-    const r = await adminApi.post('/seed-founder', params);
-    return r.data;
-  } catch (err) {
-    const e = err as AxiosError & { response?: any };
-    if (e?.response?.status === 404) {
-      const r2 = await adminApi.post('/auth/seed-founder', params);
-      return r2.data;
-    }
-    throw err;
-  }
+export async function verifyPasswordOtp(email: string, otp: string) {
+  const res = await adminApi.post('/api/auth/otp/verify', { email, otp });
+  return res.data;
 }
 
-export default adminApi;
+export async function resetPasswordWithOtp(email: string, otp: string, password: string) {
+  const res = await adminApi.post('/api/auth/otp/reset', { email, otp, password });
+  return res.data;
+}

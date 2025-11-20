@@ -1,12 +1,12 @@
 // 🛡️ Enhanced Zero-Trust Security System (Phase 2: WebAuthn + Rate Limiting)
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '@/utils/api';
 import { 
   Shield, Users, Activity, Lock, AlertTriangle, CheckCircle, XCircle,
   Key, Smartphone, Zap, Ban, TrendingUp, Globe
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3002/api';
+// Uses shared api client; all endpoints are prefixed with '/api'
 
 type Tab = 'dashboard' | 'audit' | 'sessions' | 'rbac' | 'webauthn' | 'rate-limit';
 
@@ -66,9 +66,9 @@ export default function EnhancedSecurityDashboard() {
       switch (activeTab) {
         case 'dashboard':
           const [auditRes, sessionsRes, rateLimitRes] = await Promise.all([
-            axios.get(`${API_BASE}/security/audit?limit=10`),
-            axios.get(`${API_BASE}/security/sessions`),
-            axios.get(`${API_BASE}/security/rate-limit/stats`)
+            api.get('/api/security/audit', { params: { limit: 10 } }),
+            api.get('/api/security/sessions'),
+            api.get('/api/security/rate-limit/stats')
           ]);
           setMetrics({
             threatLevel: 'low',
@@ -81,19 +81,19 @@ export default function EnhancedSecurityDashboard() {
           break;
 
         case 'audit':
-          const auditFullRes = await axios.get(`${API_BASE}/security/audit?limit=50`);
+          const auditFullRes = await api.get('/api/security/audit', { params: { limit: 50 } });
           setAuditLog(auditFullRes.data.events || []);
           break;
 
         case 'sessions':
-          const sessionsFullRes = await axios.get(`${API_BASE}/security/sessions`);
+          const sessionsFullRes = await api.get('/api/security/sessions');
           setSessions(sessionsFullRes.data.sessions || []);
           break;
 
         case 'rbac':
           const [rolesRes, usersRes] = await Promise.all([
-            axios.get(`${API_BASE}/security/rbac/roles`),
-            axios.get(`${API_BASE}/security/rbac/users`)
+            api.get('/api/security/rbac/roles'),
+            api.get('/api/security/rbac/users')
           ]);
           setRbacData({
             roles: rolesRes.data.roles || [],
@@ -102,15 +102,15 @@ export default function EnhancedSecurityDashboard() {
           break;
 
         case 'webauthn':
-          const credsRes = await axios.get(`${API_BASE}/security/webauthn/credentials/founder@newspulse.com`);
+          const credsRes = await api.get('/api/security/webauthn/credentials/founder@newspulse.com');
           setCredentials(credsRes.data.credentials || []);
           break;
 
         case 'rate-limit':
           const [statsRes, attacksRes, patternsRes] = await Promise.all([
-            axios.get(`${API_BASE}/security/rate-limit/stats`),
-            axios.get(`${API_BASE}/security/rate-limit/attacks?limit=20`),
-            axios.get(`${API_BASE}/security/rate-limit/patterns`)
+            api.get('/api/security/rate-limit/stats'),
+            api.get('/api/security/rate-limit/attacks', { params: { limit: 20 } }),
+            api.get('/api/security/rate-limit/patterns')
           ]);
           setRateLimitData({
             stats: statsRes.data.stats,
@@ -129,7 +129,7 @@ export default function EnhancedSecurityDashboard() {
 
   const revokeSession = async (sessionId: string) => {
     try {
-      await axios.delete(`${API_BASE}/security/sessions/${sessionId}`);
+      await api.delete(`/api/security/sessions/${sessionId}`);
       loadData();
     } catch (error) {
       console.error('Failed to revoke session:', error);
@@ -138,7 +138,7 @@ export default function EnhancedSecurityDashboard() {
 
   const removeCredential = async (credentialId: string) => {
     try {
-      await axios.delete(`${API_BASE}/security/webauthn/credentials/founder@newspulse.com/${credentialId}`);
+      await api.delete(`/api/security/webauthn/credentials/founder@newspulse.com/${credentialId}`);
       loadData();
     } catch (error) {
       console.error('Failed to remove credential:', error);
@@ -150,7 +150,7 @@ export default function EnhancedSecurityDashboard() {
     if (!ip) return;
 
     try {
-      await axios.post(`${API_BASE}/security/rate-limit/block`, { ip, reason: 'Manual block from dashboard' });
+      await api.post('/api/security/rate-limit/block', { ip, reason: 'Manual block from dashboard' });
       loadData();
     } catch (error) {
       console.error('Failed to block IP:', error);
@@ -159,7 +159,7 @@ export default function EnhancedSecurityDashboard() {
 
   const unblockIP = async (ip: string) => {
     try {
-      await axios.delete(`${API_BASE}/security/rate-limit/block/${ip}`);
+      await api.delete(`/api/security/rate-limit/block/${ip}`);
       loadData();
     } catch (error) {
       console.error('Failed to unblock IP:', error);

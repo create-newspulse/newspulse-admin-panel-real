@@ -1,7 +1,8 @@
 // ✅ File: components/SafeZone/SystemUnlockPanel.tsx
 
 import React, { useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaUnlockAlt } from 'react-icons/fa';
 
@@ -14,7 +15,7 @@ const SystemUnlockPanel: React.FC = () => {
     setStatus('loading');
 
     try {
-      const data = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/system/reactivate`, {
+      const data = await fetchJson<{ success?: boolean }>(`${API_BASE}/system/reactivate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 
 type ActivityData = {
@@ -20,7 +21,7 @@ const AIBehaviorTrainer: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const json = await fetchJson<any>(`${API_BASE_PATH}/ai-behavior-log`, { timeoutMs: 15000 });
+        const json = await fetchJson<any>(`${API_BASE}/ai-behavior-log`, { timeoutMs: 15000 });
 
         // Accepts both { data: {...} } and just {...}
         const info: ActivityData =

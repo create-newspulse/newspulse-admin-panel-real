@@ -1,7 +1,8 @@
 // ✅ Updated: admin-backend/pages/admin/ManageNews.tsx with Filters, Preview, Pagination, Inline Editing
 import React, { useEffect, useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';
-import { API_BASE_PATH } from '../../src/lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import AiAnchorPlayer from '../../src/components/AiAnchorPlayer';
 
 interface NewsItem {
@@ -32,7 +33,7 @@ const ManageNews: React.FC = () => {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-            const res = await fetch(`${API_BASE_PATH}/news/get-all-news/all`, { credentials: 'include' });
+            const res = await fetch(`${API_BASE}/news/get-all-news/all`, { credentials: 'include' });
         const data = await res.json();
         if (data.success && Array.isArray(data.news)) {
           setNews(data.news);
@@ -66,7 +67,7 @@ const ManageNews: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this news item?')) return;
     try {
-          const res = await fetch(`${API_BASE_PATH}/articles/${id}`, {
+          const res = await fetch(`${API_BASE}/articles/${id}`, {
             method: 'DELETE',
             credentials: 'include',
             headers: {

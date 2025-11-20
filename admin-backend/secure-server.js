@@ -2,6 +2,8 @@
 // Creates proper founder account with secure authentication
 
 const express = require('express');
+// Load environment variables (if .env present)
+try { require('dotenv').config(); } catch (_) {}
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -49,7 +51,25 @@ const users = [
 // 🔐 SECURE LOGIN ENDPOINT
 app.post('/api/admin/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
+
+    // Diagnostic snapshot (avoid logging raw password)
+    try {
+      console.log('[LOGIN ATTEMPT]', {
+        emailReceived: email || null,
+        passwordLength: password ? password.length : 0,
+        expectedAdminEmail: ADMIN_EMAIL,
+        env: {
+          ADMIN_EMAIL_set: Boolean(process.env.ADMIN_EMAIL),
+          ADMIN_PASSWORD_set: Boolean(process.env.ADMIN_PASSWORD),
+          NODE_ENV: process.env.NODE_ENV,
+        },
+        headers: {
+          origin: req.headers.origin,
+          referer: req.headers.referer,
+        }
+      });
+    } catch (_) {}
 
     if (!email || !password) {
       return res.status(400).json({
@@ -62,6 +82,7 @@ app.post('/api/admin/login', async (req, res) => {
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     
     if (!user) {
+      console.warn('[LOGIN FAIL] No matching user for email', email);
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -72,6 +93,7 @@ app.post('/api/admin/login', async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     
     if (!isValidPassword) {
+      console.warn('[LOGIN FAIL] Password mismatch for email', email);
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'

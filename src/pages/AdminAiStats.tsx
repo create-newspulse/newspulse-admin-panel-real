@@ -1,6 +1,8 @@
 // 📁 src/pages/AdminAiStats.tsx
 import React, { useEffect, useState, useRef } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import {
   PieChart,
   Pie,
@@ -39,7 +41,7 @@ const AdminAiStats: React.FC = () => {
 
     const fetchEngineStats = async () => {
       try {
-        const res = await fetch(`${API_BASE_PATH}/ai/logs/engine-stats`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/ai/logs/engine-stats`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok || !ct.includes('application/json')) {
           const txt = await res.text().catch(() => '');
@@ -62,7 +64,7 @@ const AdminAiStats: React.FC = () => {
 
     const fetchDailyStats = async () => {
       try {
-        const res = await fetch(`${API_BASE_PATH}/ai/logs/daily-stats`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/ai/logs/daily-stats`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok || !ct.includes('application/json')) {
           const txt = await res.text().catch(() => '');

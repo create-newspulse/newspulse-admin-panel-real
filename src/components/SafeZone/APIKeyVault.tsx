@@ -1,4 +1,5 @@
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import React, { useEffect, useState } from "react";
 import {
@@ -25,7 +26,7 @@ const APIKeyVault: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-  const data = await fetchJson<any>(`${API_BASE_PATH}/system/api-keys`, { timeoutMs: 15000 });
+  const data = await fetchJson<any>(`${API_BASE}/system/api-keys`, { timeoutMs: 15000 });
 
         // Accepts both { keys: [...] } or { data: { keys: [...] } }
         const keysArr =

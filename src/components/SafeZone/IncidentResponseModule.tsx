@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaClock, FaLink, FaRobot, FaBell
@@ -20,7 +21,7 @@ const IncidentResponseModule = () => {
   useEffect(() => {
     const fetchIncidents = async () => {
       try {
-        const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`${API_BASE_PATH}/system/incidents`, {
+        const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`${API_BASE}/system/incidents`, {
           timeoutMs: 15000,
         });
         setIncidents(data.incidents || []);

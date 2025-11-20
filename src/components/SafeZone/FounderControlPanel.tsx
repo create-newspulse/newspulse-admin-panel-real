@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { useNotification } from '@context/NotificationContext';
 
@@ -12,7 +13,7 @@ const FounderControlPanel = () => {
     setLoading(true);
     setAction('lockdown');
     try {
-      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/emergency-lockdown`, { method: 'POST' });
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE}/emergency-lockdown`, { method: 'POST' });
       if (json.success ?? true) notify.success('🚨 Emergency Lockdown Triggered');
       else notify.error('❌ Lockdown request failed');
     } catch (error) {
@@ -28,7 +29,7 @@ const FounderControlPanel = () => {
     setLoading(true);
     setAction('export');
     try {
-      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/export-logs`, { method: 'GET' });
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE}/export-logs`, { method: 'GET' });
       if (json.success ?? true) notify.success('📤 Logs exported successfully');
       else notify.error('❌ Export failed. Try again.');
     } catch (error) {
@@ -44,7 +45,7 @@ const FounderControlPanel = () => {
     setLoading(true);
     setAction('reactivate');
     try {
-      const json = await fetchJson<{ success?: boolean }>(`${API_BASE_PATH}/reactivate-system`, { method: 'POST' });
+      const json = await fetchJson<{ success?: boolean }>(`${API_BASE}/reactivate-system`, { method: 'POST' });
       if (json.success ?? true) notify.success('✅ System reactivated successfully');
       else notify.error('❌ Failed to reactivate system');
     } catch (err) {

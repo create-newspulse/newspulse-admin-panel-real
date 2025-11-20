@@ -1,6 +1,6 @@
-// backend/models/User.js
-import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+// backend/models/User.js (CommonJS)
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema(
   {
@@ -20,4 +20,4 @@ UserSchema.methods.comparePassword = async function (plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
-export default mongoose.model('User', UserSchema);
+module.exports = mongoose.model('User', UserSchema);

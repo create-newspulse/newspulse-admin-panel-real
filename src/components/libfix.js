@@ -1,1 +1,2 @@
-export { API_BASE_PATH } from '../lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+export const API_BASE = `${API_ORIGIN}/api`;

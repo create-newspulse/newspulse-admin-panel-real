@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { FaTrash, FaDownload, FaComments } from 'react-icons/fa';
 import axios from 'axios';
-import apiClient, { API_BASE_PATH } from '@lib/api';
+import apiClient from '@lib/api';
 import { useAITrainingInfo } from '@context/AITrainingInfoContext';
 
 // ---------- Types ----------
@@ -51,7 +51,14 @@ declare global {
 axios.defaults.withCredentials = true; // keep legacy callers safe
 
 // Small helper: safe JSON fetch using the shared apiClient (returns data or throws)
-const resolve = (url: string) => (url.startsWith('/api/') ? `${API_BASE_PATH}${url.slice(4)}` : url);
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
+const resolve = (url: string) => {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('/api/')) return `${API_ORIGIN}${url}`;
+  if (url.startsWith('/system/')) return `${API_BASE}${url}`; // normalize system root
+  return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
+};
 const get = async <T,>(path: string) => {
   // Accept absolute URLs (legacy) and relative API paths
   if (path.startsWith('http') || path.startsWith('/api/')) {
@@ -152,8 +159,8 @@ export default function KiranOSPanel() {
     const loadStatus = async () => {
       try {
         const [thinkingRes, queueRes] = await Promise.all([
-          get<ThinkingFeedRes>('/system/thinking-feed'),
-          get<QueueRes>('/system/ai-queue'),
+          get<ThinkingFeedRes>('/api/system/thinking-feed'),
+          get<QueueRes>('/api/system/ai-queue'),
         ]);
 
         if (stopped) return;
@@ -196,7 +203,7 @@ export default function KiranOSPanel() {
     let stopped = false;
     const fetchAnalytics = async () => {
       try {
-  const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
+  const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
         if (stopped) return;
 
         const topPattern =
@@ -243,7 +250,7 @@ export default function KiranOSPanel() {
   const handleManualCommand = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && manualCommand.trim()) {
       try {
-        const res = await apiClient.post('/system/ai-command', {
+        const res = await apiClient.post('/api/system/ai-command', {
           command: manualCommand.trim(),
           trigger: 'manual',
         });
@@ -258,7 +265,7 @@ export default function KiranOSPanel() {
   // ---------- Logs fetch, clear, export ----------
   const fetchLogs = async () => {
     try {
-      const res = await get<{ logs?: CommandLog[] }>('/system/view-logs');
+      const res = await get<{ logs?: CommandLog[] }>('/api/system/view-logs');
       setLogs(Array.isArray(res?.logs) ? res.logs : []);
     } catch {
       alert('❌ Failed to fetch logs.');
@@ -268,7 +275,7 @@ export default function KiranOSPanel() {
   const clearLogs = async () => {
     if (!window.confirm('Are you sure you want to delete all logs?')) return;
     try {
-      await del('/system/clear-logs');
+      await del('/api/system/clear-logs');
       alert('🗑️ Logs cleared.');
       setLogs([]);
     } catch {
@@ -294,7 +301,7 @@ export default function KiranOSPanel() {
   // ---------- Diagnostics alert ----------
   const fetchDiagnostics = async () => {
     try {
-      const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
+      const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
       const top = res?.mostUsed ?? null;
       if (top) {
         alert(`📊 Top command: ${top[0]} (${top[1]} times)`);

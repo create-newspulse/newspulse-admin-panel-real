@@ -55,10 +55,24 @@ You can drop your own screenshots into the `docs/img/` folder using the file nam
   2. In this demo, the endpoint returns a `link` instead of sending an email
   3. Open the link -> `/api/admin-auth/verify?token=...` sets the `np_admin` cookie and redirects to `/`
 
-## Local development
+## Backend
 
-- Dev stays unchanged: Vite uses `/api` which you proxy to your local backend via `vite.config.ts`.
-- Production on Vercel switches base to `/admin-api` automatically.
+- Admin UI uses `https://newspulse-backend-real.onrender.com` for all admin APIs (both locally and on Vercel).
+- Set `VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com` in your local `.env.local`.
+- The `admin-backend/` folder is legacy and can be removed later.
+
+## Local Development
+
+```
+cd admin
+cp .env.example .env.local  # if relevant
+set VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com
+npm install
+npm run dev
+# then open http://localhost:5173/admin/login
+```
+
+- Do NOT run the legacy backend in `admin-backend/`.
 
 ### Manage News Module
 
@@ -108,7 +122,7 @@ Editorial Workflow Engine supports internal tabs via `?tab=`: `queue`, `push-his
 
 ## Deploying the backend on Render (blueprint)
 
-This repo includes a `render.yaml` to deploy the backend (`admin-backend/`) and a cron-based health alarm.
+This repo previously included a prototype backend; the real backend lives in a separate repo and is deployed on Render.
 
 What you get:
 - Web service `newspulse-admin-backend` with `healthCheckPath: /api/system/health`.

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import html2pdf from 'html2pdf.js';
 import type { SystemHealth } from '../../types/SafeZone';
-import { api, API_BASE_PATH } from '@lib/api';
+import { api } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 
 const SystemHealthPanel = () => {
@@ -46,7 +49,7 @@ const SystemHealthPanel = () => {
     if (healthData && (!healthData.apiGateway || !healthData.voiceEngine)) {
       (async () => {
         try {
-          await fetchJson(`${API_BASE_PATH}/notify-down`, { method: 'POST' });
+          await fetchJson(`${API_BASE}/notify-down`, { method: 'POST' });
         } catch (e) {
           console.warn('notify-down failed:', e);
         }

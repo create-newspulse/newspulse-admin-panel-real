@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { API_BASE_PATH } from '@lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { FaHeartbeat, FaRobot, FaBolt, FaBrain } from "react-icons/fa";
 
 interface AIStatus {
@@ -18,7 +19,7 @@ const AIGlowPanel: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${API_BASE_PATH}/ai-glow-status`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/ai-glow-status`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok) {
           const txt = await res.text().catch(() => '');

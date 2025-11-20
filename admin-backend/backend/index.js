@@ -9,7 +9,7 @@ const morgan = require('morgan');
 const app = express();
 
 // ✅ Core Middleware
-app.use(cors());
+// Note: central CORS is applied by the top-level server.mjs; avoid router-level wildcard cors().
 app.use(helmet());
 app.use(compression());
 app.use(express.json());
@@ -50,6 +50,40 @@ app.use('/api/wonder', require('./routes/dailyWonder'));
 // ✅ Health Check
 app.get('/', (req, res) => {
   res.send('🟢 News Pulse Admin Backend is Live');
+});
+
+// ✅ AI System Health (new route)
+// Provides a lightweight snapshot of AI-related env/config presence.
+// Response intentionally minimal for monitoring dashboards.
+app.get('/api/system/ai-health', (req, res) => {
+  try {
+    const flags = {
+      openaiKey: Boolean(process.env.OPENAI_API_KEY),
+      googleKey: Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
+      anthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      env: process.env.NODE_ENV || 'development',
+      ts: new Date().toISOString(),
+    };
+    res.json({ ok: true, ...flags });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'ai-health-failed' });
+  }
+});
+
+// Non-/api alias for UI components expecting `/system/ai-health`
+app.get('/system/ai-health', (req, res) => {
+  try {
+    const flags = {
+      openaiKey: Boolean(process.env.OPENAI_API_KEY),
+      googleKey: Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
+      anthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      env: process.env.NODE_ENV || 'development',
+      ts: new Date().toISOString(),
+    };
+    res.json({ ok: true, ...flags, alias: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'ai-health-failed' });
+  }
 });
 
 module.exports = app;

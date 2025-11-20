@@ -25,11 +25,8 @@ export default function Login(): JSX.Element {
 
   // Build advanced auth link. In dev, point to Next.js on :3000. In prod, use /auth (likely routed).
   const advancedHref = useMemo(() => {
-    const host = window.location.hostname;
     const envOrigin = (import.meta.env as any).VITE_AUTH_ORIGIN as string | undefined;
-    if (envOrigin) return `${envOrigin.replace(/\/$/, '')}/auth`;
-    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3000/auth';
-    return '/auth';
+    return envOrigin ? `${envOrigin.replace(/\/$/, '')}/auth` : '/auth';
   }, []);
 
   const onSubmit = async (e: FormEvent) => {
@@ -47,7 +44,8 @@ export default function Login(): JSX.Element {
   // Revert: always go to admin dashboard after login
   navigate('/admin/dashboard', { replace: true });
     } else {
-      setError('Invalid email or password.');
+      console.error('Login failed: cannot reach server or invalid credentials');
+      setError('Cannot reach server or invalid credentials.');
     }
   };
 

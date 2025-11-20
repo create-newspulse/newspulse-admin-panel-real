@@ -1,80 +1,61 @@
-# NewsPulse Admin Panel Deployment (API Base Configuration)
+# NewsPulse Admin Panel Deployment (Unified API Configuration)
 
-This document explains exactly how the frontend resolves the Admin API base URL in development and production and what you must configure on Vercel.
+This document describes the current (simplified) way the admin frontend resolves its backend API base, plus recommended production setups.
 
-## Resolution Order
-The file `src/lib/api.ts` chooses the API root in this order (first non-empty wins):
-1. `VITE_ADMIN_API_BASE_URL`  (canonical – preferred; root WITHOUT trailing /api)
-2. `VITE_API_ROOT`            (legacy modern – root WITHOUT /api)
-3. `VITE_API_URL`             (older var – MAY include `/api` at the end; we strip it)
-4. Default:
-   - Development: `http://localhost:5000`
-   - Production: `/admin-api` (relative path served via Vercel rewrites to the Render backend)
+## Current Resolution Logic
+The file `lib/api.ts` computes:
 
-After resolving the root we append `/api` unless the root is relative (starts with `/`). So:
-* If `API_ROOT = '/admin-api'` then `API_BASE_PATH = '/admin-api'` (no extra `/api`).
-* If `API_ROOT = 'https://newspulse-backend-real.onrender.com'` then `API_BASE_PATH = 'https://newspulse-backend-real.onrender.com/api'`.
+```
+API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/,'')
+API_BASE   = `${API_ORIGIN}/api`
+```
 
-## Recommended Production Setup (Proxy Mode)
-Keep the existing Vercel rewrites:
-```jsonc
-// vercel.json
-{
-  "rewrites": [
-    { "source": "/admin-api/:path*", "destination": "https://newspulse-backend-real.onrender.com/api/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
-```
-Then DO NOT set any of the env vars above – the default production root becomes `/admin-api` and every request like:
-```
-GET /admin-api/dashboard-stats
-GET /admin-api/system/ai-training-info
-POST /admin-api/admin/login
-```
-is automatically rewritten to the Render backend.
+Notes:
+* We no longer support or read `VITE_ADMIN_API_BASE_URL`, `VITE_API_ROOT`, or any `API_BASE_PATH` constant.
+* A relative `/admin-api` pattern was deprecated in favor of explicit absolute origin via `VITE_API_URL`.
+* All runtime code imports only the shared axios client (`api`) and optionally calls `setAuthToken(token)`; components derive endpoint paths from `API_BASE` when needed.
 
-## Recommended Production Setup (Direct Mode)
-If you prefer to bypass rewrites (or need temporary direct calls), set:
+## Recommended Production Setup (Direct)
+Set an absolute backend origin (example Render URL):
 ```
-VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com
+VITE_API_URL=https://newspulse-backend-real.onrender.com
 ```
-Remove or keep rewrites (they are ignored by the direct absolute host). Requests will resolve to:
+Requests resolve to:
 ```
 GET https://newspulse-backend-real.onrender.com/api/dashboard-stats
 GET https://newspulse-backend-real.onrender.com/api/system/ai-training-info
 POST https://newspulse-backend-real.onrender.com/api/admin/login
 ```
 
-## Fallback Host Logic
-If the proxy (`/admin-api/...`) returns a 404/405 or HTML (misconfigured domain), the client retries selected GET endpoints against:
+## Optional Legacy Proxy (Deprecated)
+If you still have historical Vercel rewrites using `/admin-api`, you may keep them, but the frontend no longer relies on a relative root. Prefer setting `VITE_API_URL` explicitly.
+
+## Local Development
+Default origin when `VITE_API_URL` is unset:
 ```
-ADMIN_BACKEND_FALLBACK = https://newspulse-backend-real.onrender.com/api
+http://localhost:5000
 ```
-Exported from `src/lib/api.ts` and reused by `fetchJson` and `AuthContext`.
+Ensure backend listens on that port or set `VITE_API_URL` to match your local server.
+
+## Removed Fallback Logic
+Previous retry behavior (`ADMIN_BACKEND_FALLBACK`) was eliminated. All requests now go directly to `API_BASE`. Failures surface immediately for clearer debugging.
 
 ## Auth Endpoints
-Mounted on the backend at `/api/admin` (and legacy `/api/admin/auth`). The frontend calls:
+Mounted on the backend at `/api/admin` and `/api/admin-auth`:
 ```
-POST {API_BASE_PATH}/admin/login
-POST {API_BASE_PATH}/admin/seed-founder
-GET  {API_BASE_PATH}/admin-auth/session   (magic-link / cookie session check)
-POST {API_BASE_PATH}/admin-auth/logout
+POST {API_BASE}/admin/login
+POST {API_BASE}/admin/seed-founder
+GET  {API_BASE}/admin-auth/session   # magic-link / cookie session check
+POST {API_BASE}/admin-auth/logout
 ```
 
 ## Required Environment Variables (Examples)
-Proxy Mode (recommended – simplest):
+Minimal Production:
 ```
 NODE_ENV=production
 VITE_DEMO_MODE=false
-# (OPTIONAL) JWT_SECRET or ADMIN_JWT_SECRET for backend if used in serverless helpers
-```
-
-Direct Mode:
-```
-NODE_ENV=production
-VITE_DEMO_MODE=false
-VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com
+VITE_API_URL=https://newspulse-backend-real.onrender.com
+# (OPTIONAL) VITE_API_WS=wss://...  for websockets if needed
 ```
 
 ## Do NOT Use Localhost in Production
@@ -83,13 +64,11 @@ All hard-coded `http://localhost:5000` references for critical dashboard + auth 
 ## Verification Steps After Deploy
 1. Open DevTools → Network.
 2. Load dashboard – confirm 200 responses for:
-   - `/admin-api/dashboard-stats` OR `https://newspulse-backend-real.onrender.com/api/dashboard-stats`
-   - `/admin-api/system/ai-training-info`
-3. Perform login:
-   - Check `POST /admin-api/admin/login` returns 200 JSON with token.
-4. Logout:
-   - `POST /admin-api/admin-auth/logout` returns 200.
-5. Refresh page – session cookie (if any) results in a successful `GET /admin-api/admin-auth/session` (optional).
+   - `GET ${API_BASE}/dashboard-stats`
+   - `GET ${API_BASE}/system/ai-training-info`
+3. Login: `POST ${API_BASE}/admin/login` returns 200 JSON with token.
+4. Logout: `POST ${API_BASE}/admin-auth/logout` returns 200.
+5. (Optional) Session check: `GET ${API_BASE}/admin-auth/session` returns current user context.
 
 ## Troubleshooting
 | Symptom | Likely Cause | Fix |
@@ -100,4 +79,4 @@ All hard-coded `http://localhost:5000` references for critical dashboard + auth 
 | Login loops to /admin/login | 401 due to founder not seeded | Run seed-founder via `/admin-api/admin/seed-founder` |
 
 ## Summary
-The admin panel now uses a single resolution pipeline for its API base with optional direct mode override and an exported fallback host, eliminating previous inconsistent hard-coded paths.
+The admin panel now uses a single environment-driven origin (`VITE_API_URL`) and derives `API_BASE = <origin>/api`. Legacy constants (`API_BASE_PATH`, multiple root env vars, fallback host logic) were removed for consistency and reduced complexity.

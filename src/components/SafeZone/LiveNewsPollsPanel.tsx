@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, API_BASE_PATH } from '@lib/api';
+import { api } from '@lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 import { useNotification } from '@context/NotificationContext';
 import {
   FaPoll,
@@ -39,7 +42,7 @@ const LiveNewsPollsPanel = () => {
   const exportPDF = async () => {
     try {
       setIsExporting(true);
-      const res = await fetch(`${API_BASE_PATH}/polls/export-pdf`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`${API_BASE}/polls/export-pdf`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const ct = res.headers.get('content-type') || '';
       if (!/application\/(pdf|octet-stream)/i.test(ct)) {

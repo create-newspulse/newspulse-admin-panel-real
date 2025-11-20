@@ -9,7 +9,22 @@ const app = express();
 const PORT = 3002;
 
 // Middleware
-app.use(cors());
+const DEV_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://admin.newspulse.co.in',
+  'https://newspulse.co.in',
+];
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (DEV_ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

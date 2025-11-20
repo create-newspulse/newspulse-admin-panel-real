@@ -1,6 +1,7 @@
 // pages/admin/CreateUser.tsx
 import React, { useState } from 'react';
-import { API_BASE_PATH } from '../../src/lib/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 const CreateUser = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'editor' });
@@ -16,7 +17,7 @@ const CreateUser = () => {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE_PATH}/create-user`, {
+      const res = await fetch(`${API_BASE}/create-user`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

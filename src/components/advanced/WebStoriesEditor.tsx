@@ -6,7 +6,9 @@ import {
   Image as ImageIcon, Type, Play, BarChart
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || '/admin-api';
+// Direct Render backend base (host only) + explicit /api prefix
+const HOST_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${HOST_BASE}/api`;
 
 type Story = {
   id: string;

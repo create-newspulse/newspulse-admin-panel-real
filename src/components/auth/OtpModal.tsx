@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AuthAPI } from '@/lib/api';
+import { adminApi, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp } from '@/lib/adminApi';
 import { toast } from 'sonner';
 import PasswordStrength from './PasswordStrength';
 
@@ -18,7 +18,8 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
   const requestOtp = async () => {
     setLoading(true);
     try {
-      const resp: any = await AuthAPI.otpRequest(email);
+      const respData = await requestPasswordOtp(email);
+      const resp: any = respData || {};
       if (resp?.devMailError) {
         // Surface delivery issue in dev so it's clear email wasn't actually sent
         toast.warning('Email delivery failed (local dev)', { description: String(resp.devMailError) });
@@ -45,7 +46,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
 
   const verifyOtp = async () => {
     setLoading(true);
-    try { await AuthAPI.otpVerify(email, otp); toast.success('OTP verified'); setStep(3); }
+    try { await verifyPasswordOtp(email, otp); toast.success('OTP verified'); setStep(3); }
     catch (e:any) { toast.error(e?.response?.data?.message || 'Invalid OTP'); }
     finally { setLoading(false); }
   };
@@ -54,7 +55,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
     setLoading(true);
     try {
       if (pw !== pw2) { toast.error('Passwords do not match'); return; }
-      await AuthAPI.passwordReset(email, otp, pw);
+      await resetPasswordWithOtp(email, otp, pw);
       toast.success('Password updated'); onClose();
     }
     catch (e:any) { toast.error(e?.response?.data?.message || 'Reset failed'); }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '@lib/api';
 
-// tiny indirection so this component can live in src/components without deep import cycles
-// libfix.ts will re-export API_BASE_PATH from src/lib/api
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
+
+// Unified API base derived from VITE_API_URL; legacy API_BASE_PATH removed
 
 export interface AiraItem {
   id: string;
@@ -40,7 +41,7 @@ const AiraVoicePlayer: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_PATH}/aira/bulletins`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/aira/bulletins`, { credentials: 'include' });
       const json = await res.json();
       if (json?.ok && Array.isArray(json.items)) setItems(json.items);
     } finally {
@@ -53,7 +54,7 @@ const AiraVoicePlayer: React.FC = () => {
   const generate = async () => {
     setGenLoading(true);
     try {
-      const r = await fetch(`${API_BASE_PATH}/aira/generate`, {
+      const r = await fetch(`${API_BASE}/aira/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
@@ -75,7 +76,7 @@ const AiraVoicePlayer: React.FC = () => {
     if (!ok) return;
     setDeletingId(id);
     try {
-      const r = await fetch(`${API_BASE_PATH}/aira/bulletins/${encodeURIComponent(id)}`, {
+      const r = await fetch(`${API_BASE}/aira/bulletins/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include',
       });

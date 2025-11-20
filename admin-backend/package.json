@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "type": "commonjs",
   "main": "server.mjs",
+  "notes": "Legacy local backend. Do not run. Production backend lives on Render (newspulse-backend-real).",
   "scripts": {
     "start": "node server.mjs",
     "dev": "nodemon --ext js,mjs --watch server.mjs --watch backend server.mjs",
+    "dev:secure": "nodemon --ext js --watch secure-server.js secure-server.js",
+    "dev:demo": "node demo-server.js",
     "seed:articles": "node backend/scripts/seed-articles.js",
     "fix:indexes": "node backend/scripts/fix-articles-index.js"
   },

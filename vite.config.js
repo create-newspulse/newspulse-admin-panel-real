@@ -34,11 +34,19 @@ export default defineConfig(({ mode }) => {
             host: true,
             port: 5173,
             open: true,
-            // Prefer 5173 but allow auto-fallback if busy
-            strictPort: false,
+            // Enforce fixed port for CORS allowlist compatibility
+            strictPort: true,
             cors: true,
             // Proxy all API + sockets to backend in dev
             proxy: {
+                // Production-like proxy: /admin-api/* -> backend /api/*
+                // Mimics Vercel proxy behavior for local dev
+                '/admin-api': {
+                    target: env.ADMIN_BACKEND_URL || 'https://newspulse-backend-real.onrender.com',
+                    changeOrigin: true,
+                    secure: false,
+                    rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
+                },
                 '/api': {
                     target: API_HTTP,
                     changeOrigin: true,
@@ -92,7 +100,7 @@ export default defineConfig(({ mode }) => {
                             '@tiptap/starter-kit',
                             '@tiptap/extension-image',
                             '@tiptap/extension-link',
-                            '@tiptap/extension-placeholder',
+                            // removed placeholder extension (not installed)
                             '@tiptap/extension-underline',
                         ],
                         i18n: ['i18next', 'react-i18next', 'i18next-browser-languagedetector'],

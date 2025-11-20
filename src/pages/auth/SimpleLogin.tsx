@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@context/AuthContext';
 import OtpModal from '@/components/auth/OtpModal';
-import { API_BASE_PATH } from '@/lib/api';
 
 export default function SimpleLogin() {
   const navigate = useNavigate();
@@ -26,7 +25,6 @@ export default function SimpleLogin() {
     e.preventDefault();
     setLoading(true);
     console.log('🔐 SimpleLogin submit fired');
-    console.log('API_BASE_PATH:', API_BASE_PATH);
     console.log('Submitting payload:', { email }); // do not log password
     try {
       const ok = await login(email, password);

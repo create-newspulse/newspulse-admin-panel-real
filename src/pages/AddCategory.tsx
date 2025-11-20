@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '../lib/api';
+
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
 
 export default function CategoryManager() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -7,7 +9,7 @@ export default function CategoryManager() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    fetch(`${API_BASE_PATH}/categories`)
+    fetch(`${API_BASE}/categories`)
       .then(res => res.json())
       .then(data => setCategories(data.categories || []));
   }, []);
@@ -15,7 +17,7 @@ export default function CategoryManager() {
   const handleAdd = async () => {
     if (!newCategory) return;
     try {
-      const res = await fetch(`${API_BASE_PATH}/add-category`, {
+      const res = await fetch(`${API_BASE}/add-category`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newCategory }),
