@@ -1,2 +1,2 @@
-Deploy trigger: 2025-10-28T14:45:00Z
-Reason: user requested push git & vercel
+Deploy trigger: 2025-11-20T00:00:00Z
+Reason: force Vercel redeploy from main
