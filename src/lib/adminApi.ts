@@ -35,6 +35,13 @@ export async function verifyPasswordOtp(email: string, otp: string) {
 }
 
 export async function resetPasswordWithOtp(email: string, otp: string, password: string) {
-  const res = await adminApi.post('/api/auth/otp/reset', { email, otp, password });
+  // Backend expects { email, code, newPassword } OR { email, resetToken, newPassword }
+  // We currently pass the original OTP code path. Rename keys to match backend contract.
+  const res = await adminApi.post('/api/auth/otp/reset', { email, code: otp, newPassword: password });
+  return res.data;
+}
+
+export async function resetPasswordWithToken(email: string, resetToken: string, password: string) {
+  const res = await adminApi.post('/api/auth/otp/reset', { email, resetToken, newPassword: password });
   return res.data;
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { adminApi, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp } from '@/lib/adminApi';
+import { adminApi, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken } from '@/lib/adminApi';
 import { toast } from 'sonner';
 import PasswordStrength from './PasswordStrength';
 
@@ -11,6 +11,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
   const [pw2, setPw2] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resetToken, setResetToken] = useState('');
   const emailValid = useMemo(() => /.+@.+\..+/.test(email.trim()), [email]);
 
   if (!open) return null;
@@ -46,7 +47,14 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
 
   const verifyOtp = async () => {
     setLoading(true);
-    try { await verifyPasswordOtp(email, otp); toast.success('OTP verified'); setStep(3); }
+    try {
+      const data: any = await verifyPasswordOtp(email, otp);
+      if (data?.resetToken) {
+        setResetToken(String(data.resetToken));
+      }
+      toast.success('OTP verified');
+      setStep(3);
+    }
     catch (e:any) { toast.error(e?.response?.data?.message || 'Invalid OTP'); }
     finally { setLoading(false); }
   };
@@ -55,7 +63,11 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
     setLoading(true);
     try {
       if (pw !== pw2) { toast.error('Passwords do not match'); return; }
-      await resetPasswordWithOtp(email, otp, pw);
+      if (resetToken) {
+        await resetPasswordWithToken(email, resetToken, pw);
+      } else {
+        await resetPasswordWithOtp(email, otp, pw);
+      }
       toast.success('Password updated'); onClose();
     }
     catch (e:any) { toast.error(e?.response?.data?.message || 'Reset failed'); }
@@ -109,6 +121,9 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
 
         {step===3 && (
           <div className="space-y-3">
+            {resetToken && (
+              <p className="text-xs text-green-600">Secure reset token issued ✓</p>
+            )}
             <div className="relative">
               <input
                 type={showPw? 'text':'password'}
