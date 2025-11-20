@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { adminApi, requestPasswordOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken } from '@/lib/adminApi';
+import { requestPasswordResetOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken } from '@/lib/adminApi';
 import { toast } from 'sonner';
 import PasswordStrength from './PasswordStrength';
 
@@ -19,7 +19,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
   const requestOtp = async () => {
     setLoading(true);
     try {
-      const respData = await requestPasswordOtp(email);
+      const respData = await requestPasswordResetOtp(email);
       const resp: any = respData || {};
       if (resp?.devMailError) {
         // Surface delivery issue in dev so it's clear email wasn't actually sent
@@ -35,7 +35,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
       setStep(2);
     }
     catch (e:any) {
-      const msg = e?.response?.data?.message || 'Failed to send OTP';
+      const msg = e?.response?.data?.message || e?.message || 'Failed to send OTP';
       const devHint = e?.response?.data?.devMailError;
       toast.error(msg);
       if (devHint) {
