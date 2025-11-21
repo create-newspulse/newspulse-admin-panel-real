@@ -49,9 +49,9 @@ function deriveStatus(data: HealthEnvelope): HealthStatus {
   }
 }
 
-// Backend origin derived from env; fallback to Render deployment.
-const ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const HEALTH_URL = `${ORIGIN}/api/system/health`;
+// Unified health endpoint using API_BASE helper.
+import { API_BASE } from '@lib/apiBase';
+const HEALTH_URL = `${API_BASE}/system/health`;
 
 export default function SystemHealthPanel(): JSX.Element {
   const [env, setEnv] = useState<HealthEnvelope | null>(null);

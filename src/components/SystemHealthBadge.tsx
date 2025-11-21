@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-
-// Derive backend origin from env; fallback to Render backend
-const ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const HEALTH_URL = `${ORIGIN}/api/system/health`;
+import { API_BASE } from '@lib/apiBase';
+// Health endpoint unified via API_BASE (direct origin adds /api, proxy base stays /admin-api)
+const HEALTH_URL = `${API_BASE}/system/health`;
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
