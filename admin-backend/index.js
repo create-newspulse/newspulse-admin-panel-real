@@ -26,7 +26,7 @@ mongoose.connect(MONGO_URI, {
   // 🔐 Auto-seed founder admin if missing (idempotent)
   (async () => {
     try {
-      const founderEmail = (process.env.FOUNDER_EMAIL || process.env.ADMIN_EMAIL || 'founder@newspulse.ai').toLowerCase();
+      const founderEmail = (process.env.FOUNDER_EMAIL || process.env.ADMIN_EMAIL || '').toLowerCase(); // removed hard-coded founder@newspulse.ai
       const founderPassword = process.env.FOUNDER_PASSWORD || process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || 'Safe!2025@News';
       let user = await User.findOne({ email: founderEmail });
       if (!user) {

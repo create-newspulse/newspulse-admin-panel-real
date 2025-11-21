@@ -2,7 +2,7 @@ import type { Ok } from '@/types/founder';
 
 export const mockFounderApi = {
   async getProfile() {
-    return { ok: true, profile: { name: 'Kiran', founderId: 'FOUND-001', accessLevel: 'founder', lastLogin: new Date().toISOString(), devices: ['Chrome@Win', 'iPhone@iOS'], twoFA: { email: 'founder@example.com', enabled: true } } } as Ok<any>;
+    return { ok: true, profile: { name: 'Kiran', founderId: 'FOUND-001', accessLevel: 'founder', lastLogin: new Date().toISOString(), devices: ['Chrome@Win', 'iPhone@iOS'], twoFA: { email: process.env.FOUNDER_EMAIL || '', enabled: true } } } as Ok<any>; // removed founder@example.com
   },
   async getSystemSummary() {
     return { ok: true, updatedAt: new Date().toISOString(), systems: { system: 'online', ai: 'active', backup: 'ok', security: 'shielded' } } as Ok<any>;

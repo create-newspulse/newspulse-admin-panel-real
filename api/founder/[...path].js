@@ -17,7 +17,7 @@ export default async function handler(req, res) {
             case 'profile':
                 if (method !== 'GET')
                     return bad(res, 'Method Not Allowed', 405);
-                return ok(res, { profile: { name: 'Kiran', founderId: 'FOUND-001', accessLevel: 'founder', lastLogin: new Date().toISOString(), devices: ['Chrome on Windows', 'iPhone'], twoFA: { email: process.env.FOUNDER_EMAIL || 'founder@example.com', enabled: true } } });
+                return ok(res, { profile: { name: 'Kiran', founderId: 'FOUND-001', accessLevel: 'founder', lastLogin: new Date().toISOString(), devices: ['Chrome on Windows', 'iPhone'], twoFA: { email: process.env.FOUNDER_EMAIL || '', enabled: true } } }); // removed founder@example.com fallback
             case '2fa':
                 if (segs[1] === 'enable' && method === 'POST') {
                     logFounderAction(ctx, '2FA_ENABLE', req.body);

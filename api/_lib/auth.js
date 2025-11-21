@@ -25,7 +25,7 @@ export async function requireFounder(req, res) {
     };
     try {
         if (mockOn && (roleHeader === 'founder' || !roleHeader)) {
-            return { userId: 'founder-dev', email: process.env.FOUNDER_EMAIL || 'founder@example.com', role: 'founder', ip };
+            return { userId: 'founder-dev', email: process.env.FOUNDER_EMAIL || '', role: 'founder', ip }; // removed hard-coded founder@example.com
         }
         // Real session check via np_admin cookie (admin JWT)
         const cookies = parseCookies(req.headers.cookie);
