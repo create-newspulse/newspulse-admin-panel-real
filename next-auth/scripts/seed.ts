@@ -3,7 +3,11 @@ import { prisma } from '../src/lib/db';
 import { hash } from 'argon2';
 
 async function main() {
-  const email = process.env.FOUNDER_EMAIL || 'founder@newspulse.co.in';
+  const email = process.env.FOUNDER_EMAIL; // removed hard-coded fallback 'founder@newspulse.co.in'
+  if (!email) {
+    console.error('FOUNDER_EMAIL not set; skipping founder seed.');
+    return;
+  }
   const password = process.env.FOUNDER_PASSWORD || 'ChangeMe_Strong!';
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) {
