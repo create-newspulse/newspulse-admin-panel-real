@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslate } from '../hooks/useTranslate';
 import useAuthGuard from '../hooks/useAuthGuard'; // 🔐 Guard
-import api from '../utils/api'; // ✅ Axios with token (should use baseURL: '/api')
+import api from '@lib/api';
 
 import {
   BarChart,
@@ -38,7 +38,7 @@ export default function AnalyticsDashboard() {
     const fetchAnalytics = async () => {
       try {
         // ✅ USE this for all API calls (no localhost, no hardcoded full URLs)
-        const res = await api.get('/dashboard-stats');
+        const res = await api.get('/api/dashboard-stats');
         if (res.data?.success && res.data.data) {
           setSummary({
             totalViews: res.data.data.totalViews ?? 0,

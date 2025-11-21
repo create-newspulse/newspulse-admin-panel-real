@@ -18,7 +18,7 @@ export default function PushHistory() {
 
   useEffect(() => {
     apiClient
-      .get('/settings/load')
+      .get('/api/settings/load')
       .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
       .catch(() => setSettings({ lockdown: false }));
   }, []);

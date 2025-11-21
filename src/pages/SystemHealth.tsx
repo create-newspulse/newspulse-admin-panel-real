@@ -1,13 +1,13 @@
 // Example: src/pages/SystemHealth.tsx
 
 import { useEffect, useState } from 'react';
-import api from '../utils/api';
+import api from '@lib/api';
 
 const SystemHealth = () => {
   const [health, setHealth] = useState<any>(null);
 
   useEffect(() => {
-    api.get('/safezone/system-health')
+    api.get('/api/safezone/system-health')
       .then(res => setHealth(res.data))
       .catch(err => console.error('❌ System Health Error:', err.message));
   }, []);

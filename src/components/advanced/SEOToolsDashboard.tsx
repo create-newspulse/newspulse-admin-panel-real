@@ -25,7 +25,7 @@ export default function SEOToolsDashboard() {
     try {
       switch (activeTab) {
         case 'audit':
-          const auditHistoryRes = await axios.get(`${API_BASE}/seo/audit/history?limit=1`);
+          const auditHistoryRes = await axios.get(`${API_BASE}/api/seo/audit/history?limit=1`);
           if (auditHistoryRes.data.audits?.length > 0) {
             setAuditData(auditHistoryRes.data.audits[0]);
           }

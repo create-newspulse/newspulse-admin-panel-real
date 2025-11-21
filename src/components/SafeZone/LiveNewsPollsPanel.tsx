@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '@lib/api';
 
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+// Unified base: prefer explicit admin backend origin from VITE_ADMIN_API_BASE_URL; fallback to legacy VITE_API_URL.
+// Avoid hard-coded host; placeholder domain only in env configuration.
+const ORIGIN = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || '').toString().trim().replace(/\/+$/, '') || '/admin-api';
+// When using rewrite '/admin-api' base we do NOT append '/api' here; relative paths must include '/api/'.
+// For direct origin we append '/api' for convenience building explicit endpoints below.
+const API_BASE = ORIGIN === '/admin-api' ? ORIGIN : `${ORIGIN}`;
 import { useNotification } from '@context/NotificationContext';
 import {
   FaPoll,
@@ -42,7 +46,7 @@ const LiveNewsPollsPanel = () => {
   const exportPDF = async () => {
     try {
       setIsExporting(true);
-      const res = await fetch(`${API_BASE}/polls/export-pdf`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`${API_BASE === '/admin-api' ? API_BASE + '/polls/export-pdf' : API_BASE + '/api/polls/export-pdf'}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const ct = res.headers.get('content-type') || '';
       if (!/application\/(pdf|octet-stream)/i.test(ct)) {

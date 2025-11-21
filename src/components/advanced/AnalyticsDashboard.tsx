@@ -75,10 +75,10 @@ export default function AnalyticsDashboard(): JSX.Element {
     setLoading(true);
     try {
       const [revRes, traffRes, adRes, abRes] = await Promise.all([
-        apiClient.get('/analytics/revenue').catch(() => ({ data: null } as any)),
-        apiClient.get('/analytics/traffic').catch(() => ({ data: null } as any)),
-        apiClient.get('/analytics/ad-performance').catch(() => ({ data: null } as any)),
-        apiClient.get('/analytics/ab-tests').catch(() => ({ data: { tests: [] } } as any)),
+        apiClient.get('/api/analytics/revenue').catch(() => ({ data: null } as any)),
+        apiClient.get('/api/analytics/traffic').catch(() => ({ data: null } as any)),
+        apiClient.get('/api/analytics/ad-performance').catch(() => ({ data: null } as any)),
+        apiClient.get('/api/analytics/ab-tests').catch(() => ({ data: { tests: [] } } as any)),
       ]);
       setRevenue(revRes.data || mockRevenue());
       setTraffic(traffRes.data || mockTraffic());

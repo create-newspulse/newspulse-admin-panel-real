@@ -9,7 +9,7 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
   const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    apiClient.get('/settings/load')
+    apiClient.get('/api/settings/load')
       .then((res) => {
         const settings = (res as any)?.data ?? res ?? {};
         if (settings.lockdown) {

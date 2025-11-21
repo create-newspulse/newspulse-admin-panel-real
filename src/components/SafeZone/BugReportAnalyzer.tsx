@@ -21,7 +21,7 @@ const BugReportAnalyzer: React.FC = () => {
 
   const fetchLogs = async () => {
     try {
-      const data = await fetchJson<{ logs?: BugEntry[] }>(`${API_BASE}/system/bug-reports`);
+      const data = await fetchJson<{ logs?: BugEntry[] }>(`${API_BASE}/api/system/bug-reports`);
       if (Array.isArray(data.logs)) {
         setLogs(data.logs);
         setError(false);

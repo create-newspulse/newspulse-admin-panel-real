@@ -63,7 +63,7 @@ export default function AdminControlCenter() {
   useLockdownCheck(settings);
 
   useEffect(() => {
-    apiClient.get('/settings/load')
+    apiClient.get('/api/settings/load')
       .then(res => {
         const config = res.data || defaultSettings;
         setSettings(config);

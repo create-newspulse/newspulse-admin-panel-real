@@ -28,7 +28,7 @@ const AdminChatAudit = () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${API_BASE}/admin-chat-audit`, { credentials: 'include' });
+        const res = await fetch(`${API_BASE}/api/admin-chat-audit`, { credentials: 'include' });
         const ct = res.headers.get('content-type') || '';
         if (!res.ok) {
           const txt = await res.text().catch(() => '');

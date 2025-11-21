@@ -55,6 +55,15 @@ const loginHandler = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
+    try {
+      console.log('[ADMIN LOGIN] User record located', {
+        email: user.email,
+        role: user.role,
+        hasPasswordHash: Boolean(user.passwordHash),
+        passwordHashLen: user.passwordHash ? user.passwordHash.length : 0,
+      });
+    } catch (_) {}
+
     const ok = await user.comparePassword(password);
     if (!ok) {
       try { console.warn('[ADMIN LOGIN] Password mismatch for user:', email); } catch (_) {}
