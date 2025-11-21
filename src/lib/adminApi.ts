@@ -77,36 +77,32 @@ try { console.info('[adminApi] base resolved =', adminRoot); } catch {}
 
 // OTP Password Reset helpers (backend exposes /api/auth/otp/*)
 // New unified OTP helpers using resolveAdminPath so proxy base works.
+// Helper to build OTP paths relative to chosen base without duplicating '/admin-api'
+function otpEndpoint(segment: string) {
+  // When using proxy base '/admin-api' we call '/auth/otp/*' (legacy absolute mounted at root)
+  // When using a direct origin (not exactly '/admin-api') we assume backend exposes '/api/auth/otp/*'
+  if (adminRoot === '/admin-api') return `/auth/otp/${segment}`;
+  return `/api/auth/otp/${segment}`;
+}
+
 export async function requestPasswordResetOtp(email: string) {
-  // Prefer legacy absolute path /auth/otp/request (backend exposes both relative & absolute)
-  const path = resolveAdminPath('/api/auth/otp/request');
-  const alt = resolveAdminPath('/auth/otp/request');
-  try {
-    const res = await adminApi.post(path, { email });
-    return res.data;
-  } catch (e: any) {
-    // Fallback to absolute if first fails (e.g., route mount differences)
-    try {
-      const res2 = await adminApi.post(alt, { email });
-      return res2.data;
-    } catch {
-      throw e;
-    }
-  }
+  const path = otpEndpoint('request');
+  const res = await adminApi.post(path, { email });
+  return res.data;
 }
 
 export async function verifyPasswordOtp(email: string, otp: string) {
-  const path = resolveAdminPath('/api/auth/otp/verify');
+  const path = otpEndpoint('verify');
   return (await adminApi.post(path, { email, otp })).data;
 }
 
 export async function resetPasswordWithOtp(email: string, otp: string, password: string) {
-  const path = resolveAdminPath('/api/auth/otp/reset');
+  const path = otpEndpoint('reset');
   return (await adminApi.post(path, { email, code: otp, newPassword: password })).data;
 }
 
 export async function resetPasswordWithToken(email: string, resetToken: string, password: string) {
-  const path = resolveAdminPath('/api/auth/otp/reset');
+  const path = otpEndpoint('reset');
   return (await adminApi.post(path, { email, resetToken, newPassword: password })).data;
 }
 
