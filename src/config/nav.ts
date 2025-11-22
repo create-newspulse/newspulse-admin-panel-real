@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'dashboard', label:'Dashboard', path:'/admin/dashboard', roles:['editor','admin','founder','moderator'], icon:'📊' },
   { key:'add', label:'Add News', path:'/add', roles:['editor','admin','founder'], icon:'📰' },
   { key:'manage', label:'Manage News', path:'/admin/manage-news', roles:['editor','admin','founder','moderator'], icon:'📁' },
+  { key:'community-reporter', label:'Community Reporter', path:'/admin/community-reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   { key:'workflow', label:'Workflow', path:'/admin/workflow', roles:['editor','admin','founder'], icon:'⚙️' },
   { key:'livetv', label:'Live TV', path:'/admin/live', roles:['editor','admin','founder'], icon:'🎥' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠' },

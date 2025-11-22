@@ -57,6 +57,8 @@ import EnhancedSecurityDashboard from '@components/advanced/EnhancedSecurityDash
 import EditorialWorkflowEngine from '@components/advanced/EditorialWorkflowEngine';
 import FounderControlCenter from '@components/advanced/FounderControlCenter';
 import FounderControlPage from '@pages/admin/founder-control';
+// Temporary import of Community Reporter page from legacy admin folder until unified move
+import CommunityReporterPage from '@pages/admin/CommunityReporterPage';
 import MediaLibrary from '@components/advanced/MediaLibrary';
 import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
@@ -76,6 +78,7 @@ import PanelRouter from '@/routes/PanelRouter';
 import SimpleLogin from '@pages/auth/SimpleLogin';
 
 function App() {
+  console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
@@ -135,6 +138,8 @@ function App() {
               <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New alias: /admin/news -> ManageNews (fixes Back to News button path) */}
               <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Community Reporter */}
+              <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
