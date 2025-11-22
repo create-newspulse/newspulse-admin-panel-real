@@ -1,6 +1,6 @@
 // 📁 src/components/FounderRoute.tsx
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 
@@ -10,7 +10,8 @@ type FounderRouteProps = {
 
 const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   const location = useLocation();
-  const { isFounder, isAuthenticated, isLoading } = useAuth();
+  const { isFounder, isAuthenticated, isLoading, isReady, isRestoring, restoreSession } = useAuth();
+  const triedRestore = useRef(false);
 
   // 🛡️ SECURE: Environment-controlled demo access
   const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
@@ -28,17 +29,32 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   const isDemoMode = demoModeEnv !== 'false' && isVercelPreview;
   
   // Debug logging (remove in production)
-  console.log('🔧 FounderRoute Debug:', {
-    demoModeEnv,
-    isVercelPreview,
-    isDemoMode,
-    isAuthenticated,
-    isFounder,
-    hostname: window.location.hostname
-  });
+  if (import.meta.env.DEV) {
+    console.debug('[FounderRoute]', {
+      demoModeEnv,
+      isVercelPreview,
+      isDemoMode,
+      isAuthenticated,
+      isFounder,
+      isReady,
+      isRestoring,
+      hostname: window.location.hostname
+    });
+  }
+
+  // Attempt session restore after hydration if not authenticated
+  useEffect(() => {
+    if (isReady && !isAuthenticated && !triedRestore.current) {
+      triedRestore.current = true;
+      restoreSession();
+    }
+  }, [isReady, isAuthenticated, restoreSession]);
   
+  if (!isReady || isRestoring) {
+    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+  }
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Checking founder access...</div>;
+    return <div className="text-center mt-10">🔐 Checking founder access…</div>;
   }
 
   // ✅ Proper authentication check OR controlled demo access

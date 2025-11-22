@@ -152,11 +152,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Track attempted restore to prevent loops
+  const restoreAttemptedRef = useRef(false);
+
   const restoreSession = useCallback(async () => {
-    // Avoid duplicate restores
-    if (token || user || isRestoring) return;
+    // Skip if already restoring or already attempted with a fully authenticated state
+    const hasFullAuth = !!token || (user && user.role);
+    if (isRestoring || restoreAttemptedRef.current || hasFullAuth) return;
+    restoreAttemptedRef.current = true;
     setIsRestoring(true);
-    if (import.meta.env.DEV) console.debug('[Auth] attempting session restore');
+    if (import.meta.env.DEV) console.debug('[Auth] attempting session restore (no full auth)');
     try {
       const res = await adminApi.get(SESSION_ENDPOINT, { withCredentials: true });
       const raw = res.data || {};
@@ -175,8 +180,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (import.meta.env.DEV) console.debug('[Auth] restore persistence write', persistPayload);
         } catch {}
         if (import.meta.env.DEV) console.debug('[Auth] session restore success');
-      } else {
-        if (import.meta.env.DEV) console.debug('[Auth] session restore no user');
+      } else if (import.meta.env.DEV) {
+        console.debug('[Auth] session restore no user returned');
       }
     } catch (e:any) {
       if (import.meta.env.DEV) console.warn('[Auth] session restore failed', e?.response?.status, e?.message);
@@ -184,6 +189,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsRestoring(false);
     }
   }, [token, user, isRestoring]);
+
+  // Trigger restore after hydration if we only have a partial user and no token
+  useEffect(() => {
+    if (isReady) {
+      const partialUser = user && !user.role; // role often needed for founder gating
+      if (!token || partialUser) {
+        restoreSession();
+      }
+    }
+  }, [isReady, token, user, restoreSession]);
 
   const value: AuthContextValue = {
     user,

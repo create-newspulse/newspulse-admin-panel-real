@@ -6,12 +6,14 @@ import AppLayout from './pages/AppLayout';
 import AddNewsPage from './pages/admin/add-news';
 import ManageNewsPage from './pages/admin/manage-news';
 import './styles.css';
+import { AdminAuthProvider } from './context/AdminAuthContext';
 
 const qc = new QueryClient();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
+      <AdminAuthProvider>
       <BrowserRouter>
         <Routes>
           {/* Single /admin parent hosting all admin pages */}
@@ -27,6 +29,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
         </Routes>
       </BrowserRouter>
+      </AdminAuthProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

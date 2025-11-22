@@ -17,6 +17,8 @@ const API_BASE_URL = resolvedBase;
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
   monitorHub: () => Promise<any>;
+  revenue: () => Promise<any>;
+  revenueExportPdfPath: () => string;
 }
 
 export const api: ExtendedApi = axios.create({
@@ -119,6 +121,58 @@ export async function pollsLiveStats() {
 
 // Attach for existing code expecting api.pollsLiveStats()
 (api as any).pollsLiveStats = pollsLiveStats;
+
+// --- Revenue helpers (placeholder adaptive) ---
+// Attempts multiple possible backend endpoints for revenue summary.
+// Normalizes minimal shape expected by RevenuePanel.
+api.revenue = async () => {
+  const candidates = [
+    '/api/revenue/summary',
+    '/api/revenue',
+    '/revenue/summary',
+    '/revenue'
+  ];
+  let lastErr: any = null;
+  for (const p of candidates) {
+    try {
+      const res = await api.get(p);
+      const raw = res.data || {};
+      // Unwrap common wrappers
+      const data = raw.data || raw.revenue || raw;
+      const out = {
+        adsense: Number(data.adsense ?? data.googleAdsense ?? 0),
+        affiliates: Number(data.affiliates ?? data.affiliate ?? 0),
+        sponsors: Number(data.sponsors ?? data.sponsor ?? 0),
+        total: Number(data.total ?? (Number(data.adsense || 0) + Number(data.affiliates || 0) + Number(data.sponsors || 0))),
+        lastUpdated: data.lastUpdated || raw.lastUpdated || null
+      };
+      return out;
+    } catch (e:any) {
+      lastErr = e;
+      const status = e?.response?.status;
+      // Stop early if unauthorized
+      if (status === 401 || status === 403) break;
+      continue;
+    }
+  }
+  // Surface a unified error shape so UI can show message
+  return { error: 'revenue-unavailable', status: lastErr?.response?.status || null };
+};
+
+// Returns an export PDF endpoint (first existing candidate) without calling it.
+api.revenueExportPdfPath = () => {
+  const override = (import.meta.env.VITE_REVENUE_EXPORT_PATH || '').trim();
+  if (override) return api.defaults.baseURL + override.replace(/^\//,'/');
+  // Provide a deterministic primary path; backend should implement one of these.
+  const candidates = [
+    '/api/revenue/export/pdf',
+    '/api/revenue/export',
+    '/revenue/export/pdf',
+    '/revenue/export'
+  ];
+  // Just return first; UI will navigate and backend should respond or 404.
+  return api.defaults.baseURL + candidates[0];
+};
 
 export function setAuthToken(token: string | null) {
   if (token) {
