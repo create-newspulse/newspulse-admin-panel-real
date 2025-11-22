@@ -3,6 +3,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { ReactNode } from 'react';
 import { useAuth } from '@context/AuthContext';
+import { useEffect, useRef } from 'react';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -10,12 +11,20 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, role }: ProtectedRouteProps) {
-  const { isAuthenticated, user, isLoading, isReady } = useAuth();
+  const { isAuthenticated, user, isLoading, isReady, isRestoring, restoreSession } = useAuth();
+  const triedRestore = useRef(false);
   const location = useLocation();
 
-  // Wait for localStorage hydration before deciding
-  if (!isReady) {
-    return <div className="text-center mt-10">🔐 Checking admin session…</div>;
+  // Attempt a one-time session restore if unauthenticated after hydration
+  useEffect(() => {
+    if (isReady && !isAuthenticated && !triedRestore.current) {
+      triedRestore.current = true;
+      restoreSession();
+    }
+  }, [isReady, isAuthenticated, restoreSession]);
+
+  if (!isReady || isRestoring) {
+    return <div className="text-center mt-10">🔐 Restoring session…</div>;
   }
   if (isLoading) {
     return <div className="text-center mt-10">🔐 Signing in…</div>;

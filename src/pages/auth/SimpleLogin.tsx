@@ -24,12 +24,13 @@ export default function SimpleLogin() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    console.log('🔐 SimpleLogin submit fired');
-    console.log('Submitting payload:', { email }); // do not log password
+    if (import.meta.env.DEV) {
+      console.debug('🔐 SimpleLogin submit', { email });
+    }
     try {
       const ok = await login(email, password);
       if (!ok) {
-        console.warn('⚠️ Login returned false (no success flag)');
+        if (import.meta.env.DEV) console.warn('⚠️ Login returned false (no success flag)');
         toast.error('Invalid email or password');
         return;
       }
@@ -38,9 +39,9 @@ export default function SimpleLogin() {
       toast.success(`Welcome ${user?.name || email}`);
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
-      console.error('❌ Login exception:', err);
+      if (import.meta.env.DEV) console.error('❌ Login exception:', err);
       if (err?.response) {
-        console.error('Server responded (error):', err.response.status, err.response.data);
+        if (import.meta.env.DEV) console.error('Server responded (error):', err.response.status, err.response.data);
         toast.error(err.response.data?.message || 'Login failed');
       } else {
         // Fail-safe: only show toast for network errors if we truly cannot reach backend
