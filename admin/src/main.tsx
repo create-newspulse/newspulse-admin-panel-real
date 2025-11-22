@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppLayout from './pages/AppLayout';
 import AddNewsPage from './pages/admin/add-news';
 import ManageNewsPage from './pages/admin/manage-news';
+import CommunityReporterPage from './pages/admin/community-reporter';
 import './styles.css';
 
 const qc = new QueryClient();
@@ -22,6 +23,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path='admin/dashboard' element={<Navigate to='/admin/manage-news' replace />} />
             <Route path='admin/add-news' element={<AddNewsPage />} />
             <Route path='admin/manage-news' element={<ManageNewsPage />} />
+            <Route path='admin/community-reporter' element={<CommunityReporterPage />} />
             {/* Fallback for any unknown path within this SPA */}
             <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
           </Route>

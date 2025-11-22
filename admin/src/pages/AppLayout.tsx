@@ -8,6 +8,7 @@ export default function AppLayout(){
         <nav className="flex gap-4 text-sm">
           <Link to="/admin/manage-news" className="hover:underline">📁 Manage News</Link>
           <Link to="/admin/add-news" className="hover:underline">📝 Add News</Link>
+          <Link to="/admin/community-reporter" className="hover:underline">🧑‍🤝‍🧑 Community Reporter</Link>
         </nav>
       </header>
       <main className="max-w-5xl mx-auto p-4">
