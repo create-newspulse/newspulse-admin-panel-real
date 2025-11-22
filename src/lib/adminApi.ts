@@ -85,10 +85,28 @@ function otpEndpoint(segment: string) {
   return `/api/auth/otp/${segment}`;
 }
 
-export async function requestPasswordResetOtp(email: string) {
+// Structured OTP request: always returns an object with success flag
+export interface OtpRequestResult {
+  success: boolean;
+  message: string;
+  status?: number;
+  data?: any;
+}
+export async function requestPasswordResetOtp(email: string): Promise<OtpRequestResult> {
   const path = otpEndpoint('request');
-  const res = await adminApi.post(path, { email });
-  return res.data;
+  try {
+    const res = await adminApi.post(path, { email });
+    const data = res.data || {};
+    const success = data.success === true || data.ok === true;
+    const message = data.message || (success ? 'OTP sent to your email.' : 'Failed to send OTP email');
+    return { success, message, status: res.status, data };
+  } catch (err: any) {
+    const status = err?.response?.status;
+    const data = err?.response?.data || {};
+    const message = data.message || 'Failed to send OTP email';
+    console.error('[OTP][api][request][error]', { status, data, error: err?.message });
+    return { success: false, message, status, data };
+  }
 }
 
 export async function verifyPasswordOtp(email: string, otp: string) {

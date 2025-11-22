@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { requestPasswordResetOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken } from '@/lib/adminApi';
+import { requestPasswordResetOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken, type OtpRequestResult } from '@/lib/adminApi';
 import { toast } from 'sonner';
 import PasswordStrength from './PasswordStrength';
 
@@ -17,49 +17,53 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
   if (!open) return null;
 
   const requestOtp = async () => {
+    if (!emailValid || loading) return;
+    console.log('[OTP][request] Sending OTP for', email);
     setLoading(true);
     try {
-      const respData = await requestPasswordResetOtp(email);
-      const resp: any = respData || {};
-      if (resp?.devMailError) {
-        // Surface delivery issue in dev so it's clear email wasn't actually sent
-        toast.warning('Email delivery failed (local dev)', { description: String(resp.devMailError) });
+      const result: OtpRequestResult = await requestPasswordResetOtp(email);
+      console.log('[OTP][request][result]', result);
+      if (result.success) {
+        toast.success(result.message || 'OTP sent to your email.');
+        const devCode = result.data?.devCode;
+        if (devCode) {
+          setOtp(String(devCode));
+          toast.message('Dev OTP (local only)', { description: String(devCode) });
+        }
+        setStep(2);
       } else {
-        toast.success('OTP sent to email');
+        toast.error(result.message || 'Failed to send OTP email');
+        // Do NOT advance step on failure
       }
-      // In development, backend may include devCode for convenience
-      if (resp?.devCode) {
-        setOtp(String(resp.devCode));
-        toast.message('Dev OTP (local only)', { description: String(resp.devCode) });
-      }
-      setStep(2);
+    } catch (e: any) {
+      console.error('[OTP][error][request][catch]', { error: e?.message, stack: e?.stack });
+      toast.error(e?.message || 'Failed to send OTP email');
+    } finally {
+      setLoading(false);
     }
-    catch (e:any) {
-      const msg = e?.response?.data?.message || e?.message || 'Failed to send OTP';
-      const devHint = e?.response?.data?.devMailError;
-      toast.error(msg);
-      if (devHint) {
-        toast.warning('SMTP error (dev)', { description: String(devHint) });
-      }
-    }
-    finally { setLoading(false); }
   };
 
   const verifyOtp = async () => {
+    if (!otp || loading) return;
+    console.log('[OTP][verify] email=', email, 'otp=', otp);
     setLoading(true);
     try {
       const data: any = await verifyPasswordOtp(email, otp);
-      if (data?.resetToken) {
-        setResetToken(String(data.resetToken));
-      }
+      console.log('[OTP][verify][response]', data);
+      if (data?.resetToken) setResetToken(String(data.resetToken));
       toast.success('OTP verified');
       setStep(3);
+    } catch (e: any) {
+      console.error('[OTP][error][verify]', e);
+      toast.error(e?.response?.data?.message || 'Invalid OTP');
+    } finally {
+      setLoading(false);
     }
-    catch (e:any) { toast.error(e?.response?.data?.message || 'Invalid OTP'); }
-    finally { setLoading(false); }
   };
 
   const resetPw = async () => {
+    if (loading) return;
+    console.log('[OTP][reset] email=', email, 'using', resetToken ? 'resetToken' : 'otp');
     setLoading(true);
     try {
       if (pw !== pw2) { toast.error('Passwords do not match'); return; }
@@ -68,10 +72,14 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
       } else {
         await resetPasswordWithOtp(email, otp, pw);
       }
-      toast.success('Password updated'); onClose();
+      toast.success('Password updated');
+      onClose();
+    } catch (e: any) {
+      console.error('[OTP][error][reset]', e);
+      toast.error(e?.response?.data?.message || 'Reset failed');
+    } finally {
+      setLoading(false);
     }
-    catch (e:any) { toast.error(e?.response?.data?.message || 'Reset failed'); }
-    finally { setLoading(false); }
   };
 
   return (
