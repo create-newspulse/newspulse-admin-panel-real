@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import apiClient, { setAuthToken } from '@/lib/api';
 import { loginAdmin, adminApi } from '@/lib/adminApi';
 
@@ -7,9 +7,10 @@ type User = { id: string; email: string; name?: string; role?: string };
 export interface AuthContextValue {
   user: User | null;
   token: string | null;
-  isAuthenticated: boolean;
+  isAuthenticated: boolean; // derived from token OR user
   isFounder: boolean;
-  isLoading: boolean;
+  isLoading: boolean; // network/loading state for login actions
+  isReady: boolean; // localStorage hydration complete
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
@@ -20,9 +21,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isReady, setIsReady] = useState(false); // hydration flag
+
+  const STORAGE_KEY = 'newsPulseAdminAuth';
 
   // Consider cookie-session success (no token) as authenticated if we have user
-  const isAuthenticated = !!user;
+  // Auth considered valid if we have a token or a resolved user
+  const isAuthenticated = !!token || !!user;
   const isFounder = (user?.role || '').toLowerCase() === 'founder';
 
   // PRODUCTION ADMIN LOGIN (Vercel):
@@ -60,7 +65,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthToken(tokenVal);
         setTokenState(String(tokenVal));
       } else {
-        // Ensure Authorization header is cleared if no token returned
         setAuthToken(null);
         setTokenState(null);
       }
@@ -71,12 +75,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: data.role,
         name: data.name,
       };
-      setUser({
+      const normalizedUser: User = {
         id: String(u.id || u._id || ''),
         email: String(u.email || ''),
         name: String(u.name || ''),
         role: String(u.role || ''),
-      });
+      };
+      setUser(normalizedUser);
+
+      // Persist minimal auth info
+      try {
+        const persistPayload = { token: tokenVal, email: normalizedUser.email, role: normalizedUser.role };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
+      } catch { /* ignore quota errors */ }
       if (import.meta.env.DEV) console.log('[Auth] login success', data);
       return true;
     } catch (err: any) {
@@ -102,6 +113,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthToken(null);
     setTokenState(null);
     setUser(null);
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  }, []);
+
+  // Hydrate from localStorage once on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw || '{}');
+        if (parsed.token) {
+          setTokenState(String(parsed.token));
+          setAuthToken(String(parsed.token));
+        }
+        if (parsed.email || parsed.role) {
+          setUser(prev => prev || { id: '', email: String(parsed.email||''), name: '', role: String(parsed.role||'') });
+        }
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed', e);
+    } finally {
+      setIsReady(true);
+    }
   }, []);
 
   const value: AuthContextValue = {
@@ -110,6 +143,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated,
     isFounder,
     isLoading,
+    isReady,
     login,
     logout,
   };

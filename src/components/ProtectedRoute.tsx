@@ -10,11 +10,15 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, role }: ProtectedRouteProps) {
-  const { isAuthenticated, user, isLoading } = useAuth();
+  const { isAuthenticated, user, isLoading, isReady } = useAuth();
   const location = useLocation();
 
+  // Wait for localStorage hydration before deciding
+  if (!isReady) {
+    return <div className="text-center mt-10">🔐 Checking admin session…</div>;
+  }
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Loading access...</div>;
+    return <div className="text-center mt-10">🔐 Signing in…</div>;
   }
 
   if (!isAuthenticated || !user) {

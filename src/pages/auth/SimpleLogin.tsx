@@ -33,9 +33,10 @@ export default function SimpleLogin() {
         toast.error('Invalid email or password');
         return;
       }
+      // Re-read user after login (context state updated)
       const role = (user?.role || 'admin') as any;
-      toast.success(`Welcome ${user?.name || 'Admin'}`);
-      navigate(role === 'founder' ? '/admin/dashboard' : '/admin/dashboard', { replace: true });
+      toast.success(`Welcome ${user?.name || email}`);
+      navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
       console.error('❌ Login exception:', err);
       if (err?.response) {
