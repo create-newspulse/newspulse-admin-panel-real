@@ -24,6 +24,18 @@ export const adminRoot = stripTrailingSlashes(rawBase);
 // Shared axios client for admin APIs
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
+// Attach Authorization header from localStorage (JWT) uniformly
+adminApi.interceptors.request.use((cfg) => {
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
+    if (token) {
+      cfg.headers = cfg.headers || {};
+      (cfg.headers as any).Authorization = `Bearer ${token}`;
+    }
+  } catch {}
+  return cfg;
+});
+
 // Dev-only request/response logging (minimal in prod)
 if (import.meta.env.DEV) {
   adminApi.interceptors.request.use((cfg) => {
@@ -150,4 +162,17 @@ export async function loginAdmin(dto: LoginDTO) {
     }
   }
   throw lastErr || new Error('Login failed');
+}
+
+// Community Reporter helper
+export interface CommunityReporterListResult {
+  success?: boolean;
+  items?: any[];
+  data?: any;
+  [key:string]: any;
+}
+export async function getCommunityReporterSubmissions(filter?: string): Promise<CommunityReporterListResult> {
+  const params = filter && filter !== 'all' ? { status: filter } : undefined;
+  const res = await adminApi.get('/admin/community-reporter/submissions', { params });
+  return res.data || {};
 }
