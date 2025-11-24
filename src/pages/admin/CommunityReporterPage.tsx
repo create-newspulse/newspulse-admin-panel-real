@@ -27,6 +27,7 @@ interface CommunitySubmissionApi {
   flags?: string[];
   rejectReason?: string;
   status?: string;
+  linkedArticleId?: string | null;
   priority?: CommunitySubmissionPriority;
   createdAt?: string;
   updatedAt?: string;
@@ -50,6 +51,7 @@ export interface CommunitySubmission {
   flags?: string[];
   rejectReason?: string;
   status?: string; // backend may send uppercase
+  linkedArticleId?: string | null;
   priority?: CommunitySubmissionPriority;
   createdAt?: string;
   updatedAt?: string;
@@ -98,7 +100,8 @@ export default function CommunityReporterPage(){
         const normalized: CommunitySubmission[] = list.map(item => ({
           ...item,
           id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
-          status: (item.status || '').toLowerCase() // normalize for filtering
+          status: (item.status || '').toLowerCase(), // normalize for filtering
+          linkedArticleId: (item as any).linkedArticleId ?? null,
         }));
         setSubmissions(normalized);
       } catch (e:any) {
@@ -121,7 +124,8 @@ export default function CommunityReporterPage(){
       const normalized: CommunitySubmission[] = list.map(item => ({
         ...item,
         id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
-        status: (item.status || '').toLowerCase()
+        status: (item.status || '').toLowerCase(),
+        linkedArticleId: (item as any).linkedArticleId ?? null,
       }));
       setSubmissions(normalized);
     } catch(e:any) {
@@ -135,18 +139,72 @@ export default function CommunityReporterPage(){
     navigate(`/admin/community-reporter/${submission.id}`);
   };
 
+  interface DraftArticleSummary {
+    _id: string;
+    title?: string;
+    status?: string;
+    source?: string;
+    submissionId?: string;
+  }
+
+  interface DecisionResponse {
+    ok: boolean;
+    submission: CommunitySubmission;
+    draftArticle?: DraftArticleSummary | null;
+  }
+
   const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
     setActionId(submissionId); setError(null);
     try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/decision`, { decision });
-      // Optimistic local status update to avoid refetch flash
-      setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: decision === 'reject' ? 'rejected' : 'approved' } : s));
-      // For approve we may want to remove from pending; refilter handles it since status changes
-      // Optionally fetch to sync other fields
+      const res = await adminApi.post<DecisionResponse>(
+        `/api/admin/community-reporter/submissions/${submissionId}/decision`,
+        { decision }
+      );
+      const data = res.data;
+
+      if (!data || !data.submission) {
+        throw new Error('Invalid response from server');
+      }
+
+      const normalizedStatus = (data.submission.status || '').toLowerCase();
+      const linkedArticleId = (data.submission as any).linkedArticleId ?? null;
+
+      // Update local cache with full submission payload
+      setSubmissions(prev => prev.map(s =>
+        s.id === submissionId
+          ? {
+              ...s,
+              ...data.submission,
+              status: normalizedStatus,
+              linkedArticleId,
+            }
+          : s
+      ));
+
+      // Always keep list in sync with backend
       await fetchSubmissions();
+
+      if (decision === 'approve') {
+        const draft = data.draftArticle;
+        if (draft && draft._id) {
+          const title = draft.title?.trim();
+          if (title) {
+            notify.ok('Story approved', `Draft created in Manage News: ${title}.`);
+          } else {
+            notify.ok('Story approved', 'Draft created in Manage News.');
+          }
+        } else if (linkedArticleId) {
+          notify.info('Story approved. Already linked to an existing news draft.');
+        } else {
+          notify.ok('Story approved');
+        }
+      } else {
+        notify.ok('Story updated', 'Submission rejected.');
+      }
     } catch (e:any) {
       const msg = e?.response?.data?.message || e.message || 'Action failed';
       setError(prev => prev ? prev + ' | ' + msg : msg);
+      notify.err('Action failed', msg);
     } finally {
       setActionId(null);
     }
@@ -275,7 +333,19 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
-              <td className="p-2 font-medium" title={s.status}>{s.status || '—'}</td>
+              <td className="p-2 font-medium">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span title={s.status}>{s.status || '—'}</span>
+                  {s.linkedArticleId && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-50 text-amber-700 border border-amber-200"
+                      title="Draft created in Manage News"
+                    >
+                      📝 Draft linked
+                    </span>
+                  )}
+                </div>
+              </td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
