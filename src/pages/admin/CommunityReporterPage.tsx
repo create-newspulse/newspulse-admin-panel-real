@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi } from '@/lib/adminApi';
+import { decideCommunitySubmission } from '@/lib/communityReporterApi';
 
-// Updated interface for new backend routes (/api/admin/community-reporter/submissions)
+// Community Reporter queue
 interface CommunitySubmission {
   _id: string;
   headline?: string;
@@ -30,11 +31,11 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
-        console.debug('[community-reporter][queue] load:start');
-        const res = await adminApi.get('/api/admin/community-reporter/submissions');
+        console.debug('[community][queue] load:start');
+        const res = await adminApi.get('/api/admin/community/submissions');
         if (cancelled) return;
         const raw = res.data;
-        console.debug('[community-reporter][queue] load:response', res.status, raw);
+        console.debug('[community][queue] load:response', res.status, raw);
         const list = Array.isArray(raw?.submissions)
           ? raw.submissions
           : Array.isArray(raw?.data?.submissions)
@@ -49,10 +50,10 @@ export default function CommunityReporterPage(){
         if (cancelled) return;
         const status = e?.response?.status;
         setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
-        console.error('[community-reporter][queue] load:error', status, e?.response?.data || e.message);
+        console.error('[community][queue] load:error', status, e?.response?.data || e.message);
       } finally {
         if (!cancelled) setLoading(false);
-        console.debug('[community-reporter][queue] load:done');
+        console.debug('[community][queue] load:done');
       }
     }
     load();
@@ -62,7 +63,8 @@ export default function CommunityReporterPage(){
   async function handleDecision(id: string, action: 'approve'|'reject') {
     setActionId(id); setError(null);
     try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { action });
+      const decision = action === 'approve' ? 'APPROVED' : 'REJECTED';
+      await decideCommunitySubmission(id, decision);
       // Optimistically update status locally; backend canonical status strings may differ (e.g. uppercase)
       setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'approved' : 'rejected' } : s));
     } catch (e:any) {
