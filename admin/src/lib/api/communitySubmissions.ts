@@ -2,15 +2,21 @@ import { api } from './client';
 
 export interface CommunitySubmission {
   _id: string;
-  headline?: string;
-  name?: string;
-  email?: string;
+  userName: string;
+  email: string;
   location?: string;
   category?: string;
-  status?: string; // NEW | APPROVED | REJECTED
-  body?: string;
+  headline: string;
+  body: string;
+  mediaLink?: string;
+  aiHeadline?: string;
+  aiBody?: string;
+  riskScore?: number; // 0-100
+  flags?: string[]; // e.g. ["mentions_minor", "needs_verification"]
   rejectReason?: string;
-  createdAt?: string;
+  status: 'NEW' | 'AI_REVIEWED' | 'PENDING_FOUNDER' | 'APPROVED' | 'REJECTED';
+  createdAt: string;
+  updatedAt: string;
 }
 
 export async function listCommunitySubmissions(params: Record<string, any> = {}) {
@@ -23,7 +29,7 @@ export async function getCommunitySubmission(id: string) {
   return data;
 }
 
-export async function updateCommunitySubmissionStatus(id: string, body: { status: string; rejectReason?: string }) {
+export async function updateCommunitySubmissionStatus(id: string, body: { status: string; rejectReason?: string; aiHeadline?: string; aiBody?: string }) {
   const { data } = await api.patch(`/api/admin/community/submissions/${id}/status`, body);
   return data;
 }

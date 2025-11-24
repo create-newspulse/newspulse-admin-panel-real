@@ -1,30 +1,52 @@
 import { useEffect, useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+// Prefer dedicated admin backend base if available; fallback to generic API URL then remote.
+const API_ORIGIN = (
+  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
+  import.meta.env.VITE_API_URL?.toString() ||
+  'https://newspulse-backend-real.onrender.com'
+).replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationTriangle, FaEnvelope } from 'react-icons/fa';
 
+const SECURITY_ENABLED = import.meta.env.VITE_SECURITY_SYSTEM_ENABLED !== 'false';
+
 const SmartAlertSystem = () => {
   const [status, setStatus] = useState<'loaded' | 'error' | 'loading'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Simulate system check (replace with real fetch later)
     const fetchAlertConfig = async () => {
       try {
-        const data = await fetchJson<{ success?: boolean }>(`${API_BASE}/system/alert-config`, {
-          timeoutMs: 15000,
-        });
-        if (data && (data.success ?? true)) {
-          setStatus('loaded');
-        } else {
-          throw new Error('Failed to load config');
+        try {
+          const data = await fetchJson<{ success?: boolean }>(`${API_BASE}/system/alert-config`, { timeoutMs: 15000 });
+          if (data && (data.success === true || data.success === undefined)) {
+            setStatus('loaded');
+            return;
+          }
+          throw new Error('Invalid response');
+        } catch (innerErr: any) {
+          // Treat plain 404 Not Found or custom 'route not found' as missing route.
+          if (/route not found|404\b/i.test(innerErr?.message || '')) {
+            console.warn('[SmartAlertSystem] using stub config (404)');
+            setStatus('loaded');
+            return;
+          }
+          throw innerErr;
         }
-      } catch (err) {
-        console.error('❌ Alert config error:', err);
+      } catch (err: any) {
+        if (!errorMessage) console.error('❌ Alert config error:', err?.message || err);
+        setErrorMessage(err?.message || 'Alert System Load Failed');
         setStatus('error');
       }
     };
 
+    if (!SECURITY_ENABLED) {
+      console.warn('[SmartAlertSystem] disabled via VITE_SECURITY_SYSTEM_ENABLED=false');
+      setStatus('loaded');
+      return;
+    }
     fetchAlertConfig();
   }, []);
 
@@ -34,7 +56,7 @@ const SmartAlertSystem = () => {
         {status === 'loaded' && <FaCheckCircle className="text-green-500" />}
         {status === 'error' && <FaExclamationTriangle className="text-red-500" />}
         <p className={`font-mono text-sm ${status === 'loaded' ? 'text-green-600' : 'text-red-500'}`}>
-          {status === 'loaded' ? '✅ SmartAlertSystem Loaded' : '❌ Alert System Load Failed'}
+          {status === 'loaded' ? '✅ SmartAlertSystem Loaded' : `❌ ${errorMessage || 'Alert System Load Failed'}`}
         </p>
       </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import apiClient from '@lib/api';
+import apiClient, { safeSettingsLoad } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
@@ -11,9 +11,11 @@ const PollEditor = () => {
   const [settings, setSettings] = useState({ lockdown: false });
 
   useEffect(() => {
-    apiClient
-      .get('/api/settings/load')
-      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
+    safeSettingsLoad({ skipProbe: true })
+      .then((raw: any) => {
+        setSettings({ lockdown: !!raw.lockdown });
+        if (raw?._stub) console.warn('[PollEditor] settings stub active');
+      })
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 

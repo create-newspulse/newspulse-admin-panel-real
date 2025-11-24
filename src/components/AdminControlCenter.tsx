@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import apiClient from '../lib/api';
+import apiClient, { safeSettingsLoad } from '../lib/api';
 import toast from 'react-hot-toast';
 import html2pdf from 'html2pdf.js';
 import {
@@ -63,13 +63,23 @@ export default function AdminControlCenter() {
   useLockdownCheck(settings);
 
   useEffect(() => {
-    apiClient.get('/api/settings/load')
-      .then(res => {
-        const config = res.data || defaultSettings;
-        setSettings(config);
+    safeSettingsLoad({ skipProbe: true })
+      .then((raw: any) => {
+        const config = raw || defaultSettings;
+        setSettings({
+          aiTrainer: !!config.aiTrainer,
+          adsenseEnabled: !!config.adsenseEnabled,
+          voiceReader: !!config.voiceReader,
+          lockdown: !!config.lockdown,
+          signatureLock: !!config.signatureLock,
+          founderOnly: !!config.founderOnly,
+        });
+        if (raw?._stub) {
+          console.warn('[AdminControlCenter] settings stub active (route missing).');
+        }
       })
       .catch(() => {
-        toast.error('⚠️ Failed to load settings from database.');
+        toast.error('⚠️ Failed to load settings (stub defaults applied).');
         setSettings(defaultSettings);
       });
   }, []);

@@ -99,13 +99,17 @@ export function OwnerModulePage({ moduleId }: { moduleId: string }) {
   // optimistic demo lock + snapshot status from window globals or fallback
   const lockState = (window as any).__LOCK_STATE__ || 'UNLOCKED';
   const snapshotId = (window as any).__LAST_SNAPSHOT_ID__ || null;
+  const safeTabs = Array.isArray((mod as any).tabs) ? (mod as any).tabs : [];
+  if (!Array.isArray((mod as any).tabs) && import.meta.env.DEV) {
+    console.warn('[OwnerModulePage] module has no tabs array:', moduleId, mod);
+  }
   return (
     <Suspense fallback={<div className="text-sm">Loading module…</div>}>
       <OwnerZoneShell
         title={mod.title}
         toolbar={mod.id === 'founder' ? <FounderQuickActions /> : null}
-  tabs={mod.tabs.map(t => ({ id: t.id, label: t.label, render: () => React.createElement(t.component as any, {}) }))}
-        defaultTab={mod.tabs[0]?.id || 'overview'}
+  tabs={safeTabs.map((t: any) => ({ id: t.id, label: t.label, render: () => React.createElement(t.component as any, {}) }))}
+        defaultTab={safeTabs[0]?.id || 'overview'}
         status={{ lockState: lockState, snapshotId }}
       />
     </Suspense>

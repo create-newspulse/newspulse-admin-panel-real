@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
-import apiClient from '@lib/api';
+import apiClient, { safeSettingsLoad } from '@lib/api';
 
 interface Poll {
   _id: string;
@@ -23,9 +23,11 @@ const PollOfTheDay = () => {
 
   // 🔒 Load lockdown settings
   useEffect(() => {
-    apiClient
-      .get('/api/settings/load')
-      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
+    safeSettingsLoad({ skipProbe: true })
+      .then((raw: any) => {
+        setSettings({ lockdown: !!raw.lockdown });
+        if (raw?._stub) console.warn('[PollOfTheDay] settings stub active');
+      })
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 

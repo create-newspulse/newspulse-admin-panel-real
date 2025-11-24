@@ -26,6 +26,38 @@ export const api: ExtendedApi = axios.create({
   withCredentials: true,
 }) as ExtendedApi;
 
+// Cached route availability map to suppress repeated 404 network attempts for optional/admin features.
+const routeAvailability: Record<string, boolean> = {};
+// In-flight probe promises to prevent duplicate HEAD spam when multiple components mount simultaneously.
+const inFlightProbes: Record<string, Promise<boolean>> = {};
+
+async function probeRoute(path: string): Promise<boolean> {
+  // Already cached result
+  if (routeAvailability[path] !== undefined) return routeAvailability[path];
+  // Existing in-flight probe
+  if (inFlightProbes[path]) return inFlightProbes[path];
+
+  inFlightProbes[path] = (async () => {
+    try {
+      // Silent HEAD: custom flag to skip error logging in interceptor for expected 404.
+      await api.request({ url: path, method: 'HEAD', //@ts-expect-error custom flag
+        skipErrorLog: true });
+      routeAvailability[path] = true;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        routeAvailability[path] = false;
+      } else {
+        // Non-404 => treat as existing so consumer can handle auth/other errors later.
+        routeAvailability[path] = true;
+      }
+    }
+    return routeAvailability[path];
+  })();
+
+  return inFlightProbes[path];
+}
+
 // Dev request/response logging
 if (import.meta.env.DEV) {
   api.interceptors.request.use((cfg) => {
@@ -46,6 +78,10 @@ if (import.meta.env.DEV) {
     (err) => {
       const r = err?.response;
       const ct = (r?.headers?.['content-type'] || '').toString();
+      // Suppress logging for silent probes (HEAD 404 expected for optional routes)
+      if ((err as any)?.config?.skipErrorLog) {
+        return Promise.reject(err);
+      }
       const previewPromise = r?.data && typeof r.data === 'string' ? Promise.resolve(r.data) : (r?.data ? Promise.resolve(JSON.stringify(r.data).slice(0,200)) : Promise.resolve(''));
       previewPromise.then(preview => {
         try {
@@ -89,6 +125,36 @@ api.monitorHub = async () => {
   const status = lastErr?.response?.status;
   return { ok: false, status: status ?? null, error: 'monitor-hub-unavailable' };
 };
+
+// Unified settings loader with stub & 404 suppression.
+export async function safeSettingsLoad(opts?: { skipProbe?: boolean }) {
+  const path = '/api/settings/load';
+  // If security system disabled globally, skip network entirely.
+  if (import.meta.env.VITE_SECURITY_SYSTEM_ENABLED === 'false') {
+    return { ok: true, lockdown: false, _stub: true };
+  }
+  // Explicit override (caller wants zero network attempts)
+  if (opts?.skipProbe) {
+    return { ok: true, lockdown: false, _stub: true };
+  }
+  const available = await probeRoute(path);
+  if (!available) {
+    console.warn('[api] settings route missing; returning stub');
+    return { ok: true, lockdown: false, _stub: true };
+  }
+  try {
+    const res = await api.get(path);
+    const raw = res.data || res || {};
+    return { ok: true, ...(raw.data || raw), _endpoint: path };
+  } catch (err: any) {
+    if (/404/.test(err?.message || '')) {
+      console.warn('[api] settings 404 after probe; caching as unavailable');
+      routeAvailability[path] = false;
+      return { ok: true, lockdown: false, _stub: true };
+    }
+    throw err;
+  }
+}
 
 // Live Polls stats (used by LiveNewsPollsPanel) – backend route: GET /api/polls/live-stats
 // Provides shape: { success:true, data:{ totalPolls, totalVotes, topPoll:{ question, total } } }

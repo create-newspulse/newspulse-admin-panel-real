@@ -59,6 +59,7 @@ import FounderControlCenter from '@components/advanced/FounderControlCenter';
 import FounderControlPage from '@pages/admin/founder-control';
 // Temporary import of Community Reporter page from legacy admin folder until unified move
 import CommunityReporterPage from '@pages/admin/CommunityReporterPage';
+import CommunityReporterDetailPage from '@pages/admin/CommunityReporterDetailPage';
 import MediaLibrary from '@components/advanced/MediaLibrary';
 import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
@@ -138,8 +139,9 @@ function App() {
               <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New alias: /admin/news -> ManageNews (fixes Back to News button path) */}
               <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              {/* Community Reporter */}
+              {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
+              <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />

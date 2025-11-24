@@ -10,12 +10,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import "./index.css";
 
 // 🧠 Global Providers
-import { AuthProvider } from "./context/AuthContext";
-import { DarkModeProvider } from "./context/DarkModeContext";
-import { ThemeProvider } from "./context/ThemeContext";
-import { SidebarProvider } from "./context/SidebarContext";
-import { NotificationProvider } from "./context/NotificationContext";
-import { LanguageProvider } from "./context/LanguageContext";
+// Use path aliases consistently to avoid duplicate module instances in dev (prevents double Contexts)
+import { AuthProvider } from "@context/AuthContext";
+import { DarkModeProvider } from "@context/DarkModeContext";
+import { ThemeProvider } from "@context/ThemeContext";
+import { SidebarProvider } from "@context/SidebarContext";
+import { NotificationProvider } from "@context/NotificationContext";
+import { LanguageProvider } from "@context/LanguageContext";
 import { bootstrapAuth } from "./lib/auth";
 bootstrapAuth();
 // Initialize DOMPurify in the browser to make window.DOMPurify available
@@ -25,12 +26,37 @@ initDomPurify();
 import { installHtmlImportGuard } from './lib/guardHtmlImport';
 installHtmlImportGuard();
 
+// Dev-only console error throttling to stop runaway repeated identical logs
+if (import.meta.env.DEV) {
+  try {
+    const origErr = console.error;
+    interface Meta { count: number; first: number }
+    const registry = new Map<string, Meta>();
+    const MAX_INITIAL = 5; // always show first 5 identical errors
+    const WINDOW_MS = 60_000; // reset after a minute
+    console.error = (...args: any[]) => {
+      const key = String(args[0]);
+      const meta = registry.get(key) || { count: 0, first: Date.now() };
+      meta.count += 1;
+      const now = Date.now();
+      if (meta.count <= MAX_INITIAL) {
+        origErr(...args);
+      } else if (meta.count === MAX_INITIAL + 1) {
+        origErr('[console-error-throttle] suppressing further repeats for 60s:', key);
+      } else if (now - meta.first > WINDOW_MS) {
+        meta.count = 1; meta.first = now; origErr(...args);
+      }
+      registry.set(key, meta);
+    };
+  } catch {}
+}
+
 // 🎯 Grouped providers
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: 2,
+      retry: false, // disable automatic retries to prevent exponential error cascades
     },
   },
 });

@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+// Prefer admin backend dedicated base first to avoid production 404 for dev-only routes.
+const API_ORIGIN = (
+  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
+  import.meta.env.VITE_API_URL?.toString() ||
+  'https://newspulse-backend-real.onrender.com'
+).replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import {
@@ -13,34 +18,51 @@ interface Incident {
   message: string;
 }
 
+const SECURITY_ENABLED = import.meta.env.VITE_SECURITY_SYSTEM_ENABLED !== 'false';
+
 const IncidentResponseModule = () => {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let routeAvailable: boolean | null = null; // null = unknown, true = exists, false = stub
     const fetchIncidents = async () => {
+      if (routeAvailable === false) return; // hard stub mode
       try {
         const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`${API_BASE}/system/incidents`, {
           timeoutMs: 15000,
         });
+        routeAvailable = true;
         setIncidents(data.incidents || []);
         setLastSync(data.lastSync || null);
         setLoading(false);
-
         const errorLogs = (data.incidents || []).filter((log: Incident) => log.level === 'ERROR');
-        if (errorLogs.length > 0) {
-          console.warn('🚨 Critical Error Detected:', errorLogs[0].message);
+        if (errorLogs.length > 0) console.warn('🚨 Critical Error Detected:', errorLogs[0].message);
+      } catch (err: any) {
+        if (/route not found|404\b/i.test(err?.message || '')) {
+          if (routeAvailable !== false) console.warn('[IncidentResponseModule] route missing; switching to stub mode');
+          routeAvailable = false;
+          setIncidents([]);
+          setLastSync(new Date().toISOString());
+          setLoading(false);
+        } else {
+          console.error('❌ Failed to fetch incidents:', err);
+          setLoading(false);
         }
-      } catch (err) {
-        console.error('❌ Failed to fetch incidents:', err);
-        setLoading(false);
       }
     };
-
-    fetchIncidents(); // initial load
-    const interval = setInterval(fetchIncidents, 30000); // auto-refresh every 30s
-    return () => clearInterval(interval); // cleanup
+    if (!SECURITY_ENABLED) {
+      console.warn('[IncidentResponseModule] disabled via VITE_SECURITY_SYSTEM_ENABLED=false');
+      routeAvailable = false;
+      setIncidents([]);
+      setLastSync(new Date().toISOString());
+      setLoading(false);
+      return;
+    }
+    fetchIncidents();
+    const interval = setInterval(fetchIncidents, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const downloadJSON = () => {

@@ -31,7 +31,10 @@ export default function LoginForm() {
       // Try modern /login first; fallback to /auth/login automatically (handled in loginAdmin)
       const { token, user } = await loginAdmin(data as LoginDTO);
       if (token && user) {
-        setAuth(user, token);
+        // Normalize token: remove any leading 'Bearer ' prefix if backend already included it
+        const normalizedToken = String(token).replace(/^Bearer\s+/i, '');
+        setAuth(user, normalizedToken);
+        try { localStorage.setItem('np_admin_token', normalizedToken); } catch {}
         toast.success(`Welcome ${user.name} (${user.role})`);
         // Spec: route to admin dashboard
         window.location.href = '/admin/dashboard';

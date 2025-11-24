@@ -51,6 +51,7 @@ export default function CommunityReporterPage(){
             <th className="p-2 text-left">Location</th>
             <th className="p-2 text-left">Category</th>
             <th className="p-2 text-left">Status</th>
+            <th className="p-2 text-left">Risk</th>
             <th className="p-2 text-left">Created</th>
           </tr>
         </thead>
@@ -58,16 +59,21 @@ export default function CommunityReporterPage(){
           {submissions.map((s: any)=>(
             <tr key={s._id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=> open(s._id)}>
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline}</td>
-              <td className="p-2" title={s.name}>{s.name}</td>
+              <td className="p-2" title={s.userName}>{s.userName}</td>
               <td className="p-2" title={s.location}>{s.location || '—'}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2 font-medium" title={s.status}>{s.status}</td>
+              <td className="p-2" title={typeof s.riskScore==='number' ? String(s.riskScore) : '—'}>
+                {typeof s.riskScore==='number' ? (
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${s.riskScore <= 25 ? 'bg-green-100 text-green-700 border-green-200' : s.riskScore <= 60 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-red-100 text-red-700 border-red-200'}`}>{s.riskScore}</span>
+                ) : '—'}
+              </td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
             </tr>
           ))}
           {!isLoading && submissions.length===0 && (
             <tr>
-              <td colSpan={6} className="p-4 text-center text-slate-500">No submissions found.</td>
+              <td colSpan={7} className="p-4 text-center text-slate-500">No submissions found.</td>
             </tr>
           )}
         </tbody>

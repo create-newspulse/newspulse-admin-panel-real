@@ -1,72 +1,78 @@
 import axios from 'axios';
 
-// OPTION A (Direct): Set VITE_ADMIN_API_BASE_URL to full backend origin (no trailing /api).
-// OPTION B (Rewrite): Set VITE_ADMIN_API_BASE_URL=/admin-api and configure vercel.json rewrite.
-// We now strictly honor the explicit env variable when present; no automatic host sniffing.
-let rawBase = (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined)?.trim() || '';
-if (!rawBase) rawBase = '/admin-api'; // fallback to proxy path when not provided
-// Canonicalize accidental duplication
-rawBase = rawBase.replace(/\/admin-api\/api$/,'/admin-api');
-rawBase = rawBase.replace(/\/admin-api\/$/,'/admin-api');
-
-// Remove any trailing slashes without using a regex
-function stripTrailingSlashes(url: string): string {
-  let out = (url || "").trim();
-  while (out.endsWith("/")) {
-    out = out.slice(0, -1);
-  }
-  return out;
-}
-
-// Clean backend host (no path suffix)
-export const adminRoot = stripTrailingSlashes(rawBase);
-
-// Shared axios client for admin APIs
+// Single source of truth for admin API base URL.
+// Prefer explicit env override, fallback to production backend origin.
+const explicitEnv = (import.meta.env.VITE_ADMIN_API_URL || '').trim();
+const FALLBACK_ADMIN_BASE = 'https://newspulse-backend-real.onrender.com';
+export const adminRoot = explicitEnv || FALLBACK_ADMIN_BASE; // retain exported name for existing imports
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
-// Attach Authorization header from localStorage (JWT) uniformly
-adminApi.interceptors.request.use((cfg) => {
+// Attach Authorization header from localStorage (JWT) for all requests
+adminApi.interceptors.request.use((config) => {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('adminToken') : null;
+    let token: string | null = null;
+    if (typeof window !== 'undefined') {
+      // 1. newsPulseAdminAuth.accessToken first
+      try {
+        const raw = localStorage.getItem('newsPulseAdminAuth');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.accessToken) token = String(parsed.accessToken);
+        }
+      } catch {}
+      // 2. fallback to np_admin_access_token then np_admin_token
+      if (!token) token = localStorage.getItem('np_admin_access_token');
+      if (!token) token = localStorage.getItem('np_admin_token');
+    }
     if (token) {
-      cfg.headers = cfg.headers || {};
-      (cfg.headers as any).Authorization = `Bearer ${token}`;
+      config.headers = config.headers || {};
+      (config.headers as any).Authorization = `Bearer ${token}`;
     }
   } catch {}
-  return cfg;
+  return config;
 });
 
-// Dev-only request/response logging (minimal in prod)
+// Always log error responses in the requested format, then rethrow
+// Throttled / deduplicated error logging to avoid console flood
+adminApi.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const status = error?.response?.status;
+    const url = error?.config?.url || error?.response?.config?.url || '';
+    const ct = error?.response?.headers?.['content-type'];
+    // Auto-redirect on 401 for protected admin API paths
+    if (status === 401 && /\/api\/admin\//.test(url)) {
+      try {
+        localStorage.removeItem('newsPulseAdminAuth');
+        localStorage.removeItem('np_admin_token');
+        localStorage.removeItem('np_admin_access_token');
+      } catch {}
+      try { console.warn('[adminApi] 401 detected – redirecting to /admin/login'); } catch {}
+      if (typeof window !== 'undefined') {
+        // Avoid infinite loops if already on login
+        if (!window.location.pathname.includes('/admin/login')) {
+          window.location.href = '/admin/login';
+        }
+      }
+    }
+    // Suppress noisy 404 for /api/admin/me specifically
+    if (!(status === 404 && url.endsWith('/api/admin/me'))) {
+      try { console.error('[adminApi:err]', status, url, ct); } catch {}
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Dev-only request/response success logging to aid debugging
 if (import.meta.env.DEV) {
   adminApi.interceptors.request.use((cfg) => {
-    try {
-      console.debug('[adminApi:req]', cfg.method?.toUpperCase(), cfg.baseURL ? cfg.baseURL + (cfg.url || '') : cfg.url, cfg.headers);
-    } catch {}
+    try { console.debug('[adminApi:req]', cfg.method?.toUpperCase(), cfg.baseURL ? cfg.baseURL + (cfg.url || '') : cfg.url); } catch {}
     return cfg;
   });
-  adminApi.interceptors.response.use(
-    (res) => {
-      try {
-        console.debug('[adminApi:res]', res.status, res.config.url, res.headers['content-type']);
-        const ct = (res.headers['content-type'] || '').toString();
-        if (!/application\/json/i.test(ct)) {
-          console.error('⚠ Non-JSON response detected. Likely misconfigured base URL or rewrite.', ct);
-        }
-      } catch {}
-      return res;
-    },
-    (err) => {
-      const res = err?.response;
-      try {
-        console.error('[adminApi:err]', res?.status, res?.config?.url, res?.headers?.['content-type']);
-        const ct = (res?.headers?.['content-type'] || '').toString();
-        if (/text\/html/i.test(ct)) {
-          console.error('❌ HTML received instead of JSON. Check VITE_ADMIN_API_BASE_URL or Vercel rewrite.');
-        }
-      } catch {}
-      return Promise.reject(err);
-    }
-  );
+  adminApi.interceptors.response.use((res) => {
+    try { console.debug('[adminApi:res]', res.status, res.config.url, res.headers['content-type']); } catch {}
+    return res;
+  });
 }
 
 // Resolve a path with awareness of proxy base. If using '/admin-api' remove leading '/api/'.
@@ -75,12 +81,7 @@ if (import.meta.env.DEV) {
 // For direct base we prepend the full origin.
 export function resolveAdminPath(p: string): string {
   const clean = p.startsWith('/') ? p : `/${p}`;
-  if (adminRoot === '/admin-api') {
-    if (clean.startsWith('/api/')) return `/admin-api${clean.replace(/^\/api\//, '/')}`; // /admin-api/system/health
-    return `/admin-api${clean}`;
-  }
-  // direct host
-  if (clean.startsWith('/api/')) return `${adminRoot}${clean}`; // origin + /api/... path
+  // Always resolve relative to the chosen base URL
   return `${adminRoot}${clean}`;
 }
 
@@ -164,15 +165,4 @@ export async function loginAdmin(dto: LoginDTO) {
   throw lastErr || new Error('Login failed');
 }
 
-// Community Reporter helper
-export interface CommunityReporterListResult {
-  success?: boolean;
-  items?: any[];
-  data?: any;
-  [key:string]: any;
-}
-export async function getCommunityReporterSubmissions(filter?: string): Promise<CommunityReporterListResult> {
-  const params = filter && filter !== 'all' ? { status: filter } : undefined;
-  const res = await adminApi.get('/admin/community-reporter/submissions', { params });
-  return res.data || {};
-}
+// (Removed multi-path Community Reporter helper; component now calls single definitive endpoint.)

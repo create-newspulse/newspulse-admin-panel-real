@@ -1,5 +1,7 @@
 import React from 'react';
 
+declare global { interface Window { __EB_LOGGED?: Set<string>; __EB_COUNTS?: Record<string, number>; } }
+
 type Props = {
   children: React.ReactNode;
   fallback?: React.ReactNode;
@@ -21,7 +23,19 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: any, info: any) {
     if (typeof window !== 'undefined') {
-      console.error('[ErrorBoundary]', error, info);
+      window.__EB_LOGGED = window.__EB_LOGGED || new Set<string>();
+      window.__EB_COUNTS = window.__EB_COUNTS || {};
+      const key = (error?.message || String(error)) + '::' + (error?.stack ? String(error.stack).split('\n')[0] : '');
+      if (!window.__EB_LOGGED.has(key)) {
+        window.__EB_LOGGED.add(key);
+        console.error('[ErrorBoundary]', error, info);
+      } else {
+        window.__EB_COUNTS[key] = (window.__EB_COUNTS[key] || 1) + 1;
+        const c = window.__EB_COUNTS[key];
+        if (c === 25 || c === 100 || c === 500) {
+          console.warn('[ErrorBoundary] repeated error x' + c, error?.message || error);
+        }
+      }
     }
   }
 

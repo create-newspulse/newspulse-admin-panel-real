@@ -1,183 +1,103 @@
-// 📁 frontend/components/SafeZone/ThreatDashboard.tsx
 import { useEffect, useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import type { ReactNode } from 'react';
-import {
-  FaShieldAlt, FaBug, FaRobot, FaHistory, FaCheck, FaTimes, FaDownload
-} from 'react-icons/fa';
+import { FaShieldAlt, FaBug, FaRobot, FaHistory } from 'react-icons/fa';
 
-type ThreatLog = {
-  ipReputationScore: number;
-  credentialsLeaked: boolean;
-  proxyDetected?: boolean;
-  lastScan: string;
-  origin: string;
-  createdAt: string;
-};
+// Normalized response shapes
+interface ThreatEvent { id?: string; createdAt?: string; severity?: string; message?: string; ip?: string }
+interface RegionStat { region?: string; incidents?: number }
+interface ThreatStats { cards: any[]; recentEvents: ThreatEvent[]; topRegions: RegionStat[] }
 
-type StatsResponse = {
-  success: boolean;
-  totalScans: number;
-  flaggedScans: number;
-  autoTriggered: number;
-  recentLogs: ThreatLog[];
-};
+const SECURITY_ENABLED = import.meta.env.VITE_SECURITY_SYSTEM_ENABLED !== 'false';
 
-const ThreatDashboard = () => {
-  const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+const ThreatDashboard: React.FC = () => {
+  const [stats, setStats] = useState<ThreatStats | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchStats = async () => {
+  async function loadStats() {
+    setLoading(true); setError(null);
     try {
-      const json = await fetchJson<StatsResponse>(`${API_BASE}/dashboard/threat-stats`);
-      if (json && json.success) setStats(json);
-      else throw new Error('Invalid data structure');
-    } catch (err) {
-      console.error('❌ Failed to load threat stats:', err);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+      const data: any = await fetchJson<any>('/api/dashboard/threat-stats');
+      setStats({
+        cards: Array.isArray(data?.cards) ? data.cards : [],
+        recentEvents: Array.isArray(data?.recentEvents) ? data.recentEvents : [],
+        topRegions: Array.isArray(data?.topRegions) ? data.topRegions : [],
+      });
+    } catch (err: any) {
+      console.error('[ThreatDashboard] load error:', err?.message || err);
+      setStats(null);
+      setError(err?.message || 'Failed to load threat stats');
+    } finally { setLoading(false); }
+  }
 
   useEffect(() => {
-    fetchStats();
-    // Optional Auto Refresh:
-    // const interval = setInterval(fetchStats, 60000);
-    // return () => clearInterval(interval);
+    if (!SECURITY_ENABLED) {
+      console.warn('[ThreatDashboard] disabled via VITE_SECURITY_SYSTEM_ENABLED=false');
+      setStats({ cards: [], recentEvents: [], topRegions: [] });
+      setLoading(false);
+      return;
+    }
+    loadStats();
   }, []);
 
-  const exportLogs = () => {
-    if (!stats) return;
-    const blob = new Blob([JSON.stringify(stats.recentLogs, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `threat-logs-${Date.now()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
+  if (loading) return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-6">
+      <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-600 dark:text-blue-300"><FaShieldAlt /> Threat Intelligence Dashboard</h2>
+      <p className="text-gray-500 text-sm">Loading threat stats...</p>
+    </div>
+  );
+
+  if (error || !stats) return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-6">
+      <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-600 dark:text-blue-300"><FaShieldAlt /> Threat Intelligence Dashboard</h2>
+      <div className="text-red-600 text-sm">❌ Failed to load threat stats{error ? `: ${error}` : ''}</div>
+    </div>
+  );
+
+  const { cards, recentEvents, topRegions } = stats;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-6">
-      <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-600 dark:text-blue-300">
-        <FaShieldAlt /> Threat Intelligence Dashboard
-      </h2>
-
-      {loading ? (
-        <p className="text-gray-500">Loading threat stats...</p>
-      ) : error || !stats ? (
-        <p className="text-red-600">❌ Failed to load threat data</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <ColorCard
-              color="bg-blue-100 dark:bg-blue-900/30"
-              icon={<FaBug className="text-2xl text-blue-600 mx-auto mb-2" />}
-              label="Total Scans"
-              value={stats.totalScans}
-            />
-            <ColorCard
-              color="bg-yellow-100 dark:bg-yellow-900/30"
-              icon={<FaRobot className="text-2xl text-yellow-600 mx-auto mb-2" />}
-              label="Flagged Threats"
-              value={stats.flaggedScans}
-            />
-            <ColorCard
-              color="bg-red-100 dark:bg-red-900/30"
-              icon={<FaHistory className="text-2xl text-red-600 mx-auto mb-2" />}
-              label="Auto-Triggered"
-              value={stats.autoTriggered}
-            />
-          </div>
-
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-md font-semibold text-gray-600 dark:text-gray-300">
-              🕵️ Recent Logs:
-            </h3>
-            <button
-              onClick={exportLogs}
-              className="text-blue-600 text-xs flex items-center gap-1 hover:underline"
-            >
-              <FaDownload /> Export Logs
-            </button>
-          </div>
-
+      <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-blue-600 dark:text-blue-300"><FaShieldAlt /> Threat Intelligence Dashboard</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <ColorCard color="bg-blue-100 dark:bg-blue-900/30" icon={<FaBug className="text-2xl text-blue-600 mx-auto mb-2" />} label="Cards" value={cards.length} />
+        <ColorCard color="bg-yellow-100 dark:bg-yellow-900/30" icon={<FaRobot className="text-2xl text-yellow-600 mx-auto mb-2" />} label="Recent Events" value={recentEvents.length} />
+        <ColorCard color="bg-red-100 dark:bg-red-900/30" icon={<FaHistory className="text-2xl text-red-600 mx-auto mb-2" />} label="Top Regions" value={topRegions.length} />
+      </div>
+      <div className="mb-4">
+        <h3 className="text-md font-semibold text-gray-600 dark:text-gray-300 mb-2">🕵️ Recent Events</h3>
+        {recentEvents.length === 0 ? <p className="text-xs text-gray-500">No recent events.</p> : (
           <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-2 max-h-60 overflow-y-auto pr-2">
-            {stats.recentLogs.map((log, idx) => (
-              <li key={idx} className="border-b border-gray-200 dark:border-gray-700 pb-2">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <strong>Score:</strong>{' '}
-                    <span className={log.ipReputationScore < 50 ? 'text-red-500' : 'text-green-600'}>
-                      {log.ipReputationScore}
-                    </span>{' '}
-                    <RiskBadge score={log.ipReputationScore} />
-                    {' | '}
-                    <strong>Leaked:</strong>{' '}
-                    {log.credentialsLeaked ? (
-                      <span className="text-red-600 inline-flex items-center"><FaTimes className="mr-1" />Yes</span>
-                    ) : (
-                      <span className="text-green-600 inline-flex items-center"><FaCheck className="mr-1" />No</span>
-                    )}
-                    {' | '}
-                    <strong>From:</strong> {log.origin}
-                  </div>
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {new Date(log.createdAt).toLocaleString()}
-                </div>
+            {recentEvents.map((ev: ThreatEvent, idx: number) => (
+              <li key={ev.id || idx} className="border-b border-gray-200 dark:border-gray-700 pb-2">
+                <div className="flex justify-between items-center"><div><strong>{ev.severity || 'INFO'}:</strong> {ev.message || '—'}</div></div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{ev.createdAt ? new Date(ev.createdAt).toLocaleString() : 'Unknown time'}</div>
               </li>
             ))}
           </ul>
-        </>
-      )}
+        )}
+      </div>
+      <div>
+        <h3 className="text-md font-semibold text-gray-600 dark:text-gray-300 mb-2">🌐 Top Regions</h3>
+        {topRegions.length === 0 ? <p className="text-xs text-gray-500">No region stats.</p> : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {topRegions.map((r: RegionStat, idx: number) => (
+              <div key={r.region || idx} className="text-xs p-2 rounded bg-blue-50 dark:bg-blue-900/30"><span className="font-semibold">{r.region || 'Unknown'}</span>: {r.incidents ?? 0}</div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-// 🔷 Colored Summary Card
-const ColorCard = ({
-  color,
-  icon,
-  label,
-  value,
-}: {
-  color: string;
-  icon: ReactNode;
-  label: string;
-  value: number;
-}) => (
+const ColorCard = ({ color, icon, label, value }: { color: string; icon: ReactNode; label: string; value: number }) => (
   <div className={`${color} p-4 rounded shadow text-center`}>
     {icon}
     <p className="text-sm">{label}</p>
     <p className="text-xl font-bold">{value}</p>
   </div>
 );
-
-// 🧠 Score Risk Badge
-const RiskBadge = ({ score }: { score: number }) => {
-  let label = 'Low';
-  let style = 'bg-green-100 text-green-700';
-
-  if (score < 50) {
-    label = 'High';
-    style = 'bg-red-100 text-red-700';
-  } else if (score < 80) {
-    label = 'Medium';
-    style = 'bg-yellow-100 text-yellow-700';
-  }
-
-  return (
-    <span className={`ml-2 px-2 py-0.5 text-xs rounded-full font-semibold ${style}`}>
-      {label}
-    </span>
-  );
-};
 
 export default ThreatDashboard;

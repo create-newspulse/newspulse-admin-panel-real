@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import apiClient from '@lib/api';
+import apiClient, { safeSettingsLoad } from '@lib/api';
 import SignatureUnlock from './SafeZone/SignatureUnlock';
 
 export default function LockCheckWrapper({ children }: { children: React.ReactNode }) {
@@ -9,16 +9,18 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
   const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    apiClient.get('/api/settings/load')
-      .then((res) => {
-        const settings = (res as any)?.data ?? res ?? {};
-        if (settings.lockdown) {
+    safeSettingsLoad({ skipProbe: true })
+      .then((settings: any) => {
+        if (settings?.lockdown) {
           setLocked(true);
           toast.error('🔒 Lockdown Mode is active. Signature required.');
         }
+        if (settings?._stub) {
+          console.warn('[LockCheckWrapper] settings stub in use (route missing).');
+        }
       })
       .catch(() => {
-        toast.error('⚠️ Could not verify lockdown status.');
+        toast.error('⚠️ Could not verify lockdown status (stub assumed).');
       })
       .finally(() => setLoading(false));
   }, []);

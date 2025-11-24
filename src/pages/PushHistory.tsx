@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api, { default as apiClient } from '../lib/api';
+import api, { default as apiClient, safeSettingsLoad } from '../lib/api';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
 interface PushEntry {
@@ -17,9 +17,11 @@ export default function PushHistory() {
   const [settings, setSettings] = useState({ lockdown: false });
 
   useEffect(() => {
-    apiClient
-      .get('/api/settings/load')
-      .then((res) => setSettings(((res as any)?.data ?? res) || { lockdown: false }))
+    safeSettingsLoad({ skipProbe: true })
+      .then((raw: any) => {
+        setSettings({ lockdown: !!raw.lockdown });
+        if (raw?._stub) console.warn('[PushHistory] settings stub active');
+      })
       .catch(() => setSettings({ lockdown: false }));
   }, []);
 

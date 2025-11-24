@@ -28,7 +28,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const STORAGE_KEY = 'newsPulseAdminAuth';
   const AUTH_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
-  const SESSION_ENDPOINT = '/admin/me';
+  const SESSION_ENDPOINT = '/api/admin/me';
 
   // Consider cookie-session success (no token) as authenticated if we have user
   // Auth considered valid if we have a token or a resolved user
@@ -67,11 +67,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const tokenVal = data.token || data.accessToken || null;
       if (tokenVal) {
-        setAuthToken(tokenVal);
-        setTokenState(String(tokenVal));
+        const normalized = String(tokenVal).replace(/^Bearer\s+/i, '');
+        setAuthToken(normalized);
+        setTokenState(normalized);
+        // Persist under both new and legacy keys so interceptors always find it
+        try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
+        try { localStorage.setItem('np_admin_token', normalized); } catch {}
       } else {
         setAuthToken(null);
         setTokenState(null);
+        try { localStorage.removeItem('np_admin_token'); } catch {}
+        try { localStorage.removeItem('np_admin_access_token'); } catch {}
       }
 
       const u = data.user || data.data?.user || {
@@ -120,6 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTokenState(null);
     setUser(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem('np_admin_token'); } catch {}
     if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage');
   }, []);
 
@@ -136,8 +143,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (import.meta.env.DEV) console.debug('[Auth] stored session expired');
         } else {
           if (parsed.token) {
-            setTokenState(String(parsed.token));
-            setAuthToken(String(parsed.token));
+            const normalized = String(parsed.token).replace(/^Bearer\s+/i, '');
+            setTokenState(normalized);
+            setAuthToken(normalized);
+            try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
+            try { localStorage.setItem('np_admin_token', normalized); } catch {}
           }
           if (parsed.email || parsed.role) {
             setUser(prev => prev || { id: '', email: String(parsed.email||''), name: '', role: String(parsed.role||'') });
@@ -184,7 +194,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.debug('[Auth] session restore no user returned');
       }
     } catch (e:any) {
-      if (import.meta.env.DEV) console.warn('[Auth] session restore failed', e?.response?.status, e?.message);
+      const st = e?.response?.status;
+      // Treat 404 as non-fatal (no profile) and avoid noisy warning
+      if (import.meta.env.DEV && st !== 404) console.warn('[Auth] session restore failed', st, e?.message);
     } finally {
       setIsRestoring(false);
     }

@@ -45,6 +45,9 @@ const Breadcrumbs = () => {
           const path = "/" + segments.slice(0, i + 1).join("/");
           const isLast = i === segments.length - 1;
 
+          // Omit 'admin' segment from breadcrumbs when it is a prefix (i.e., followed by at least one more segment)
+          if (seg === 'admin' && segments.length > 1) return null;
+
           return (
             <li key={i} className="flex items-center gap-1">
               <FaChevronRight className="text-gray-400 text-xs" />
