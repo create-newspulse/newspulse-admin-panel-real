@@ -34,9 +34,15 @@ export default function CommunityReporterDetailPage() {
       try {
         const res = await adminApi.get(`/api/admin/community/submissions/${id}`);
         if (cancelled) return;
-        // Accept either { submission } or raw
-        const data = res.data?.submission || res.data;
-        setSub(data);
+        const raw = res.data;
+        const submission = raw?.submission ?? raw;
+        // If backend indicates failure or provides a null/empty submission, treat as not found
+        if ((raw && raw.success === false) || !submission || (typeof submission === 'object' && submission !== null && Object.keys(submission).length === 0)) {
+          setSub(null);
+          setError('Submission not found.');
+        } else {
+          setSub(submission);
+        }
       } catch (e:any) {
         if (cancelled) return;
         const st = e?.response?.status;
@@ -49,13 +55,13 @@ export default function CommunityReporterDetailPage() {
     return () => { cancelled = true; };
   }, [id]);
 
-  async function postAction(kind: 'approve'|'reject') {
+  async function handleDecision(action: 'approve'|'reject') {
     if (!id) return;
     setActionLoading(true); setError(null);
     try {
-      await adminApi.post(`/api/admin/community/submissions/${id}/${kind}`);
-      setSub(prev => prev ? { ...prev, status: kind === 'approve' ? 'approved' : 'rejected' } : prev);
-      setToast(kind === 'approve' ? 'Submission approved.' : 'Submission rejected.');
+      await adminApi.post(`/api/admin/community/submissions/${id}/${action}`);
+      setSub(prev => prev ? { ...prev, status: action === 'approve' ? 'approved' : 'rejected' } : prev);
+      setToast(action === 'approve' ? 'Submission approved.' : 'Submission rejected.');
       setTimeout(()=> setToast(null), 3500);
     } catch (e:any) {
       const msg = e?.response?.data?.message || e.message || 'Action failed';
@@ -88,9 +94,21 @@ export default function CommunityReporterDetailPage() {
         <div className="p-3 border rounded bg-slate-50 whitespace-pre-wrap text-sm">{sub.body || '—'}</div>
         {sub.mediaUrl && <div><span className="font-semibold">Media:</span> <a href={sub.mediaUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">Open Media</a></div>}
       </div>
-      <div className="mt-6 flex gap-3">
-        {sub.status !== 'approved' && <button disabled={actionLoading} onClick={()=> postAction('approve')} className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-60">Approve</button>}
-        {sub.status !== 'rejected' && <button disabled={actionLoading} onClick={()=> postAction('reject')} className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-60">Reject</button>}
+      <div className="mt-6 flex gap-3 flex-wrap">
+        {sub.status !== 'approved' && (
+          <button
+            disabled={actionLoading}
+            onClick={()=> handleDecision('approve')}
+            className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-60"
+          >Approve</button>
+        )}
+        {sub.status !== 'rejected' && (
+          <button
+            disabled={actionLoading}
+            onClick={()=> handleDecision('reject')}
+            className="px-4 py-2 rounded bg-red-600 text-white disabled:opacity-60"
+          >Reject</button>
+        )}
       </div>
     </div>
   );

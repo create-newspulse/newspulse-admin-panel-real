@@ -19,6 +19,7 @@ export default function CommunityReporterPage(){
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>([]);
+  const [actionId, setActionId] = useState<string|null>(null);
   const loadedRef = useRef(false);
   const navigate = useNavigate();
 
@@ -46,6 +47,20 @@ export default function CommunityReporterPage(){
     return () => { cancelled = true; };
   }, []);
 
+  async function handleDecision(id: string, action: 'approve'|'reject') {
+    setActionId(id); setError(null);
+    try {
+      await adminApi.post(`/api/admin/community/submissions/${id}/${action}`);
+      // Optimistically update status locally; backend canonical status strings may differ (e.g. uppercase)
+      setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'approved' : 'rejected' } : s));
+    } catch (e:any) {
+      const msg = e?.response?.data?.message || e.message || 'Action failed';
+      setError(prev => prev ? prev + ' | ' + msg : msg);
+    } finally {
+      setActionId(null);
+    }
+  }
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4 flex items-center gap-2">🧑‍🤝‍🧑 Community Reporter Queue</h1>
@@ -60,7 +75,7 @@ export default function CommunityReporterPage(){
             <th className="p-2 text-left">Category</th>
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Created At</th>
-            <th className="p-2 text-left">View</th>
+            <th className="p-2 text-left">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -73,7 +88,23 @@ export default function CommunityReporterPage(){
               <td className="p-2 font-medium" title={s.status}>{s.status || '—'}</td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
-                <button onClick={()=> navigate(`/admin/community-reporter/${s._id}`)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white">View</button>
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={()=> navigate(`/admin/community-reporter/${s._id}`)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white">View</button>
+                  {s.status !== 'approved' && (
+                    <button
+                      disabled={actionId === s._id}
+                      onClick={()=> handleDecision(s._id, 'approve')}
+                      className="px-3 py-1 text-xs rounded bg-green-600 text-white disabled:opacity-60"
+                    >Approve</button>
+                  )}
+                  {s.status !== 'rejected' && (
+                    <button
+                      disabled={actionId === s._id}
+                      onClick={()=> handleDecision(s._id, 'reject')}
+                      className="px-3 py-1 text-xs rounded bg-red-600 text-white disabled:opacity-60"
+                    >Reject</button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
