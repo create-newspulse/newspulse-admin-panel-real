@@ -30,17 +30,29 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
+        console.debug('[community-reporter][queue] load:start');
         const res = await adminApi.get('/api/admin/community-reporter/submissions');
         if (cancelled) return;
         const raw = res.data;
-        const list = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
+        console.debug('[community-reporter][queue] load:response', res.status, raw);
+        const list = Array.isArray(raw?.submissions)
+          ? raw.submissions
+          : Array.isArray(raw?.data?.submissions)
+            ? raw.data.submissions
+            : Array.isArray(raw?.results)
+              ? raw.results
+              : Array.isArray(raw?.items)
+                ? raw.items
+                : Array.isArray(raw) ? raw : [];
         setSubmissions(list);
       } catch (e:any) {
         if (cancelled) return;
         const status = e?.response?.status;
         setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
+        console.error('[community-reporter][queue] load:error', status, e?.response?.data || e.message);
       } finally {
         if (!cancelled) setLoading(false);
+        console.debug('[community-reporter][queue] load:done');
       }
     }
     load();
