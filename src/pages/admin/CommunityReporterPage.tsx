@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi } from '@/lib/adminApi';
 
+export type CommunitySubmissionPriority =
+  | 'FOUNDER_REVIEW'
+  | 'EDITOR_REVIEW'
+  | 'LOW_PRIORITY';
+
 // Raw shape from backend (_id based)
 interface CommunitySubmissionApi {
   _id: string;
@@ -20,6 +25,7 @@ interface CommunitySubmissionApi {
   flags?: string[];
   rejectReason?: string;
   status?: string;
+  priority?: CommunitySubmissionPriority;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -42,8 +48,23 @@ export interface CommunitySubmission {
   flags?: string[];
   rejectReason?: string;
   status?: string; // backend may send uppercase
+  priority?: CommunitySubmissionPriority;
   createdAt?: string;
   updatedAt?: string;
+}
+
+function formatPriorityLabel(priority?: CommunitySubmissionPriority){
+  if (priority === 'FOUNDER_REVIEW') return '🔴 Founder Review';
+  if (priority === 'EDITOR_REVIEW') return '🟡 Editor Review';
+  if (priority === 'LOW_PRIORITY') return '🟢 Low Priority';
+  return '—';
+}
+
+function priorityRank(priority?: CommunitySubmissionPriority){
+  if (priority === 'FOUNDER_REVIEW') return 1;
+  if (priority === 'EDITOR_REVIEW') return 2;
+  if (priority === 'LOW_PRIORITY') return 3;
+  return 99;
 }
 
 export default function CommunityReporterPage(){
@@ -52,6 +73,7 @@ export default function CommunityReporterPage(){
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>([]);
   const [actionId, setActionId] = useState<string|null>(null);
   const [viewMode, setViewMode] = useState<'pending'|'rejected'>('pending');
+  const [priorityFilter, setPriorityFilter] = useState<'ALL' | CommunitySubmissionPriority>('ALL');
   const loadedRef = useRef(false);
   const navigate = useNavigate();
 
@@ -144,16 +166,26 @@ export default function CommunityReporterPage(){
     }
   };
 
-  const filteredSubmissions = submissions.filter(s => {
-    if (viewMode === 'pending') return s.status === 'pending';
-    if (viewMode === 'rejected') return s.status === 'rejected';
-    return true;
-  });
+  const filteredSubmissions = submissions
+    .filter(s => {
+      if (viewMode === 'pending') return s.status === 'pending';
+      if (viewMode === 'rejected') return s.status === 'rejected';
+      return true;
+    })
+    .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
+    .slice()
+    .sort((a, b) => {
+      const prioDiff = priorityRank(a.priority) - priorityRank(b.priority);
+      if (prioDiff !== 0) return prioDiff;
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return bTime - aTime;
+    });
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4 flex items-center gap-2">🧑‍🤝‍🧑 Community Reporter Queue</h1>
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2 items-center">
         <button
           className={`px-3 py-1 rounded text-sm ${viewMode==='pending' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
           onClick={()=> setViewMode('pending')}
@@ -162,6 +194,32 @@ export default function CommunityReporterPage(){
           className={`px-3 py-1 rounded text-sm ${viewMode==='rejected' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
           onClick={()=> setViewMode('rejected')}
         >Rejected / Trash</button>
+        <div className="flex items-center gap-1 ml-4">
+          <span className="text-xs text-slate-600 mr-1">Priority:</span>
+          <button
+            type="button"
+            onClick={()=> setPriorityFilter('ALL')}
+            className={`px-2 py-1 text-xs rounded border ${priorityFilter==='ALL' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+          >All</button>
+          <button
+            type="button"
+            onClick={()=> setPriorityFilter('FOUNDER_REVIEW')}
+            className={`px-2 py-1 text-xs rounded border ${priorityFilter==='FOUNDER_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            title="High priority – founder should review first"
+          >🔴 Founder</button>
+          <button
+            type="button"
+            onClick={()=> setPriorityFilter('EDITOR_REVIEW')}
+            className={`px-2 py-1 text-xs rounded border ${priorityFilter==='EDITOR_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            title="Medium priority – editor can review"
+          >🟡 Editor</button>
+          <button
+            type="button"
+            onClick={()=> setPriorityFilter('LOW_PRIORITY')}
+            className={`px-2 py-1 text-xs rounded border ${priorityFilter==='LOW_PRIORITY' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            title="Low priority – safe to review later"
+          >🟢 Low</button>
+        </div>
       </div>
       {loading && <div>Loading...</div>}
       {error && !loading && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
@@ -172,6 +230,7 @@ export default function CommunityReporterPage(){
             <th className="p-2 text-left">Name</th>
             <th className="p-2 text-left">City/Location</th>
             <th className="p-2 text-left">Category</th>
+            <th className="p-2 text-left">Priority</th>
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Created At</th>
             <th className="p-2 text-left">Actions</th>
@@ -184,6 +243,7 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.userName || s.name}>{s.userName || s.name || '—'}</td>
               <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
+              <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
               <td className="p-2 font-medium" title={s.status}>{s.status || '—'}</td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">

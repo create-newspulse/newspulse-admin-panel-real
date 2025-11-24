@@ -1,5 +1,10 @@
 import { api } from './client';
 
+export type CommunitySubmissionPriority =
+  | 'FOUNDER_REVIEW'
+  | 'EDITOR_REVIEW'
+  | 'LOW_PRIORITY';
+
 // Raw backend shape
 export interface CommunitySubmissionApi {
   _id: string;
@@ -16,6 +21,7 @@ export interface CommunitySubmissionApi {
   flags?: string[];
   rejectReason?: string;
   status?: string;
+  priority?: CommunitySubmissionPriority;
   createdAt?: string;
   updatedAt?: string;
 }
