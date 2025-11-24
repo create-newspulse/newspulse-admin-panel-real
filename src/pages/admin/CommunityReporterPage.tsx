@@ -2,19 +2,49 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi } from '@/lib/adminApi';
 
-// Community Reporter queue submission type (narrowed per spec)
-type CommunitySubmission = {
+// Raw shape from backend (_id based)
+interface CommunitySubmissionApi {
   _id: string;
-  name?: string; // backend may provide userName or name
   userName?: string;
+  name?: string;
   email?: string;
   location?: string;
   city?: string;
   category?: string;
-  status: string;
   headline?: string;
-  createdAt: string;
-};
+  body?: string;
+  mediaLink?: string;
+  aiHeadline?: string;
+  aiBody?: string;
+  riskScore?: number;
+  flags?: string[];
+  rejectReason?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Normalized UI type (id guaranteed)
+export interface CommunitySubmission {
+  id: string; // normalized id used everywhere in UI
+  userName?: string;
+  name?: string;
+  email?: string;
+  location?: string;
+  city?: string;
+  category?: string;
+  headline?: string;
+  body?: string;
+  mediaLink?: string;
+  aiHeadline?: string;
+  aiBody?: string;
+  riskScore?: number;
+  flags?: string[];
+  rejectReason?: string;
+  status?: string; // backend may send uppercase
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export default function CommunityReporterPage(){
   const [loading, setLoading] = useState(false);
@@ -34,7 +64,7 @@ export default function CommunityReporterPage(){
         const res = await adminApi.get('/api/admin/community-reporter/submissions');
         if (cancelled) return;
         const raw = res.data;
-        const list = Array.isArray(raw?.submissions)
+        const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions)
           ? raw.submissions
           : Array.isArray(raw?.data?.submissions)
             ? raw.data.submissions
@@ -43,7 +73,11 @@ export default function CommunityReporterPage(){
               : Array.isArray(raw?.items)
                 ? raw.items
                 : Array.isArray(raw) ? raw : [];
-        setSubmissions(list);
+        const normalized: CommunitySubmission[] = list.map(item => ({
+          ...item,
+          id: item._id || (item as any).id || (item as any).ID || (item as any).uuid || 'missing-id'
+        }));
+        setSubmissions(normalized);
       } catch (e:any) {
         if (cancelled) return;
         const status = e?.response?.status;
@@ -60,38 +94,34 @@ export default function CommunityReporterPage(){
     try {
       const res = await adminApi.get('/api/admin/community-reporter/submissions');
       const raw = res.data;
-      const list = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
-      setSubmissions(list);
+      const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
+      const normalized: CommunitySubmission[] = list.map(item => ({
+        ...item,
+        id: item._id || (item as any).id || (item as any).ID || (item as any).uuid || 'missing-id'
+      }));
+      setSubmissions(normalized);
     } catch(e:any) {
       const status = e?.response?.status;
       setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
     }
   }
 
-  const handleView = (submissionId: string) => {
-    navigate(`/admin/community-reporter/${submissionId}`);
+  const handleView = (submission: CommunitySubmission) => {
+    if (!submission.id || submission.id === 'missing-id') return;
+    navigate(`/admin/community-reporter/${submission.id}`);
   };
 
-  const handleApprove = async (submissionId: string) => {
+  const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
     setActionId(submissionId); setError(null);
     try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/approve`);
+      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/decision`, { decision });
       await fetchSubmissions();
-    } catch(e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Approve failed';
+    } catch (e:any) {
+      const msg = e?.response?.data?.message || e.message || 'Action failed';
       setError(prev => prev ? prev + ' | ' + msg : msg);
-    } finally { setActionId(null); }
-  };
-
-  const handleReject = async (submissionId: string) => {
-    setActionId(submissionId); setError(null);
-    try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/reject`);
-      await fetchSubmissions();
-    } catch(e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Reject failed';
-      setError(prev => prev ? prev + ' | ' + msg : msg);
-    } finally { setActionId(null); }
+    } finally {
+      setActionId(null);
+    }
   };
 
   return (
@@ -113,7 +143,7 @@ export default function CommunityReporterPage(){
         </thead>
         <tbody>
           {submissions.map(s => (
-            <tr key={s._id} className="border-t hover:bg-slate-50">
+            <tr key={s.id} className="border-t hover:bg-slate-50">
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline || '—'}</td>
               <td className="p-2" title={s.userName || s.name}>{s.userName || s.name || '—'}</td>
               <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
@@ -122,18 +152,18 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={()=> handleView(s._id)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white">View</button>
+                  <button onClick={()=> handleView(s)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white" disabled={!s.id || s.id==='missing-id'}>View</button>
                   {s.status !== 'APPROVED' && s.status !== 'approved' && (
                     <button
-                      disabled={actionId === s._id}
-                      onClick={()=> handleApprove(s._id)}
+                      disabled={actionId === s.id || !s.id || s.id==='missing-id'}
+                      onClick={()=> handleDecision(s.id, 'approve')}
                       className="px-3 py-1 text-xs rounded bg-green-600 text-white disabled:opacity-60"
                     >Approve</button>
                   )}
                   {s.status !== 'REJECTED' && s.status !== 'rejected' && (
                     <button
-                      disabled={actionId === s._id}
-                      onClick={()=> handleReject(s._id)}
+                      disabled={actionId === s.id || !s.id || s.id==='missing-id'}
+                      onClick={()=> handleDecision(s.id, 'reject')}
                       className="px-3 py-1 text-xs rounded bg-red-600 text-white disabled:opacity-60"
                     >Reject</button>
                   )}

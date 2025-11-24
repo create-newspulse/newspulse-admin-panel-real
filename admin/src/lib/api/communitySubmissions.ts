@@ -1,42 +1,52 @@
 import { api } from './client';
 
-export interface CommunitySubmission {
+// Raw backend shape
+export interface CommunitySubmissionApi {
   _id: string;
-  userName: string;
-  email: string;
+  userName?: string;
+  email?: string;
   location?: string;
   category?: string;
-  headline: string;
-  body: string;
+  headline?: string;
+  body?: string;
   mediaLink?: string;
   aiHeadline?: string;
   aiBody?: string;
-  riskScore?: number; // 0-100
-  flags?: string[]; // e.g. ["mentions_minor", "needs_verification"]
+  riskScore?: number;
+  flags?: string[];
   rejectReason?: string;
-  status: 'NEW' | 'AI_REVIEWED' | 'PENDING_FOUNDER' | 'APPROVED' | 'REJECTED';
-  createdAt: string;
-  updatedAt: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export async function listCommunitySubmissions(params: Record<string, any> = {}) {
-  const { data } = await api.get('/api/admin/community/submissions', { params });
-  return data;
+// Normalized UI shape
+export interface CommunitySubmission extends CommunitySubmissionApi {
+  id: string; // mapped from _id
 }
 
-export async function getCommunitySubmission(id: string) {
-  const { data } = await api.get(`/api/admin/community/submissions/${id}`);
-  return data;
+function normalizeOne(item: CommunitySubmissionApi): CommunitySubmission {
+  return { ...item, id: item._id };
 }
 
-export async function updateCommunitySubmissionStatus(id: string, body: { status: string; rejectReason?: string; aiHeadline?: string; aiBody?: string }) {
-  // Prefer decision endpoint; maps status to uppercase decision.
-  const decision = body.status?.toUpperCase();
-  if (decision === 'APPROVED' || decision === 'REJECTED') {
-    const { data } = await api.post(`/api/admin/community/submissions/${id}/decision`, { decision, aiHeadline: body.aiHeadline, aiBody: body.aiBody, rejectReason: body.rejectReason });
-    return data;
-  }
-  // Fallback to legacy status patch if needed
-  const { data } = await api.patch(`/api/admin/community/submissions/${id}/status`, body);
+function normalizeList(list: CommunitySubmissionApi[]): CommunitySubmission[] {
+  return list.map(normalizeOne);
+}
+
+export async function listCommunitySubmissions(params: Record<string, any> = {}): Promise<CommunitySubmission[]> {
+  const { data } = await api.get('/api/admin/community-reporter/submissions', { params });
+  const raw = data?.submissions || data?.data?.submissions || Array.isArray(data) ? data : [];
+  return normalizeList(raw as CommunitySubmissionApi[]);
+}
+
+export async function getCommunitySubmission(id: string): Promise<CommunitySubmission | null> {
+  const { data } = await api.get(`/api/admin/community-reporter/submissions/${id}`);
+  const item = (data?.submission ?? data) as CommunitySubmissionApi | undefined;
+  return item ? normalizeOne(item) : null;
+}
+
+export async function updateCommunitySubmissionDecision(id: string, decision: 'approve' | 'reject', extra?: { aiHeadline?: string; aiBody?: string; rejectReason?: string }) {
+  const { aiHeadline, aiBody, rejectReason } = extra || {};
+  const { data } = await api.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision, aiHeadline, aiBody, rejectReason });
   return data;
 }
