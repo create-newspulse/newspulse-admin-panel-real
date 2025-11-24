@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { adminApi, decideCommunitySubmission, getCommunitySubmission } from '@/lib/adminApi';
+import { adminApi } from '@/lib/adminApi';
 
 interface SubmissionDetail {
   _id: string;
@@ -22,7 +22,7 @@ interface SubmissionDetail {
 }
 
 export default function CommunityReporterDetailPage() {
-  const { submissionId } = useParams<{ submissionId: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string|null>(null);
@@ -33,10 +33,10 @@ export default function CommunityReporterDetailPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!submissionId) return;
+      if (!id) return;
       setLoading(true); setError(null);
       try {
-        const res = await getCommunitySubmission(submissionId);
+        const res = await adminApi.get(`/api/admin/community-reporter/submissions/${id}`);
         if (cancelled) return;
         const raw = res.data;
         const submission = raw?.submission ?? raw;
@@ -60,10 +60,10 @@ export default function CommunityReporterDetailPage() {
   }, [id]);
 
   async function handleDecision(action: 'approve'|'reject') {
-    if (!submissionId) return;
+    if (!id) return;
     setActionLoading(true); setError(null);
     try {
-      await decideCommunitySubmission(submissionId, action);
+      await adminApi.post(`/api/admin/community-reporter/submissions/${id}/${action === 'approve' ? 'approve' : 'reject'}`);
       setSub(prev => prev ? { ...prev, status: action === 'approve' ? 'approved' : 'rejected' } : prev);
       setToast(action === 'approve' ? 'Submission approved.' : 'Submission rejected.');
       setTimeout(()=> setToast(null), 3500);

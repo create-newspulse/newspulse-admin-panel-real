@@ -167,27 +167,4 @@ export async function loginAdmin(dto: LoginDTO) {
 
 // (Removed multi-path Community Reporter helper; component now calls single definitive endpoint.)
 // Community Reporter decision helper (fetch-based per spec)
-export async function decideCommunitySubmission(
-  id: string,
-  decision: 'approve' | 'reject'
-) {
-  const base = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_ADMIN_API_URL || adminRoot).replace(/\/$/, '');
-  const url = `${base}/api/admin/community/submissions/${id}/decision`;
-  const res = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision })
-  });
-  if (!res.ok) {
-    let error: any = {};
-    try { error = await res.json(); } catch {}
-    throw new Error(error?.message || 'Failed to update submission');
-  }
-  return res.json();
-}
-
-export async function getCommunitySubmission(id: string) {
-  // Axios helper for GET; returns axios response .data like { submission } or raw object
-  return adminApi.get(`/api/admin/community/submissions/${id}`);
-}
+// Community Reporter direct calls now done inline; previous decision helper removed per updated spec.

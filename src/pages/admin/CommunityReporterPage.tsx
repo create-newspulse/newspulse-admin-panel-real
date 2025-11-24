@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminApi, decideCommunitySubmission } from '@/lib/adminApi';
+import { adminApi } from '@/lib/adminApi';
 
-// Community Reporter queue
-interface CommunitySubmission {
+// Community Reporter queue submission type (narrowed per spec)
+type CommunitySubmission = {
   _id: string;
-  headline?: string;
+  name?: string; // backend may provide userName or name
   userName?: string;
-  name?: string; // fallback legacy field
+  email?: string;
   location?: string;
-  city?: string; // some backends may use city
+  city?: string;
   category?: string;
-  status?: string; // pending | approved | rejected | new
-  createdAt?: string;
-}
+  status: string;
+  headline?: string;
+  createdAt: string;
+};
 
 export default function CommunityReporterPage(){
   const [loading, setLoading] = useState(false);
@@ -30,7 +31,7 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get('/api/admin/community/submissions');
+        const res = await adminApi.get('/api/admin/community-reporter/submissions');
         if (cancelled) return;
         const raw = res.data;
         const list = Array.isArray(raw?.submissions)
@@ -55,22 +56,43 @@ export default function CommunityReporterPage(){
     return () => { cancelled = true; };
   }, []);
 
-  async function handleDecision(id: string, decision: 'approve'|'reject') {
-    setActionId(id); setError(null);
+  async function fetchSubmissions(){
     try {
-      await decideCommunitySubmission(id, decision);
-      // After success: refetch list to ensure status reflects server canonical value
-      const res = await adminApi.get('/api/admin/community/submissions');
+      const res = await adminApi.get('/api/admin/community-reporter/submissions');
       const raw = res.data;
       const list = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
       setSubmissions(list);
-    } catch (e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Action failed';
-      setError(prev => prev ? prev + ' | ' + msg : msg);
-    } finally {
-      setActionId(null);
+    } catch(e:any) {
+      const status = e?.response?.status;
+      setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
     }
   }
+
+  const handleView = (submissionId: string) => {
+    navigate(`/admin/community-reporter/${submissionId}`);
+  };
+
+  const handleApprove = async (submissionId: string) => {
+    setActionId(submissionId); setError(null);
+    try {
+      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/approve`);
+      await fetchSubmissions();
+    } catch(e:any) {
+      const msg = e?.response?.data?.message || e.message || 'Approve failed';
+      setError(prev => prev ? prev + ' | ' + msg : msg);
+    } finally { setActionId(null); }
+  };
+
+  const handleReject = async (submissionId: string) => {
+    setActionId(submissionId); setError(null);
+    try {
+      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/reject`);
+      await fetchSubmissions();
+    } catch(e:any) {
+      const msg = e?.response?.data?.message || e.message || 'Reject failed';
+      setError(prev => prev ? prev + ' | ' + msg : msg);
+    } finally { setActionId(null); }
+  };
 
   return (
     <div>
@@ -100,18 +122,18 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={()=> navigate(`/admin/community-reporter/${s._id}`)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white">View</button>
-                  {s.status !== 'approved' && (
+                  <button onClick={()=> handleView(s._id)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white">View</button>
+                  {s.status !== 'APPROVED' && s.status !== 'approved' && (
                     <button
                       disabled={actionId === s._id}
-                      onClick={()=> handleDecision(s._id, 'approve')}
+                      onClick={()=> handleApprove(s._id)}
                       className="px-3 py-1 text-xs rounded bg-green-600 text-white disabled:opacity-60"
                     >Approve</button>
                   )}
-                  {s.status !== 'rejected' && (
+                  {s.status !== 'REJECTED' && s.status !== 'rejected' && (
                     <button
                       disabled={actionId === s._id}
-                      onClick={()=> handleDecision(s._id, 'reject')}
+                      onClick={()=> handleReject(s._id)}
                       className="px-3 py-1 text-xs rounded bg-red-600 text-white disabled:opacity-60"
                     >Reject</button>
                   )}
