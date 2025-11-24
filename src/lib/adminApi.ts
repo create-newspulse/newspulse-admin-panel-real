@@ -168,3 +168,14 @@ export async function loginAdmin(dto: LoginDTO) {
 // (Removed multi-path Community Reporter helper; component now calls single definitive endpoint.)
 // Community Reporter decision helper (fetch-based per spec)
 // Community Reporter direct calls now done inline; previous decision helper removed per updated spec.
+
+export interface CommunityCleanupResponse {
+  deletedCount: number;
+  olderThanDays?: number;
+  cutoffDate?: string;
+}
+
+export async function cleanupOldLowPriorityCommunityStories(): Promise<CommunityCleanupResponse> {
+  const { data } = await adminApi.post('/api/admin/community-reporter/cleanup');
+  return data as CommunityCleanupResponse;
+}

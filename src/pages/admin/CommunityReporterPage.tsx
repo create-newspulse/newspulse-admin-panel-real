@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminApi } from '@/lib/adminApi';
+import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
+import { useAuth } from '@/context/AuthContext';
+import { useNotify } from '@/components/ui/toast-bridge';
 
 export type CommunitySubmissionPriority =
   | 'FOUNDER_REVIEW'
@@ -76,6 +78,9 @@ export default function CommunityReporterPage(){
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | CommunitySubmissionPriority>('ALL');
   const loadedRef = useRef(false);
   const navigate = useNavigate();
+  const { isFounder } = useAuth();
+  const notify = useNotify();
+  const [isCleaning, setIsCleaning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,16 +94,10 @@ export default function CommunityReporterPage(){
         const raw = res.data;
         const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions)
           ? raw.submissions
-          : Array.isArray(raw?.data?.submissions)
-            ? raw.data.submissions
-            : Array.isArray(raw?.results)
-              ? raw.results
-              : Array.isArray(raw?.items)
-                ? raw.items
-                : Array.isArray(raw) ? raw : [];
+          : [];
         const normalized: CommunitySubmission[] = list.map(item => ({
           ...item,
-          id: item._id || (item as any).id || (item as any).ID || (item as any).uuid || 'missing-id',
+          id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
           status: (item.status || '').toLowerCase() // normalize for filtering
         }));
         setSubmissions(normalized);
@@ -118,10 +117,10 @@ export default function CommunityReporterPage(){
     try {
       const res = await adminApi.get('/api/admin/community-reporter/submissions');
       const raw = res.data;
-      const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
+      const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
       const normalized: CommunitySubmission[] = list.map(item => ({
         ...item,
-        id: item._id || (item as any).id || (item as any).ID || (item as any).uuid || 'missing-id',
+        id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
         status: (item.status || '').toLowerCase()
       }));
       setSubmissions(normalized);
@@ -166,6 +165,27 @@ export default function CommunityReporterPage(){
     }
   };
 
+  const handleCleanup = async () => {
+    if (isCleaning) return;
+    setIsCleaning(true);
+    try {
+      const res = await cleanupOldLowPriorityCommunityStories();
+      const deleted = Number(res?.deletedCount || 0);
+      if (deleted > 0) {
+        notify.ok('Cleanup complete', `Deleted ${deleted} old low-priority stories (older than 30 days).`);
+      } else {
+        notify.info('No old low-priority stories to clean.');
+      }
+      await fetchSubmissions();
+    } catch (e:any) {
+      const msg = e?.response?.data?.message || e.message || 'Cleanup failed. Please try again.';
+      setError(prev => prev ? prev + ' | ' + msg : msg);
+      notify.err('Cleanup failed', msg);
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
   const filteredSubmissions = submissions
     .filter(s => {
       if (viewMode === 'pending') return s.status === 'pending';
@@ -185,7 +205,8 @@ export default function CommunityReporterPage(){
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4 flex items-center gap-2">🧑‍🤝‍🧑 Community Reporter Queue</h1>
-      <div className="mb-4 flex flex-wrap gap-2 items-center">
+      <div className="mb-4 flex flex-wrap gap-2 items-center justify-between">
+        <div className="flex flex-wrap gap-2 items-center">
         <button
           className={`px-3 py-1 rounded text-sm ${viewMode==='pending' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
           onClick={()=> setViewMode('pending')}
@@ -194,7 +215,7 @@ export default function CommunityReporterPage(){
           className={`px-3 py-1 rounded text-sm ${viewMode==='rejected' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
           onClick={()=> setViewMode('rejected')}
         >Rejected / Trash</button>
-        <div className="flex items-center gap-1 ml-4">
+        <div className="flex items-center gap-1 ml-4 flex-wrap">
           <span className="text-xs text-slate-600 mr-1">Priority:</span>
           <button
             type="button"
@@ -220,6 +241,16 @@ export default function CommunityReporterPage(){
             title="Low priority – safe to review later"
           >🟢 Low</button>
         </div>
+        </div>
+        {isFounder && (
+          <button
+            type="button"
+            onClick={handleCleanup}
+            disabled={isCleaning}
+            className="px-3 py-1 rounded text-xs border bg-white text-slate-700 border-slate-300 hover:bg-slate-100 disabled:opacity-60 whitespace-nowrap mt-2 sm:mt-0"
+            title="Delete old low-priority stories (safe housekeeping)"
+          >{isCleaning ? 'Cleaning…' : 'Clean old low-priority stories'}</button>
+        )}
       </div>
       {loading && <div>Loading...</div>}
       {error && !loading && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
