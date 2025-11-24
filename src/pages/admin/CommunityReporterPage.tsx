@@ -30,11 +30,9 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
-        console.debug('[community][queue] load:start');
-        const res = await adminApi.get('/api/admin/community-reporter/submissions');
+        const res = await adminApi.get('/api/admin/community/submissions');
         if (cancelled) return;
         const raw = res.data;
-        console.debug('[community][queue] load:response', res.status, raw);
         const list = Array.isArray(raw?.submissions)
           ? raw.submissions
           : Array.isArray(raw?.data?.submissions)
@@ -49,22 +47,23 @@ export default function CommunityReporterPage(){
         if (cancelled) return;
         const status = e?.response?.status;
         setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
-        console.error('[community][queue] load:error', status, e?.response?.data || e.message);
       } finally {
         if (!cancelled) setLoading(false);
-        console.debug('[community][queue] load:done');
       }
     }
     load();
     return () => { cancelled = true; };
   }, []);
 
-  async function handleDecision(id: string, action: 'approve'|'reject') {
+  async function handleDecision(id: string, decision: 'approve'|'reject') {
     setActionId(id); setError(null);
     try {
-      await decideCommunitySubmission(id, action);
-      // Optimistically update status locally; backend canonical status strings may differ (e.g. uppercase)
-      setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'APPROVED' : 'REJECTED' } : s));
+      await decideCommunitySubmission(id, decision);
+      // After success: refetch list to ensure status reflects server canonical value
+      const res = await adminApi.get('/api/admin/community/submissions');
+      const raw = res.data;
+      const list = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
+      setSubmissions(list);
     } catch (e:any) {
       const msg = e?.response?.data?.message || e.message || 'Action failed';
       setError(prev => prev ? prev + ' | ' + msg : msg);

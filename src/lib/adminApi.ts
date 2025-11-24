@@ -169,15 +169,15 @@ export async function loginAdmin(dto: LoginDTO) {
 // Community Reporter decision helper (fetch-based per spec)
 export async function decideCommunitySubmission(
   id: string,
-  action: 'approve' | 'reject'
+  decision: 'approve' | 'reject'
 ) {
   const base = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_ADMIN_API_URL || adminRoot).replace(/\/$/, '');
-  const url = `${base}/api/admin/community-reporter/submissions/${id}/decision`;
+  const url = `${base}/api/admin/community/submissions/${id}/decision`;
   const res = await fetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action })
+    body: JSON.stringify({ decision })
   });
   if (!res.ok) {
     let error: any = {};
@@ -185,4 +185,9 @@ export async function decideCommunitySubmission(
     throw new Error(error?.message || 'Failed to update submission');
   }
   return res.json();
+}
+
+export async function getCommunitySubmission(id: string) {
+  // Axios helper for GET; returns axios response .data like { submission } or raw object
+  return adminApi.get(`/api/admin/community/submissions/${id}`);
 }

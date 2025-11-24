@@ -141,7 +141,7 @@ function App() {
               <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
-              <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
+              <Route path="/admin/community-reporter/:submissionId" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
