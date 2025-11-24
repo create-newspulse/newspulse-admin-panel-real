@@ -15,6 +15,10 @@ interface SubmissionDetail {
   status?: string;
   mediaUrl?: string;
   createdAt?: string;
+  aiHeadline?: string;
+  aiBody?: string;
+  riskScore?: number;
+  flags?: string[];
 }
 
 export default function CommunityReporterDetailPage() {
@@ -32,7 +36,7 @@ export default function CommunityReporterDetailPage() {
       if (!id) return;
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get(`/api/admin/community/submissions/${id}`);
+        const res = await adminApi.get(`/api/admin/community-reporter/submissions/${id}`);
         if (cancelled) return;
         const raw = res.data;
         const submission = raw?.submission ?? raw;
@@ -59,7 +63,7 @@ export default function CommunityReporterDetailPage() {
     if (!id) return;
     setActionLoading(true); setError(null);
     try {
-      await adminApi.post(`/api/admin/community/submissions/${id}/${action}`);
+      await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { action });
       setSub(prev => prev ? { ...prev, status: action === 'approve' ? 'approved' : 'rejected' } : prev);
       setToast(action === 'approve' ? 'Submission approved.' : 'Submission rejected.');
       setTimeout(()=> setToast(null), 3500);

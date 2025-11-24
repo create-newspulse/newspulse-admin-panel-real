@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi } from '@/lib/adminApi';
 
-// Updated interface for new backend routes (/api/admin/community/submissions)
+// Updated interface for new backend routes (/api/admin/community-reporter/submissions)
 interface CommunitySubmission {
   _id: string;
   headline?: string;
@@ -30,7 +30,7 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get('/api/admin/community/submissions');
+        const res = await adminApi.get('/api/admin/community-reporter/submissions');
         if (cancelled) return;
         const raw = res.data;
         const list = Array.isArray(raw?.submissions) ? raw.submissions : (Array.isArray(raw) ? raw : []);
@@ -50,7 +50,7 @@ export default function CommunityReporterPage(){
   async function handleDecision(id: string, action: 'approve'|'reject') {
     setActionId(id); setError(null);
     try {
-      await adminApi.post(`/api/admin/community/submissions/${id}/${action}`);
+      await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { action });
       // Optimistically update status locally; backend canonical status strings may differ (e.g. uppercase)
       setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'approved' : 'rejected' } : s));
     } catch (e:any) {
