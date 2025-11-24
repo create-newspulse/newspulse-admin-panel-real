@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { adminApi } from '@/lib/adminApi';
-import { getCommunitySubmission, decideCommunitySubmission } from '@/lib/communityReporterApi';
+import { adminApi, decideCommunitySubmission } from '@/lib/adminApi';
 
 interface SubmissionDetail {
   _id: string;
@@ -37,7 +36,7 @@ export default function CommunityReporterDetailPage() {
       if (!id) return;
       setLoading(true); setError(null);
       try {
-        const res = await getCommunitySubmission(id);
+        const res = await adminApi.get(`/api/admin/community-reporter/submissions/${id}`);
         if (cancelled) return;
         const raw = res.data;
         const submission = raw?.submission ?? raw;
@@ -64,8 +63,7 @@ export default function CommunityReporterDetailPage() {
     if (!id) return;
     setActionLoading(true); setError(null);
     try {
-      const decision = action === 'approve' ? 'APPROVED' : 'REJECTED';
-      await decideCommunitySubmission(id, decision);
+      await decideCommunitySubmission(id, action);
       setSub(prev => prev ? { ...prev, status: action === 'approve' ? 'approved' : 'rejected' } : prev);
       setToast(action === 'approve' ? 'Submission approved.' : 'Submission rejected.');
       setTimeout(()=> setToast(null), 3500);

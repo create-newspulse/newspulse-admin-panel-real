@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminApi } from '@/lib/adminApi';
-import { decideCommunitySubmission } from '@/lib/communityReporterApi';
+import { adminApi, decideCommunitySubmission } from '@/lib/adminApi';
 
 // Community Reporter queue
 interface CommunitySubmission {
@@ -32,7 +31,7 @@ export default function CommunityReporterPage(){
       setLoading(true); setError(null);
       try {
         console.debug('[community][queue] load:start');
-        const res = await adminApi.get('/api/admin/community/submissions');
+        const res = await adminApi.get('/api/admin/community-reporter/submissions');
         if (cancelled) return;
         const raw = res.data;
         console.debug('[community][queue] load:response', res.status, raw);
@@ -63,10 +62,9 @@ export default function CommunityReporterPage(){
   async function handleDecision(id: string, action: 'approve'|'reject') {
     setActionId(id); setError(null);
     try {
-      const decision = action === 'approve' ? 'APPROVED' : 'REJECTED';
-      await decideCommunitySubmission(id, decision);
+      await decideCommunitySubmission(id, action);
       // Optimistically update status locally; backend canonical status strings may differ (e.g. uppercase)
-      setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'approved' : 'rejected' } : s));
+      setSubmissions(prev => prev.map(s => s._id === id ? { ...s, status: action === 'approve' ? 'APPROVED' : 'REJECTED' } : s));
     } catch (e:any) {
       const msg = e?.response?.data?.message || e.message || 'Action failed';
       setError(prev => prev ? prev + ' | ' + msg : msg);
