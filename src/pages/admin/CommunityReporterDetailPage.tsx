@@ -63,16 +63,41 @@ export default function CommunityReporterDetailPage() {
       if (!id || id === 'undefined') return; // guard against literal 'undefined'
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get<CommunitySubmissionApi>(`/api/admin/community-reporter/submissions/${id}`);
+        const attemptPaths = [
+          `/api/admin/community-reporter/submissions/${id}`,
+          `/api/admin/community-reporter/submission/${id}`,
+          `/api/admin/community-reporter/submissions?id=${id}`,
+          // legacy fallbacks
+          `/api/admin/community/submissions/${id}`,
+          `/api/admin/community/submission/${id}`
+        ];
+        let found: CommunitySubmissionApi | null = null;
+        let lastErr: any = null;
+        for (const p of attemptPaths) {
+          try {
+            const r = await adminApi.get(p);
+            const raw = r.data as any;
+            const itemApi = (raw?.submission ?? raw) as CommunitySubmissionApi | undefined;
+            if (itemApi && itemApi._id) {
+              found = itemApi;
+              break;
+            }
+          } catch (e:any) {
+            lastErr = e;
+            const st = e?.response?.status;
+            // continue only on 404/400, break on auth or server errors
+            if (st && st !== 404 && st !== 400) break;
+          }
+        }
         if (cancelled) return;
-        const raw = res.data as any;
-        const itemApi = (raw?.submission ?? raw) as CommunitySubmissionApi | undefined;
-        if (!itemApi || (raw && raw.success === false)) {
+        if (!found) {
           setSubmission(null);
-          setError('Submission not found.');
+          const status = lastErr?.response?.status;
+          setError(status === 404 ? 'Submission not found.' : 'Failed to load submission.');
         } else {
-          const mapped: CommunitySubmission = { ...itemApi, id: itemApi._id };
+          const mapped: CommunitySubmission = { ...found, id: found._id };
           setSubmission(mapped);
+          if (import.meta.env.DEV) console.debug('[CommunityReporterDetail] loaded submission', mapped.id);
         }
       } catch (e:any) {
         if (cancelled) return;
@@ -99,6 +124,18 @@ export default function CommunityReporterDetailPage() {
       navigate('/admin/community-reporter');
     } catch (e:any) {
       const msg = e?.response?.data?.message || e.message || 'Action failed';
+      // Fallback: try uppercase decision if lowercase failed
+      if (/decision/.test(e?.config?.url || '') && (decision === 'approve' || decision === 'reject')) {
+        try {
+          const upper = decision.toUpperCase();
+          await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision: upper });
+          setSubmission(prev => prev ? { ...prev, status: upper } : prev);
+          setToast(decision === 'approve' ? 'Submission approved.' : 'Submission rejected.');
+          setTimeout(()=> setToast(null), 3500);
+          navigate('/admin/community-reporter');
+          return;
+        } catch {}
+      }
       setError(msg);
     } finally {
       setActionLoading(false);
