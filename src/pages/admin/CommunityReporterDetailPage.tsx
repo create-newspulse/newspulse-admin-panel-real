@@ -60,44 +60,18 @@ export default function CommunityReporterDetailPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!id || id === 'undefined') return; // guard against literal 'undefined'
+      if (!id || id === 'undefined') return;
       setLoading(true); setError(null);
       try {
-        const attemptPaths = [
-          `/api/admin/community-reporter/submissions/${id}`,
-          `/api/admin/community-reporter/submission/${id}`,
-          `/api/admin/community-reporter/submissions?id=${id}`,
-          // legacy fallbacks
-          `/api/admin/community/submissions/${id}`,
-          `/api/admin/community/submission/${id}`
-        ];
-        let found: CommunitySubmissionApi | null = null;
-        let lastErr: any = null;
-        for (const p of attemptPaths) {
-          try {
-            const r = await adminApi.get(p);
-            const raw = r.data as any;
-            const itemApi = (raw?.submission ?? raw) as CommunitySubmissionApi | undefined;
-            if (itemApi && itemApi._id) {
-              found = itemApi;
-              break;
-            }
-          } catch (e:any) {
-            lastErr = e;
-            const st = e?.response?.status;
-            // continue only on 404/400, break on auth or server errors
-            if (st && st !== 404 && st !== 400) break;
-          }
-        }
+        const res = await adminApi.get(`/api/admin/community-reporter/submissions/${id}`);
         if (cancelled) return;
-        if (!found) {
+        const raw = res.data;
+        const itemApi: CommunitySubmissionApi | undefined = (raw && raw.submission) ? raw.submission : raw;
+        if (!itemApi || !itemApi._id) {
           setSubmission(null);
-          const status = lastErr?.response?.status;
-          setError(status === 404 ? 'Submission not found.' : 'Failed to load submission.');
+          setError('Submission not found.');
         } else {
-          const mapped: CommunitySubmission = { ...found, id: found._id };
-          setSubmission(mapped);
-          if (import.meta.env.DEV) console.debug('[CommunityReporterDetail] loaded submission', mapped.id);
+          setSubmission({ ...itemApi, id: itemApi._id });
         }
       } catch (e:any) {
         if (cancelled) return;
@@ -116,27 +90,10 @@ export default function CommunityReporterDetailPage() {
     setActionLoading(true); setError(null);
     try {
       await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision });
-      // Update local status using backend convention (convert to uppercase for display if needed)
       setSubmission(prev => prev ? { ...prev, status: decision.toUpperCase() } : prev);
-      setToast(decision === 'approve' ? 'Submission approved.' : 'Submission rejected.');
-      setTimeout(()=> setToast(null), 3500);
-      // After decision, navigate back to queue for clarity
       navigate('/admin/community-reporter');
     } catch (e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Action failed';
-      // Fallback: try uppercase decision if lowercase failed
-      if (/decision/.test(e?.config?.url || '') && (decision === 'approve' || decision === 'reject')) {
-        try {
-          const upper = decision.toUpperCase();
-          await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision: upper });
-          setSubmission(prev => prev ? { ...prev, status: upper } : prev);
-          setToast(decision === 'approve' ? 'Submission approved.' : 'Submission rejected.');
-          setTimeout(()=> setToast(null), 3500);
-          navigate('/admin/community-reporter');
-          return;
-        } catch {}
-      }
-      setError(msg);
+      setError('Failed to update submission. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -167,14 +124,14 @@ export default function CommunityReporterDetailPage() {
         {(submission.mediaUrl || submission.mediaLink) && <div><span className="font-semibold">Media:</span> <a href={submission.mediaUrl || submission.mediaLink} target="_blank" rel="noreferrer" className="text-blue-600 underline">Open Media</a></div>}
       </div>
       <div className="mt-6 flex gap-3 flex-wrap">
-        {submission.status !== 'APPROVED' && submission.status !== 'approve' && (
+        {submission.status?.toUpperCase() !== 'APPROVED' && (
           <button
             disabled={actionLoading}
             onClick={()=> handleDecision('approve')}
             className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-60"
           >Approve</button>
         )}
-        {submission.status !== 'REJECTED' && submission.status !== 'reject' && (
+        {submission.status?.toUpperCase() !== 'REJECTED' && (
           <button
             disabled={actionLoading}
             onClick={()=> handleDecision('reject')}
