@@ -4,15 +4,7 @@ import axios, { AxiosInstance } from 'axios';
 // Prefer explicit backend origin via VITE_ADMIN_API_BASE_URL (e.g. https://newspulse-backend-real.example.com)
 // Fallback to '/admin-api' ONLY for legacy rewrite mode (vercel.json rewrites '/admin-api/*' -> backend).
 // IMPORTANT: Replace the placeholder domain in your deployment environment; never hard-code production host here.
-let resolvedBase = (import.meta.env.VITE_ADMIN_API_BASE_URL || '').toString().trim();
-if (!resolvedBase) {
-  // Legacy fallback: relative proxy path (requires vercel.json rewrite present)
-  resolvedBase = '/admin-api';
-}
-// Normalize accidental suffixes and double slashes.
-resolvedBase = resolvedBase.replace(/\/+$/, '');
-resolvedBase = resolvedBase.replace(/\/admin-api\/api$/,'/admin-api');
-const API_BASE_URL = resolvedBase;
+const API_BASE_URL = '/admin-api';
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
