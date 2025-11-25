@@ -35,7 +35,7 @@ interface ListResponse {
   total: number;
 }
 
-const ADMIN_ARTICLES_PATH = '/admin/articles';
+const ADMIN_ARTICLES_PATH = '/articles';
 
 // --- Core list & actions ---
 export async function listArticles(params: Record<string, any>): Promise<ListResponse> {
