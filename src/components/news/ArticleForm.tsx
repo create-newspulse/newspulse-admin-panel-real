@@ -48,7 +48,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ id, articleId, mode, o
       setTitle(data.title || '');
       setSlug(data.slug || '');
       setSummary(data.summary || '');
-      setContent(data.content || '');
+      // Prefer the field actually provided by backend: content or body
+      setContent((data as any).content ?? (data as any).body ?? '');
   const incomingCat = typeof (data as any).category === 'string' ? (data as any).category as string : undefined;
   const canon = incomingCat ? (isValidCategory(incomingCat) ? incomingCat : canonicalizeCategory(incomingCat)) : ARTICLE_CATEGORIES[0];
   setCategory(canon);

@@ -114,38 +114,47 @@ app.get('/admin/stats', (req, res) => {
 });
 
 // --- Dashboard Stats (canonical endpoints expected by frontend) ---
+const buildDashboardStatsPayload = () => ({
+  totals: {
+    news: 247,
+    today: 12,
+    users: 1024,
+    activeUsers: 27,
+    totalViews: 125430,
+  },
+  byCategory: [
+    { _id: 'Politics', count: 45 },
+    { _id: 'Technology', count: 38 },
+    { _id: 'Sports', count: 32 },
+  ],
+  byLanguage: [
+    { _id: 'en', count: 150 },
+    { _id: 'hi', count: 67 },
+    { _id: 'gu', count: 30 },
+  ],
+  recent: [],
+  aiLogs: 1234,
+  activeUsers: 27,
+});
+
 // GET /api/dashboard-stats  and GET /api/stats (alias)
 app.get('/api/dashboard-stats', (req, res) => {
   try {
     return res.json({
       ok: true,
       success: true,
-      data: {
-        totals: {
-          news: 247,
-          today: 12,
-          users: 1024,
-          activeUsers: 27,
-          totalViews: 125430,
-        },
-        byCategory: [
-          { _id: 'Politics', count: 45 },
-          { _id: 'Technology', count: 38 },
-          { _id: 'Sports', count: 32 },
-        ],
-        byLanguage: [
-          { _id: 'en', count: 150 },
-          { _id: 'hi', count: 67 },
-          { _id: 'gu', count: 30 }
-        ],
-        recent: [],
-        aiLogs: 1234,
-        activeUsers: 27
-      }
+      status: 200,
+      message: 'Dashboard stats fetched successfully',
+      data: buildDashboardStatsPayload(),
     });
   } catch (err) {
     console.error('❌ /api/dashboard-stats error', err);
-    return res.status(500).json({ ok: false, success: false, message: 'Failed to fetch dashboard stats' });
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      status: 500,
+      message: 'Failed to fetch dashboard stats',
+    });
   }
 });
 
@@ -155,30 +164,18 @@ app.get('/api/stats', (req, res) => {
     return res.json({
       ok: true,
       success: true,
-      data: {
-        totals: {
-          news: 247,
-          today: 12,
-          users: 1024,
-          activeUsers: 27,
-          totalViews: 125430,
-        },
-        byCategory: [
-          { _id: 'Politics', count: 45 },
-          { _id: 'Technology', count: 38 },
-        ],
-        byLanguage: [
-          { _id: 'en', count: 150 },
-          { _id: 'hi', count: 67 }
-        ],
-        recent: [],
-        aiLogs: 1234,
-        activeUsers: 27
-      }
+      status: 200,
+      message: 'Stats fetched successfully',
+      data: buildDashboardStatsPayload(),
     });
   } catch (err) {
     console.error('❌ /api/stats error', err);
-    return res.status(500).json({ ok: false, success: false, message: 'Failed to fetch stats' });
+    return res.status(500).json({
+      ok: false,
+      success: false,
+      status: 500,
+      message: 'Failed to fetch stats',
+    });
   }
 });
 
