@@ -312,6 +312,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ id, articleId, mode, o
         </div>
       </div>
 
+      {/* Optional helpful banner on missing backend route */}
+      {mutation.isError && (mutation.error as any)?.response?.status === 404 && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
+          Backend route missing (articles). Check backend deployment.
+        </div>
+      )}
+
       <div className="sticky bottom-0 bg-white border-t border-slate-200 py-3 flex gap-3 justify-end">
         <button type="button" onClick={saveDraft} className="btn-secondary" disabled={!title}>Save Draft</button>
         <button type="submit" className="btn" disabled={!canPublish || publishBlocked || mutation.isPending}>{mutation.isPending ? 'Saving…' : (publishBlocked ? 'Resolve Issues' : 'Publish')}</button>

@@ -50,11 +50,12 @@ export default defineConfig(({ mode }): UserConfig => {
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
-        // Directly proxy /admin-api to backend origin without path rewrite
+        // Proxy /admin-api/* to local backend and rewrite to /api/* in dev
         '/admin-api': {
-          target: `${API_HTTP}`,
+          target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
+          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
         },
         '/socket.io': {
           target: API_WS,

@@ -1,10 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Centralized Admin API base:
-// Prefer explicit backend origin via VITE_ADMIN_API_BASE_URL (e.g. https://newspulse-backend-real.example.com)
-// Fallback to '/admin-api' ONLY for legacy rewrite mode (vercel.json rewrites '/admin-api/*' -> backend).
-// IMPORTANT: Replace the placeholder domain in your deployment environment; never hard-code production host here.
-const API_BASE_URL = '/admin-api';
+// Centralized Admin API base per spec:
+// Use env var when provided, else default to '/admin-api' to work with proxy/rewrites.
+const API_BASE_URL = (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() || '/admin-api';
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -15,7 +13,7 @@ export interface ExtendedApi extends AxiosInstance {
 
 export const api: ExtendedApi = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
+  withCredentials: false,
 }) as ExtendedApi;
 
 // Cached route availability map to suppress repeated 404 network attempts for optional/admin features.
