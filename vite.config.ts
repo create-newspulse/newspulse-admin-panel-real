@@ -11,7 +11,8 @@ export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
   // Prefer explicit origin when provided; otherwise keep empty in production so client defaults to '/admin-api'
-  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:5000' : '');
+  // Default dev backend: demo server runs on 3002 in this repo (demo-server.js)
+  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:3002' : '');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
 
   return {

@@ -1,11 +1,15 @@
 // 📁 File: admin-backend/index.js
 
-require('dotenv').config();
-const mongoose = require('mongoose');
-const express = require('express');
+import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+import { createRequire } from 'node:module';
+
+dotenv.config();
+
+const require = createRequire(import.meta.url);
 const app = require('./backend/index');
 const User = require('./backend/models/User');
-const bcrypt = require('bcryptjs');
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -26,7 +30,7 @@ mongoose.connect(MONGO_URI, {
   // 🔐 Auto-seed founder admin if missing (idempotent)
   (async () => {
     try {
-      const founderEmail = (process.env.FOUNDER_EMAIL || process.env.ADMIN_EMAIL || '').toLowerCase(); // removed hard-coded founder@newspulse.ai
+      const founderEmail = (process.env.FOUNDER_EMAIL || process.env.ADMIN_EMAIL || '').toLowerCase();
       const founderPassword = process.env.FOUNDER_PASSWORD || process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || 'Safe!2025@News';
       let user = await User.findOne({ email: founderEmail });
       if (!user) {
@@ -39,14 +43,12 @@ mongoose.connect(MONGO_URI, {
           isActive: true,
         });
         console.log(`🟢 Auto-seeded founder user: ${founderEmail}`);
+      } else if (!user.isActive) {
+        user.isActive = true;
+        await user.save();
+        console.log(`🟢 Reactivated founder user: ${founderEmail}`);
       } else {
-        if (!user.isActive) {
-          user.isActive = true;
-          await user.save();
-          console.log(`🟢 Reactivated founder user: ${founderEmail}`);
-        } else {
-          console.log(`ℹ️ Founder user already exists: ${founderEmail}`);
-        }
+        console.log(`ℹ️ Founder user already exists: ${founderEmail}`);
       }
     } catch (e) {
       console.warn('⚠️ Founder auto-seed skipped:', e.message);

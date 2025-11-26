@@ -1,3 +1,3 @@
 // Bridge entry for nodemon scripts expecting server.mjs
-// Loads the CommonJS server at index.js
+// Re-exports the main ES module server
 import './index.js';

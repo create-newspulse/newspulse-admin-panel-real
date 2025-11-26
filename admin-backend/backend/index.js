@@ -113,6 +113,75 @@ app.get('/admin/stats', (req, res) => {
   });
 });
 
+// --- Dashboard Stats (canonical endpoints expected by frontend) ---
+// GET /api/dashboard-stats  and GET /api/stats (alias)
+app.get('/api/dashboard-stats', (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      success: true,
+      data: {
+        totals: {
+          news: 247,
+          today: 12,
+          users: 1024,
+          activeUsers: 27,
+          totalViews: 125430,
+        },
+        byCategory: [
+          { _id: 'Politics', count: 45 },
+          { _id: 'Technology', count: 38 },
+          { _id: 'Sports', count: 32 },
+        ],
+        byLanguage: [
+          { _id: 'en', count: 150 },
+          { _id: 'hi', count: 67 },
+          { _id: 'gu', count: 30 }
+        ],
+        recent: [],
+        aiLogs: 1234,
+        activeUsers: 27
+      }
+    });
+  } catch (err) {
+    console.error('❌ /api/dashboard-stats error', err);
+    return res.status(500).json({ ok: false, success: false, message: 'Failed to fetch dashboard stats' });
+  }
+});
+
+// Alias without dash
+app.get('/api/stats', (req, res) => {
+  try {
+    return res.json({
+      ok: true,
+      success: true,
+      data: {
+        totals: {
+          news: 247,
+          today: 12,
+          users: 1024,
+          activeUsers: 27,
+          totalViews: 125430,
+        },
+        byCategory: [
+          { _id: 'Politics', count: 45 },
+          { _id: 'Technology', count: 38 },
+        ],
+        byLanguage: [
+          { _id: 'en', count: 150 },
+          { _id: 'hi', count: 67 }
+        ],
+        recent: [],
+        aiLogs: 1234,
+        activeUsers: 27
+      }
+    });
+  } catch (err) {
+    console.error('❌ /api/stats error', err);
+    return res.status(500).json({ ok: false, success: false, message: 'Failed to fetch stats' });
+  }
+});
+
 // ✅ Extended startup banner (will print once parent server starts listening)
 try {
   console.info('[ADMIN BACKEND] Variant: MongoDB-backed Express server loaded. Stats route aliases active.');

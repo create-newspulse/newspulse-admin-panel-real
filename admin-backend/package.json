@@ -1,7 +1,7 @@
 {
   "name": "admin-backend",
   "version": "1.0.0",
-  "type": "commonjs",
+  "type": "module",
   "main": "server.mjs",
   "notes": "Legacy local backend. Do not run. Production backend lives on Render (newspulse-backend-real).",
   "scripts": {
