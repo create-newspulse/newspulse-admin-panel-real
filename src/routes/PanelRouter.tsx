@@ -3,6 +3,7 @@ import AppShell from '@/components/layout/AppShell';
 import { RequireAuth, RequireRole } from '@/routes/guards';
 import QuickCards from '@/components/dashboard/QuickCards';
 import SystemAlerts from '@/components/alerts/SystemAlerts';
+import DraftDeskPage from '@/pages/admin/DraftDeskPage';
 
 // Placeholder pages
 function Page({ title }: { title: string }) { return <div className="space-y-4"><h1 className="text-2xl font-semibold">{title}</h1><p className="opacity-70 text-sm">TODO: implement "{title}"</p></div>; }
@@ -27,6 +28,7 @@ export default function PanelRouter() {
           {/* Admin */}
           <Route path="admin/news/new" element={<RequireRole allow={['founder','admin']}><Page title="Add News" /></RequireRole>} />
           <Route path="admin/news" element={<RequireRole allow={['founder','admin']}><Page title="Manage News" /></RequireRole>} />
+          <Route path="admin/drafts" element={<RequireRole allow={['founder','admin','editor']}><DraftDeskPage /></RequireRole>} />
           <Route path="admin/moderation" element={<RequireRole allow={['founder','admin']}><Page title="Moderation" /></RequireRole>} />
           <Route path="admin/compliance" element={<RequireRole allow={['founder','admin']}><Page title="Compliance" /></RequireRole>} />
           <Route path="admin/operations" element={<RequireRole allow={['founder','admin']}><Page title="Operations" /></RequireRole>} />

@@ -70,6 +70,7 @@ import ChangePassword from '@pages/admin/ChangePassword';
 import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
+import DraftDeskPage from '@pages/admin/DraftDeskPage';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -139,6 +140,8 @@ function App() {
               <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New alias: /admin/news -> ManageNews (fixes Back to News button path) */}
               <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Draft Desk */}
+              <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
