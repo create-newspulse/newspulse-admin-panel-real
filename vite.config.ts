@@ -10,9 +10,8 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
-  // Prefer explicit origin when provided; otherwise keep empty in production so client defaults to '/admin-api'
-  // Default dev backend: demo server runs on 3002 in this repo (demo-server.js)
-  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:3002' : '');
+  // In dev, default to production backend if local backend not specified
+  const API_HTTP = rawAdminBase || (mode === 'development' ? 'https://newspulse-backend-real.onrender.com' : '');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
 
   return {
@@ -51,12 +50,11 @@ export default defineConfig(({ mode }): UserConfig => {
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
-        // Mirror Vercel rewrite for local dev
+        // Directly proxy /admin-api to backend origin without path rewrite
         '/admin-api': {
-          target: `${API_HTTP}/api`,
+          target: `${API_HTTP}`,
           changeOrigin: true,
           secure: false,
-          rewrite: (path) => path.replace(/^\/admin-api/, ''),
         },
         '/socket.io': {
           target: API_WS,

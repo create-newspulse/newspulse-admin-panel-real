@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import api from '@lib/api';
 
 type RegionHit = { code: string; count: number };
 
@@ -51,22 +49,19 @@ export default function RealtimeTrafficGlobe() {
     });
   }, [hits]);
 
-  // Fetch top regions from the same backend as MonitorHubPanel
+  // Fetch top regions via shared API (avoids hardcoded '/api' and double-prefix)
   useEffect(() => {
     let mounted = true;
     const fetchData = async () => {
       try {
-        const res = await fetch(`${API_BASE}/system/monitor-hub`, { credentials: 'include' });
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !/application\/json/i.test(ct)) throw new Error('bad');
-        const data = await res.json();
-        const regions = (data.topRegions || ['IN','US','AE']) as string[];
+        const result = await api.monitorHub();
+        const regions = (result.topRegions || ['IN','US','AE']) as string[];
         const counts = regions.reduce<Record<string, number>>((acc, code) => {
           acc[code] = (acc[code] || 0) + 1; return acc;
         }, {});
         if (!mounted) return;
         setHits(Object.entries(counts).map(([code, count]) => ({ code, count })));
-        setActiveUsers(data.activeUsers || 0);
+        setActiveUsers(Number(result.activeUsers || 0));
       } catch {
         if (!mounted) return;
         setHits([{ code: 'IN', count: 5 }, { code: 'US', count: 3 }, { code: 'AE', count: 2 }]);

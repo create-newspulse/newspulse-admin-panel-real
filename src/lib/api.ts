@@ -92,7 +92,8 @@ if (import.meta.env.DEV) {
 // Tries modern path first then legacy fallback, normalizes shape.
 api.monitorHub = async () => {
   // Prefer canonical backend path; include fallback alias variants to tolerate mixed deployments.
-  const paths = ['/api/system/monitor-hub', '/system/monitor-hub', '/api/admin/stats', '/admin/stats'];
+  // With baseURL '/admin-api', do not prefix with extra '/api'
+  const paths = ['/system/monitor-hub', '/admin/stats'];
   let lastErr: any = null;
   for (const p of paths) {
     try {
