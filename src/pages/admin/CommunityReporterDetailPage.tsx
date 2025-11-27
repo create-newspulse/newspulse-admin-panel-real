@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { adminApi } from '@/lib/adminApi';
+import { useNotify } from '@/components/ui/toast-bridge';
 
 // Raw API type
 interface CommunitySubmissionApi {
@@ -56,6 +57,15 @@ export default function CommunityReporterDetailPage() {
   const [submission, setSubmission] = useState<CommunitySubmission | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState<string|null>(null);
+  const notify = useNotify();
+
+  interface CommunityApproveResponse {
+    ok: boolean;
+    success?: boolean;
+    submission: CommunitySubmission;
+    draftArticle?: any | null;
+    article?: any | null;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -89,8 +99,34 @@ export default function CommunityReporterDetailPage() {
     if (!id || id === 'undefined') return;
     setActionLoading(true); setError(null);
     try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision });
-      setSubmission(prev => prev ? { ...prev, status: decision.toUpperCase() } : prev);
+      const res = await adminApi.post<CommunityApproveResponse>(`/api/admin/community-reporter/submissions/${id}/decision`, { decision });
+      const data = res.data as CommunityApproveResponse;
+
+      if (!data || !data.submission) {
+        throw new Error('Invalid response from server');
+      }
+
+      const updated = data.submission;
+      const linkedArticleId = (updated as any).linkedArticleId ?? null;
+      setSubmission(prev => prev ? { ...prev, ...updated } : updated);
+
+      if (decision === 'approve') {
+        const articleLike = data.draftArticle ?? data.article ?? null;
+        if (articleLike && articleLike._id) {
+          const title = (articleLike.title || '').trim();
+          notify.ok(
+            'Story approved',
+            title ? `Draft created in Manage News (Draft tab): ${title}.` : 'Draft created in Manage News (Draft tab).'
+          );
+        } else if (linkedArticleId) {
+          notify.info('Story approved. Already linked to an existing news draft.');
+        } else {
+          notify.ok('Story approved');
+        }
+      } else {
+        notify.ok('Story updated', 'Submission rejected.');
+      }
+
       navigate('/admin/community-reporter');
     } catch (e:any) {
       setError('Failed to update submission. Please try again.');

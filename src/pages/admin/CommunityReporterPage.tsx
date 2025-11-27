@@ -58,6 +58,15 @@ export interface CommunitySubmission {
   updatedAt?: string;
 }
 
+// Typed approve response based on backend payload
+export interface CommunityApproveResponse {
+  ok: boolean;
+  success?: boolean;
+  submission: CommunitySubmission;
+  draftArticle?: any | null;
+  article?: any | null;
+}
+
 function formatPriorityLabel(priority?: CommunitySubmissionPriority){
   if (priority === 'FOUNDER_REVIEW') return '🔴 Founder Review';
   if (priority === 'EDITOR_REVIEW') return '🟡 Editor Review';
@@ -154,11 +163,11 @@ export default function CommunityReporterPage(){
   const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
     setActionId(submissionId); setError(null);
     try {
-      const res = await adminApi.post<DecisionResponse>(
+      const res = await adminApi.post<CommunityApproveResponse>(
         `/api/admin/community-reporter/submissions/${submissionId}/decision`,
         { decision }
       );
-      const data = res.data;
+      const data = res.data as CommunityApproveResponse;
 
       if (!data || !data.submission) {
         throw new Error('Invalid response from server');
@@ -183,14 +192,13 @@ export default function CommunityReporterPage(){
       await fetchSubmissions();
 
       if (decision === 'approve') {
-        const draft = data.draftArticle;
-        if (draft && draft._id) {
-          const title = draft.title?.trim();
-          if (title) {
-            notify.ok('Story approved', `Draft created in Manage News: ${title}.`);
-          } else {
-            notify.ok('Story approved', 'Draft created in Manage News.');
-          }
+        const articleLike = data.draftArticle ?? data.article ?? null;
+        if (articleLike && articleLike._id) {
+          const title = (articleLike.title || '').trim();
+          notify.ok(
+            'Story approved',
+            title ? `Draft created in Manage News (Draft tab): ${title}.` : 'Draft created in Manage News (Draft tab).'
+          );
         } else if (linkedArticleId) {
           notify.info('Story approved. Already linked to an existing news draft.');
         } else {
@@ -336,10 +344,10 @@ export default function CommunityReporterPage(){
                   <span title={s.status}>{s.status || '—'}</span>
                   {s.linkedArticleId && (
                     <span
-                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-50 text-amber-700 border border-amber-200"
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200"
                       title="Draft created in Manage News"
                     >
-                      📝 Draft linked
+                      Draft linked
                     </span>
                   )}
                 </div>
