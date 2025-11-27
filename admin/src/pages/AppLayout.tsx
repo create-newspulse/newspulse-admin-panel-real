@@ -7,6 +7,7 @@ export default function AppLayout(){
         <div className="font-semibold">🛡️ News Pulse Admin</div>
         <nav className="flex gap-4 text-sm">
           <Link to="/admin/manage-news" className="hover:underline">Manage News</Link>
+          <Link to="/admin/drafts" className="hover:underline">Draft Desk</Link>
           <Link to="/admin/add-news" className="hover:underline">Add News</Link>
           <Link to="/admin/community-reporter" className="hover:underline">Community Reporter</Link>
         </nav>

@@ -38,6 +38,12 @@ app.use('/api/news', require('./routes/news/saveNews'));              // /news/a
 app.use('/api/news', require('./routes/news/add'));                   // Add news
 app.use('/api/news', require('./routes/news/trendingController'));   // Trending score (if used)
 
+// ✅ Admin API (frontend contract) – mount lightweight endpoints expected by the React UI
+// Articles: POST/GET/PUT on /admin-api/articles
+app.use('/admin-api', require('./routes/adminApiArticles'));
+// Assist suggestions: /admin-api/assist/suggest and /admin-api/assist/suggest/v2
+app.use('/admin-api/assist', require('./routes/assist'));
+
 // ✅ Polls & Daily Wonder (Only Active Ones)
 app.use('/api/polls', require('./routes/polls'));
 app.use('/api/wonder', require('./routes/dailyWonder'));

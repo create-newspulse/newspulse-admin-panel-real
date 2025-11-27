@@ -45,8 +45,8 @@ async function tryAiSuggest(payload: {
   language: 'en' | 'hi' | 'gu';
 }) {
   try {
-    // if you add a backend route later: POST /api/assist/suggest
-    const res = await fetch('/api/assist/suggest', {
+    // Use admin API base; aligns with backend /admin-api/assist/suggest
+    const res = await fetch('/admin-api/assist/suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

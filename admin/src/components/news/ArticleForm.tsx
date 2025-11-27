@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, listArticles, updateArticle } from '../../lib/api/articles';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { createArticle, updateArticle, getArticle } from '../../lib/api/articles';
 import { verifyLanguage, readability } from '../../lib/api/language';
 import { ptiCheck } from '../../lib/api/compliance';
 import TagInput from '../ui/TagInput';
@@ -32,6 +32,34 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const autoSaveRef = useRef<number | null>(null);
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []); // could be populated if listing all
+
+  // Load existing article when in edit mode
+  useEffect(()=>{
+    let ignore = false;
+    async function load(){
+      if (mode !== 'edit' || !articleId) return;
+      try {
+        const res = await getArticle(articleId);
+        const art = (res?.data?.article) || res?.article || res;
+        if (!art || ignore) return;
+        setTitle(art.title || '');
+        setSlug(art.slug || '');
+        setSummary(art.summary || '');
+        setContent(art.content || art.body || '');
+        setCategory(art.category || 'General');
+        setLanguage((art.language || 'en') as any);
+        setStatus((art.status || 'draft') as any);
+        setTags(Array.isArray(art.tags) ? art.tags : []);
+        setScheduledAt(art.scheduledAt || '');
+        const pti = art.ptiCompliance || art.ptiStatus;
+        if (pti) setPtiStatus(pti);
+      } catch (err) {
+        console.error('[ADMIN][EDIT_NEWS] Load error', err);
+      }
+    }
+    load();
+    return ()=>{ ignore = true; };
+  }, [mode, articleId]);
 
   // Auto slug
   useEffect(()=> {

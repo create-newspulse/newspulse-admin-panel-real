@@ -23,6 +23,7 @@ const AdminNavbar = () => {
             </span>
           )}
         </Link>
+        <Link to="/admin/drafts">Draft Desk</Link>
         <Link to="/admin/community-reporter">Community Reporter</Link>
         <button className="bg-red-600 px-3 py-1 rounded hover:bg-red-700">Logout</button>
       </div>

@@ -39,6 +39,7 @@ export default function ManageNewsPage(){
               <td className="p-2 text-center">{a.language}</td>
               <td className="p-2 text-center">{a.status}</td>
               <td className="p-2 flex gap-2 justify-center">
+                <a href={`/admin/manage-news/${a._id}/edit`} className="btn-secondary">Edit</a>
                 {a.status!=='archived' && a.status!=='deleted' && <button onClick={()=> act(a._id,'archive')} className="btn-secondary">Archive</button>}
                 {a.status==='archived' && <button onClick={()=> act(a._id,'restore')} className="btn-secondary">Restore</button>}
                 {a.status!=='deleted' && <button onClick={()=> act(a._id,'delete')} className="btn-secondary">Delete</button>}
