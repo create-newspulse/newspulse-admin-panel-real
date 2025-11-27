@@ -33,7 +33,6 @@ export default function ArticleEditPage() {
         id={id}
         initialValues={data}
         userRole="admin"
-        onDone={() => navigate('/admin/news')}
       />
     </div>
   );

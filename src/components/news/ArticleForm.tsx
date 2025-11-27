@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createArticle, updateArticle, getArticle, type Article } from '@/lib/api/articles';
+import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
 import { ptiCheck } from '@/lib/api/compliance';
 import TagInput from '@/components/ui/TagInput';
@@ -167,8 +168,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if (computedMode === 'create') return createArticle(body as any);
       return updateArticle(editId!, body as any);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['articles'] }); onDone(); },
-    onError: (err: any) => { console.error('[ArticleForm] mutation error', err?.response?.status, err?.response?.data || err?.message); }
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      toast.success(computedMode === 'edit' ? 'Article updated successfully' : 'Article created successfully');
+      onDone();
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || err?.message || 'Save failed';
+      console.error('[ArticleForm] mutation error', err?.response?.status, err?.response?.data || err?.message);
+      toast.error(msg);
+    }
   });
 
   function saveDraft(){ if (!mutation.isPending) mutation.mutate(); }
