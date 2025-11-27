@@ -22,7 +22,7 @@ const STATUS_TABS: { value: 'all' | ArticleStatus; label: string }[] = [
 export default function ManageNews() {
   // status param uses explicit 'all' | ArticleStatus for UI sync
   const [params, setParams] = React.useState<Record<string,any>>({ page:1, limit:20, sort:'-createdAt', status:'all' as 'all' | ArticleStatus });
-  const [editingId, setEditingId] = React.useState<string | null>(null);
+  // Side-panel edit removed; editing now handled via dedicated route.
   const [showCsv, setShowCsv] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
 
@@ -71,7 +71,6 @@ export default function ManageNews() {
 
       <ArticleTable
         params={params}
-        onEdit={(id)=> { setEditingId(id); }}
         onSelectIds={setSelectedIds}
         onPageChange={(p)=> setParams(prev => ({ ...prev, page: Math.max(1, p) }))}
       />
@@ -87,17 +86,7 @@ export default function ManageNews() {
         </div>
       )}
 
-      {editingId && (
-        <div className="fixed top-0 right-0 w-[400px] h-full bg-white dark:bg-slate-900 shadow-xl overflow-y-auto p-4 z-40 border-l">
-          <div className="flex justify-between items-center mb-3">
-            <h2 className="font-semibold">Edit Article</h2>
-            <button onClick={()=> setEditingId(null)} className="text-sm px-2 py-1 rounded bg-slate-200 dark:bg-slate-700">Close</button>
-          </div>
-          <Suspense fallback={<div className="p-4 text-sm">Loading form…</div>}>
-            <ArticleForm id={editingId} onDone={()=> { setEditingId(null); setParams(p => ({ ...p })); }} />
-          </Suspense>
-        </div>
-      )}
+      {/* Edit side panel removed in favor of /admin/articles/:id/edit route */}
 
       {showCsv && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listArticles,
@@ -16,9 +17,10 @@ import { useAuth } from '@/context/AuthContext';
 import type { ArticleStatus } from '@/types/articles';
 import { ScheduleDialog } from './ScheduleDialog';
 
-interface Props { params: Record<string, any>; onEdit: (id: string) => void; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
+interface Props { params: Record<string, any>; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
 
-export const ArticleTable: React.FC<Props> = ({ params, onEdit, onSelectIds, onPageChange }) => {
+export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange }) => {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
   const role = user?.role || 'editor';
@@ -190,7 +192,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onEdit, onSelectIds, onP
               <td className="p-2">{(() => { const t = r.createdAt && !Number.isNaN(Date.parse(r.createdAt)) ? new Date(r.createdAt).toLocaleString() : '—'; return t; })()}</td>
               <td className="p-2 space-x-2">
                 {getAvailableActions((r.status || 'draft') as ArticleStatus).includes('edit') && (
-                  <button onClick={()=> onEdit(r._id)} className="text-blue-600 hover:underline">Edit</button>
+                  <button onClick={()=> navigate(`/admin/articles/${r._id}/edit`)} className="text-blue-600 hover:underline">Edit</button>
                 )}
                 {getAvailableActions(r.status as ArticleStatus).includes('publishNow') && (
                   <button onClick={()=> mutatePublish.mutate(r._id)} className="text-green-700 hover:underline">Publish</button>

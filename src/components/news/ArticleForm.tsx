@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, type Article } from '@/lib/api/articles';
 import { verifyLanguage, readability } from '@/lib/api/language';
 import { ptiCheck } from '@/lib/api/compliance';
 import TagInput from '@/components/ui/TagInput';
@@ -10,14 +10,35 @@ import { ARTICLE_CATEGORIES, isValidCategory, canonicalizeCategory } from '@/lib
 import AiAssistantTipBox from '@/components/news/AiAssistantTipBox';
 import { assistSuggestV2, type AssistSuggestV2Response } from '@/lib/api/assist';
 
-interface ArticleFormProps { id?: string | null; articleId?: string; mode?: 'create'|'edit'; onDone?: () => void; userRole?: 'writer'|'editor'|'admin'|'founder'; }
+interface ArticleFormProps {
+  mode: 'create' | 'edit';
+  id?: string | null; // edit id (preferred)
+  articleId?: string; // legacy prop alias
+  initialValues?: Partial<Article>; // pre-fetched data (edit)
+  onSubmit?: (payload: Record<string, any>) => Promise<any>; // override create/update
+  onDone?: () => void;
+  userRole?: 'writer'|'editor'|'admin'|'founder';
+}
 
-export const ArticleForm: React.FC<ArticleFormProps> = ({ id, articleId, mode, onDone = ()=>{}, userRole='writer' }) => {
-  // unify id/articleId
+export const ArticleForm: React.FC<ArticleFormProps> = ({
+  id,
+  articleId,
+  mode,
+  initialValues,
+  onSubmit,
+  onDone = ()=>{},
+  userRole='writer'
+}) => {
+  // resolve edit id
   const editId = id || articleId || null;
-  const computedMode: 'create'|'edit' = editId ? 'edit' : (mode || 'create');
+  const computedMode: 'create'|'edit' = mode || (editId ? 'edit' : 'create');
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['articles','one',editId], queryFn: ()=> editId? getArticle(editId): Promise.resolve(null), enabled: !!editId });
+  // Skip internal fetch if caller provided initialValues
+  const { data } = useQuery({
+    queryKey: ['articles','one',editId],
+    queryFn: ()=> editId ? getArticle(editId) : Promise.resolve(null),
+    enabled: !!editId && !initialValues,
+  });
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [autoSlug, setAutoSlug] = useState(true);
@@ -42,23 +63,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ id, articleId, mode, o
   const [checks, setChecks] = useState<{ seo: any; compliance: any; duplicate: any }>({ seo: null, compliance: null, duplicate: null });
   const suggestCacheRef = useRef<Map<string, AssistSuggestV2Response>>(new Map());
 
-  // populate when data arrives
+  // populate from initialValues first (edit mode)
   useEffect(()=> {
-    if (data && computedMode === 'edit') {
-      setTitle(data.title || '');
-      setSlug(data.slug || '');
-      setSummary(data.summary || '');
-      // Prefer the field actually provided by backend: content or body
-      setContent((data as any).content ?? (data as any).body ?? '');
-  const incomingCat = typeof (data as any).category === 'string' ? (data as any).category as string : undefined;
-  const canon = incomingCat ? (isValidCategory(incomingCat) ? incomingCat : canonicalizeCategory(incomingCat)) : ARTICLE_CATEGORIES[0];
-  setCategory(canon);
-      setLanguage((data.language as any) || 'en');
-      setStatus((data.status as any) || 'draft');
-      setTags(Array.isArray((data as any).tags) ? (data as any).tags : []);
-      setScheduledAt((data as any).scheduledAt ? new Date((data as any).scheduledAt).toISOString().slice(0,16) : '');
+    const src = (computedMode === 'edit') ? (initialValues || data) : null;
+    if (src) {
+      setTitle(src.title || '');
+      setSlug(src.slug || '');
+      setSummary((src as any).summary || '');
+      setContent((src as any).content ?? (src as any).body ?? '');
+      const incomingCat = typeof (src as any).category === 'string' ? (src as any).category as string : undefined;
+      const canon = incomingCat ? (isValidCategory(incomingCat) ? incomingCat : canonicalizeCategory(incomingCat)) : ARTICLE_CATEGORIES[0];
+      setCategory(canon);
+      setLanguage(((src as any).language as any) || 'en');
+      setStatus(((src as any).status as any) || 'draft');
+      setTags(Array.isArray((src as any).tags) ? (src as any).tags : []);
+      setScheduledAt((src as any).scheduledAt ? new Date((src as any).scheduledAt).toISOString().slice(0,16) : '');
     }
-  }, [data, computedMode]);
+  }, [initialValues, data, computedMode]);
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
@@ -142,6 +163,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({ id, articleId, mode, o
     mutationFn: async () => {
       const body = { title, slug, summary, content, category, tags, status, language, scheduledAt: scheduledAt || undefined, ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus };
       if (!title.trim()) throw new Error('Title required');
+      if (onSubmit) return onSubmit(body);
       if (computedMode === 'create') return createArticle(body as any);
       return updateArticle(editId!, body as any);
     },

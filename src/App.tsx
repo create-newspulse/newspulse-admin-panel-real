@@ -26,7 +26,8 @@ import { isAllowedHost } from './lib/hostGuard';
 // Admin Pages
 import Dashboard from '@pages/admin/Dashboard';
 import AddNews from '@pages/AddNews';
-import EditNews from '@pages/EditNews';
+import EditNews from '@pages/EditNews'; // legacy editor (kept for backward compatibility)
+import ArticleEditPage from '@pages/ArticleEditPage';
 import ManageNews from '@pages/ManageNews';
 import AddCategory from '@pages/AddCategory';
 import LanguageSettings from '@pages/owner/LanguageSettings';
@@ -130,6 +131,8 @@ function App() {
               {/* Legacy /add now redirects to /admin/add-news (updated editor) */}
               <Route path="/add" element={<AddNews />} />
               <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* New dedicated modern edit route using ArticleForm */}
+              <Route path="/admin/articles/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ArticleEditPage /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/push-history" element={<ProtectedRoute><LockCheckWrapper><PushHistory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/add-category" element={<ProtectedRoute><LockCheckWrapper><AddCategory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
