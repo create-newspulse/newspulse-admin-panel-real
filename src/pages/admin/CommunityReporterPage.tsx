@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
+import { fetchCommunityReporterSubmissions } from '@/api/adminCommunityReporterApi';
 import { useAuth } from '@/context/AuthContext';
 import { useNotify } from '@/components/ui/toast-bridge';
 
@@ -91,9 +92,7 @@ export default function CommunityReporterPage(){
       loadedRef.current = true;
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get('/api/admin/community-reporter/submissions');
-        if (cancelled) return;
-        const raw = res.data;
+        const raw = await fetchCommunityReporterSubmissions();
         const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions)
           ? raw.submissions
           : [];
@@ -118,8 +117,7 @@ export default function CommunityReporterPage(){
 
   async function fetchSubmissions(){
     try {
-      const res = await adminApi.get('/api/admin/community-reporter/submissions');
-      const raw = res.data;
+      const raw = await fetchCommunityReporterSubmissions();
       const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
       const normalized: CommunitySubmission[] = list.map(item => ({
         ...item,
