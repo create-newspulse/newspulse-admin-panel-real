@@ -70,9 +70,15 @@ export async function listArticles(params: {
 }
 export async function getArticle(id: string): Promise<Article> {
   const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${id}`);
-  const { ok, article } = res.data as ApiResponse;
-  if (!ok || !article) throw new Error('Failed to get article');
-  return article;
+  const raw = res.data as any;
+  const ok = raw?.ok === true || raw?.success === true || !!raw?.article || !!raw?.data;
+  const article = (raw?.article)
+    || (raw?.data?.article)
+    || (raw?.data && typeof raw.data === 'object' && !Array.isArray(raw.data) ? raw.data : null);
+  if (!ok || !article || !article._id) {
+    throw new Error('Failed to get article');
+  }
+  return article as Article;
 }
 export async function archiveArticle(id: string) {
   const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/archive`);
