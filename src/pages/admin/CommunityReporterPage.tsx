@@ -1,73 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
+import { normalizeError, appendError } from '@/lib/error';
 import { fetchCommunityReporterSubmissions } from '@/api/adminCommunityReporterApi';
+import { debug } from '@/lib/debug';
 import { useAuth } from '@/context/AuthContext';
 import { useNotify } from '@/components/ui/toast-bridge';
-
-export type CommunitySubmissionPriority =
-  | 'FOUNDER_REVIEW'
-  | 'EDITOR_REVIEW'
-  | 'LOW_PRIORITY';
-
-// Raw shape from backend (_id based)
-interface CommunitySubmissionApi {
-  _id: string;
-  userName?: string;
-  name?: string;
-  email?: string;
-  location?: string;
-  city?: string;
-  category?: string;
-  headline?: string;
-  body?: string;
-  mediaLink?: string;
-  aiHeadline?: string;
-  aiBody?: string;
-  riskScore?: number;
-  flags?: string[];
-  rejectReason?: string;
-  status?: string;
-  linkedArticleId?: string | null;
-  priority?: CommunitySubmissionPriority;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// Normalized UI type (id guaranteed)
-export interface CommunitySubmission {
-  id: string; // normalized id used everywhere in UI
-  userName?: string;
-  name?: string;
-  email?: string;
-  location?: string;
-  city?: string;
-  category?: string;
-  headline?: string;
-  body?: string;
-  mediaLink?: string;
-  aiHeadline?: string;
-  aiBody?: string;
-  riskScore?: number;
-  flags?: string[];
-  rejectReason?: string;
-  status?: string; // backend may send uppercase
-  linkedArticleId?: string | null;
-  priority?: CommunitySubmissionPriority;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// Typed approve response based on backend payload
-export interface CommunityApproveResponse {
-  ok: boolean;
-  success?: boolean;
-  submission: CommunitySubmission;
-  draftArticle?: any | null;
-  article?: any | null;
-}
+import {
+  CommunitySubmissionPriority,
+  CommunitySubmissionApi,
+  CommunityDecisionResponse
+} from '@/types/api';
+import { CommunitySubmission } from '@/types/CommunitySubmission';
 
 function formatPriorityLabel(priority?: CommunitySubmissionPriority){
+  // Function to format priority labels
   if (priority === 'FOUNDER_REVIEW') return '🔴 Founder Review';
   if (priority === 'EDITOR_REVIEW') return '🟡 Editor Review';
   if (priority === 'LOW_PRIORITY') return '🟢 Low Priority';
@@ -94,6 +41,28 @@ export default function CommunityReporterPage(){
   const notify = useNotify();
   const [isCleaning, setIsCleaning] = useState(false);
 
+  // Helper to map raw API submission to strict Phase-1 CommunitySubmission type
+  function mapRaw(raw: CommunitySubmissionApi): CommunitySubmission {
+    return {
+      id: String((raw as any).id || raw._id || (raw as any).ID || (raw as any).uuid || 'missing-id'),
+      headline: raw.headline ?? '',
+      body: raw.body ?? '',
+      category: raw.category ?? '',
+      location: raw.location ?? raw.city ?? '',
+      city: raw.city ?? undefined,
+      status: (() => {
+        const s = String(raw.status || 'pending').toLowerCase();
+        return (s === 'pending' || s === 'approved' || s === 'rejected' || s === 'trash') ? s : 'pending';
+      })() as CommunitySubmission['status'],
+      priority: raw.priority,
+      linkedArticleId: raw.linkedArticleId ?? null,
+      createdAt: raw.createdAt,
+      userName: raw.userName,
+      name: raw.name,
+      email: raw.email,
+    };
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -102,20 +71,13 @@ export default function CommunityReporterPage(){
       setLoading(true); setError(null);
       try {
         const raw = await fetchCommunityReporterSubmissions();
-        const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions)
-          ? raw.submissions
-          : [];
-        const normalized: CommunitySubmission[] = list.map(item => ({
-          ...item,
-          id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
-          status: (item.status || '').toLowerCase(), // normalize for filtering
-          linkedArticleId: (item as any).linkedArticleId ?? null,
-        }));
-        setSubmissions(normalized);
+        debug('[CommunityReporterPage] submissions raw', raw);
+        const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
+        setSubmissions(list.map(mapRaw));
       } catch (e:any) {
         if (cancelled) return;
-        const status = e?.response?.status;
-        setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
+        const n = normalizeError(e, 'Failed to load submissions.');
+        setError(n.authExpired ? 'Session expired. Please login again.' : n.message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -127,17 +89,12 @@ export default function CommunityReporterPage(){
   async function fetchSubmissions(){
     try {
       const raw = await fetchCommunityReporterSubmissions();
+      debug('[CommunityReporterPage] refresh raw', raw);
       const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-      const normalized: CommunitySubmission[] = list.map(item => ({
-        ...item,
-        id: (item as any).id || item._id || (item as any).ID || (item as any).uuid || 'missing-id',
-        status: (item.status || '').toLowerCase(),
-        linkedArticleId: (item as any).linkedArticleId ?? null,
-      }));
-      setSubmissions(normalized);
+      setSubmissions(list.map(mapRaw));
     } catch(e:any) {
-      const status = e?.response?.status;
-      setError(status === 401 ? 'Session expired. Please login again.' : 'Failed to load submissions.');
+      const n = normalizeError(e, 'Failed to load submissions.');
+      setError(n.authExpired ? 'Session expired. Please login again.' : n.message);
     }
   }
 
@@ -153,27 +110,26 @@ export default function CommunityReporterPage(){
   const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
     setActionId(submissionId); setError(null);
     try {
-      const res = await adminApi.post<CommunityApproveResponse>(
+      const res = await adminApi.post<CommunityDecisionResponse>(
         `/api/admin/community-reporter/submissions/${submissionId}/decision`,
         { decision }
       );
-      const data = res.data as CommunityApproveResponse;
+      const data = res.data as CommunityDecisionResponse;
 
       if (!data || !data.submission) {
         throw new Error('Invalid response from server');
       }
 
-      const normalizedStatus = (data.submission.status || '').toLowerCase();
-      const linkedArticleId = (data.submission as any).linkedArticleId ?? null;
+      // Normalize submission (handles id/status)
+      const normalizedSubmission = mapRaw(data.submission as CommunitySubmissionApi);
+      const linkedArticleId = normalizedSubmission.linkedArticleId ?? null;
 
       // Update local cache with full submission payload
       setSubmissions(prev => prev.map(s =>
         s.id === submissionId
           ? {
               ...s,
-              ...data.submission,
-              status: normalizedStatus,
-              linkedArticleId,
+              ...normalizedSubmission,
             }
           : s
       ));
@@ -181,7 +137,7 @@ export default function CommunityReporterPage(){
       // Always keep list in sync with backend
       await fetchSubmissions();
 
-      if (decision === 'approve') {
+      if (data.action === 'approve') {
         const articleLike = data.draftArticle ?? data.article ?? null;
         if (articleLike && articleLike._id) {
           const title = (articleLike.title || '').trim();
@@ -194,13 +150,13 @@ export default function CommunityReporterPage(){
         } else {
           notify.ok('Story approved');
         }
-      } else {
+      } else if (data.action === 'reject') {
         notify.ok('Story updated', 'Submission rejected.');
       }
     } catch (e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Action failed';
-      setError(prev => prev ? prev + ' | ' + msg : msg);
-      notify.err('Action failed', msg);
+      const n = normalizeError(e, 'Action failed');
+      setError(prev => appendError(prev, n));
+      notify.err('Action failed', n.message);
     } finally {
       setActionId(null);
     }
@@ -212,8 +168,8 @@ export default function CommunityReporterPage(){
       await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/restore`);
       setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: 'pending' } : s));
     } catch (e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Restore failed';
-      setError(prev => prev ? prev + ' | ' + msg : msg);
+      const n = normalizeError(e, 'Restore failed');
+      setError(prev => appendError(prev, n));
     } finally {
       setActionId(null);
     }
@@ -232,9 +188,9 @@ export default function CommunityReporterPage(){
       }
       await fetchSubmissions();
     } catch (e:any) {
-      const msg = e?.response?.data?.message || e.message || 'Cleanup failed. Please try again.';
-      setError(prev => prev ? prev + ' | ' + msg : msg);
-      notify.err('Cleanup failed', msg);
+      const n = normalizeError(e, 'Cleanup failed. Please try again.');
+      setError(prev => appendError(prev, n));
+      notify.err('Cleanup failed', n.message);
     } finally {
       setIsCleaning(false);
     }
@@ -242,8 +198,9 @@ export default function CommunityReporterPage(){
 
   const filteredSubmissions = submissions
     .filter(s => {
-      if (viewMode === 'pending') return s.status === 'pending';
-      if (viewMode === 'rejected') return s.status === 'rejected';
+      const status = String(s.status || '').toLowerCase();
+      if (viewMode === 'pending') return status === 'pending';
+      if (viewMode === 'rejected') return status === 'rejected';
       return true;
     })
     .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
@@ -346,14 +303,21 @@ export default function CommunityReporterPage(){
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={()=> handleView(s)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white" disabled={!s.id || s.id==='missing-id'}>View</button>
-                  {viewMode === 'pending' && s.status !== 'approved' && s.status !== 'APPROVED' && (
+                  {s.linkedArticleId && (
+                    <button
+                      onClick={() => navigate(`/admin/articles/${s.linkedArticleId}/edit`)}
+                      className="px-3 py-1 text-xs rounded bg-emerald-600 text-white"
+                      title="Open linked draft in editor"
+                    >Open Draft</button>
+                  )}
+                  {viewMode === 'pending' && String(s.status || '').toUpperCase() !== 'APPROVED' && (
                     <button
                       disabled={actionId === s.id || !s.id || s.id==='missing-id'}
                       onClick={()=> handleDecision(s.id, 'approve')}
                       className="px-3 py-1 text-xs rounded bg-green-600 text-white disabled:opacity-60"
                     >Approve</button>
                   )}
-                  {viewMode === 'pending' && s.status !== 'rejected' && s.status !== 'REJECTED' && (
+                  {viewMode === 'pending' && String(s.status || '').toUpperCase() !== 'REJECTED' && (
                     <button
                       disabled={actionId === s.id || !s.id || s.id==='missing-id'}
                       onClick={()=> handleDecision(s.id, 'reject')}
@@ -373,7 +337,7 @@ export default function CommunityReporterPage(){
           ))}
           {!loading && filteredSubmissions.length === 0 && (
             <tr>
-              <td colSpan={7} className="p-4 text-center text-slate-500">No submissions found.</td>
+              <td colSpan={8} className="p-4 text-center text-slate-500">No submissions found.</td>
             </tr>
           )}
         </tbody>

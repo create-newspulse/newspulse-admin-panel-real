@@ -7,23 +7,33 @@ const FALLBACK_ADMIN_BASE = 'https://newspulse-backend-real.onrender.com';
 export const adminRoot = explicitEnv || FALLBACK_ADMIN_BASE; // retain exported name for existing imports
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
+// Unified token retrieval for reuse across components/utilities.
+// Order of precedence:
+// 1. newsPulseAdminAuth.accessToken (stored auth object)
+// 2. np_admin_access_token
+// 3. np_admin_token
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  let token: string | null = null;
+  try {
+    const raw = localStorage.getItem('newsPulseAdminAuth');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.accessToken) token = String(parsed.accessToken);
+        else if (parsed?.token) token = String(parsed.token);
+      } catch {}
+    }
+  } catch {}
+  if (!token) token = localStorage.getItem('np_admin_access_token');
+  if (!token) token = localStorage.getItem('np_admin_token');
+  return token;
+}
+
 // Attach Authorization header from localStorage (JWT) for all requests
 adminApi.interceptors.request.use((config) => {
   try {
-    let token: string | null = null;
-    if (typeof window !== 'undefined') {
-      // 1. newsPulseAdminAuth.accessToken first
-      try {
-        const raw = localStorage.getItem('newsPulseAdminAuth');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed?.accessToken) token = String(parsed.accessToken);
-        }
-      } catch {}
-      // 2. fallback to np_admin_access_token then np_admin_token
-      if (!token) token = localStorage.getItem('np_admin_access_token');
-      if (!token) token = localStorage.getItem('np_admin_token');
-    }
+    const token = getAuthToken();
     if (token) {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;

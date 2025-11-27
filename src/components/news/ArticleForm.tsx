@@ -10,6 +10,8 @@ import { readingTimeSec } from '@/lib/readtime';
 import { ARTICLE_CATEGORIES, isValidCategory, canonicalizeCategory } from '@/lib/categories';
 import AiAssistantTipBox from '@/components/news/AiAssistantTipBox';
 import { assistSuggestV2, type AssistSuggestV2Response } from '@/lib/api/assist';
+import { usePublishFlag } from '@/context/PublishFlagContext';
+import { normalizeError } from '@/lib/error';
 
 interface ArticleFormProps {
   mode: 'create' | 'edit';
@@ -49,6 +51,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [category, setCategory] = useState<string>(ARTICLE_CATEGORIES[0]);
   const [language, setLanguage] = useState<'en'|'hi'|'gu'>('en');
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
+  // Keep original status to ensure Save Draft never downgrades/changes live states
+  const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
   const [tags, setTags] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState<string>('');
   const [ptiStatus, setPtiStatus] = useState<'pending'|'compliant'|'needs_review'>('pending');
@@ -63,6 +67,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [tone, setTone] = useState<'neutral'|'impact'|'analytical'>('neutral');
   const [checks, setChecks] = useState<{ seo: any; compliance: any; duplicate: any }>({ seo: null, compliance: null, duplicate: null });
   const suggestCacheRef = useRef<Map<string, AssistSuggestV2Response>>(new Map());
+  const { publishEnabled } = usePublishFlag();
 
   // populate from initialValues first (edit mode)
   useEffect(()=> {
@@ -76,7 +81,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const canon = incomingCat ? (isValidCategory(incomingCat) ? incomingCat : canonicalizeCategory(incomingCat)) : ARTICLE_CATEGORIES[0];
       setCategory(canon);
       setLanguage(((src as any).language as any) || 'en');
-      setStatus(((src as any).status as any) || 'draft');
+      const incomingStatus = (((src as any).status as any) || 'draft') as 'draft'|'scheduled'|'published';
+      setStatus(incomingStatus);
+      originalStatusRef.current = incomingStatus;
       setTags(Array.isArray((src as any).tags) ? (src as any).tags : []);
       setScheduledAt((src as any).scheduledAt ? new Date((src as any).scheduledAt).toISOString().slice(0,16) : '');
     }
@@ -161,8 +168,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const publishBlocked = !founderOverride && ((checks.compliance?.ptiFlags?.length ?? 0) > 0 || (checks.duplicate?.score ?? 0) >= 0.78);
 
   const mutation = useMutation({
-    mutationFn: async () => {
-      const body = { title, slug, summary, content, category, tags, status, language, scheduledAt: scheduledAt || undefined, ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus };
+    // desiredStatusOverride lets callers force a specific status (e.g., Publish)
+    mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
+      // Compute safe status to send:
+      // - New/draft items => draft
+      // - Live items (published/scheduled) => keep original live state
+      // - If override provided (e.g., publish), use it explicitly
+      let statusToSend: 'draft'|'scheduled'|'published';
+      if (desiredStatusOverride) {
+        statusToSend = desiredStatusOverride;
+      } else if (computedMode === 'create') {
+        statusToSend = 'draft';
+      } else {
+        const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
+        statusToSend = (orig === 'published' || orig === 'scheduled') ? orig : 'draft';
+      }
+
+      const body = { title, slug, summary, content, category, tags, status: statusToSend, language, scheduledAt: scheduledAt || undefined, ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus };
       if (!title.trim()) throw new Error('Title required');
       if (onSubmit) return onSubmit(body);
       if (computedMode === 'create') return createArticle(body as any);
@@ -174,13 +196,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       onDone();
     },
     onError: (err: any) => {
-      const msg = err?.response?.data?.message || err?.message || 'Save failed';
-      console.error('[ArticleForm] mutation error', err?.response?.status, err?.response?.data || err?.message);
-      toast.error(msg);
+      const n = normalizeError(err, 'Save failed');
+      console.error('[ArticleForm] mutation error', n.status, n.raw?.response?.data || n.message);
+      toast.error(n.message);
     }
   });
 
-  function saveDraft(){ if (!mutation.isPending) mutation.mutate(); }
+  function saveDraft(){
+    if (!mutation.isPending) {
+      // No override here. This ensures drafts stay drafts; live stays live.
+      mutation.mutate();
+    }
+  }
+  function handlePublish(){
+    if (!publishEnabled) {
+      console.warn('Publish is disabled in this environment');
+      toast.error('Publishing temporarily disabled');
+      return;
+    }
+    if (!mutation.isPending) {
+      // Publish is the only place that sets status: 'published'.
+      mutation.mutate('published');
+    }
+  }
   useEffect(()=> {
     if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current);
     autoSaveRef.current = window.setInterval(()=> { if (title.trim()) saveDraft(); }, 30000);
@@ -194,7 +232,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const canPublish = (userRole === 'admin' || userRole === 'founder') && (ptiStatus === 'compliant' || founderOverride) && ['en','hi','gu'].every(l => (langIssues[l]||[]).length === 0 || founderOverride);
 
   return (
-    <form onSubmit={e=> { e.preventDefault(); mutation.mutate(); }} className="space-y-6">
+    <form onSubmit={e=> { e.preventDefault(); handlePublish(); }} className="space-y-6">
       <div className="card p-4 space-y-4">
         <div>
           <label className="block text-sm font-medium">Title</label>
@@ -352,7 +390,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       <div className="sticky bottom-0 bg-white border-t border-slate-200 py-3 flex gap-3 justify-end">
         <button type="button" onClick={saveDraft} className="btn-secondary" disabled={!title}>Save Draft</button>
-        <button type="submit" className="btn" disabled={!canPublish || publishBlocked || mutation.isPending}>{mutation.isPending ? 'Saving…' : (publishBlocked ? 'Resolve Issues' : 'Publish')}</button>
+        <button type="submit" className="btn" disabled={!publishEnabled || !canPublish || publishBlocked || mutation.isPending} title={!publishEnabled ? 'Publishing temporarily disabled' : undefined}>{mutation.isPending ? 'Saving…' : (publishBlocked ? 'Resolve Issues' : (publishEnabled ? 'Publish' : 'Publish (disabled)'))}</button>
         {mutation.isError && (
           <div className="text-xs text-red-600 flex items-center">{(mutation.error as any)?.response?.data?.message || (mutation.error as any)?.message || 'Save failed'}</div>
         )}

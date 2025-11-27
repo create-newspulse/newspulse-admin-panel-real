@@ -3,9 +3,14 @@ import { ArticleTable } from '@/components/news/ArticleTable';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
 import apiClient from '@/lib/api';
+import { debug } from '@/lib/debug';
+import { guardAction, type ArticleWorkflowAction } from '@/lib/articleWorkflowGuard';
 import toast from 'react-hot-toast';
 import { safeLazy } from '@/utils/safeLazy';
 import type { ArticleStatus } from '@/types/articles';
+import type { ManageNewsParams } from '@/types/api';
+import { usePublishFlag } from '@/context/PublishFlagContext';
+import { useAuth } from '@/context/AuthContext';
 
 const ArticleForm = safeLazy(() => import('@/components/news/ArticleForm').then(m => ({ default: m.ArticleForm })), 'ArticleForm');
 
@@ -21,16 +26,24 @@ const STATUS_TABS: { value: 'all' | ArticleStatus; label: string }[] = [
 
 export default function ManageNews() {
   // status param uses explicit 'all' | ArticleStatus for UI sync
-  const [params, setParams] = React.useState<Record<string,any>>({ page:1, limit:20, sort:'-createdAt', status:'all' as 'all' | ArticleStatus });
+  const [params, setParams] = React.useState<ManageNewsParams>({ page:1, limit:20, sort:'-createdAt', status:'all' });
   // Side-panel edit removed; editing now handled via dedicated route.
   const [showCsv, setShowCsv] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const { publishEnabled, override, setOverride, envDefault } = usePublishFlag();
+  const { isFounder } = useAuth();
 
   // Voice & playback controls removed (no-op)
 
   // Workflow transition (mirrors legacy doTransition)
-  const doTransition = async (id: string, action: string) => {
+  const doTransition = async (id: string, action: ArticleWorkflowAction) => {
     try {
+      const g = guardAction(action, publishEnabled, { isFounder });
+      if (!g.allowed) {
+        debug('[ManageNews] blocked transition', { id, action, publishEnabled });
+        toast.error(g.reason || 'Action blocked');
+        return;
+      }
       await apiClient.post(`/news/${id}/transition`, { action });
       toast.success(`${action} done`);
       // Trigger a soft refresh by nudging params (keeps pagination)
@@ -82,7 +95,31 @@ export default function ManageNews() {
           <button onClick={()=> { if (confirm(`Send ${selectedIds.length} to Review?`)) selectedIds.forEach(id => void doTransition(id,'toReview')); }} className="px-2 py-1 rounded border">To Review</button>
           <button onClick={()=> { if (confirm(`Send ${selectedIds.length} to Legal?`)) selectedIds.forEach(id => void doTransition(id,'toLegal')); }} className="px-2 py-1 rounded border">To Legal</button>
           <button onClick={()=> { if (confirm(`Approve ${selectedIds.length}?`)) selectedIds.forEach(id => void doTransition(id,'approve')); }} className="px-2 py-1 rounded border">Approve</button>
-          <button onClick={()=> { if (confirm(`Publish ${selectedIds.length}?`)) selectedIds.forEach(id => void doTransition(id,'publish')); }} className="px-2 py-1 rounded border text-white bg-red-600">Publish</button>
+          {publishEnabled ? (
+            <button onClick={()=> { if (confirm(`Publish ${selectedIds.length}?`)) selectedIds.forEach(id => void doTransition(id,'publish')); }} className="px-2 py-1 rounded border text-white bg-red-600">Publish</button>
+          ) : (
+            <span className="px-2 py-1 rounded border bg-slate-200 text-slate-500" title="Publishing temporarily disabled">Publish (disabled)</span>
+          )}
+        </div>
+      )}
+      {isFounder && (
+        <div className="mt-4 p-3 rounded border bg-slate-50 text-xs flex flex-wrap items-center gap-3">
+          <span className="font-medium">Publish Runtime Toggle</span>
+          <span>Env Default: {envDefault ? 'ON' : 'OFF'}</span>
+          <span>Override: {override === null ? '—' : (override ? 'ON' : 'OFF')}</span>
+          <span>Effective: {publishEnabled ? 'ON' : 'OFF'}</span>
+          <button
+            type="button"
+            onClick={()=> setOverride(override === null ? !envDefault : !override)}
+            className="px-2 py-1 rounded border bg-white hover:bg-slate-100"
+          >Toggle</button>
+          {override !== null && (
+            <button
+              type="button"
+              onClick={()=> setOverride(null)}
+              className="px-2 py-1 rounded border bg-white hover:bg-slate-100"
+            >Clear Override</button>
+          )}
         </div>
       )}
 

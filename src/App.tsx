@@ -10,6 +10,7 @@ import i18n from './lib/i18n.config';
 import { useDarkMode } from '@context/DarkModeContext';
 import { useAuth } from '@context/AuthContext';
 import { AITrainingInfoProvider } from '@context/AITrainingInfoContext';
+import { PublishFlagProvider } from '@/context/PublishFlagContext';
 
 import Navbar from '@components/Navbar';
 import Breadcrumbs from '@components/Breadcrumbs';
@@ -108,6 +109,7 @@ function App() {
 
   return (
     <AITrainingInfoProvider>
+      <PublishFlagProvider>
       <I18nextProvider i18n={i18n}>
         <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-slate-900 text-white' : 'bg-white text-black'}`}>
           <Navbar />
@@ -138,11 +140,12 @@ function App() {
               <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
-              {/* Manage News canonical route + admin aliases for navbar consistency */}
+              {/* Manage News routes & aliases */}
               <Route path="/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              {/* New alias: /admin/news -> ManageNews (fixes Back to News button path) */}
               <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Ensure /admin/articles renders the Manage News list (breadcrumb shows 'Manage News') */}
+              <Route path="/admin/articles" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* Draft Desk */}
               <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter Queue & Detail */}
@@ -216,6 +219,7 @@ function App() {
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         </div>
       </I18nextProvider>
+      </PublishFlagProvider>
     </AITrainingInfoProvider>
   );
 }

@@ -1,20 +1,21 @@
 import React from 'react';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { ArticleStatus } from '@/types/articles';
+import type { ManageNewsParams } from '@/types/api';
 
-interface Props { params: Record<string,any>; onChange: (p: Record<string,any>) => void; }
+interface Props { params: ManageNewsParams; onChange: (p: ManageNewsParams) => void; }
 export const ArticleFilters: React.FC<Props> = ({ params, onChange }) => {
-  const [local, setLocal] = React.useState(params);
+  const [local, setLocal] = React.useState<ManageNewsParams>(params);
   React.useEffect(()=> setLocal(params), [params]);
   const apply = () => onChange(local);
-  const reset = () => { const cleared = { page:1, limit:20, status:'all' as const }; setLocal(cleared as any); onChange(cleared as any); };
+  const reset = () => { const cleared: ManageNewsParams = { page:1, limit:20, status:'all', sort: params.sort }; setLocal(cleared); onChange(cleared); };
   const debouncedSearch = useDebounce(local.q, 400);
-  React.useEffect(()=> { if (debouncedSearch !== params.q) onChange({ ...local, q: debouncedSearch, page:1 }); /* eslint-disable-next-line */}, [debouncedSearch]);
+  React.useEffect(()=> { if (debouncedSearch !== params.q) onChange({ ...local, q: debouncedSearch || undefined, page:1 }); /* eslint-disable-next-line */}, [debouncedSearch]);
   return (
     <div className="flex flex-wrap gap-3 items-end mb-4">
       <div className="flex flex-col">
         <label className="text-xs font-semibold">Search</label>
-        <input value={local.q||''} onChange={e=> setLocal({...local,q:e.target.value, page:1})} placeholder="Search..." className="border rounded px-2 py-1" />
+        <input value={local.q||''} onChange={e=> setLocal({...local,q:e.target.value||undefined, page:1})} placeholder="Search..." className="border rounded px-2 py-1" />
       </div>
       <div className="flex flex-col">
         <label className="text-xs font-semibold">Categories</label>

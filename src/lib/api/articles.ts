@@ -31,7 +31,7 @@ interface ApiResponse {
   message?: string;
 }
 
-interface ListResponse {
+export interface ListResponse {
   data: Article[];
   page: number;
   pages: number;

@@ -133,10 +133,43 @@ $response.Content
 - Use a strong founder password and enable password reset via OTP flow.
 
 ---
-## 11. Next Steps
+## 11. Operational Safeguards (Publishing & Workflow)
+
+Recent platform hardening added layered controls to prevent accidental or unauthorized publishing:
+
+### 11.1 Global Publish Flag
+Environment-driven default (`PUBLISH_ENABLED`) can be runtime overridden (founder only) via UI toggle. When OFF:
+- All publish & schedule actions are visually disabled.
+- Guard logic blocks backend transition requests (`publish`, `schedule`).
+
+### 11.2 Guard Logic (`guardAction`)
+Applies in `ManageNews` and `EditNews` pages before hitting transition endpoint:
+- Blocks publish/schedule if global flag OFF.
+- Requires founder role for publish when enabled.
+- Requires checklist completion for publish/schedule.
+- Enforces valid stage (schedule only from `approved`; publish only from `approved` or `scheduled`).
+Blocked attempts emit `debug()` logs for auditing.
+
+### 11.3 Bulk Upload Safety
+CSV preflight parses statuses client-side; unsafe `published` / `scheduled` rows are downgraded to `draft` if flag OFF or user not founder. Sanitization summary is shown to the user.
+
+### 11.4 Centralized Types
+Workflow, submission, and article domain models are defined in `src/types/api.ts` ensuring consistent status/stage usage and reducing drift.
+
+### 11.5 Error & Debug Utilities
+`normalizeError()` unifies API error parsing; `debug()` gated by env/localStorage avoids noisy logs in production while retaining deep diagnostics when needed.
+
+### 11.6 Recommended Monitoring Additions
+- Track rate of blocked publish actions (founder oversight metric).
+- Alert if blocked actions spike (could indicate misuse or misconfigured flag).
+- Log CSV sanitization counts to detect patterns of attempted auto-publish.
+
+## 12. Next Steps
 - Add monitoring for `/api/health` uptime.
 - Enable rate limiting on admin auth endpoints in backend.
 - Add MFA layer if required.
+- Document flag override audit trail (simple append-only log).
+- Add unit tests for transition guards (already partially covered for workflow & bulk upload).
 
 ---
 Maintained by: NewsPulse Platform Team

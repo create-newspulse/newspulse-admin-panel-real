@@ -4,6 +4,11 @@ import Editor from '../components/Editor';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
+import { usePublishFlag } from '../context/PublishFlagContext';
+import { guardAction } from '../lib/articleWorkflowGuard';
+import { debug } from '../lib/debug';
+
+import type { WorkflowChecklist, WorkflowState } from '@/types/api';
 
 interface NewsForm {
   title: string;
@@ -12,21 +17,6 @@ interface NewsForm {
   language: string;
   summary?: string;
 }
-
-type WorkflowChecklist = {
-  ptiCompliance: boolean;
-  rightsCleared: boolean;
-  attributionPresent: boolean;
-  defamationScanOk: boolean;
-};
-
-type WorkflowState = {
-  status: string;
-  stage: string;
-  checklist: WorkflowChecklist;
-  approvals?: Array<any>;
-  scheduledAt?: string | null;
-};
 
 const CATEGORY_OPTIONS = [
   'Breaking News', 'Regional', 'Politics', 'National', 'International',
@@ -40,6 +30,7 @@ export default function EditNews() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { publishEnabled } = usePublishFlag();
 
   const [form, setForm] = useState<NewsForm>({
     title: '',
@@ -205,6 +196,13 @@ export default function EditNews() {
 
   const doTransition = async (action: 'toReview' | 'toLegal' | 'approve' | 'schedule' | 'publish') => {
     if (!id) return;
+    const allChecklistOk = checklist.ptiCompliance && checklist.rightsCleared && checklist.attributionPresent && checklist.defamationScanOk;
+    const g = guardAction(action, publishEnabled, { checklistOk: allChecklistOk, stage: workflow?.stage, isFounder: (user?.role || '').toLowerCase() === 'founder' });
+    if (!g.allowed) {
+      debug('[EditNews] blocked transition', { id, action, publishEnabled });
+      toast.error(g.reason || 'Publishing disabled');
+      return;
+    }
     try {
       const payload: any = { action };
       if (action === 'schedule') {
@@ -325,6 +323,24 @@ export default function EditNews() {
                 <span className="px-2 py-1 text-xs rounded bg-amber-100 text-amber-800">Scheduled: {new Date(workflow.scheduledAt).toLocaleString()}</span>
               ) : null}
             </div>
+
+            {workflow.approvals && workflow.approvals.length > 0 && (
+              <div className="mb-4 border rounded bg-white overflow-hidden">
+                <div className="px-3 py-2 text-xs font-semibold bg-slate-100 flex items-center justify-between">
+                  <span>Approvals ({workflow.approvals.length})</span>
+                </div>
+                <div className="divide-y">
+                  {workflow.approvals.map((a, idx) => (
+                    <div key={idx} className="px-3 py-2 text-[11px] flex flex-wrap gap-3 items-center">
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{a.role}</span>
+                      {a.userName && <span className="text-slate-700">{a.userName}</span>}
+                      <span className="text-slate-500">{new Date(a.at).toLocaleString()}</span>
+                      {a.note && <span className="text-slate-600 italic max-w-[320px] truncate" title={a.note}>{a.note}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="flex items-center gap-2">

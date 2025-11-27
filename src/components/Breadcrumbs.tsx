@@ -10,6 +10,10 @@ const Breadcrumbs = () => {
     admin: "Admin",
     safeownerzone: "Safe Owner Zone",
     'ai-engine': 'AI Engine',
+    // News management aliases → single label
+    articles: 'Manage News',
+    news: 'Manage News',
+    'manage-news': 'Manage News',
   };
 
   // Full-path overrides for clarity between similarly named areas
@@ -41,31 +45,58 @@ const Breadcrumbs = () => {
             🏠 Home
           </Link>
         </li>
-        {segments.map((seg, i) => {
-          const path = "/" + segments.slice(0, i + 1).join("/");
-          const isLast = i === segments.length - 1;
+        {(() => {
+          // Build renderable entries allowing us to skip dynamic IDs for known routes
+          const entries: { key: string; path: string; label: string; isLast: boolean }[] = [];
+          const cleaned: Array<{ seg: string; idx: number }> = [];
 
-          // Omit 'admin' segment from breadcrumbs when it is a prefix (i.e., followed by at least one more segment)
-          if (seg === 'admin' && segments.length > 1) return null;
+          // Hide 'admin' when it's a mere prefix
+          segments.forEach((seg, i) => {
+            if (seg === 'admin' && segments.length > 1) return;
+            cleaned.push({ seg, idx: i });
+          });
 
-          return (
-            <li key={i} className="flex items-center gap-1">
+          // Special-case: /admin/articles/:id/edit → hide :id and label 'Edit Article'
+          // Note: original indices still in `segments`
+          const isArticleEdit = segments.length >= 4
+            && segments[0] === 'admin'
+            && segments[1] === 'articles'
+            && segments[3] === 'edit';
+
+          for (let viewIndex = 0; viewIndex < cleaned.length; viewIndex++) {
+            const { seg, idx } = cleaned[viewIndex];
+
+            // Skip the dynamic id between articles and edit
+            if (isArticleEdit && idx === 2) continue;
+
+            const path = "/" + segments.slice(0, idx + 1).join("/");
+            const isLast = (function () {
+              // If we skipped the id, the visual last might shift
+              if (isArticleEdit) {
+                // Last visible segment is at original idx 3 ('edit')
+                return idx === 3;
+              }
+              return idx === segments.length - 1;
+            })();
+
+            const label = (isArticleEdit && seg === 'edit')
+              ? 'Edit Article'
+              : formatLabel(seg, path);
+
+            entries.push({ key: `${idx}:${seg}`, path, label, isLast });
+          }
+
+          return entries.map((e) => (
+            <li key={e.key} className="flex items-center gap-1">
               <FaChevronRight className="text-gray-400 text-xs" />
-              {isLast ? (
-                <span className="font-semibold text-gray-800 dark:text-white">
-                  {formatLabel(seg, path)}
-                </span>
+              {e.isLast ? (
+                <span className="font-semibold text-gray-800 dark:text-white">{e.label}</span>
               ) : (
-                <Link
-                  to={path}
-                  className="text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  {formatLabel(seg, path)}
-                </Link>
+                <Link to={e.path} className="text-blue-600 dark:text-blue-400 hover:underline">{e.label}</Link>
               )}
             </li>
-          );
-        })}
+          ));
+        })()}
       </ol>
     </nav>
   );

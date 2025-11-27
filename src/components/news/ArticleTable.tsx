@@ -11,13 +11,17 @@ import {
   unscheduleArticle,
   deleteArticleHard,
   type Article,
+  type ListResponse,
 } from '@/lib/api/articles';
 import toast from 'react-hot-toast';
+import { normalizeError } from '@/lib/error';
 import { useAuth } from '@/context/AuthContext';
 import type { ArticleStatus } from '@/types/articles';
 import { ScheduleDialog } from './ScheduleDialog';
+import { usePublishFlag } from '@/context/PublishFlagContext';
 
-interface Props { params: Record<string, any>; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
+import type { ManageNewsParams } from '@/types/api';
+interface Props { params: ManageNewsParams; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
 
 export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange }) => {
   const navigate = useNavigate();
@@ -26,17 +30,17 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const role = user?.role || 'editor';
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
-  const { data, isLoading, error } = useQuery({ queryKey: ['articles', params], queryFn: () => listArticles(params) });
+  const { data, isLoading, error } = useQuery<ListResponse>({ queryKey: ['articles', params], queryFn: () => listArticles(params) });
   // Optimistic mutations
   const mutateArchive = useMutation({
     mutationFn: archiveArticle,
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
-      const prev = qc.getQueryData<any>(['articles', params]);
+      const prev = qc.getQueryData<ListResponse>(['articles', params]);
       if (prev?.data) {
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: any)=> a._id===id? { ...a, status:'archived' }: a)
+          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'archived' }: a)
         });
       }
       return { prev };
@@ -49,11 +53,11 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     mutationFn: restoreArticle,
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
-      const prev = qc.getQueryData<any>(['articles', params]);
+      const prev = qc.getQueryData<ListResponse>(['articles', params]);
       if (prev?.data) {
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: any)=> a._id===id? { ...a, status:'draft' }: a)
+          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'draft' }: a)
         });
       }
       return { prev };
@@ -66,11 +70,11 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     mutationFn: deleteArticle,
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
-      const prev = qc.getQueryData<any>(['articles', params]);
+      const prev = qc.getQueryData<ListResponse>(['articles', params]);
       if (prev?.data) {
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: any)=> a._id===id? { ...a, status:'deleted' }: a)
+          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'deleted' }: a)
         });
       }
       return { prev };
@@ -142,19 +146,23 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
 
   React.useEffect(()=>{ onSelectIds?.(selected); },[selected]);
   if (isLoading) return <div className="animate-pulse text-slate-500">Loading articles…</div>;
-  if (error) return <div className="text-red-600">Error loading articles</div>;
+  if (error) {
+    const n = normalizeError(error, 'Error loading articles');
+    return <div className="text-red-600">{n.message}</div>;
+  }
   const rows = data?.data || [];
   const page = data?.page || 1;
   const pages = data?.pages || 1;
   const total = data?.total || 0;
   const canPrev = page > 1;
   const canNext = page < pages;
+  const { publishEnabled } = usePublishFlag();
   return (
     <>
     <table className="w-full text-sm border">
       <thead className="sticky top-0 bg-slate-100">
         <tr className="text-left">
-          <th className="p-2"><input type="checkbox" onChange={e=> setSelected(e.target.checked? rows.map((r:any)=> r._id): [])} /></th>
+          <th className="p-2"><input type="checkbox" onChange={e=> setSelected(e.target.checked? rows.map((r:Article)=> r._id): [])} /></th>
           <th className="p-2">Title</th>
           <th className="p-2">Status</th>
           <th className="p-2">Author</th>
@@ -165,11 +173,11 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
         </tr>
       </thead>
       <tbody>
-        {rows.map((r:any)=> {
+        {rows.map((r: Article)=> {
           const statusColors: Record<'draft'|'scheduled'|'published'|'archived'|'deleted', string> = {
             draft: 'bg-gray-500', scheduled: 'bg-amber-600', published: 'bg-green-600', archived: 'bg-slate-600', deleted: 'bg-red-700'
           };
-          const st = (r.status ?? 'draft') as 'draft'|'scheduled'|'published'|'archived'|'deleted';
+          const st = (r.status ?? 'draft') as ArticleStatus;
           const badge = statusColors[st] || 'bg-gray-500';
 
           const ptiColors: Record<'compliant'|'pending'|'rejected', string> = { compliant: 'bg-green-600', pending: 'bg-amber-600', rejected: 'bg-red-600' };
@@ -185,7 +193,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
                   <span className="px-1 py-0.5 rounded bg-sky-700 text-white text-[10px]">{r.category}</span>
                 </div>
               </td>
-              <td className="p-2"><span className={`px-2 py-0.5 rounded text-white ${badge}`}>{r.status}</span></td>
+              <td className="p-2"><span className={`px-2 py-0.5 rounded text-white ${badge}`}>{st}</span></td>
               <td className="p-2">{r.author?.name || '—'}</td>
               <td className="p-2"><span className={`px-2 py-0.5 rounded text-white ${ptiBadge}`}>{r.ptiCompliance}</span></td>
               <td className="p-2">{r.trustScore ?? 0}</td>
@@ -195,16 +203,24 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
                   <button onClick={()=> navigate(`/admin/articles/${r._id}/edit`)} className="text-blue-600 hover:underline">Edit</button>
                 )}
                 {getAvailableActions(r.status as ArticleStatus).includes('publishNow') && (
-                  <button onClick={()=> mutatePublish.mutate(r._id)} className="text-green-700 hover:underline">Publish</button>
+                  publishEnabled ? (
+                    <button onClick={()=> mutatePublish.mutate(r._id)} className="text-green-700 hover:underline">Publish</button>
+                  ) : (
+                    <span className="text-slate-400 cursor-not-allowed">Publish (disabled)</span>
+                  )
                 )}
                 {getAvailableActions(r.status as ArticleStatus).includes('schedule') && (
-                  <button
-                    onClick={()=> {
-                      setScheduleTarget(r);
-                      setScheduleOpen(true);
-                    }}
-                    className="text-amber-700 hover:underline"
-                  >Schedule</button>
+                  publishEnabled ? (
+                    <button
+                      onClick={()=> {
+                        setScheduleTarget(r);
+                        setScheduleOpen(true);
+                      }}
+                      className="text-amber-700 hover:underline"
+                    >Schedule</button>
+                  ) : (
+                    <span className="text-slate-400 cursor-not-allowed">Schedule (disabled)</span>
+                  )
                 )}
                 {getAvailableActions(r.status as ArticleStatus).includes('unschedule') && (
                   <button onClick={()=> mutateUnschedule.mutate(r._id)} className="text-amber-700 hover:underline">Unschedule</button>

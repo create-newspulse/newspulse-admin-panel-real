@@ -1,53 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { fetchCommunitySubmissionById } from '@/api/adminCommunityReporterApi';
+import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { adminApi } from '@/lib/adminApi';
 import { useNotify } from '@/components/ui/toast-bridge';
 
-// Raw API type
-interface CommunitySubmissionApi {
-  _id: string;
-  name?: string;
-  userName?: string;
-  email?: string;
-  location?: string;
-  city?: string;
-  category?: string;
-  headline?: string;
-  body?: string;
-  mediaLink?: string;
-  mediaUrl?: string;
-  aiHeadline?: string;
-  aiBody?: string;
-  riskScore?: number;
-  flags?: string[];
-  rejectReason?: string;
-  status?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// Normalized UI type
-interface CommunitySubmission {
-  id: string;
-  name?: string;
-  userName?: string;
-  email?: string;
-  location?: string;
-  city?: string;
-  category?: string;
-  headline?: string;
-  body?: string;
-  mediaLink?: string;
-  mediaUrl?: string;
-  aiHeadline?: string;
-  aiBody?: string;
-  riskScore?: number;
-  flags?: string[];
-  rejectReason?: string;
-  status?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
 
 export default function CommunityReporterDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,20 +30,15 @@ export default function CommunityReporterDetailPage() {
       if (!id || id === 'undefined') return;
       setLoading(true); setError(null);
       try {
-        const res = await adminApi.get(`/api/admin/community-reporter/submissions/${id}`);
+        const s = await fetchCommunitySubmissionById(String(id));
         if (cancelled) return;
-        const raw = res.data;
-        const itemApi: CommunitySubmissionApi | undefined = (raw && raw.submission) ? raw.submission : raw;
-        if (!itemApi || !itemApi._id) {
-          setSubmission(null);
-          setError('Submission not found.');
-        } else {
-          setSubmission({ ...itemApi, id: itemApi._id });
-        }
+        setSubmission(s);
       } catch (e:any) {
         if (cancelled) return;
-        const st = e?.response?.status;
-        setError(st === 404 ? 'Submission not found.' : st === 401 ? 'Please login again.' : 'Failed to load submission.');
+        const msg = String(e?.message || 'Failed to load submission');
+        const is404 = msg.includes('HTTP 404');
+        const is401 = msg.includes('HTTP 401');
+        setError(is404 ? 'Submission not found.' : is401 ? 'Please login again.' : 'Failed to load submission.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -143,30 +95,40 @@ export default function CommunityReporterDetailPage() {
   if (!submission) return null;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <button onClick={goBack} className="mb-4 px-3 py-1 rounded bg-slate-600 text-white">← Back to Queue</button>
       <h1 className="text-2xl font-bold mb-2">{submission.headline || 'Untitled Submission'}</h1>
       {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
-      <div className="space-y-2 text-sm">
-        <div><span className="font-semibold">User:</span> {submission.userName || submission.name || '—'}</div>
-        <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
-        <div><span className="font-semibold">Location:</span> {submission.city || submission.location || '—'}</div>
-        <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
-        <div><span className="font-semibold">Status:</span> {submission.status || '—'}</div>
-        <div><span className="font-semibold">Created:</span> {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : '—'}</div>
-        <div><span className="font-semibold">Story Text:</span></div>
-        <div className="p-3 border rounded bg-slate-50 whitespace-pre-wrap text-sm">{submission.body || '—'}</div>
-        {(submission.mediaUrl || submission.mediaLink) && <div><span className="font-semibold">Media:</span> <a href={submission.mediaUrl || submission.mediaLink} target="_blank" rel="noreferrer" className="text-blue-600 underline">Open Media</a></div>}
+      <div className="border rounded bg-white p-3 mb-6">
+        <h3 className="text-sm font-semibold mb-3">Submission Details</h3>
+        <div className="space-y-2 text-sm">
+          <div><span className="font-semibold">User:</span> {submission.userName || submission.name || '—'}</div>
+          <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
+          <div><span className="font-semibold">Location:</span> {submission.city || submission.location || '—'}</div>
+          <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
+          <div><span className="font-semibold">Status:</span> {submission.status || '—'}</div>
+          <div><span className="font-semibold">Created:</span> {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : '—'}</div>
+        </div>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Headline</label>
+            <input value={submission.headline ?? ''} readOnly className="w-full border rounded px-2 py-1 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Body</label>
+            <textarea value={submission.body ?? ''} readOnly rows={10} className="w-full border rounded px-2 py-1 text-sm" />
+          </div>
+        </div>
       </div>
       <div className="mt-6 flex gap-3 flex-wrap">
-        {submission.status?.toUpperCase() !== 'APPROVED' && (
+        {String(submission.status || '').toUpperCase() !== 'APPROVED' && (
           <button
             disabled={actionLoading}
             onClick={()=> handleDecision('approve')}
             className="px-4 py-2 rounded bg-green-600 text-white disabled:opacity-60"
           >Approve</button>
         )}
-        {submission.status?.toUpperCase() !== 'REJECTED' && (
+        {String(submission.status || '').toUpperCase() !== 'REJECTED' && (
           <button
             disabled={actionLoading}
             onClick={()=> handleDecision('reject')}

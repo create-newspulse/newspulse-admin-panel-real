@@ -17,7 +17,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'home', label:'Home', path:'/', roles:['viewer','editor','admin','founder','moderator'], icon:'🏠', hidden: true },
   { key:'dashboard', label:'Dashboard', path:'/admin/dashboard', roles:['editor','admin','founder','moderator'], icon:'📊' },
   { key:'add', label:'Add News', path:'/add', roles:['editor','admin','founder'], icon:'📰' },
-  { key:'manage', label:'Manage News', path:'/admin/manage-news', roles:['editor','admin','founder','moderator'], icon:'📁' },
+  // Keep main nav pointing to /admin/articles (alias routes handle others)
+  { key:'manage', label:'Manage News', path:'/admin/articles', roles:['editor','admin','founder','moderator'], icon:'📁' },
   { key:'drafts', label:'Draft Desk', path:'/admin/drafts', roles:['editor','admin','founder'], icon:'📰' },
   { key:'community-reporter', label:'Community Reporter Queue', path:'/admin/community-reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   { key:'workflow', label:'Workflow', path:'/admin/workflow', roles:['editor','admin','founder'], icon:'⚙️' },
