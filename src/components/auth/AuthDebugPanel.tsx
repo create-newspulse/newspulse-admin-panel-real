@@ -1,4 +1,4 @@
-import React from 'react';
+// React import removed (not needed with JSX runtime)
 import { useAuth } from '@context/AuthContext';
 
 export default function AuthDebugPanel(){

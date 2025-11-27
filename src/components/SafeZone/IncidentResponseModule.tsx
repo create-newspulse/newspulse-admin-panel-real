@@ -41,7 +41,7 @@ const IncidentResponseModule = () => {
         if (errorLogs.length > 0) console.warn('🚨 Critical Error Detected:', errorLogs[0].message);
       } catch (err: any) {
         if (/route not found|404\b/i.test(err?.message || '')) {
-          if (routeAvailable !== false) console.warn('[IncidentResponseModule] route missing; switching to stub mode');
+          if (routeAvailable === null) console.warn('[IncidentResponseModule] route missing; switching to stub mode');
           routeAvailable = false;
           setIncidents([]);
           setLastSync(new Date().toISOString());

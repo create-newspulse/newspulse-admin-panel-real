@@ -1,12 +1,13 @@
 import React from 'react';
 import { useDebounce } from '@/hooks/useDebounce';
+import type { ArticleStatus } from '@/types/articles';
 
 interface Props { params: Record<string,any>; onChange: (p: Record<string,any>) => void; }
 export const ArticleFilters: React.FC<Props> = ({ params, onChange }) => {
   const [local, setLocal] = React.useState(params);
   React.useEffect(()=> setLocal(params), [params]);
   const apply = () => onChange(local);
-  const reset = () => { const cleared = { page:1, limit:20 }; setLocal(cleared); onChange(cleared); };
+  const reset = () => { const cleared = { page:1, limit:20, status:'all' as const }; setLocal(cleared as any); onChange(cleared as any); };
   const debouncedSearch = useDebounce(local.q, 400);
   React.useEffect(()=> { if (debouncedSearch !== params.q) onChange({ ...local, q: debouncedSearch, page:1 }); /* eslint-disable-next-line */}, [debouncedSearch]);
   return (
@@ -37,9 +38,13 @@ export const ArticleFilters: React.FC<Props> = ({ params, onChange }) => {
       </div>
       <div className="flex flex-col">
         <label className="text-xs font-semibold">Status</label>
-        <select value={local.status||''} onChange={e=> setLocal({...local,status:e.target.value||undefined, page:1})} className="border rounded px-2 py-1">
-          <option value="">All</option>
-          {['draft','scheduled','published','archived','deleted'].map(s=> <option key={s} value={s}>{s}</option>)}
+        <select
+          value={(local.status ?? 'all') as 'all' | ArticleStatus}
+          onChange={e=> setLocal({ ...local, status: (e.target.value as 'all' | ArticleStatus), page:1 })}
+          className="border rounded px-2 py-1"
+        >
+          <option value="all">All</option>
+          {(['draft','scheduled','published','archived','deleted'] as ArticleStatus[]).map(s=> <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
       <div className="flex flex-col">

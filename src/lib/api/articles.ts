@@ -3,6 +3,7 @@
 // We merge functionality into a single set of exports using the existing apiClient.
 
 import apiClient from '@/lib/api';
+import type { ArticleStatus } from '@/types/articles';
 
 export interface Article {
   _id: string;
@@ -11,13 +12,15 @@ export interface Article {
   summary?: string;
   content?: string;
   category?: string;
-  status?: string;
+  status?: ArticleStatus;
   author?: { name?: string };
   language?: string;
   ptiCompliance?: string;
   trustScore?: number;
   createdAt?: string;
   updatedAt?: string;
+  publishAt?: string;
+  scheduledAt?: string;
 }
 
 interface ApiResponse {
@@ -38,7 +41,17 @@ interface ListResponse {
 const ADMIN_ARTICLES_PATH = '/articles';
 
 // --- Core list & actions ---
-export async function listArticles(params: Record<string, any>): Promise<ListResponse> {
+export async function listArticles(params: {
+  status?: 'all' | ArticleStatus;
+  category?: string;
+  language?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+}): Promise<ListResponse> {
   // Translate frontend param `status: 'all'` to backend `status: undefined`
   if (params.status === 'all') {
     delete params.status;
@@ -72,6 +85,49 @@ export async function restoreArticle(id: string) {
 export async function deleteArticle(id: string) {
   const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`);
   return res.data;
+}
+
+// --- Control tower helpers ---
+export async function updateArticleStatus(id: string, status: ArticleStatus) {
+  // Prefer dedicated status route if backend supports it; fallback to generic update
+  try {
+    const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/status`, { status });
+    return res.data as Article;
+  } catch (err: any) {
+    if (err?.response?.status === 404) {
+      const res2 = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status });
+      return res2.data as Article;
+    }
+    throw err;
+  }
+}
+
+export async function scheduleArticle(id: string, publishAt: string) {
+  // Prefer dedicated schedule route; fallback to generic update with status
+  try {
+    const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/schedule`, { publishAt });
+    return res.data as Article;
+  } catch (err: any) {
+    if (err?.response?.status === 404) {
+      const res2 = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status: 'scheduled', publishAt });
+      return res2.data as Article;
+    }
+    throw err;
+  }
+}
+
+export async function unscheduleArticle(id: string) {
+  // Clear schedule and revert to draft
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status: 'draft', publishAt: null, scheduledAt: null });
+  return res.data as Article;
+}
+
+export async function deleteArticleSoft(id: string) {
+  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`);
+}
+
+export async function deleteArticleHard(id: string) {
+  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`, { params: { hard: true } });
 }
 
 // Optional extra helpers (create/update/meta) if needed by other screens

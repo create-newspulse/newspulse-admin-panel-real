@@ -146,19 +146,9 @@ export default function CommunityReporterPage(){
     navigate(`/admin/community-reporter/${submission.id}`);
   };
 
-  interface DraftArticleSummary {
-    _id: string;
-    title?: string;
-    status?: string;
-    source?: string;
-    submissionId?: string;
-  }
+  // Removed unused DraftArticleSummary type; we rely on backend-provided article payload
 
-  interface DecisionResponse {
-    ok: boolean;
-    submission: CommunitySubmission;
-    draftArticle?: DraftArticleSummary | null;
-  }
+  // Removed unused DecisionResponse type; approve flow now uses CommunityApproveResponse
 
   const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
     setActionId(submissionId); setError(null);

@@ -1,8 +1,20 @@
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listArticles, archiveArticle, restoreArticle, deleteArticle } from '@/lib/api/articles';
+import {
+  listArticles,
+  archiveArticle,
+  restoreArticle,
+  deleteArticle,
+  updateArticleStatus,
+  scheduleArticle,
+  unscheduleArticle,
+  deleteArticleHard,
+  type Article,
+} from '@/lib/api/articles';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
+import type { ArticleStatus } from '@/types/articles';
+import { ScheduleDialog } from './ScheduleDialog';
 
 interface Props { params: Record<string, any>; onEdit: (id: string) => void; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
 
@@ -66,6 +78,66 @@ export const ArticleTable: React.FC<Props> = ({ params, onEdit, onSelectIds, onP
     onSettled: () => { qc.invalidateQueries({ queryKey:['articles']}); }
   });
   const [selected, setSelected] = React.useState<string[]>([]);
+  
+  // Actions helper
+  type ArticleAction =
+    | 'edit'
+    | 'publishNow'
+    | 'schedule'
+    | 'unschedule'
+    | 'unpublish'
+    | 'archive'
+    | 'restore'
+    | 'deleteSoft'
+    | 'deleteHard';
+
+  function getAvailableActions(status: ArticleStatus): ArticleAction[] {
+    switch (status) {
+      case 'draft':
+        return ['edit', 'publishNow', 'schedule', 'archive', 'deleteSoft'];
+      case 'scheduled':
+        return ['edit', 'unschedule', 'archive', 'deleteSoft'];
+      case 'published':
+        return ['edit', 'unpublish', 'archive', 'deleteSoft'];
+      case 'archived':
+        return ['edit', 'restore', 'deleteSoft'];
+      case 'deleted':
+        return ['restore', 'deleteHard'];
+      default:
+        return ['edit'];
+    }
+  }
+
+  // Mutations for status transitions
+  const mutatePublish = useMutation({
+    mutationFn: (id: string) => updateArticleStatus(id, 'published'),
+    onSuccess: () => { toast.success('Published'); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+  });
+  const mutateUnpublish = useMutation({
+    mutationFn: (id: string) => updateArticleStatus(id, 'draft'),
+    onSuccess: () => { toast.success('Unpublished'); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+  });
+  const mutateSchedule = useMutation({
+    mutationFn: ({ id, at }: { id: string; at: string }) => scheduleArticle(id, at),
+    onSuccess: (_data, vars) => { toast.success(`Scheduled for local time ${new Date(vars.at).toLocaleString()}`); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+  });
+  const mutateUnschedule = useMutation({
+    mutationFn: (id: string) => unscheduleArticle(id),
+    onSuccess: () => { toast.success('Unscheduled'); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+  });
+  const mutateDeleteHard = useMutation({
+    mutationFn: (id: string) => deleteArticleHard(id),
+    onSuccess: () => { toast.success('Deleted forever'); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+  });
+  // Scheduling dialog state
+  const [scheduleOpen, setScheduleOpen] = React.useState(false);
+  const [scheduleTarget, setScheduleTarget] = React.useState<Article | null>(null);
+
   React.useEffect(()=>{ onSelectIds?.(selected); },[selected]);
   if (isLoading) return <div className="animate-pulse text-slate-500">Loading articles…</div>;
   if (error) return <div className="text-red-600">Error loading articles</div>;
@@ -115,12 +187,41 @@ export const ArticleTable: React.FC<Props> = ({ params, onEdit, onSelectIds, onP
               <td className="p-2">{r.author?.name || '—'}</td>
               <td className="p-2"><span className={`px-2 py-0.5 rounded text-white ${ptiBadge}`}>{r.ptiCompliance}</span></td>
               <td className="p-2">{r.trustScore ?? 0}</td>
-              <td className="p-2">{new Date(r.createdAt).toLocaleDateString()}</td>
+              <td className="p-2">{(() => { const t = r.createdAt && !Number.isNaN(Date.parse(r.createdAt)) ? new Date(r.createdAt).toLocaleString() : '—'; return t; })()}</td>
               <td className="p-2 space-x-2">
-                <button onClick={()=> onEdit(r._id)} className="text-blue-600 hover:underline">Edit</button>
-                {canArchive && r.status !== 'archived' && r.status !== 'deleted' && <button onClick={()=> mutateArchive.mutate(r._id)} className="text-slate-600 hover:underline">Archive</button>}
-                {canArchive && r.status === 'archived' && <button onClick={()=> mutateRestore.mutate(r._id)} className="text-green-600 hover:underline">Restore</button>}
-                {canDelete && r.status !== 'deleted' && <button onClick={()=> mutateDelete.mutate(r._id)} className="text-red-600 hover:underline">Delete</button>}
+                {getAvailableActions((r.status || 'draft') as ArticleStatus).includes('edit') && (
+                  <button onClick={()=> onEdit(r._id)} className="text-blue-600 hover:underline">Edit</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('publishNow') && (
+                  <button onClick={()=> mutatePublish.mutate(r._id)} className="text-green-700 hover:underline">Publish</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('schedule') && (
+                  <button
+                    onClick={()=> {
+                      setScheduleTarget(r);
+                      setScheduleOpen(true);
+                    }}
+                    className="text-amber-700 hover:underline"
+                  >Schedule</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('unschedule') && (
+                  <button onClick={()=> mutateUnschedule.mutate(r._id)} className="text-amber-700 hover:underline">Unschedule</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('unpublish') && (
+                  <button onClick={()=> mutateUnpublish.mutate(r._id)} className="text-slate-700 hover:underline">Unpublish</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('archive') && canArchive && (
+                  <button onClick={()=> mutateArchive.mutate(r._id)} className="text-slate-600 hover:underline">Archive</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('restore') && (
+                  <button onClick={()=> mutateRestore.mutate(r._id)} className="text-green-600 hover:underline">Restore</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('deleteSoft') && canDelete && (
+                  <button onClick={()=> mutateDelete.mutate(r._id)} className="text-red-600 hover:underline">Delete</button>
+                )}
+                {getAvailableActions(r.status as ArticleStatus).includes('deleteHard') && canDelete && (
+                  <button onClick={()=> { if (confirm('Delete forever?')) mutateDeleteHard.mutate(r._id); }} className="text-red-700 hover:underline">Delete forever</button>
+                )}
               </td>
             </tr>
           );
@@ -141,6 +242,25 @@ export const ArticleTable: React.FC<Props> = ({ params, onEdit, onSelectIds, onP
         </div>
       )}
     </div>
+    {/* Schedule Dialog */}
+    <ScheduleDialog
+      isOpen={scheduleOpen}
+      initialDateTime={(() => {
+        if (!scheduleTarget) return undefined;
+        const base = scheduleTarget.publishAt || scheduleTarget.scheduledAt || null;
+        return base;
+      })()}
+      onCancel={() => { setScheduleOpen(false); setScheduleTarget(null); }}
+      onConfirm={(localValue) => {
+        if (!scheduleTarget) return;
+        // localValue format: YYYY-MM-DDTHH:mm (local). new Date parses as local time.
+        const iso = new Date(localValue).toISOString();
+        if (!iso || Number.isNaN(Date.parse(iso))) { toast.error('Invalid date'); return; }
+        mutateSchedule.mutate({ id: scheduleTarget._id, at: iso });
+        setScheduleOpen(false);
+        setScheduleTarget(null);
+      }}
+    />
     </>
   );
 };

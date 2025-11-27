@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import apiClient, { safeSettingsLoad } from '@lib/api';
+import { safeSettingsLoad } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 

@@ -30,7 +30,9 @@ if (!interceptorsAttached) {
 				token = localStorage.getItem("np_admin_access_token") || localStorage.getItem("np_admin_token");
 			}
 			if (token) {
-				(config.headers ||= {});
+				if (!config.headers) {
+					config.headers = {} as any; // initialize headers object for axios typing
+				}
 				(config.headers as any).Authorization = `Bearer ${token}`;
 			}
 		} catch {}

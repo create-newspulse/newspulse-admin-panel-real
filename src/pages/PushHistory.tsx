@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api, { default as apiClient, safeSettingsLoad } from '../lib/api';
+import api, { safeSettingsLoad } from '../lib/api';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 
 interface PushEntry {

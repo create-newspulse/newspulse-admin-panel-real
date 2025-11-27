@@ -32,7 +32,23 @@ export default function AIEngine(): JSX.Element {
     }
     setLoading(true);
     try {
-  const resp = await apiLib.aiEngineRun({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl });
+  const resp = await (apiLib as any).aiEngineRun?.({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl })
+    .catch(async () => {
+      // Fallback POST if helper missing
+      try {
+        const API_ORIGIN_FALLBACK = (import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '') || '/admin-api';
+        const endpoint = API_ORIGIN_FALLBACK === '/admin-api' ? `${API_ORIGIN_FALLBACK}/ai/engine/run` : `${API_ORIGIN_FALLBACK}/api/ai/engine/run`;
+        const fr = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl })
+        });
+        if (!fr.ok) throw new Error(`HTTP ${fr.status}`);
+        return fr.json();
+      } catch (e) {
+        throw e;
+      }
+    });
       setResult(resp.result);
     } catch (e: any) {
       setError(e?.response?.data?.error || 'Failed to run AI Engine');

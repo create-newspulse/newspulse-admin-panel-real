@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import apiClient, { setAuthToken } from '@/lib/api';
-import { loginAdmin, adminApi } from '@/lib/adminApi';
+import { setAuthToken } from '@/lib/api';
+import { adminApi } from '@/lib/adminApi';
 
-type User = { id: string; email: string; name?: string; role?: string };
+type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string };
 
 export interface AuthContextValue {
   user: User | null;
@@ -88,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       const normalizedUser: User = {
         id: String(u.id || u._id || ''),
+        _id: String(u._id || u.id || ''),
         email: String(u.email || ''),
         name: String(u.name || ''),
         role: String(u.role || ''),
@@ -179,6 +180,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (u && (u.email || u.role)) {
         const restored: User = {
           id: String(u.id || u._id || ''),
+          _id: String(u._id || u.id || ''),
           email: String(u.email || ''),
           name: String(u.name || ''),
           role: String(u.role || ''),

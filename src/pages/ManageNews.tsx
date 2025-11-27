@@ -5,14 +5,12 @@ import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { safeLazy } from '@/utils/safeLazy';
+import type { ArticleStatus } from '@/types/articles';
 
 const ArticleForm = safeLazy(() => import('@/components/news/ArticleForm').then(m => ({ default: m.ArticleForm })), 'ArticleForm');
 
-// (Optional future) Workflow typing placeholder kept minimal
-
-// Status tabs metadata (UX layer over existing status filter)
-type NewsStatus = 'draft' | 'scheduled' | 'published' | 'archived' | 'deleted';
-const STATUS_TABS: { value: NewsStatus | 'all'; label: string }[] = [
+// Status tabs metadata (shared type)
+const STATUS_TABS: { value: 'all' | ArticleStatus; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Draft' },
   { value: 'scheduled', label: 'Scheduled' },
@@ -22,7 +20,8 @@ const STATUS_TABS: { value: NewsStatus | 'all'; label: string }[] = [
 ];
 
 export default function ManageNews() {
-  const [params, setParams] = React.useState<Record<string,any>>({ page:1, limit:20, sort:'-createdAt' });
+  // status param uses explicit 'all' | ArticleStatus for UI sync
+  const [params, setParams] = React.useState<Record<string,any>>({ page:1, limit:20, sort:'-createdAt', status:'all' as 'all' | ArticleStatus });
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [showCsv, setShowCsv] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
@@ -53,15 +52,15 @@ export default function ManageNews() {
         </div>
       </div>
 
-      {/* Status Tabs (UX layer over existing status filter) */}
+      {/* Status Tabs (synced with filters dropdown) */}
       <div className="flex flex-wrap gap-2">
         {STATUS_TABS.map(tab => {
-          const active = (params.status ?? 'all') === tab.value || (tab.value === 'all' && !params.status);
+          const active = (params.status ?? 'all') === tab.value;
           return (
             <button
               key={tab.value}
               type="button"
-              onClick={() => setParams(p => ({ ...p, status: tab.value === 'all' ? undefined : tab.value, page:1 }))}
+              onClick={() => setParams(p => ({ ...p, status: tab.value, page:1 }))}
               className={`px-3 py-1 rounded border text-sm transition ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'}`}
             >{tab.label}</button>
           );

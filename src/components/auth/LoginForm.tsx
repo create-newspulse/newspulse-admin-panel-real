@@ -2,7 +2,6 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
-import { type LoginDTO } from '@/lib/api';
 import { loginAdmin } from '@/lib/adminApi';
 import { useAuth } from '@/store/auth';
 import { toast } from 'sonner';
@@ -29,7 +28,7 @@ export default function LoginForm() {
     try {
       // Shared admin client: base already includes /admin
       // Try modern /login first; fallback to /auth/login automatically (handled in loginAdmin)
-      const { token, user } = await loginAdmin(data as LoginDTO);
+      const { token, user } = await loginAdmin({ email: data.email, password: data.password });
       if (token && user) {
         // Normalize token: remove any leading 'Bearer ' prefix if backend already included it
         const normalizedToken = String(token).replace(/^Bearer\s+/i, '');

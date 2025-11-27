@@ -9,12 +9,25 @@ export interface ExtendedApi extends AxiosInstance {
   monitorHub: () => Promise<any>;
   revenue: () => Promise<any>;
   revenueExportPdfPath: () => string;
+  systemHealth: () => Promise<any>;
+  aiActivityLog: () => Promise<any>;
+  stats: () => Promise<any>;
+  weekly: () => Promise<any>;
+  traffic: () => Promise<any>;
+  pollsLiveStats: () => Promise<any>;
 }
 
 export const api: ExtendedApi = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: false,
 }) as ExtendedApi;
+
+// Stub legacy helpers to avoid undefined method errors; components can feature-detect responses.
+api.systemHealth = async () => ({ ok: true, status: 'unknown' });
+api.aiActivityLog = async () => ({ ok: true, entries: [] });
+api.stats = async () => ({ ok: true, stats: {} });
+api.weekly = async () => ({ ok: true, weekly: {} });
+api.traffic = async () => ({ ok: true, traffic: {} });
 
 // Cached route availability map to suppress repeated 404 network attempts for optional/admin features.
 const routeAvailability: Record<string, boolean> = {};
@@ -25,7 +38,7 @@ async function probeRoute(path: string): Promise<boolean> {
   // Already cached result
   if (routeAvailability[path] !== undefined) return routeAvailability[path];
   // Existing in-flight probe
-  if (inFlightProbes[path]) return inFlightProbes[path];
+  if (inFlightProbes[path] !== undefined) return inFlightProbes[path];
 
   inFlightProbes[path] = (async () => {
     try {

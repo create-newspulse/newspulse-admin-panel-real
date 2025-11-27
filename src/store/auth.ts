@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
-export type Role = 'founder' | 'admin' | 'employee';
-export type User = { id: string; name: string; email: string; role: Role; avatarUrl?: string };
+export type Role = 'founder' | 'admin' | 'editor' | 'copyeditor' | 'reporter' | 'intern' | 'employee';
+export type User = { id: string; name: string; email: string; role: Role; avatarUrl?: string; avatar?: string; bio?: string; _id?: string };
 
 type State = {
   user: User | null;

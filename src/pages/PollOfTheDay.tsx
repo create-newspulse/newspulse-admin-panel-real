@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
-import apiClient, { safeSettingsLoad } from '@lib/api';
+import { safeSettingsLoad } from '@lib/api';
 
 interface Poll {
   _id: string;

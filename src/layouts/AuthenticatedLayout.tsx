@@ -23,7 +23,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
       return;
     }
 
-    if (requiredRoles && user && !requiredRoles.includes(user.role)) {
+    if (requiredRoles && user?.role && !requiredRoles.includes(user.role)) {
       navigate('/unauthorized', { replace: true });
     }
   }, [isLoading, isAuthenticated, user, requiredRoles, navigate, location.pathname]);
@@ -40,7 +40,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
     );
   }
 
-  if (!isAuthenticated || (requiredRoles && user && !requiredRoles.includes(user.role))) {
+  if (!isAuthenticated || (requiredRoles && user?.role && !requiredRoles.includes(user.role))) {
     return null;
   }
 

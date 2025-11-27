@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { adminRoot, adminApi } from '@lib/adminApi';
+import { adminApi } from '@lib/adminApi';
 
 // Define the type for the training info (customize as per your real data)
 interface AITrainingInfo {

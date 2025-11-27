@@ -56,7 +56,7 @@ export default function CommunityReporterDetailPage() {
   const [error, setError] = useState<string|null>(null);
   const [submission, setSubmission] = useState<CommunitySubmission | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [toast, setToast] = useState<string|null>(null);
+  // Local toast state removed; we use global notify toasts.
   const notify = useNotify();
 
   interface CommunityApproveResponse {
@@ -146,7 +146,6 @@ export default function CommunityReporterDetailPage() {
     <div className="max-w-3xl">
       <button onClick={goBack} className="mb-4 px-3 py-1 rounded bg-slate-600 text-white">← Back to Queue</button>
       <h1 className="text-2xl font-bold mb-2">{submission.headline || 'Untitled Submission'}</h1>
-      {toast && <div className="mb-3 text-sm bg-green-100 text-green-700 px-3 py-2 rounded border border-green-200">{toast}</div>}
       {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
       <div className="space-y-2 text-sm">
         <div><span className="font-semibold">User:</span> {submission.userName || submission.name || '—'}</div>

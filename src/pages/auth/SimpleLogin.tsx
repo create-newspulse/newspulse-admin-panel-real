@@ -35,7 +35,6 @@ export default function SimpleLogin() {
         return;
       }
       // Re-read user after login (context state updated)
-      const role = (user?.role || 'admin') as any;
       toast.success(`Welcome ${user?.name || email}`);
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
