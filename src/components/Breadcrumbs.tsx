@@ -14,6 +14,8 @@ const Breadcrumbs = () => {
     articles: 'Manage News',
     news: 'Manage News',
     'manage-news': 'Manage News',
+    community: 'Community',
+    reporter: 'Community Reporter Queue',
   };
 
   // Full-path overrides for clarity between similarly named areas
@@ -21,6 +23,7 @@ const Breadcrumbs = () => {
   const PATH_LABELS: Record<string, string> = {
     "/admin/security": "Zero-Trust Security",
     "/safeownerzone/security": "Security & Lockdown",
+    "/community/reporter": "Community Reporter Queue",
   };
 
   const formatLabel = (segment: string, path: string) => {
