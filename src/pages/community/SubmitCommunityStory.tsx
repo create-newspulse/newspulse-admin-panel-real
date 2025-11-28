@@ -42,28 +42,27 @@ export default function SubmitCommunityStory() {
 
   const mutation = useMutation({
     mutationFn: async (status: Article['status']) => {
-      const payload: Partial<Article & {
-        city?: string; location?: string; state?: string; country?: string; district?: string;
-        contactName?: string; contactEmail?: string; contactPhone?: string; contactMethod?: string;
-        contactOk?: boolean; futureContactOk?: boolean;
-      }> = {
+      const payload: any = {
         title,
         language,
         category,
         summary: summary || undefined,
         content: body,
         status: status,
-        city: city || undefined,
-        location: city || undefined,
-        state: stateName || undefined,
-        country: country || undefined,
-        district: district || undefined,
-        contactName: contactName || undefined,
-        contactEmail: contactEmail || undefined,
-        contactPhone: contactPhone || undefined,
-        contactMethod: contactMethod || undefined,
-        contactOk,
-        futureContactOk,
+        location: {
+          city: city || undefined,
+          state: stateName || undefined,
+          country: country || undefined,
+          district: district || undefined,
+        },
+        contact: {
+          name: (contactName || '').trim() || undefined,
+          email: (contactEmail || '').trim() || undefined,
+          phone: (contactPhone || '').trim() || undefined,
+          preferredContact: (contactMethod ? contactMethod : 'no_preference'),
+          canContactForThisStory: !!contactOk,
+          canContactForFutureStories: !!futureContactOk,
+        },
       };
       return await createCommunityArticle(payload);
     },

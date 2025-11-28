@@ -1,26 +1,6 @@
 import apiClient from '@/lib/api';
 import type { ArticleStatus } from '@/types/articles';
-
-export interface CommunityStory {
-  _id: string;
-  title: string;
-  summary?: string;
-  content?: string;
-  status: ArticleStatus;        // reusing admin article statuses
-  createdAt?: string;
-  updatedAt?: string;
-  language?: string;
-  category?: string;
-  city?: string;
-  source?: string;
-  submittedBy?: string;         // user id or email
-}
-
-export interface StoryListResponse {
-  ok: boolean;
-  items: CommunityStory[];
-  total: number;
-}
+import type { CommunityStoryListResponse } from '@/types/community';
 
 const MY_STORIES_PATH = '/community/stories/my';
 
@@ -33,11 +13,11 @@ export async function listMyStories(params?: {
   const query = { ...(params || {}) } as any;
   if (query.status === 'all') delete query.status;
 
-  const res = await apiClient.get<StoryListResponse>(MY_STORIES_PATH, {
+  const res = await apiClient.get<CommunityStoryListResponse>(MY_STORIES_PATH, {
     params: query,
   });
 
-  const data = res.data as StoryListResponse;
+  const data = res.data as CommunityStoryListResponse;
   if (!data?.ok) {
     throw new Error('Failed to load my stories');
   }
