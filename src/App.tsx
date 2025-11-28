@@ -76,6 +76,7 @@ import DraftDeskPage from '@pages/admin/DraftDeskPage';
 import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
 import ReporterPortal from '@pages/community/ReporterPortal';
+import CommunityHome from '@pages/community/CommunityHome';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -155,6 +156,8 @@ function App() {
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               {/* New canonical community reporter queue route (founder/admin view) */}
               <Route path="/community/reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
+              {/* Community Hub root */}
+              <Route path="/community" element={<ProtectedRoute><LockCheckWrapper><CommunityHome /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
               {/* Community Reporter – Submit Story (admin + public alias) */}
               <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><SubmitCommunityStory /></LockCheckWrapper></ProtectedRoute>} />
