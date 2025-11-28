@@ -7,6 +7,9 @@ export interface CommunitySubmission {
   category?: string;
   location?: string; // or city; keeping both optional
   city?: string;
+  state?: string;
+  country?: string;
+  district?: string;
   status: CommunitySubmissionStatus;
   priority?: 'FOUNDER_REVIEW' | 'EDITOR_REVIEW' | 'LOW_PRIORITY';
   linkedArticleId?: string | null;
@@ -14,6 +17,12 @@ export interface CommunitySubmission {
   userName?: string; // reporter display name
   name?: string; // legacy field fallback
   email?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  contactMethod?: 'email' | 'phone' | 'whatsapp' | 'other' | '' | undefined;
+  contactOk?: boolean;
+  futureContactOk?: boolean;
   // --- Reporter enrichment (UI only) ---
   reporterName?: string; // normalized name (userName || name)
   reporterAge?: number; // if backend sends age or age numeric string

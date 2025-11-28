@@ -30,12 +30,8 @@ function formatPriorityLabel(priority?: CommunitySubmissionPriority){
   return '—';
 }
 
-function priorityRank(priority?: CommunitySubmissionPriority){
-  if (priority === 'FOUNDER_REVIEW') return 1;
-  if (priority === 'EDITOR_REVIEW') return 2;
-  if (priority === 'LOW_PRIORITY') return 3;
-  return 99;
-}
+// Priority rank helper no longer used in sorting; keep for future enhancements
+// Removed to avoid unused variable warning
 
 export default function CommunityReporterPage(){
   const [loading, setLoading] = useState(false);
@@ -65,6 +61,13 @@ export default function CommunityReporterPage(){
     const city = (raw as any).city || (raw as any).town || '';
     const state = (raw as any).state || (raw as any).region || '';
     const country = (raw as any).country || '';
+    const district = (raw as any).district || (raw as any).area || '';
+    const contactName = (raw as any).contactName || undefined;
+    const contactEmail = (raw as any).contactEmail || undefined;
+    const contactPhone = (raw as any).contactPhone || undefined;
+    const contactMethod = (raw as any).contactMethod || undefined;
+    const contactOk = (raw as any).contactOk === true || (raw as any).contactOk === 'true';
+    const futureContactOk = (raw as any).futureContactOk === true || (raw as any).futureContactOk === 'true';
     const locParts = [city, state, country].map(p => String(p || '').trim()).filter(Boolean);
     const joinedLoc = locParts.join(', ');
     const reporterLocation = joinedLoc || (raw.location || raw.city || undefined);
@@ -76,6 +79,9 @@ export default function CommunityReporterPage(){
       category: raw.category ?? '',
       location: raw.location ?? raw.city ?? '',
       city: raw.city ?? undefined,
+      state: state || undefined,
+      country: country || undefined,
+      district: district || undefined,
       status: statusNorm,
       priority: raw.priority,
       linkedArticleId: raw.linkedArticleId ?? null,
@@ -83,6 +89,12 @@ export default function CommunityReporterPage(){
       userName: raw.userName,
       name: raw.name,
       email: raw.email,
+      contactName,
+      contactEmail,
+      contactPhone,
+      contactMethod,
+      contactOk: contactOk || undefined,
+      futureContactOk: futureContactOk || undefined,
       reporterName,
       reporterAge,
       reporterAgeGroup: agInfo.label,
@@ -244,10 +256,9 @@ export default function CommunityReporterPage(){
     .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
     .slice()
     .sort((a, b) => {
-      const prioDiff = priorityRank(a.priority) - priorityRank(b.priority);
-      if (prioDiff !== 0) return prioDiff;
       const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      // Newest first on top
       return bTime - aTime;
     });
 
@@ -308,7 +319,8 @@ export default function CommunityReporterPage(){
           <tr>
             <th className="p-2 text-left">Headline</th>
             <th className="p-2 text-left">Reporter</th>
-            <th className="p-2 text-left">City/Location</th>
+            <th className="p-2 text-left">Location</th>
+            <th className="p-2 text-left">Contact</th>
             <th className="p-2 text-left">Category</th>
             <th className="p-2 text-left">Priority</th>
             <th className="p-2 text-left">AI Risk</th>
@@ -346,6 +358,17 @@ export default function CommunityReporterPage(){
                 </div>
               </td>
               <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
+              <td className="p-2" title={(s.contactEmail || s.contactPhone) ? `${s.contactEmail || ''} ${s.contactPhone || ''}`.trim() : ''}>
+                <div className="flex flex-col gap-1 max-w-[180px]">
+                  {s.contactName && <span className="truncate" title={s.contactName}>{s.contactName}</span>}
+                  {(s.contactEmail || s.contactPhone) ? (
+                    <span className="text-[11px] text-slate-600 truncate" title={`${s.contactEmail || ''} ${s.contactPhone || ''}`.trim()}>
+                      {(s.contactEmail || '').trim()}{s.contactEmail && s.contactPhone ? ' · ' : ''}{(s.contactPhone || '').trim()}
+                    </span>
+                  ) : <span className="text-[11px] text-slate-400">—</span>}
+                  {s.contactMethod && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200 w-max" title="Preferred contact method">{s.contactMethod}</span>}
+                </div>
+              </td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
               <td className="p-2">

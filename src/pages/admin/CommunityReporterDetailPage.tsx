@@ -110,7 +110,10 @@ export default function CommunityReporterDetailPage() {
             return <div><span className="font-semibold">User:</span> {display}</div>;
           })()}
           <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
-          <div><span className="font-semibold">Location:</span> {submission.city || submission.location || '—'}</div>
+          <div><span className="font-semibold">Location:</span> {(() => {
+            const parts = [submission.city, submission.state, submission.district, submission.country].filter(Boolean);
+            return parts.length ? parts.join(', ') : (submission.city || submission.location || '—');
+          })()}</div>
           <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
           <div><span className="font-semibold">Status:</span> {submission.status || '—'}</div>
           <div><span className="font-semibold">Created:</span> {submission.createdAt ? new Date(submission.createdAt).toLocaleString() : '—'}</div>
@@ -125,6 +128,60 @@ export default function CommunityReporterDetailPage() {
             <textarea value={submission.body ?? ''} readOnly rows={10} className="w-full border rounded px-2 py-1 text-sm" />
           </div>
         </div>
+      </div>
+
+      {/* Location & Contact (internal only) */}
+      <div className="border rounded bg-white p-3 mb-6">
+        <h3 className="text-sm font-semibold mb-3">Location & Contact (Internal)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div>
+            <div className="font-semibold">City / Town</div>
+            <div className="mt-1">{submission.city || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">State / Region</div>
+            <div className="mt-1">{submission.state || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">Country</div>
+            <div className="mt-1">{submission.country || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">District / Area</div>
+            <div className="mt-1">{submission.district || '—'}</div>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div>
+            <div className="font-semibold">Reporter Name</div>
+            <div className="mt-1">{submission.contactName || (submission as any).reporterName || submission.userName || submission.name || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">Email</div>
+            <div className="mt-1">{submission.contactEmail || submission.email || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">Phone / WhatsApp</div>
+            <div className="mt-1">{submission.contactPhone || '—'}</div>
+          </div>
+          <div>
+            <div className="font-semibold">Preferred Method</div>
+            <div className="mt-1">{submission.contactMethod || '—'}</div>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 text-xs">
+          {submission.contactOk ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">Consent: story follow-up</span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">No follow-up consent</span>
+          )}
+          {submission.futureContactOk ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">Consent: future stories</span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">No future contact consent</span>
+          )}
+        </div>
+        <p className="mt-3 text-[11px] text-slate-500">Internal only – do not publish contact details publicly.</p>
       </div>
 
       {/* AI Review Section */}
