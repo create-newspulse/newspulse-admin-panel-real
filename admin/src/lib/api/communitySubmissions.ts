@@ -17,6 +17,9 @@ export interface CommunitySubmissionApi {
   mediaLink?: string;
   aiHeadline?: string;
   aiBody?: string;
+  aiSuggestedCategory?: string | null;
+  aiSuggestedTags?: string[];
+  aiTipOnlySuggested?: boolean;
   riskScore?: number;
   flags?: string[];
   rejectReason?: string;

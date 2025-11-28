@@ -102,7 +102,13 @@ export default function CommunityReporterDetailPage() {
       <div className="border rounded bg-white p-3 mb-6">
         <h3 className="text-sm font-semibold mb-3">Submission Details</h3>
         <div className="space-y-2 text-sm">
-          <div><span className="font-semibold">User:</span> {submission.userName || submission.name || '—'}</div>
+          {(() => {
+            const preferred = (submission as any).reporterName || submission.userName || submission.name || '';
+            const looksLikeId = typeof preferred === 'string' && (/^[a-f0-9]{24}$/i.test(preferred) || /^\d{10,}$/i.test(preferred));
+            const fallback = (submission.email || '').split('@')[0] || '—';
+            const display = preferred && !looksLikeId ? preferred : fallback;
+            return <div><span className="font-semibold">User:</span> {display}</div>;
+          })()}
           <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
           <div><span className="font-semibold">Location:</span> {submission.city || submission.location || '—'}</div>
           <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
@@ -119,6 +125,69 @@ export default function CommunityReporterDetailPage() {
             <textarea value={submission.body ?? ''} readOnly rows={10} className="w-full border rounded px-2 py-1 text-sm" />
           </div>
         </div>
+      </div>
+
+      {/* AI Review Section */}
+      <div className="border rounded bg-white p-3 mb-6">
+        <h3 className="text-sm font-semibold mb-3">AI Review</h3>
+        {(!('aiTitle' in (submission as any)) && !('aiHeadline' in (submission as any)) && !('aiBody' in (submission as any))) && (
+          <div className="text-xs text-slate-500">AI review not available. Treat as manual review.</div>
+        )}
+        {(() => {
+          const aiTitle = (submission as any).aiTitle ?? (submission as any).aiHeadline ?? '';
+          const aiBody = (submission as any).aiBody ?? '';
+          const riskScoreRaw = (submission as any).riskScore;
+          const riskScore = typeof riskScoreRaw === 'number' ? Math.max(0, Math.min(100, riskScoreRaw)) : null;
+          const flags: string[] = Array.isArray((submission as any).flags) ? (submission as any).flags : [];
+          const policyNotes: string | null = (submission as any).policyNotes ?? null;
+
+          const risk = (() => {
+            if (riskScore === null) return { label: 'Not reviewed', className: 'bg-slate-100 text-slate-600 border border-slate-200' };
+            if (riskScore <= 30) return { label: `Low (${riskScore})`, className: 'bg-green-100 text-green-700 border border-green-200' };
+            if (riskScore <= 70) return { label: `Medium (${riskScore})`, className: 'bg-amber-100 text-amber-800 border border-amber-200' };
+            return { label: `High (${riskScore})`, className: 'bg-red-100 text-red-700 border border-red-200' };
+          })();
+
+          const friendlyFlag = (f: string) => {
+            switch (f) {
+              case 'mentions_minor': return 'Mentions a minor';
+              case 'strong_opinion': return 'Strong opinion / emotional tone';
+              case 'privacy_risk': return 'Possible privacy risk';
+              case 'ai_error': return 'AI error – manual review needed';
+              default: return f.replaceAll('_', ' ');
+            }
+          };
+
+          return (
+            <div className="space-y-3">
+              {aiTitle ? (
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">AI Suggested Headline</label>
+                  <input value={aiTitle} readOnly className="w-full border rounded px-2 py-1 text-sm bg-emerald-50/40" />
+                </div>
+              ) : null}
+              {aiBody ? (
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">AI Suggested Body</label>
+                  <textarea value={aiBody} readOnly rows={8} className="w-full border rounded px-2 py-1 text-sm bg-emerald-50/40" />
+                </div>
+              ) : null}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${risk.className}`}>{risk.label}</span>
+                {flags.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {flags.map((f, i) => (
+                      <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200">{friendlyFlag(f)}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {policyNotes && (
+                <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded p-2">{policyNotes}</p>
+              )}
+            </div>
+          );
+        })()}
       </div>
       <div className="mt-6 flex gap-3 flex-wrap">
         {String(submission.status || '').toUpperCase() !== 'APPROVED' && (

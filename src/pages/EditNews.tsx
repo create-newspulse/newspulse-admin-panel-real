@@ -58,24 +58,25 @@ export default function EditNews() {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const res = await api.get(`/news/${id}`);
+        const res = await api.get(`/api/admin/articles/${id}`);
         const data = res.data;
-        if ((data.success && data.data) || data?.title) {
+        const article = data?.article || data?.data || data;
+        if (article && (article._id || article.id)) {
           setForm({
-            title: data.data?.title ?? data.title,
-            content: data.data?.content ?? data.content,
-            category: data.data?.category ?? data.category,
-            language: data.data?.language ?? data.language,
-            summary: data.data?.summary ?? data.summary ?? ''
+            title: article.title || '',
+            content: article.content || '',
+            category: article.category || '',
+            language: article.language || '',
+            summary: article.summary || ''
           });
         } else {
-          setError('⚠️ News not found');
+          setError('⚠️ Article not found');
         }
       } catch (err) {
         console.warn('Direct fetch failed, attempting fallback list lookup…');
         try {
-          const list = await api.get('/news/all');
-          const items = list.data?.articles || list.data?.items || [];
+          const list = await api.get('/api/admin/articles');
+          const items = list.data?.articles || list.data?.items || list.data || [];
           const found = items.find((n: any) => (n._id || n.id) === id);
           if (found) {
             setForm({
@@ -86,11 +87,11 @@ export default function EditNews() {
               summary: found.summary || ''
             });
           } else {
-            setError('⚠️ News not found');
+            setError('⚠️ Article not found');
           }
         } catch (e) {
           console.error(e);
-          setError('❌ Failed to load news');
+          setError('❌ Failed to load article');
         }
       } finally {
         setLoading(false);
@@ -143,15 +144,11 @@ export default function EditNews() {
     }
 
     try {
-      const res = await api.put(`/edit-news/${id}`, form);
+      const res = await api.put(`/api/admin/articles/${id}`, form);
       const result = res.data || {};
 
-      if (result.success) {
-        toast.success('✅ News updated');
-        navigate('/manage-news');
-      } else {
-        toast.error('❌ Update failed');
-      }
+      toast.success('✅ Article updated');
+      navigate('/manage-news');
     } catch (err: any) {
       console.error(err);
       toast.error(`❌ Server error: ${err?.message || 'unknown'}`);

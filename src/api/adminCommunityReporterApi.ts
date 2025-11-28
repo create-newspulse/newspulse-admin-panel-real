@@ -38,8 +38,27 @@ export async function fetchCommunitySubmissionById(id: string): Promise<Communit
 }
 
 export async function fetchCommunityReporterSubmissions() {
-  const path = '/api/admin/community-reporter/submissions';
-  const res = await adminApi.get(path);
-  if (import.meta.env.DEV) debug('[communityReporterApi] GET', path, 'status=', res.status);
-  return res.data;
+  // Try canonical admin path; fallback to legacy community path if needed
+  const paths = [
+    '/api/admin/community-reporter/submissions',
+    '/api/community/submissions',
+    '/community/submissions'
+  ];
+  let lastErr: any = null;
+  for (const path of paths) {
+    try {
+      const res = await adminApi.get(path);
+      if (import.meta.env.DEV) debug('[communityReporterApi] GET', path, 'status=', res.status);
+      return res.data;
+    } catch (e: any) {
+      lastErr = e;
+      // continue to next path
+    }
+  }
+  // Graceful dev fallback to avoid UI lock if backend down
+  if (import.meta.env.DEV) {
+    debug('[communityReporterApi] all paths failed; returning empty list fallback');
+    return { submissions: [] };
+  }
+  throw lastErr || new Error('Failed to load submissions');
 }

@@ -12,6 +12,15 @@ import {
   CommunityDecisionResponse
 } from '@/types/api';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
+import { getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
+
+/*
+ * Community Reporter Queue (admin)
+ * File: src/pages/admin/CommunityReporterPage.tsx
+ * Submission type: CommunitySubmission (src/types/CommunitySubmission.ts)
+ * Data fetch: fetchCommunityReporterSubmissions() from src/api/adminCommunityReporterApi.ts
+ * Enhancements: Reporter composite cell (name + age group badge + location)
+ */
 
 function formatPriorityLabel(priority?: CommunitySubmissionPriority){
   // Function to format priority labels
@@ -43,6 +52,23 @@ export default function CommunityReporterPage(){
 
   // Helper to map raw API submission to strict Phase-1 CommunitySubmission type
   function mapRaw(raw: CommunitySubmissionApi): CommunitySubmission {
+    const statusNorm = (() => {
+      const s = String(raw.status || 'pending').toLowerCase();
+      return (s === 'pending' || s === 'approved' || s === 'rejected' || s === 'trash') ? s : 'pending';
+    })() as CommunitySubmission['status'];
+    const reporterName = (raw.userName || raw.name || '').trim() || undefined;
+    // Age extraction (number if possible)
+    const ageRaw: any = (raw as any).age ?? (raw as any).reporterAge ?? undefined;
+    const ageNum = typeof ageRaw === 'number' ? ageRaw : (typeof ageRaw === 'string' ? Number(ageRaw) : undefined);
+    const reporterAge = (typeof ageNum === 'number' && !Number.isNaN(ageNum)) ? ageNum : undefined;
+    const explicitGroup: string | undefined = (raw as any).ageGroup || (raw as any).reporterAgeGroup || undefined;
+    const city = (raw as any).city || (raw as any).town || '';
+    const state = (raw as any).state || (raw as any).region || '';
+    const country = (raw as any).country || '';
+    const locParts = [city, state, country].map(p => String(p || '').trim()).filter(Boolean);
+    const joinedLoc = locParts.join(', ');
+    const reporterLocation = joinedLoc || (raw.location || raw.city || undefined);
+    const agInfo = getAgeGroup(reporterAge, explicitGroup);
     return {
       id: String((raw as any).id || raw._id || (raw as any).ID || (raw as any).uuid || 'missing-id'),
       headline: raw.headline ?? '',
@@ -50,16 +76,23 @@ export default function CommunityReporterPage(){
       category: raw.category ?? '',
       location: raw.location ?? raw.city ?? '',
       city: raw.city ?? undefined,
-      status: (() => {
-        const s = String(raw.status || 'pending').toLowerCase();
-        return (s === 'pending' || s === 'approved' || s === 'rejected' || s === 'trash') ? s : 'pending';
-      })() as CommunitySubmission['status'],
+      status: statusNorm,
       priority: raw.priority,
       linkedArticleId: raw.linkedArticleId ?? null,
       createdAt: raw.createdAt,
       userName: raw.userName,
       name: raw.name,
       email: raw.email,
+      reporterName,
+      reporterAge,
+      reporterAgeGroup: agInfo.label,
+      reporterLocation,
+      // AI review fields (support legacy naming fallbacks)
+      aiTitle: (raw as any).aiTitle ?? (raw as any).aiHeadline ?? null,
+      aiBody: (raw as any).aiBody ?? (raw as any).aiText ?? null,
+      riskScore: (typeof (raw as any).riskScore === 'number') ? (raw as any).riskScore : undefined,
+      flags: Array.isArray((raw as any).flags) ? (raw as any).flags : undefined,
+      policyNotes: (raw as any).policyNotes ?? undefined,
     };
   }
 
@@ -100,7 +133,12 @@ export default function CommunityReporterPage(){
 
   const handleView = (submission: CommunitySubmission) => {
     if (!submission.id || submission.id === 'missing-id') return;
-    navigate(`/admin/community-reporter/${submission.id}`);
+    const name = submission.reporterName || submission.userName || submission.name || '';
+    try {
+      if (name) sessionStorage.setItem(`cr:${submission.id}:name`, name);
+      if (submission.headline) sessionStorage.setItem(`cr:${submission.id}:headline`, submission.headline);
+    } catch {}
+    navigate(`/admin/community-reporter/${submission.id}` as any, { state: { reporterName: name, submissionId: submission.id, headline: submission.headline } } as any);
   };
 
   // Removed unused DraftArticleSummary type; we rely on backend-provided article payload
@@ -269,10 +307,11 @@ export default function CommunityReporterPage(){
         <thead className="bg-slate-100">
           <tr>
             <th className="p-2 text-left">Headline</th>
-            <th className="p-2 text-left">Name</th>
+            <th className="p-2 text-left">Reporter</th>
             <th className="p-2 text-left">City/Location</th>
             <th className="p-2 text-left">Category</th>
             <th className="p-2 text-left">Priority</th>
+            <th className="p-2 text-left">AI Risk</th>
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Created At</th>
             <th className="p-2 text-left">Actions</th>
@@ -282,10 +321,57 @@ export default function CommunityReporterPage(){
           {filteredSubmissions.map(s => (
             <tr key={s.id} className="border-t hover:bg-slate-50">
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline || '—'}</td>
-              <td className="p-2" title={s.userName || s.name}>{s.userName || s.name || '—'}</td>
+              <td className="p-2" title={s.reporterName || s.userName || s.name || 'Unknown reporter'}>
+                <div className="flex flex-col gap-1 max-w-[240px]">
+                  <span className="font-medium truncate">{s.reporterName || s.userName || s.name || 'Unknown reporter'}</span>
+                  <div className="flex flex-wrap gap-1 items-center">
+                    {/* Age group badge */}
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${toneToBadgeClasses((() => {
+                        const grp = s.reporterAgeGroup || 'Age not provided';
+                        if (grp.startsWith('Under 13')) return 'danger';
+                        if (grp.startsWith('13–17')) return 'warning';
+                        if (grp.startsWith('18+')) return 'success';
+                        return 'neutral';
+                      })())}`}
+                      title={s.reporterAgeGroup}
+                    >{s.reporterAgeGroup || 'Age not provided'}</span>
+                    {s.reporterLocation && (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200 max-w-[160px] truncate"
+                        title={s.reporterLocation}
+                      >{s.reporterLocation}</span>
+                    )}
+                  </div>
+                </div>
+              </td>
               <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
+              <td className="p-2">
+                {typeof (s as any).riskScore === 'number' ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const score = Math.max(0, Math.min(100, Number((s as any).riskScore || 0)));
+                      const tier = score <= 30 ? { label: 'Low', tone: 'success' } : score <= 70 ? { label: 'Medium', tone: 'warning' } : { label: 'High', tone: 'danger' };
+                      return (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${toneToBadgeClasses(tier.tone as any)}`}
+                          title={`Risk: ${tier.label} (${score})`}
+                        >{tier.label} <span className="ml-1 opacity-70">{score}</span></span>
+                      );
+                    })()}
+                    {Array.isArray((s as any).flags) && (s as any).flags.length > 0 && (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200"
+                        title={(s as any).flags.join(', ')}
+                      >🚩 {(s as any).flags.length} flags</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )}
+              </td>
               <td className="p-2 font-medium">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span title={s.status}>{s.status || '—'}</span>

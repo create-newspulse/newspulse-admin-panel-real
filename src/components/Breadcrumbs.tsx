@@ -79,9 +79,23 @@ const Breadcrumbs = () => {
               return idx === segments.length - 1;
             })();
 
-            const label = (isArticleEdit && seg === 'edit')
+            let label = (isArticleEdit && seg === 'edit')
               ? 'Edit Article'
               : formatLabel(seg, path);
+
+            // Special-case: Community Reporter detail → show reporter name instead of raw id
+            const isCommunityDetail = segments[0] === 'admin' && segments[1] === 'community-reporter' && idx === 2;
+            if (isCommunityDetail) {
+              const looksLikeId = /^[a-f0-9]{24}$/i.test(seg) || /^\d{10,}$/i.test(seg);
+              if (looksLikeId) {
+                const st: any = (location as any).state || {};
+                let preferred = st?.reporterName || '';
+                if (!preferred) {
+                  try { preferred = sessionStorage.getItem(`cr:${seg}:name`) || ''; } catch {}
+                }
+                label = preferred || 'Submission';
+              }
+            }
 
             entries.push({ key: `${idx}:${seg}`, path, label, isLast });
           }

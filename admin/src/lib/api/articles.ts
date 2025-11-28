@@ -14,6 +14,15 @@ export interface ArticleInput {
   ptiCompliance?: string;
 }
 
+// Minimal admin-facing article shape used for filtering & actions
+export interface AdminArticle {
+  _id: string;
+  title?: string;
+  language?: 'en'|'hi'|'gu'|string;
+  status?: 'draft'|'scheduled'|'published'|'archived'|'deleted'|string;
+  source?: 'community'|'editor'|string;
+}
+
 export interface AdminArticleListParams {
   page?: number;
   limit?: number;

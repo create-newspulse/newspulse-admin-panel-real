@@ -95,6 +95,41 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange }: P
                   </div>
                 </div>
               </div>
+              {/* AI Suggestions block */}
+              <div className="mt-2 p-3 border rounded bg-slate-50">
+                <h3 className="font-semibold mb-2">AI Suggestions</h3>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="font-medium">Suggested section:</span>{' '}
+                    <span>
+                      {formatCategoryLabel(item.aiSuggestedCategory)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Suggested tags:</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {Array.isArray(item.aiSuggestedTags) && item.aiSuggestedTags.length > 0 ? (
+                        item.aiSuggestedTags.map((t) => (
+                          <span key={t} className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-xs font-medium">{t}</span>
+                        ))
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    {item.aiTipOnlySuggested === true ? (
+                      <div className="mt-1 px-3 py-2 border rounded bg-yellow-50 text-yellow-800 border-yellow-200">
+                        AI suggests treating this as a TIP ONLY (needs separate verification before publishing).
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs text-slate-600">
+                        AI considers this suitable as a direct story (subject to Founder judgment).
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div className="space-y-2">
                 <div><span className="font-medium">Name:</span> {item.userName} {item.email && <span className="text-slate-500">({item.email})</span>}</div>
                 <div><span className="font-medium">Location:</span> {item.location || '—'}</div>
@@ -149,4 +184,27 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange }: P
       </div>
     </div>
   );
+}
+
+// Helpers
+const CATEGORY_LABELS: Record<string, string> = {
+  regional: 'Regional',
+  youth: 'Youth Pulse',
+  civic: 'Civic Issues',
+  politics: 'Politics',
+  business: 'Business',
+  sports: 'Sports',
+  culture: 'Culture'
+};
+
+function titleCaseFallback(slug?: string | null): string {
+  if (!slug) return '—';
+  const s = String(slug).replace(/[_-]+/g, ' ');
+  return s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
+function formatCategoryLabel(slug?: string | null): string {
+  if (!slug) return '—';
+  const key = String(slug).toLowerCase();
+  return CATEGORY_LABELS[key] || titleCaseFallback(slug);
 }

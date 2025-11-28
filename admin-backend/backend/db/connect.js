@@ -9,6 +9,13 @@ const connectDB = async () => {
     // Use environment variable or fallback to localhost for dev
     const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/newspulse';
 
+    // Allow disabling DB in local/dev with special flags
+    if (/^(skip|none|disable|disabled)$/i.test((MONGO_URI || '').trim())) {
+      console.warn('⏭️  [connectDB] MongoDB connection disabled by MONGO_URI flag. Running without DB.');
+      process.env.DB_DEGRADED = '1';
+      return false;
+    }
+
     // Warn if running production without MONGO_URI
     if (process.env.NODE_ENV === 'production' && !process.env.MONGO_URI && !process.env.MONGODB_URI) {
       console.warn('⚠️ [connectDB] MONGO_URI/MONGODB_URI not set in production! Using default/localhost.');
@@ -19,7 +26,14 @@ const connectDB = async () => {
       await mongoose.disconnect();
     }
 
-    // Modern Mongoose (v6+) no longer needs useNewUrlParser/useUnifiedTopology
+    // Validate scheme
+    if (!/^mongodb(\+srv)?:\/\//i.test(MONGO_URI)) {
+      console.warn('⚠️  [connectDB] MONGO_URI does not start with mongodb:// or mongodb+srv://. Running without DB.');
+      process.env.DB_DEGRADED = '1';
+      return false;
+    }
+
+    // Modern Mongoose (v6+) no longer needs legacy options
     await mongoose.connect(MONGO_URI, {
       serverSelectionTimeoutMS: 5000,
     });

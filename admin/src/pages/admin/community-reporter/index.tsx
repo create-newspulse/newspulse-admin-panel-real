@@ -104,6 +104,7 @@ export default function CommunityReporterPage(){
             <th className="p-2 text-left">Name</th>
             <th className="p-2 text-left">Location</th>
             <th className="p-2 text-left">Category</th>
+            <th className="p-2 text-left">AI</th>
             <th className="p-2 text-left">Priority</th>
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Risk</th>
@@ -117,6 +118,18 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.userName}>{s.userName}</td>
               <td className="p-2" title={s.location}>{s.location || '—'}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
+              <td className="p-2">
+                {s?.aiTipOnlySuggested === true ? (
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-medium border bg-yellow-50 text-yellow-800 border-yellow-200"
+                    title={(s?.aiSuggestedCategory || '') as string}
+                  >
+                    Tip
+                  </span>
+                ) : (
+                  <span className="text-slate-300"> </span>
+                )}
+              </td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
               <td className="p-2 font-medium" title={s.status}>{s.status}</td>
               <td className="p-2" title={typeof s.riskScore==='number' ? String(s.riskScore) : '—'}>

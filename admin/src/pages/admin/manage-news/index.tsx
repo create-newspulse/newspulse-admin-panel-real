@@ -1,10 +1,16 @@
+import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { listArticles, archiveArticle, restoreArticle, deleteArticle } from '../../../lib/api/articles';
+import { listArticles, archiveArticle, restoreArticle, deleteArticle, AdminArticle } from '../../../lib/api/articles';
 
 export default function ManageNewsPage(){
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey:['articles'], queryFn: () => listArticles() });
-  const items = data?.data || [];
+  const items: AdminArticle[] = (data?.data || []) as AdminArticle[];
+
+  // Hide community-sourced drafts from Manage News list (affects implicit "All" view here)
+  const filteredItems = useMemo(()=>
+    (items || []).filter(a => !( (a?.source === 'community') && (a?.status === 'draft') )),
+  [items]);
 
   async function act(id:string, action:'archive'|'restore'|'delete') {
     if (action==='archive') await archiveArticle(id);
@@ -33,7 +39,7 @@ export default function ManageNewsPage(){
           </tr>
         </thead>
         <tbody>
-          {items.map((a:any)=>(
+          {filteredItems.map((a: AdminArticle)=>(
             <tr key={a._id} className="border-t">
               <td className="p-2">{a.title}</td>
               <td className="p-2 text-center">{a.language}</td>

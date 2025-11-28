@@ -50,12 +50,13 @@ export default defineConfig(({ mode }): UserConfig => {
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
-        // Proxy /admin-api/* to local backend and rewrite to /api/* in dev
+        // Proxy /admin-api/* to local backend without rewriting path
+        // Backend mounts admin endpoints under '/admin-api', so keep the prefix intact.
         '/admin-api': {
           target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
-          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
+          // No rewrite: preserve '/admin-api' so routes like '/admin-api/articles/:id' resolve
         },
         '/socket.io': {
           target: API_WS,
