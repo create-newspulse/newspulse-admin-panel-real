@@ -75,6 +75,7 @@ import Editorial from '@pages/admin/Editorial';
 import DraftDeskPage from '@pages/admin/DraftDeskPage';
 import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
+import ReporterPortal from '@pages/community/ReporterPortal';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -157,6 +158,7 @@ function App() {
               <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><SubmitCommunityStory /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter – My Stories */}
               <Route path="/admin/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
