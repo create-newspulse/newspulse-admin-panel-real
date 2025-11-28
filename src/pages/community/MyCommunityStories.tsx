@@ -2,18 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { listMyStories, withdrawStory, deleteMyStory, type CommunityStory } from '@/lib/api/communityStories';
+import { listMyStories, withdrawStory, deleteMyStory } from '@/lib/api/communityStories';
+import type { CommunityStory } from '@/types/community';
 import type { ArticleStatus } from '@/types/articles';
 
-function statusBadgeTone(s: ArticleStatus) {
-  switch (s) {
-    case 'draft': return 'bg-slate-100 text-slate-700 border border-slate-200';
-    case 'scheduled': return 'bg-indigo-100 text-indigo-700 border border-indigo-200';
-    case 'published': return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
-    case 'archived': return 'bg-gray-100 text-gray-700 border border-gray-200';
-    case 'deleted': return 'bg-red-100 text-red-700 border border-red-200';
-    default: return 'bg-slate-100 text-slate-700 border border-slate-200';
-  }
+function StatusBadge({ status }: { status: string | ArticleStatus }) {
+  const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] capitalize';
+  const s = String(status || '').toLowerCase();
+  if (s === 'draft') return <span className={`${base} bg-slate-100 text-slate-700 border border-slate-200`}>draft</span>;
+  if (s === 'pending' || s === 'under_review') return <span className={`${base} bg-amber-50 text-amber-800 border border-amber-200`}>pending</span>;
+  if (s === 'approved' || s === 'published') return <span className={`${base} bg-emerald-50 text-emerald-700 border border-emerald-200`}>{s === 'approved' ? 'approved' : 'published'}</span>;
+  if (s === 'rejected' || s === 'deleted') return <span className={`${base} bg-red-50 text-red-700 border border-red-200`}>{s === 'rejected' ? 'rejected' : 'deleted'}</span>;
+  if (s === 'archived') return <span className={`${base} bg-slate-50 text-slate-500 border border-slate-200`}>archived</span>;
+  if (s === 'scheduled') return <span className={`${base} bg-indigo-100 text-indigo-700 border border-indigo-200`}>scheduled</span>;
+  return <span className={`${base} bg-slate-50 text-slate-500 border border-slate-200`}>{status || 'unknown'}</span>;
 }
 
 function snippet(txt?: string, n = 140) {
@@ -25,6 +27,7 @@ function snippet(txt?: string, n = 140) {
 export default function MyCommunityStories() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [viewing, setViewing] = useState<CommunityStory | null>(null);
 
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<ArticleStatus | 'all'>('all');
@@ -78,7 +81,7 @@ export default function MyCommunityStories() {
           <p className="text-sm text-slate-600">View and manage stories you've submitted to NewsPulse.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn-secondary" onClick={()=> navigate('/admin/community/submit')}>+ New Story</button>
+          <button className="btn-secondary" onClick={()=> navigate('/community/submit')}>+ New Story</button>
           <button className="btn-secondary" onClick={()=> qc.invalidateQueries({ queryKey: ['my-community-stories'] })}>Refresh</button>
         </div>
       </div>
@@ -113,7 +116,7 @@ export default function MyCommunityStories() {
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Language</th>
             <th className="p-2 text-left">Category</th>
-            <th className="p-2 text-left">City</th>
+            <th className="p-2 text-left">Location</th>
             <th className="p-2 text-left">Created</th>
             <th className="p-2 text-left">Actions</th>
           </tr>
@@ -124,15 +127,16 @@ export default function MyCommunityStories() {
               <td className="p-2 max-w-[240px] truncate" title={s.title}>{s.title}</td>
               <td className="p-2 max-w-[300px] truncate" title={s.summary || snippet(s.content)}>{s.summary || snippet(s.content)}</td>
               <td className="p-2">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${statusBadgeTone(s.status)}`}>{s.status}</span>
+                <StatusBadge status={String(s.status || '')} />
               </td>
               <td className="p-2" title={s.language || ''}>{s.language || '—'}</td>
               <td className="p-2" title={s.category || ''}>{s.category || '—'}</td>
-              <td className="p-2" title={s.city || ''}>{s.city || '—'}</td>
+              <td className="p-2" title={s.location?.city || ''}>{s.location?.city || '—'}</td>
               <td className="p-2" title={s.createdAt || ''}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
-                  <button className="px-3 py-1 text-xs rounded bg-blue-600 text-white" onClick={()=> navigate(`/admin/news/${s._id}/edit`)}>Edit</button>
+                  <button className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-900" onClick={()=> setViewing(s)}>View</button>
+                  <button className="px-3 py-1 text-xs rounded bg-blue-600 text-white" onClick={()=> navigate(`/admin/articles/${s._id}/edit`)}>Edit</button>
                   <button className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-800" onClick={()=> withdrawMut.mutate(s._id)} disabled={withdrawMut.isPending}>Withdraw</button>
                   <button className="px-3 py-1 text-xs rounded bg-red-600 text-white" onClick={()=> deleteMut.mutate(s._id)} disabled={deleteMut.isPending}>Delete</button>
                 </div>
@@ -146,6 +150,36 @@ export default function MyCommunityStories() {
           )}
         </tbody>
       </table>
+
+      {viewing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-2xl w-full mx-4">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold truncate" title={viewing.title}>{viewing.title || 'Untitled story'}</h3>
+              <button className="text-slate-600 hover:text-slate-900" onClick={()=> setViewing(null)}>✕</button>
+            </div>
+            <div className="p-4 space-y-3 text-sm text-slate-800">
+              <div className="flex items-center gap-2 flex-wrap">
+                <StatusBadge status={String(viewing.status || '')} />
+                {viewing.language && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200">{viewing.language}</span>}
+                {viewing.category && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200">{viewing.category}</span>}
+                {viewing.location?.city && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200">{viewing.location.city}</span>}
+                {viewing.createdAt && <span className="text-xs text-slate-500">{new Date(viewing.createdAt).toLocaleString()}</span>}
+              </div>
+              {viewing.summary && (
+                <p className="text-slate-700">{viewing.summary}</p>
+              )}
+              {viewing.content && (
+                <div className="prose max-w-none whitespace-pre-wrap leading-relaxed">{viewing.content}</div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button className="px-3 py-1 text-sm rounded bg-slate-200 text-slate-800" onClick={()=> setViewing(null)}>Close</button>
+              <button className="px-3 py-1 text-sm rounded bg-blue-600 text-white" onClick={()=> { setViewing(null); navigate(`/admin/articles/${viewing._id}/edit`); }}>Edit</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
