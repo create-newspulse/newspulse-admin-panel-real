@@ -141,6 +141,18 @@ export async function createArticle(data: Partial<Article>) {
   const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
   return res.data;
 }
+// Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
+export async function createCommunityArticle(data: Partial<Article>) {
+  // Draft Desk marks community items if any of: isCommunity, source/origin/submittedBy contains 'community'/'reporter'
+  const payload = {
+    ...data,
+    // Ensure at least one explicit flag for reliable detection
+    isCommunity: true,
+    source: 'community-reporter',
+    origin: 'community-reporter',
+  } as Partial<Article & { isCommunity?: boolean; source?: string; origin?: string; submittedBy?: string }>;
+  return createArticle(payload);
+}
 export async function updateArticle(id: string, data: Partial<Article>) {
   const res = await apiClient.put(`${ADMIN_ARTICLES_PATH}/${id}`, data);
   return res.data;

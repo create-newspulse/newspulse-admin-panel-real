@@ -73,6 +73,8 @@ import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
 import DraftDeskPage from '@pages/admin/DraftDeskPage';
+import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
+import MyCommunityStories from '@pages/community/MyCommunityStories';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -151,6 +153,10 @@ function App() {
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
+              {/* Community Reporter – Submit Story */}
+              <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><SubmitCommunityStory /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Community Reporter – My Stories */}
+              <Route path="/admin/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
