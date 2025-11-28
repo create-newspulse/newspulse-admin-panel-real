@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { listMyStories, type CommunityStory } from '@/lib/api/communityStories';
 import { Users, FileText, PenSquare, BarChart3, ArrowRight, AlertCircle } from 'lucide-react';
@@ -24,7 +24,6 @@ function statusBadge(status: string) {
 
 export default function ReporterPortal() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string|null>(null);
   const [items, setItems] = useState<CommunityStory[]>([]);
