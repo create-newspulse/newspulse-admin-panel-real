@@ -77,6 +77,8 @@ import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
 import ReporterPortal from '@pages/community/ReporterPortal';
 import CommunityHome from '@pages/community/CommunityHome';
+import ReporterContactDirectory from '@pages/community/ReporterContactDirectory';
+import ReporterStoriesAdmin from '@pages/community/ReporterStoriesAdmin';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -165,6 +167,12 @@ function App() {
               {/* Community Reporter – My Stories (admin + public alias) */}
               <Route path="/admin/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Reporter Stories (admin-only, read-only) - query-param style */}
+              <Route path="/community/reporter-stories" element={<ProtectedRoute><LockCheckWrapper><ReporterStoriesAdmin /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Legacy path-param variant retained for backward compatibility: redirect to query style */}
+              <Route path="/community/reporter-stories/:reporterKey" element={<Navigate replace to="/community/reporter-stories" />} />
+              {/* Reporter Contact Directory (founder/admin only) */}
+              <Route path="/community/reporter-contacts" element={<ProtectedRoute><LockCheckWrapper><ReporterContactDirectory /></LockCheckWrapper></ProtectedRoute>} />
               {/* Reporter Portal (admin + public alias) */}
               <Route path="/admin/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />

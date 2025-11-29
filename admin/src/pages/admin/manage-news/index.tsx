@@ -15,7 +15,17 @@ export default function ManageNewsPage(){
   async function act(id:string, action:'archive'|'restore'|'delete') {
     if (action==='archive') await archiveArticle(id);
     if (action==='restore') await restoreArticle(id);
-    if (action==='delete') await deleteArticle(id);
+    if (action==='delete') {
+      await deleteArticle(id);
+      // Optimistically remove the item from cache so UI reflects deletion immediately
+      qc.setQueryData(['articles'], (old: any) => {
+        try {
+          const arr = Array.isArray(old?.data) ? old.data : [];
+          const next = arr.filter((a: AdminArticle) => a._id !== id);
+          return { ...(old||{}), data: next };
+        } catch { return old; }
+      });
+    }
     qc.invalidateQueries({ queryKey:['articles'] });
   }
 

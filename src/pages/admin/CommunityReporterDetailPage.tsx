@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { fetchCommunitySubmissionById } from '@/api/adminCommunityReporterApi';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { adminApi } from '@/lib/adminApi';
@@ -9,6 +9,9 @@ import { useNotify } from '@/components/ui/toast-bridge';
 export default function CommunityReporterDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromReporterStoriesKey: string | undefined = (location.state as any)?.reporterKey;
+  const fromReporterStoriesName: string | undefined = (location.state as any)?.reporterName;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [submission, setSubmission] = useState<CommunitySubmission | null>(null);
@@ -87,7 +90,19 @@ export default function CommunityReporterDetailPage() {
     }
   }
 
-  function goBack() { navigate('/admin/community-reporter'); }
+  function goBack() {
+    // Prefer returning to Reporter Stories listing if context is available
+    if (fromReporterStoriesKey) {
+      const key = fromReporterStoriesKey.trim();
+      const name = (fromReporterStoriesName || '').trim();
+      const q = new URLSearchParams();
+      q.set('reporterKey', key);
+      if (name) q.set('name', name);
+      navigate(`/community/reporter-stories?${q.toString()}`, { state: { reporterKey: key, reporterName: name } });
+      return;
+    }
+    navigate('/admin/community-reporter');
+  }
 
   if (id === 'undefined') return <div className="max-w-xl"><p className="text-red-600 mb-4">Invalid submission ID.</p><button onClick={goBack} className="px-3 py-1 rounded bg-slate-600 text-white">Back</button></div>;
   if (loading) return <div>Loading...</div>;
@@ -96,7 +111,7 @@ export default function CommunityReporterDetailPage() {
 
   return (
     <div className="max-w-5xl">
-      <button onClick={goBack} className="mb-4 px-3 py-1 rounded bg-slate-600 text-white">← Back to Queue</button>
+      <button onClick={goBack} className="mb-4 px-3 py-1 rounded bg-slate-600 text-white">← Back to Reporter stories</button>
       <h1 className="text-2xl font-bold mb-2">{submission.headline || 'Untitled Submission'}</h1>
       {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
       <div className="border rounded bg-white p-3 mb-6">
