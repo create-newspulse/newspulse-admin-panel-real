@@ -1,0 +1,99 @@
+import { useEffect } from 'react';
+import { ReporterContact } from '@/lib/api/reporterDirectory';
+
+interface ReporterProfileDrawerProps {
+  open: boolean;
+  reporter: ReporterContact | null;
+  onClose: () => void;
+  onOpenStories: (key: string) => void;
+  onOpenQueue: (key: string) => void;
+}
+
+export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenStories, onOpenQueue }: ReporterProfileDrawerProps) {
+  useEffect(() => {
+    function onEsc(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [onClose]);
+
+  const key = reporter?.email || reporter?.phone || '';
+  const name = reporter?.name || 'Unknown reporter';
+  const maskedPhone = reporter?.phone ? reporter.phone.replace(/(\d{2})\d+(\d{3})/, '$1*****$2') : null;
+
+  return (
+    <div className={`fixed inset-0 z-40 ${open ? '' : 'pointer-events-none'}`}>
+      {/* Overlay */}
+      <div
+        className={`absolute inset-0 bg-black/30 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`}
+        onClick={onClose}
+      />
+      {/* Panel */}
+      <div
+        className={`absolute right-0 top-0 h-full w-full sm:w-[420px] bg-white shadow-xl border-l transition-transform ${open ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <div>
+            <h2 className="text-lg font-semibold">{name}</h2>
+            <p className="text-xs text-slate-600">Founder/Admin only — do not share publicly.</p>
+          </div>
+          <button onClick={onClose} className="px-2 py-1 text-sm rounded-md border hover:bg-slate-50">✕</button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* Meta */}
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
+            <span className="text-xs text-slate-500">Last: {reporter?.lastStoryAt ? new Date(reporter.lastStoryAt).toLocaleString() : '—'}</span>
+          </div>
+
+          {/* Contact */}
+          <div className="space-y-1">
+            <div className="text-sm"><span className="font-medium">Email:</span> {reporter?.email || '—'}</div>
+            <div className="text-sm"><span className="font-medium">Phone:</span> {maskedPhone || '—'}</div>
+          </div>
+
+          {/* Location */}
+          <div className="space-y-1">
+            <div className="text-sm"><span className="font-medium">City:</span> {reporter?.city || '—'}</div>
+            <div className="text-sm"><span className="font-medium">State:</span> {reporter?.state || '—'}</div>
+            <div className="text-sm"><span className="font-medium">Country:</span> {reporter?.country || '—'}</div>
+          </div>
+
+          {/* Activity */}
+          <div className="grid grid-cols-3 gap-2">
+            <Metric label="Total" value={reporter?.totalStories ?? 0} />
+            <Metric label="Approved" value={reporter?.approvedStories ?? 0} />
+            <Metric label="Pending" value={reporter?.pendingStories ?? 0} />
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 pt-2">
+            <button
+              disabled={!key}
+              onClick={() => key && onOpenStories(key)}
+              className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
+            >
+              Open My Community Stories
+            </button>
+            <button
+              disabled={!key}
+              onClick={() => key && onOpenQueue(key)}
+              className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
+            >
+              Open in Reporter Queue
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border p-3 text-center">
+      <div className="text-xs text-slate-600">{label}</div>
+      <div className="text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
