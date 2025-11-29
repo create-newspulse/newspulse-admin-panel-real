@@ -27,6 +27,8 @@ export interface CommunityStory {
   submittedBy?: string;
   location?: CommunityStoryLocation;
   contact?: CommunityStoryContact;
+  publishedUrl?: string;
+  decisionReason?: string;
 }
 
 export interface CommunityStoryListResponse {

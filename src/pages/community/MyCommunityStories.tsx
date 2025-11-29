@@ -5,17 +5,11 @@ import toast from 'react-hot-toast';
 import { listMyStories, withdrawStory, deleteMyStory } from '@/lib/api/communityStories';
 import type { CommunityStory } from '@/types/community';
 import type { ArticleStatus } from '@/types/articles';
+import StoryStatusPill, { mapStoryStatus, type CommunityStoryStatus } from '@/components/community/StoryStatusPill';
 
 function StatusBadge({ status }: { status: string | ArticleStatus }) {
-  const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] capitalize';
-  const s = String(status || '').toLowerCase();
-  if (s === 'draft') return <span className={`${base} bg-slate-100 text-slate-700 border border-slate-200`}>draft</span>;
-  if (s === 'pending' || s === 'under_review') return <span className={`${base} bg-amber-50 text-amber-800 border border-amber-200`}>pending</span>;
-  if (s === 'approved' || s === 'published') return <span className={`${base} bg-emerald-50 text-emerald-700 border border-emerald-200`}>{s === 'approved' ? 'approved' : 'published'}</span>;
-  if (s === 'rejected' || s === 'deleted') return <span className={`${base} bg-red-50 text-red-700 border border-red-200`}>{s === 'rejected' ? 'rejected' : 'deleted'}</span>;
-  if (s === 'archived') return <span className={`${base} bg-slate-50 text-slate-500 border border-slate-200`}>archived</span>;
-  if (s === 'scheduled') return <span className={`${base} bg-indigo-100 text-indigo-700 border border-indigo-200`}>scheduled</span>;
-  return <span className={`${base} bg-slate-50 text-slate-500 border border-slate-200`}>{status || 'unknown'}</span>;
+  const mapped = mapStoryStatus(String(status || ''));
+  return <StoryStatusPill status={mapped} />;
 }
 
 function snippet(txt?: string, n = 140) {
@@ -30,11 +24,11 @@ export default function MyCommunityStories() {
   const [viewing, setViewing] = useState<CommunityStory | null>(null);
 
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState<ArticleStatus | 'all'>('all');
+  const [status, setStatus] = useState<CommunityStoryStatus | 'all'>('all');
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['my-community-stories', status, q],
-    queryFn: () => listMyStories({ status, q, page: 1, limit: 100 }),
+    queryFn: () => listMyStories({ status: status === 'all' ? 'all' : undefined, q, page: 1, limit: 100 }),
     staleTime: 30_000,
   });
 
@@ -45,6 +39,9 @@ export default function MyCommunityStories() {
     if (q.trim()) {
       const qq = q.trim().toLowerCase();
       arr = arr.filter((s) => (s.title || '').toLowerCase().includes(qq));
+    }
+    if (status !== 'all') {
+      arr = arr.filter((s) => mapStoryStatus(String(s.status)) === status);
     }
     return arr;
   }, [items, q]);
@@ -93,10 +90,11 @@ export default function MyCommunityStories() {
             <select value={status} onChange={e=> setStatus(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
               <option value="all">All</option>
               <option value="draft">Draft</option>
-              <option value="scheduled">Scheduled</option>
+              <option value="submitted">Submitted</option>
+              <option value="approved">Approved</option>
               <option value="published">Published</option>
-              <option value="archived">Archived</option>
-              <option value="deleted">Deleted</option>
+              <option value="rejected">Rejected</option>
+              <option value="withdrawn">Withdrawn</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -116,8 +114,9 @@ export default function MyCommunityStories() {
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left">Language</th>
             <th className="p-2 text-left">Category</th>
-            <th className="p-2 text-left">Location</th>
+            <th className="p-2 text-left">City</th>
             <th className="p-2 text-left">Created</th>
+            <th className="p-2 text-left">Last updated</th>
             <th className="p-2 text-left">Actions</th>
           </tr>
         </thead>
@@ -133,19 +132,30 @@ export default function MyCommunityStories() {
               <td className="p-2" title={s.category || ''}>{s.category || '—'}</td>
               <td className="p-2" title={s.location?.city || ''}>{s.location?.city || '—'}</td>
               <td className="p-2" title={s.createdAt || ''}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
+              <td className="p-2" title={s.updatedAt || ''}>{s.updatedAt ? new Date(s.updatedAt).toLocaleString() : '—'}</td>
               <td className="p-2">
-                <div className="flex gap-2 flex-wrap">
-                  <button className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-900" onClick={()=> setViewing(s)}>View</button>
-                  <button className="px-3 py-1 text-xs rounded bg-blue-600 text-white" onClick={()=> navigate(`/admin/articles/${s._id}/edit`)}>Edit</button>
-                  <button className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-800" onClick={()=> withdrawMut.mutate(s._id)} disabled={withdrawMut.isPending}>Withdraw</button>
-                  <button className="px-3 py-1 text-xs rounded bg-red-600 text-white" onClick={()=> deleteMut.mutate(s._id)} disabled={deleteMut.isPending}>Delete</button>
-                </div>
+                <RowActions
+                  story={s}
+                  onView={() => setViewing(s)}
+                  onWithdraw={async () => {
+                    if (!window.confirm('Withdraw this submission? Editors will stop reviewing it.')) return;
+                    await withdrawMut.mutateAsync(s._id);
+                  }}
+                  onDelete={async () => {
+                    if (!window.confirm('Delete this story? This action cannot be undone.')) return;
+                    await deleteMut.mutateAsync(s._id);
+                  }}
+                  onEdit={() => navigate(`/community/submit?storyId=${encodeURIComponent(s._id)}`)}
+                  onSubmit={() => toast.success('Submit not wired yet')}
+                  onResubmit={() => toast.success('Resubmit not wired yet')}
+                  onNewDraft={() => navigate(`/community/submit?fromStory=${encodeURIComponent(s._id)}`)}
+                />
               </td>
             </tr>
           ))}
           {!isLoading && filtered.length === 0 && (
             <tr>
-              <td colSpan={8} className="p-4 text-center text-slate-500">No stories found.</td>
+              <td colSpan={9} className="p-4 text-center text-slate-500">You haven’t submitted any stories yet. Use the Reporter Portal or Submit Story page to send your first report.</td>
             </tr>
           )}
         </tbody>
@@ -166,11 +176,20 @@ export default function MyCommunityStories() {
                 {viewing.location?.city && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200">{viewing.location.city}</span>}
                 {viewing.createdAt && <span className="text-xs text-slate-500">{new Date(viewing.createdAt).toLocaleString()}</span>}
               </div>
+              {mapStoryStatus(String(viewing.status)) === 'rejected' && viewing.decisionReason && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">Reason: {viewing.decisionReason}</div>
+              )}
+              {mapStoryStatus(String(viewing.status)) === 'removed' && (
+                <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">This story was removed by NewsPulse for safety/legal reasons.</div>
+              )}
               {viewing.summary && (
                 <p className="text-slate-700">{viewing.summary}</p>
               )}
               {viewing.content && (
                 <div className="prose max-w-none whitespace-pre-wrap leading-relaxed">{viewing.content}</div>
+              )}
+              {mapStoryStatus(String(viewing.status)) === 'published' && viewing.publishedUrl && (
+                <a className="text-sm text-blue-600 hover:underline" href={viewing.publishedUrl} target="_blank" rel="noreferrer">View on site</a>
               )}
             </div>
             <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-2">
@@ -183,3 +202,95 @@ export default function MyCommunityStories() {
     </div>
   );
 }
+
+function RowActions({
+  story,
+  onView,
+  onEdit,
+  onSubmit,
+  onWithdraw,
+  onDelete,
+  onResubmit,
+  onNewDraft,
+}: {
+  story: CommunityStory;
+  onView: () => void;
+  onEdit: () => void;
+  onSubmit: () => void;
+  onWithdraw: () => Promise<void> | void;
+  onDelete: () => Promise<void> | void;
+  onResubmit: () => void;
+  onNewDraft: () => void;
+}) {
+  const s = mapStoryStatus(String(story.status));
+  const Btn = ({ className, children, onClick, disabled }: any) => (
+    <button className={className} onClick={onClick} disabled={disabled}>{children}</button>
+  );
+
+  // Common styles
+  const outlineBlue = 'px-3 py-1 text-xs rounded border border-blue-300 text-blue-700 bg-white hover:bg-blue-50';
+  const filledBlue = 'px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700';
+  const filledGreen = 'px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700';
+  const outlineRed = 'px-3 py-1 text-xs rounded border border-red-300 text-red-700 bg-white hover:bg-red-50';
+  const textRed = 'px-2 py-1 text-xs text-red-700 hover:underline';
+
+  if (s === 'draft') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onEdit}>Edit</Btn>
+        <Btn className={filledGreen} onClick={onSubmit}>Submit</Btn>
+        <Btn className={textRed} onClick={onDelete}>Delete</Btn>
+      </div>
+    );
+  }
+  if (s === 'submitted') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onView}>View</Btn>
+        <Btn className={outlineRed} onClick={onWithdraw}>Withdraw</Btn>
+      </div>
+    );
+  }
+  if (s === 'approved') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onView}>View</Btn>
+      </div>
+    );
+  }
+  if (s === 'published') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onView}>View</Btn>
+        {story.publishedUrl && (
+          <a className={filledBlue} href={story.publishedUrl} target="_blank" rel="noreferrer">View on site</a>
+        )}
+      </div>
+    );
+  }
+  if (s === 'rejected') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onView}>View</Btn>
+        <Btn className={filledBlue} onClick={onNewDraft}>New draft</Btn>
+        <Btn className={textRed} onClick={onDelete}>Delete</Btn>
+      </div>
+    );
+  }
+  if (s === 'withdrawn') {
+    return (
+      <div className="flex gap-2 flex-wrap">
+        <Btn className={outlineBlue} onClick={onEdit}>Edit</Btn>
+        <Btn className={filledGreen} onClick={onResubmit}>Resubmit</Btn>
+        <Btn className={textRed} onClick={onDelete}>Delete</Btn>
+      </div>
+    );
+  }
+  // removed
+  return (
+    <div className="flex gap-2 flex-wrap">
+      <Btn className={outlineBlue} onClick={onView}>View</Btn>
+    </div>
+  );
+}
+
