@@ -138,6 +138,8 @@ export default function MyCommunityStories() {
                   story={s}
                   onView={() => setViewing(s)}
                   onWithdraw={async () => {
+                    const mapped = mapStoryStatus(String(s.status));
+                    if (mapped !== 'submitted') { toast.error('Withdraw allowed only while submitted/under review'); return; }
                     if (!window.confirm('Withdraw this submission? Editors will stop reviewing it.')) return;
                     await withdrawMut.mutateAsync(s._id);
                   }}

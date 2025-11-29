@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { createCommunityArticle, type Article } from '@/lib/api/articles';
+import { createCommunityArticle, updateArticle, getArticle, type Article } from '@/lib/api/articles';
+import { useLocation } from 'react-router-dom';
+import { getMyStory } from '@/lib/api/communityStories';
 import { ARTICLE_CATEGORIES } from '@/lib/categories';
 
 interface SubmitStoryFormValues {
@@ -23,6 +25,10 @@ interface SubmitStoryFormValues {
 }
 
 export default function SubmitCommunityStory() {
+  const locationHook = useLocation();
+  const params = new URLSearchParams(locationHook.search);
+  const editingId = params.get('storyId');
+  const cloneId = params.get('fromStory');
   const [title, setTitle] = useState('');
   const [language, setLanguage] = useState<'en'|'hi'|'gu'>('en');
   const [category, setCategory] = useState<string>(ARTICLE_CATEGORIES[0]);
@@ -64,6 +70,10 @@ export default function SubmitCommunityStory() {
           canContactForFutureStories: !!futureContactOk,
         },
       };
+      // If editing existing story, update instead of create
+      if (editingId) {
+        return await updateArticle(editingId, payload);
+      }
       return await createCommunityArticle(payload);
     },
     onSuccess: () => {
@@ -94,6 +104,48 @@ export default function SubmitCommunityStory() {
     return null;
   }
 
+  // Prefill logic for editing or cloning
+  // Editing: storyId param; Cloning: fromStory param
+  // For cloning we fetch and set fields but ignore original status
+  useEffect(() => {
+    const targetId = editingId || cloneId;
+    if (!targetId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Prefer articles API for full content; fallback to community story API
+        let data: any;
+        try {
+          data = await getArticle(targetId);
+        } catch {
+          try { data = await getMyStory(targetId); } catch {}
+        }
+        if (!data || cancelled) return;
+        setTitle(data.title || '');
+        setLanguage((data.language || 'en') as any);
+        setCategory(data.category || ARTICLE_CATEGORIES[0]);
+        // location could be nested or flat
+        const loc = data.location || {};
+        setCity(loc.city || data.city || '');
+        setStateName(loc.state || data.state || '');
+        setCountry(loc.country || data.country || 'India');
+        setDistrict(loc.district || data.district || '');
+        setSummary(data.summary || '');
+        setBody(data.content || data.body || '');
+        const contact = data.contact || {};
+        setContactName(contact.name || data.contactName || '');
+        setContactEmail(contact.email || data.contactEmail || '');
+        setContactPhone(contact.phone || data.contactPhone || '');
+        setContactMethod((contact.preferredContact || data.contactMethod || '') as any);
+        setContactOk(!!contact.canContactForThisStory || !!data.contactOk);
+        setFutureContactOk(!!contact.canContactForFutureStories || !!data.futureContactOk);
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to prefill story');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [editingId, cloneId]);
+
   function handleSaveDraft() {
     const v = validateCommon();
     if (v) { toast.error(v); return; }
@@ -111,7 +163,7 @@ export default function SubmitCommunityStory() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold mb-1">Submit Story – Community Reporter</h1>
+        <h1 className="text-2xl font-bold mb-1">{editingId ? 'Edit Story – Community Reporter' : cloneId ? 'New Draft (Cloned)' : 'Submit Story – Community Reporter'}</h1>
         <p className="text-sm text-slate-600">Write your story here. You can save as a draft or submit it to the NewsPulse editorial team for review.</p>
       </div>
 
@@ -229,8 +281,8 @@ export default function SubmitCommunityStory() {
       </div>
 
       <div className="sticky bottom-0 bg-white border-t border-slate-200 py-3 flex gap-3 justify-end">
-        <button type="button" onClick={handleSaveDraft} className="btn-secondary" disabled={mutation.isPending}>Save as Draft</button>
-        <button type="button" onClick={handleSubmitForReview} className="btn" disabled={mutation.isPending}>{mutation.isPending ? 'Saving…' : 'Submit for Review'}</button>
+        <button type="button" onClick={handleSaveDraft} className="btn-secondary" disabled={mutation.isPending}>{editingId ? 'Update Draft' : 'Save as Draft'}</button>
+        <button type="button" onClick={handleSubmitForReview} className="btn" disabled={mutation.isPending}>{mutation.isPending ? (editingId ? 'Updating…' : 'Saving…') : editingId ? 'Update & Keep Draft' : 'Submit for Review'}</button>
       </div>
     </div>
   );

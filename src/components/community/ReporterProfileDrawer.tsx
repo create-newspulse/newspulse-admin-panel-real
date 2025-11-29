@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
-import { ReporterContact } from '@/lib/api/reporterDirectory';
+import { useEffect, useState } from 'react';
+import { ReporterContact, updateReporterContactNotes } from '@/lib/api/reporterDirectory';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'react-hot-toast';
 
 interface ReporterProfileDrawerProps {
   open: boolean;
@@ -19,6 +21,33 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
   const key = reporter?.email || reporter?.phone || '';
   const name = reporter?.name || 'Unknown reporter';
   const maskedPhone = reporter?.phone ? reporter.phone.replace(/(\d{2})\d+(\d{3})/, '$1*****$2') : null;
+
+  const queryClient = useQueryClient();
+  const [draftNotes, setDraftNotes] = useState<string>(reporter?.notes || '');
+  // Sync when reporter changes
+  useEffect(() => { setDraftNotes(reporter?.notes || ''); }, [reporter?.notes, reporter?.id]);
+
+  const { mutate: saveNotes, isLoading: saving } = useMutation({
+    mutationFn: async () => {
+      if (!key) throw new Error('Missing reporter key');
+      return updateReporterContactNotes(key, draftNotes.trim());
+    },
+    onSuccess: () => {
+      toast.success('Notes saved');
+      // Refresh directory list (contains notes indicator)
+      queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] });
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || 'Failed to save notes');
+    }
+  });
+
+  const onBlurSave = () => {
+    // Only save if value changed from original
+    if ((reporter?.notes || '') !== draftNotes.trim()) {
+      saveNotes();
+    }
+  };
 
   return (
     <div className={`fixed inset-0 z-40 ${open ? '' : 'pointer-events-none'}`}>
@@ -64,6 +93,27 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             <Metric label="Total" value={reporter?.totalStories ?? 0} />
             <Metric label="Approved" value={reporter?.approvedStories ?? 0} />
             <Metric label="Pending" value={reporter?.pendingStories ?? 0} />
+          </div>
+
+          {/* Private Notes (Admin-only) */}
+          <div className="space-y-2 pt-2">
+            <label className="text-xs font-medium text-slate-600 flex items-center gap-1">
+              Private notes <span className="text-slate-400">(founder/admin)</span>
+            </label>
+            <textarea
+              value={draftNotes}
+              onChange={(e) => setDraftNotes(e.target.value)}
+              onBlur={onBlurSave}
+              placeholder="Add any internal context, sourcing details, risk flags..."
+              className="w-full min-h-[110px] resize-y px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <div className="flex items-center justify-end gap-3">
+              <button
+                disabled={saving || (reporter?.notes || '') === draftNotes.trim()}
+                onClick={() => saveNotes()}
+                className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-50"
+              >{saving ? 'Saving…' : 'Save notes'}</button>
+            </div>
           </div>
 
           {/* Actions */}

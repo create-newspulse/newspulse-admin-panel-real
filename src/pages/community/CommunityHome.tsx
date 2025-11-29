@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Users, LayoutGrid, FileText, PenSquare } from 'lucide-react';
+import { ContactRound } from 'lucide-react';
 
 export default function CommunityHome() {
   // Breadcrumbs are globally rendered; keep local minimal description
@@ -40,6 +41,14 @@ export default function CommunityHome() {
           description="Manage and track your submissions"
           icon={<PenSquare className="w-6 h-6" />}
           variant="neutral"
+        />
+        {/* Reporter Contact Directory */}
+        <HubCard
+          to="/community/reporter-contacts"
+          title="Reporter Contact Directory"
+          description="Secure list of reporters’ contact & location for follow-up."
+          icon={<ContactRound className="w-6 h-6" />}
+          variant="secondary"
         />
       </section>
 

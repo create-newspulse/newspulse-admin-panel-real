@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { listReporterStoriesForAdmin, ReporterAdminStory } from '@/lib/community';
+import { useQuery } from '@tanstack/react-query';
+import { listReporterStoriesForAdmin } from '@/lib/community';
 
 function useQueryParam(name: string) {
   const { search } = useLocation();
@@ -13,29 +14,22 @@ export default function ReporterStoriesAdmin() {
   const reporterName = useQueryParam('name') || (location.state as any)?.reporterName || '';
   const reporterKeyFromState = (location.state as any)?.reporterKey || '';
   const reporterKey = (reporterKeyFromQuery || reporterKeyFromState).trim();
-  const [stories, setStories] = useState<ReporterAdminStory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setStories([]);
-    if (!reporterKey) {
-      setLoading(false);
-      return; // handled in render branch
-    }
-    (async () => {
-      try {
-        const res = await listReporterStoriesForAdmin(reporterKey, { page: 1, limit: 20 });
-        setStories(res.items || []);
-      } catch (e: any) {
-        setError('Failed to load stories');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [reporterKey]);
+  // React Query for stories (auto manages loading/error states)
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['reporter-stories-admin', reporterKey],
+    queryFn: () => listReporterStoriesForAdmin(reporterKey, { page: 1, limit: 20 }),
+    enabled: !!reporterKey,
+    staleTime: 15_000,
+  });
+  const stories = data?.items || [];
+  const errorMessage = (error as any)?.message || 'Failed to load stories';
 
   return (
     <div className="px-6 py-4 max-w-6xl mx-auto space-y-6">
@@ -54,34 +48,42 @@ export default function ReporterStoriesAdmin() {
           <p>Open the Reporter Contact Directory and choose a reporter to view their stories.</p>
           <Link to="/community/reporter-contacts" className="inline-flex items-center px-3 py-1.5 rounded-md border text-sm hover:bg-slate-50">Go to Directory</Link>
         </div>
-      ) : loading ? (
+      ) : isLoading ? (
         <div className="rounded-xl border border-slate-200 p-6 text-sm text-slate-600">Loading stories…</div>
-      ) : error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">{error}</div>
+      ) : isError ? (
+        <div className="rounded-xl border border-red-300 bg-red-50 p-6 space-y-4">
+          <div className="font-semibold text-red-800">Failed to load stories</div>
+          <div className="text-sm text-red-700">{errorMessage}</div>
+          <button
+            onClick={() => refetch()}
+            className="inline-flex items-center px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm"
+          >Retry</button>
+        </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 overflow-hidden">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Title</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Language</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Category</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">AI risk</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Priority</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Created</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Last updated</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {stories.length === 0 ? (
+        stories.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 p-12 text-center space-y-3 bg-white">
+            <div className="text-lg font-semibold">No stories yet</div>
+            <p className="text-sm text-slate-600">This reporter has not submitted any stories.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 overflow-hidden">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50">
                 <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-600">No stories for this reporter yet.</td>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Title</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Language</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">AI risk</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Priority</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Created</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Last updated</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Actions</th>
                 </tr>
-              ) : (
-                stories.map(s => (
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {stories.map(s => (
                   <tr key={s.id}>
                     <td className="px-4 py-3 text-sm">{s.title}</td>
                     <td className="px-4 py-3 text-sm">{s.status}</td>
@@ -100,11 +102,11 @@ export default function ReporterStoriesAdmin() {
                       >View</Link>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </div>
   );

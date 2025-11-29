@@ -173,7 +173,7 @@ function DirectoryTable({ isLoading, isError, error, items, sortBy, sortDir, onS
           ) : (
             items.map((rc) => (
               <tr key={rc.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onSelect(rc)}>
-                <td className="px-4 py-3 text-sm">{rc.name || '—'}</td>
+                <td className="px-4 py-3 text-sm flex items-center gap-1">{rc.name || '—'} {rc.notes ? <span title="Has private notes" className="text-xs">📝</span> : null}</td>
                 <td className="px-4 py-3 text-sm">{rc.email || '—'}</td>
                 <td className="px-4 py-3 text-sm">{rc.phone || '—'}</td>
                 <td className="px-4 py-3 text-sm">{rc.city || '—'}</td>
