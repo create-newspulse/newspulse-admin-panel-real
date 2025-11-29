@@ -1,8 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
-import { ReporterContact } from '@/lib/api/reporterDirectory';
-import { useReporterContactsQuery } from '@/features/community/api/reporterDirectory';
-import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
+import { ReporterContact } from '@/lib/api/reporterDirectory.ts';
+import { useReporterContactsQuery } from '@/features/community/api/reporterDirectory.ts';
+import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
 
 export default function ReporterContactDirectory() {
   const navigate = useNavigate();
