@@ -205,7 +205,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function saveDraft(){
     if (!mutation.isPending) {
       // No override here. This ensures drafts stay drafts; live stays live.
-      mutation.mutate();
+      mutation.mutate(undefined);
     }
   }
   function handlePublish(){

@@ -34,8 +34,13 @@ export default function MyCommunityStories() {
 
   const items: CommunityStory[] = (data?.items || []).slice();
 
-  const filtered = useMemo(() => {
-    let arr = items;
+  // Hide stories deleted by the reporter immediately from the list
+  const visible = useMemo(() => {
+    let arr = items.filter((s) => {
+      const raw = String(s.status || '').toLowerCase();
+      const isDeletedByReporter = raw === 'deleted' || (s as any).deletedByReporter === true;
+      return !isDeletedByReporter;
+    });
     if (q.trim()) {
       const qq = q.trim().toLowerCase();
       arr = arr.filter((s) => (s.title || '').toLowerCase().includes(qq));
@@ -44,7 +49,7 @@ export default function MyCommunityStories() {
       arr = arr.filter((s) => mapStoryStatus(String(s.status)) === status);
     }
     return arr;
-  }, [items, q]);
+  }, [items, q, status]);
 
   const withdrawMut = useMutation({
     mutationFn: async (id: string) => withdrawStory(id),
@@ -59,8 +64,23 @@ export default function MyCommunityStories() {
 
   const deleteMut = useMutation({
     mutationFn: async (id: string) => deleteMyStory(id),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       toast.success('Story deleted');
+      // Optimistically remove the story from cached lists so it disappears immediately
+      const removeFromCache = (key: any[]) => {
+        qc.setQueryData(key, (prev: any) => {
+          if (!prev) return prev;
+          if (Array.isArray(prev)) {
+            return prev.filter((s: any) => s?._id !== variables);
+          }
+          if (prev?.items && Array.isArray(prev.items)) {
+            return { ...prev, items: prev.items.filter((s: any) => s?._id !== variables) };
+          }
+          return prev;
+        });
+      };
+      removeFromCache(['my-community-stories']);
+      removeFromCache(['my-community-stories', status, q]);
       await qc.invalidateQueries({ queryKey: ['my-community-stories'] });
     },
     onError: (err: any) => {
@@ -121,7 +141,7 @@ export default function MyCommunityStories() {
           </tr>
         </thead>
         <tbody>
-          {filtered.map((s)=> (
+          {visible.map((s)=> (
             <tr key={s._id} className="border-t hover:bg-slate-50">
               <td className="p-2 max-w-[240px] truncate" title={s.title}>{s.title}</td>
               <td className="p-2 max-w-[300px] truncate" title={s.summary || snippet(s.content)}>{s.summary || snippet(s.content)}</td>
@@ -155,7 +175,7 @@ export default function MyCommunityStories() {
               </td>
             </tr>
           ))}
-          {!isLoading && filtered.length === 0 && (
+          {!isLoading && visible.length === 0 && (
             <tr>
               <td colSpan={9} className="p-4 text-center text-slate-500">You haven’t submitted any stories yet. Use the Reporter Portal or Submit Story page to send your first report.</td>
             </tr>
@@ -288,11 +308,9 @@ function RowActions({
       </div>
     );
   }
-  // removed
+  // Removed by News Pulse – no actions available
   return (
-    <div className="flex gap-2 flex-wrap">
-      <Btn className={outlineBlue} onClick={onView}>View</Btn>
-    </div>
+    <span className="text-xs text-gray-500 italic">Removed by News Pulse – no actions available</span>
   );
 }
 

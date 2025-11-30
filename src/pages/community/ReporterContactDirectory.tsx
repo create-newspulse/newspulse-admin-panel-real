@@ -18,6 +18,24 @@ function getActivityStatus(lastStoryAt?: string | null): 'Very active' | 'Active
   return 'Inactive';
 }
 
+// Normalize any non-string value into a displayable string and extract nested keys if present.
+function norm(val: any, prefer?: 'city'|'state'|'country'): string {
+  if (val == null) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'object') {
+    const city = (val.city && typeof val.city === 'string') ? val.city : '';
+    const state = (val.state && typeof val.state === 'string') ? val.state : '';
+    const country = (val.country && typeof val.country === 'string') ? val.country : '';
+    if (prefer === 'city') return city;
+    if (prefer === 'state') return state;
+    if (prefer === 'country') return country;
+    const parts = [city, state, country].filter(Boolean);
+    return parts.join(', ');
+  }
+  try { return String(val); } catch { return ''; }
+}
+
 export default function ReporterContactDirectory() {
   const STORAGE_KEY = 'reporterDirectoryPreferences';
   const navigate = useNavigate();
@@ -26,7 +44,7 @@ export default function ReporterContactDirectory() {
   const [cityVal, setCityVal] = useState<string | undefined>(undefined);
   const [countryVal, setCountryVal] = useState<string | undefined>(undefined);
   const [page] = useState(1);
-  const notify = useNotify?.() as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
+  const notify = (useNotify?.() as unknown) as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
   const [sortBy, setSortBy] = useState<undefined | 'name' | 'stories' | 'lastStory' | 'activity'>(undefined);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -34,28 +52,31 @@ export default function ReporterContactDirectory() {
   const { data, isLoading, isError, error } = useReporterContactsQuery({ page, limit: 200 });
   const items = (data?.items ?? []) as ReporterContact[];
 
+
   // Derive unique sets from current dataset
   // Unique value derivation (case-sensitive as stored)
-  const uniqueCountries = useMemo(() => ['All countries', ...Array.from(new Set(items.map(i => i.country).filter(Boolean))).sort()], [items]);
+  const uniqueCountries = useMemo(() => ['All countries', ...Array.from(new Set(items.map(i => norm(i.country, 'country')).filter(Boolean))).sort()], [items]);
   const uniqueStates = useMemo(() => {
     const base = countryVal && countryVal !== 'All countries'
-      ? items.filter(i => (i.country || '').toLowerCase() === countryVal.toLowerCase())
+      ? items.filter(i => norm(i.country, 'country').toLowerCase() === countryVal.toLowerCase())
       : items;
-    return ['All states', ...Array.from(new Set(base.map(i => i.state).filter(Boolean))).sort()];
+    return ['All states', ...Array.from(new Set(base.map(i => norm(i.state, 'state')).filter(Boolean))).sort()];
   }, [items, countryVal]);
   const filteredCities = useMemo(() => {
     const base = items.filter(i => {
-      if (countryVal && countryVal !== 'All countries' && (i.country || '').toLowerCase() !== countryVal.toLowerCase()) return false;
-      if (stateVal && stateVal !== 'All states' && (i.state || '').toLowerCase() !== stateVal.toLowerCase()) return false;
+      const ctry = norm(i.country, 'country').toLowerCase();
+      const st = norm(i.state, 'state').toLowerCase();
+      if (countryVal && countryVal !== 'All countries' && ctry !== countryVal.toLowerCase()) return false;
+      if (stateVal && stateVal !== 'All states' && st !== stateVal.toLowerCase()) return false;
       return true;
     });
-    return ['All cities', ...Array.from(new Set(base.map(i => i.city).filter(Boolean))).sort()];
+    return ['All cities', ...Array.from(new Set(base.map(i => norm(i.city, 'city')).filter(Boolean))).sort()];
   }, [items, countryVal, stateVal]);
 
   // Default country to India if present and not yet chosen
   useEffect(() => {
     if (!countryVal) {
-      const hasIndia = items.some(i => (i.country || '').toLowerCase() === 'india');
+      const hasIndia = items.some(i => norm(i.country, 'country').toLowerCase() === 'india');
       if (hasIndia) setCountryVal('India');
     }
   }, [items, countryVal]);
@@ -63,6 +84,8 @@ export default function ReporterContactDirectory() {
   // Client-side filtered reporters
   const [hasNotesOnly, setHasNotesOnly] = useState(false);
   const [activityFilter, setActivityFilter] = useState<'All activity' | 'Very active' | 'Active' | 'Dormant' | 'Inactive'>('All activity');
+  const [typeFilter, setTypeFilter] = useState<'All'|'Community'|'Journalist'>('All');
+  const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Unverified'>('All');
 
   // Load preferences on mount (browser-only)
   useEffect(() => {
@@ -107,23 +130,34 @@ export default function ReporterContactDirectory() {
   const filteredReporters = useMemo(() => {
     let list = items;
     if (countryVal && countryVal !== 'All countries') {
-      list = list.filter(r => (r.country || '').toLowerCase() === countryVal.toLowerCase());
+      list = list.filter(r => norm(r.country, 'country').toLowerCase() === countryVal.toLowerCase());
     }
     if (stateVal && stateVal !== 'All states') {
-      list = list.filter(r => (r.state || '').toLowerCase() === stateVal.toLowerCase());
+      list = list.filter(r => norm(r.state, 'state').toLowerCase() === stateVal.toLowerCase());
     }
     if (cityVal && cityVal !== 'All cities') {
-      list = list.filter(r => (r.city || '').toLowerCase() === cityVal.toLowerCase());
+      list = list.filter(r => norm(r.city, 'city').toLowerCase() === cityVal.toLowerCase());
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(r => [r.name, r.email, r.phone].some(f => (f || '').toLowerCase().includes(q)));
+      list = list.filter(r => [r.name, r.email, r.phone].some(f => norm(f).toLowerCase().includes(q)));
     }
     if (hasNotesOnly) {
       list = list.filter(r => !!(r.notes && String(r.notes).trim().length > 0));
     }
     if (activityFilter !== 'All activity') {
       list = list.filter(r => getActivityStatus(r.lastStoryAt) === activityFilter);
+    }
+    if (typeFilter !== 'All') {
+      list = list.filter(r => (r.reporterType || 'community') === (typeFilter === 'Journalist' ? 'journalist' : 'community'));
+    }
+    if (verificationFilter !== 'All') {
+      list = list.filter(r => {
+        const v = (r.verificationLevel || 'unverified');
+        if (verificationFilter === 'Verified') return v === 'verified';
+        if (verificationFilter === 'Pending') return v === 'pending';
+        return v === 'unverified';
+      });
     }
     // Optional default sort: newest last story first, empties at bottom
     return list;
@@ -268,17 +302,17 @@ export default function ReporterContactDirectory() {
   // Cities for selected state with counts
   const cityGroups = useMemo(() => {
     if (!stateVal || stateVal === 'All states') return [] as { city: string; count: number }[];
-    let base = items.filter(r => (r.state || '').toLowerCase() === stateVal.toLowerCase());
+    let base = items.filter(r => norm(r.state, 'state').toLowerCase() === stateVal.toLowerCase());
     if (countryVal && countryVal !== 'All countries') {
-      base = base.filter(r => (r.country || '').toLowerCase() === countryVal.toLowerCase());
+      base = base.filter(r => norm(r.country, 'country').toLowerCase() === countryVal.toLowerCase());
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      base = base.filter(r => [r.name, r.email, r.phone].some(f => (f || '').toLowerCase().includes(q)));
+      base = base.filter(r => [r.name, r.email, r.phone].some(f => norm(f).toLowerCase().includes(q)));
     }
     const map = new Map<string, number>();
     base.forEach(r => {
-      const c = (r.city || '').trim();
+      const c = norm(r.city, 'city').trim();
       if (!c) return;
       map.set(c, (map.get(c) || 0) + 1);
     });
@@ -337,13 +371,13 @@ export default function ReporterContactDirectory() {
         {/* Filters Bar */}
         <div className="flex flex-wrap items-center gap-3">
         <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="px-3 py-2 border rounded-md text-sm">
-          {uniqueCountries.map(c => <option key={c} value={c === 'All countries' ? '' : c}>{c}</option>)}
+          {uniqueCountries.map(c => <option key={c ?? 'All countries'} value={c === 'All countries' ? '' : (c ?? '')}>{c}</option>)}
         </select>
         <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); }} className="px-3 py-2 border rounded-md text-sm">
-          {uniqueStates.map(s => <option key={s} value={s === 'All states' ? '' : s}>{s}</option>)}
+          {uniqueStates.map(s => <option key={s ?? 'All states'} value={s === 'All states' ? '' : (s ?? '')}>{s}</option>)}
         </select>
         <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="px-3 py-2 border rounded-md text-sm">
-          {filteredCities.map(c => <option key={c} value={c === 'All cities' ? '' : c}>{c}</option>)}
+          {filteredCities.map(c => <option key={c ?? 'All cities'} value={c === 'All cities' ? '' : (c ?? '')}>{c}</option>)}
         </select>
         <input
           value={searchQuery}
@@ -372,6 +406,16 @@ export default function ReporterContactDirectory() {
             <input type="checkbox" checked={hasNotesOnly} onChange={(e) => setHasNotesOnly(e.target.checked)} />
             Has notes
           </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-600">Type:</span>
+            <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
+              {['All','Community','Journalist'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            <span className="text-xs text-slate-600">Verification:</span>
+            <select value={verificationFilter} onChange={(e)=> setVerificationFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
+              {['All','Verified','Pending','Unverified'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+          </div>
           <select
             value={activityFilter}
             onChange={(e) => setActivityFilter(e.target.value as any)}
@@ -433,6 +477,7 @@ export default function ReporterContactDirectory() {
           error={error as any}
           items={sortedReporters}
           selectedIds={selectedIds}
+          notify={notify}
           onToggleSelect={(id: string) => {
             setSelectedIds(prev => {
               const next = new Set(prev);
@@ -529,7 +574,7 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
   );
 }
 
-function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void }) {
+function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, notify }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } }) {
   const navigate = useNavigate();
   // For sort indicator, we pull from parent via URL? Simpler: local props not available.
   // We'll read from window state via a tiny hook? Instead, render indicators via a simple context closure.
@@ -607,6 +652,8 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
               </button>
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Email</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Phone</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
@@ -658,6 +705,19 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
+                    {rc.reporterType==='journalist' ? 'Journalist' : 'Community Reporter'}
+                  </span>
+                  {rc.organisationName && (
+                    <span className="ml-2 text-xs text-slate-600">{rc.organisationName}{rc.beatsProfessional && rc.beatsProfessional.length>0 ? ` · ${rc.beatsProfessional.join(', ')}` : ''}</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : rc.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                    {rc.verificationLevel==='verified' ? 'Verified' : rc.verificationLevel==='pending' ? 'Pending' : 'Unverified'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-sm">
                   {rc.email ? (
                     <div className="flex items-center gap-1 group">
                       <a className="text-blue-600 hover:underline" href={`mailto:${rc.email}`}>{rc.email}</a>
@@ -686,9 +746,9 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                     <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">No phone yet</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-sm">{(rc.city || '') || (!rc.city && !rc.state && !rc.country ? <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">Location not set</span> : '—')}</td>
-                <td className="px-4 py-3 text-sm">{rc.state || '—'}</td>
-                <td className="px-4 py-3 text-sm">{rc.country || '—'}</td>
+                <td className="px-4 py-3 text-sm">{norm(rc.city, 'city') || (!rc.city && !rc.state && !rc.country ? <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">Location not set</span> : '—')}</td>
+                <td className="px-4 py-3 text-sm">{norm(rc.state, 'state') || '—'}</td>
+                <td className="px-4 py-3 text-sm">{norm(rc.country, 'country') || '—'}</td>
                 <td className="px-4 py-3 text-sm">{rc.totalStories}</td>
                 <td className="px-4 py-3 text-sm">
                   {(() => {

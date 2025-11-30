@@ -15,6 +15,17 @@ export interface ReporterContact {
   pendingStories: number;
   approvedStories: number;
   lastStoryAt: string; // ISO date
+  // Extended fields
+  reporterType?: 'journalist' | 'community';
+  verificationLevel?: 'unverified' | 'pending' | 'verified';
+  organisationName?: string | null;
+  organisationType?: string | null;
+  positionTitle?: string | null;
+  beatsProfessional?: string[] | null;
+  yearsExperience?: number | null;
+  languages?: string[] | null;
+  websiteOrPortfolio?: string | null;
+  socialLinks?: { linkedin?: string; twitter?: string } | null;
 }
 
 export interface ReporterContactListResponse {

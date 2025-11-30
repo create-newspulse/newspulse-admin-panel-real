@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
 import { normalizeError, appendError } from '@/lib/error';
@@ -13,6 +13,8 @@ import {
 } from '@/types/api';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
+import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
+import { Star } from 'lucide-react';
 
 /*
  * Community Reporter Queue (admin)
@@ -45,8 +47,32 @@ export default function CommunityReporterPage(){
   const { isFounder } = useAuth();
   const notify = useNotify();
   const [isCleaning, setIsCleaning] = useState(false);
+  // New UI state additions
+  const [riskFilter, setRiskFilter] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'FLAGGED'>('ALL');
+  const [aiPickOnly, setAiPickOnly] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'ALL'|'COMMUNITY'|'VERIFIED_JOURNALISTS'>('ALL');
+  const [reviewMode, setReviewMode] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileSubmission, setProfileSubmission] = useState<CommunitySubmission | null>(null);
 
   // Helper to map raw API submission to strict Phase-1 CommunitySubmission type
+  function norm(val: any, prefer?: 'city'|'state'|'country'): string {
+    if (val == null) return '';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number') return String(val);
+    if (typeof val === 'object') {
+      const city = (val.city && typeof val.city === 'string') ? val.city : '';
+      const state = (val.state && typeof val.state === 'string') ? val.state : '';
+      const country = (val.country && typeof val.country === 'string') ? val.country : '';
+      if (prefer === 'city') return city;
+      if (prefer === 'state') return state;
+      if (prefer === 'country') return country;
+      const parts = [city, state, country].filter(Boolean);
+      return parts.join(', ');
+    }
+    try { return String(val); } catch { return ''; }
+  }
   function mapRaw(raw: CommunitySubmissionApi): CommunitySubmission {
     const statusNorm = (() => {
       const s = String(raw.status || 'pending').toLowerCase();
@@ -58,9 +84,9 @@ export default function CommunityReporterPage(){
     const ageNum = typeof ageRaw === 'number' ? ageRaw : (typeof ageRaw === 'string' ? Number(ageRaw) : undefined);
     const reporterAge = (typeof ageNum === 'number' && !Number.isNaN(ageNum)) ? ageNum : undefined;
     const explicitGroup: string | undefined = (raw as any).ageGroup || (raw as any).reporterAgeGroup || undefined;
-    const city = (raw as any).city || (raw as any).town || '';
-    const state = (raw as any).state || (raw as any).region || '';
-    const country = (raw as any).country || '';
+    const city = norm((raw as any).city ?? (raw as any).town, 'city');
+    const state = norm((raw as any).state ?? (raw as any).region, 'state');
+    const country = norm((raw as any).country, 'country');
     const district = (raw as any).district || (raw as any).area || '';
     const contactName = (raw as any).contactName || undefined;
     const contactEmail = (raw as any).contactEmail || undefined;
@@ -70,15 +96,15 @@ export default function CommunityReporterPage(){
     const futureContactOk = (raw as any).futureContactOk === true || (raw as any).futureContactOk === 'true';
     const locParts = [city, state, country].map(p => String(p || '').trim()).filter(Boolean);
     const joinedLoc = locParts.join(', ');
-    const reporterLocation = joinedLoc || (raw.location || raw.city || undefined);
+    const reporterLocation = joinedLoc || norm((raw as any).location ?? (raw as any).city);
     const agInfo = getAgeGroup(reporterAge, explicitGroup);
     return {
       id: String((raw as any).id || raw._id || (raw as any).ID || (raw as any).uuid || 'missing-id'),
       headline: raw.headline ?? '',
       body: raw.body ?? '',
       category: raw.category ?? '',
-      location: raw.location ?? raw.city ?? '',
-      city: raw.city ?? undefined,
+      location: reporterLocation || '',
+      city: city || undefined,
       state: state || undefined,
       country: country || undefined,
       district: district || undefined,
@@ -105,6 +131,10 @@ export default function CommunityReporterPage(){
       riskScore: (typeof (raw as any).riskScore === 'number') ? (raw as any).riskScore : undefined,
       flags: Array.isArray((raw as any).flags) ? (raw as any).flags : undefined,
       policyNotes: (raw as any).policyNotes ?? undefined,
+      aiHighlighted: (raw as any).aiHighlighted === true || (raw as any).aiHighlighted === 'true',
+      aiTrendingScore: typeof (raw as any).aiTrendingScore === 'number' ? (raw as any).aiTrendingScore : undefined,
+      ptiComplianceStatus: (raw as any).ptiComplianceStatus ?? undefined,
+      trustScore: typeof (raw as any).trustScore === 'number' ? (raw as any).trustScore : undefined,
     };
   }
 
@@ -246,21 +276,70 @@ export default function CommunityReporterPage(){
     }
   };
 
-  const filteredSubmissions = submissions
-    .filter(s => {
-      const status = String(s.status || '').toLowerCase();
-      if (viewMode === 'pending') return status === 'pending';
-      if (viewMode === 'rejected') return status === 'rejected';
-      return true;
-    })
-    .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
-    .slice()
-    .sort((a, b) => {
+  // Risk tier helper
+  function getRiskTier(s: CommunitySubmission): 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN' {
+    const score = typeof s.riskScore === 'number' ? s.riskScore : NaN;
+    if (Number.isNaN(score)) return 'UNKNOWN';
+    if (score <= 30) return 'LOW';
+    if (score <= 70) return 'MEDIUM';
+    return 'HIGH';
+  }
+
+  const filteredSubmissions = useMemo(() => {
+    // Adjust default sort for pending: verified journalist first
+    const sorted = submissions.slice().sort((a, b) => {
+      const aVerifiedJournalist = ((a as any).sourceType === 'journalist') && ((a as any).reporterVerificationLevel === 'verified');
+      const bVerifiedJournalist = ((b as any).sourceType === 'journalist') && ((b as any).reporterVerificationLevel === 'verified');
+      if (aVerifiedJournalist && !bVerifiedJournalist) return -1;
+      if (!aVerifiedJournalist && bVerifiedJournalist) return 1;
       const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      // Newest first on top
-      return bTime - aTime;
+      return bTime - aTime; // Newest first
     });
+    return sorted
+      .filter(s => {
+        const status = String(s.status || '').toLowerCase();
+        if (viewMode === 'pending') return status === 'pending';
+        if (viewMode === 'rejected') return status === 'rejected';
+        return true;
+      })
+      .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
+      .filter(s => {
+        if (riskFilter === 'ALL') return true;
+        if (riskFilter === 'FLAGGED') return Array.isArray(s.flags) && s.flags.length > 0;
+        const tier = getRiskTier(s);
+        return tier === riskFilter;
+      })
+      .filter(s => {
+        if (sourceFilter === 'ALL') return true;
+        const src = (s as any).sourceType as 'community'|'journalist'|undefined;
+        const v = (s as any).reporterVerificationLevel as 'unverified'|'pending'|'verified'|undefined;
+        if (sourceFilter === 'COMMUNITY') return src !== 'journalist';
+        // VERIFIED_JOURNALISTS
+        return src === 'journalist' && v === 'verified';
+      })
+      .filter(s => aiPickOnly ? (s.aiHighlighted || (typeof s.aiTrendingScore === 'number' && s.aiTrendingScore > 0)) : true)
+      .slice();
+  }, [submissions, viewMode, priorityFilter, riskFilter, aiPickOnly, sourceFilter]);
+
+  // Pending list for review mode
+  const reviewPendingList = useMemo(() => filteredSubmissions.filter(s => s.status === 'pending'), [filteredSubmissions]);
+  const currentReviewItem = reviewPendingList[reviewIndex];
+
+  async function handleReviewAction(action: 'approve' | 'reject' | 'skip') {
+    if (!currentReviewItem) return;
+    if (action === 'skip') {
+      setReviewIndex(i => i + 1);
+      return;
+    }
+    await handleDecision(currentReviewItem.id, action === 'approve' ? 'approve' : 'reject');
+    setReviewIndex(i => i + 1);
+  }
+
+  function openReporterProfile(s: CommunitySubmission) {
+    setProfileSubmission(s);
+    setProfileOpen(true);
+  }
 
   return (
     <div>
@@ -302,6 +381,54 @@ export default function CommunityReporterPage(){
           >🟢 Low</button>
         </div>
         </div>
+        {/* Risk filter bar */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-slate-600 mr-1">Risk:</span>
+          {(['ALL','LOW','MEDIUM','HIGH','FLAGGED'] as const).map(r => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRiskFilter(r)}
+              className={`px-2 py-1 text-xs rounded border ${riskFilter===r ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300'}`}
+              title={r==='FLAGGED' ? 'Stories with AI policy flags' : r==='ALL' ? 'Show all risk tiers' : `${r.charAt(0)+r.slice(1).toLowerCase()} risk stories`}
+            >{r==='ALL' ? 'All' : r==='FLAGGED' ? 'Flagged' : r.charAt(0)+r.slice(1).toLowerCase()}</button>
+          ))}
+        </div>
+        {/* Source filter bar */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-slate-600 mr-1">Source:</span>
+          {(['ALL','COMMUNITY','VERIFIED_JOURNALISTS'] as const).map(sv => (
+            <button
+              key={sv}
+              type="button"
+              onClick={() => setSourceFilter(sv)}
+              className={`px-2 py-1 text-xs rounded border ${sourceFilter===sv ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-700 border-slate-300'}`}
+              title={sv==='VERIFIED_JOURNALISTS' ? 'Only verified journalist submissions' : sv==='COMMUNITY' ? 'Community reporters' : 'Show all sources'}
+            >{sv==='ALL' ? 'All' : sv==='COMMUNITY' ? 'Community' : 'Verified journalists'}</button>
+          ))}
+        </div>
+        {/* AI Pick toggle */}
+        <label className="flex items-center gap-2 text-xs text-slate-600 ml-2">
+          <input type="checkbox" checked={aiPickOnly} onChange={e=> setAiPickOnly(e.target.checked)} /> AI Picks only
+        </label>
+        {/* Review Mode button */}
+        {!reviewMode && (
+          <button
+            type="button"
+            onClick={()=> { setReviewMode(true); setReviewIndex(0); }}
+            disabled={filteredSubmissions.filter(s=> s.status==='pending').length===0}
+            className="px-3 py-1 rounded text-xs border bg-white text-slate-700 border-slate-300 hover:bg-slate-100 disabled:opacity-50 whitespace-nowrap"
+            title="Sequentially review pending stories"
+          >Start Review Mode</button>
+        )}
+        {reviewMode && (
+          <button
+            type="button"
+            onClick={()=> setReviewMode(false)}
+            className="px-3 py-1 rounded text-xs border bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 whitespace-nowrap"
+            title="Exit review mode"
+          >Exit Review Mode</button>
+        )}
         {isFounder && (
           <button
             type="button"
@@ -312,6 +439,72 @@ export default function CommunityReporterPage(){
           >{isCleaning ? 'Cleaning…' : 'Clean old low-priority stories'}</button>
         )}
       </div>
+      {/* Review Mode Panel */}
+      {reviewMode && (
+        <div className="mb-6 rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
+          {currentReviewItem ? (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold truncate max-w-[640px]" title={currentReviewItem.headline}>{currentReviewItem.headline || 'Untitled story'}</h2>
+                  <div className="flex flex-wrap gap-2 items-center text-xs">
+                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200" title="Reporter">{currentReviewItem.reporterName || currentReviewItem.userName || currentReviewItem.name || 'Unknown reporter'}</span>
+                    {typeof currentReviewItem.riskScore === 'number' && (
+                      <span className={`px-2 py-0.5 rounded border text-[10px] ${(() => { const tier = getRiskTier(currentReviewItem); if (tier==='LOW') return 'bg-emerald-100 text-emerald-700 border-emerald-200'; if (tier==='MEDIUM') return 'bg-amber-100 text-amber-700 border-amber-200'; if (tier==='HIGH') return 'bg-red-100 text-red-700 border-red-200'; return 'bg-slate-100 text-slate-600 border-slate-200'; })()}`}
+                        title={`Risk tier: ${getRiskTier(currentReviewItem)} (${currentReviewItem.riskScore})`}
+                      >Risk {getRiskTier(currentReviewItem)} {currentReviewItem.riskScore}</span>
+                    )}
+                    {Array.isArray(currentReviewItem.flags) && currentReviewItem.flags.length > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-[10px]" title={currentReviewItem.flags.join(', ')}>🚩 {currentReviewItem.flags.length} flag(s)</span>
+                    )}
+                    {currentReviewItem.aiHighlighted && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px]" title="Highlighted by AI">
+                        <Star className="w-3 h-3" /> AI Pick
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={()=> openReporterProfile(currentReviewItem)}
+                  className="px-3 py-1.5 rounded text-xs border bg-white hover:bg-slate-50"
+                >View Reporter</button>
+              </div>
+              <div className="text-sm max-h-[300px] overflow-auto whitespace-pre-wrap border rounded p-3 bg-slate-50" title="Story body">
+                {currentReviewItem.body || 'No body provided.'}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={actionId === currentReviewItem.id}
+                  onClick={()=> handleReviewAction('approve')}
+                  className="px-4 py-1.5 text-sm rounded bg-green-600 text-white disabled:opacity-50"
+                >Approve & Next</button>
+                <button
+                  disabled={actionId === currentReviewItem.id}
+                  onClick={()=> handleReviewAction('reject')}
+                  className="px-4 py-1.5 text-sm rounded bg-red-600 text-white disabled:opacity-50"
+                >Reject & Next</button>
+                <button
+                  disabled={actionId === currentReviewItem.id}
+                  onClick={()=> handleReviewAction('skip')}
+                  className="px-4 py-1.5 text-sm rounded bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50"
+                >Skip</button>
+                <div className="ml-auto text-xs text-slate-600 flex items-center gap-2">
+                  <span>{reviewIndex + 1} / {reviewPendingList.length}</span>
+                  <button
+                    type="button"
+                    onClick={()=> { setReviewIndex(0); }}
+                    className="px-2 py-1 rounded border bg-white hover:bg-slate-50"
+                    title="Restart from first pending story"
+                  >Restart</button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-600">No more pending stories match current filters. <button type="button" onClick={()=> setReviewMode(false)} className="underline">Exit review mode</button></div>
+          )}
+        </div>
+      )}
       {loading && <div>Loading...</div>}
       {error && !loading && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
       <table className="w-full text-sm border">
@@ -330,8 +523,12 @@ export default function CommunityReporterPage(){
           </tr>
         </thead>
         <tbody>
-          {filteredSubmissions.map(s => (
-            <tr key={s.id} className="border-t hover:bg-slate-50">
+          {filteredSubmissions.map(s => {
+            const tier = getRiskTier(s);
+            const isFlagged = Array.isArray(s.flags) && s.flags.length > 0;
+            const rowHighlight = tier === 'MEDIUM' ? 'bg-amber-50' : tier === 'HIGH' ? 'bg-red-50' : '';
+            return (
+            <tr key={s.id} className={`border-t hover:bg-slate-50 ${rowHighlight}`}> 
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline || '—'}</td>
               <td className="p-2" title={s.reporterName || s.userName || s.name || 'Unknown reporter'}>
                 <div className="flex flex-col gap-1 max-w-[240px]">
@@ -354,10 +551,22 @@ export default function CommunityReporterPage(){
                         title={s.reporterLocation}
                       >{s.reporterLocation}</span>
                     )}
+                    {/* Source chips */}
+                    {(() => {
+                      const sourceType = (s as any).sourceType as 'community'|'journalist'|undefined;
+                      const v = (s as any).reporterVerificationLevel as 'unverified'|'pending'|'verified'|undefined;
+                      if (sourceType === 'journalist' && v === 'verified') {
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200" title="Verified Journalist">Verified Journalist</span>;
+                      }
+                      if (sourceType === 'journalist' && v !== 'verified') {
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title="Journalist (pending)">Journalist (pending)</span>;
+                      }
+                      return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-700 border border-purple-200" title="Community Reporter">Community Reporter</span>;
+                    })()}
                   </div>
                 </div>
               </td>
-              <td className="p-2" title={s.city || s.location}>{s.city || s.location || '—'}</td>
+              <td className="p-2" title={norm(s.city || s.location)}>{norm(s.city || s.location) || '—'}</td>
               <td className="p-2" title={(s.contactEmail || s.contactPhone) ? `${s.contactEmail || ''} ${s.contactPhone || ''}`.trim() : ''}>
                 <div className="flex flex-col gap-1 max-w-[180px]">
                   {s.contactName && <span className="truncate" title={s.contactName}>{s.contactName}</span>}
@@ -372,28 +581,33 @@ export default function CommunityReporterPage(){
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
               <td className="p-2">
-                {typeof (s as any).riskScore === 'number' ? (
+                {typeof s.riskScore === 'number' ? (
                   <div className="flex items-center gap-2 flex-wrap">
                     {(() => {
-                      const score = Math.max(0, Math.min(100, Number((s as any).riskScore || 0)));
-                      const tier = score <= 30 ? { label: 'Low', tone: 'success' } : score <= 70 ? { label: 'Medium', tone: 'warning' } : { label: 'High', tone: 'danger' };
+                      const score = Math.max(0, Math.min(100, Number(s.riskScore || 0)));
+                      const tierObj = tier === 'LOW' ? { label: 'Low', tone: 'success' } : tier === 'MEDIUM' ? { label: 'Medium', tone: 'warning' } : tier === 'HIGH' ? { label: 'High', tone: 'danger' } : { label: '—', tone: 'neutral' };
+                      const flagsText = isFlagged ? (s.flags || []).join(', ') : 'No policy flags';
                       return (
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${toneToBadgeClasses(tier.tone as any)}`}
-                          title={`Risk: ${tier.label} (${score})`}
-                        >{tier.label} <span className="ml-1 opacity-70">{score}</span></span>
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${toneToBadgeClasses(tierObj.tone as any)}`}
+                          title={`Risk: ${tierObj.label} (${score})\n${flagsText}`}
+                        >{tierObj.label} <span className="ml-1 opacity-70">{score}</span></span>
                       );
                     })()}
-                    {Array.isArray((s as any).flags) && (s as any).flags.length > 0 && (
+                    {isFlagged && (
                       <span
                         className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200"
-                        title={(s as any).flags.join(', ')}
-                      >🚩 {(s as any).flags.length} flags</span>
+                        title={(s.flags || []).join(', ')}
+                      >🚩 {(s.flags || []).length} flags</span>
+                    )}
+                    {(s.aiHighlighted || (typeof s.aiTrendingScore === 'number' && s.aiTrendingScore > 0)) && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-200"
+                        title={`AI Pick${typeof s.aiTrendingScore === 'number' ? ` · trending score ${s.aiTrendingScore}` : ''}`}
+                      ><Star className="w-3 h-3" /> AI Pick</span>
                     )}
                   </div>
-                ) : (
-                  <span className="text-slate-400">—</span>
-                )}
+                ) : <span className="text-slate-400">—</span>}
               </td>
               <td className="p-2 font-medium">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -406,12 +620,29 @@ export default function CommunityReporterPage(){
                       Draft linked
                     </span>
                   )}
+                  {s.ptiComplianceStatus && (
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ${s.ptiComplianceStatus==='pass' ? 'bg-green-100 text-green-700 border-green-200' : s.ptiComplianceStatus==='fail' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}
+                      title={`PTI Compliance: ${s.ptiComplianceStatus}`}
+                    >PTI {s.ptiComplianceStatus}</span>
+                  )}
+                  {typeof s.trustScore === 'number' && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200"
+                      title={`Trust score: ${s.trustScore}`}
+                    >Trust {s.trustScore}</span>
+                  )}
                 </div>
               </td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={()=> handleView(s)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white" disabled={!s.id || s.id==='missing-id'}>View</button>
+                  <button
+                    onClick={()=> openReporterProfile(s)}
+                    className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
+                    title="Open reporter profile drawer"
+                  >View Reporter</button>
                   {s.linkedArticleId && (
                     <button
                       onClick={() => navigate(`/admin/articles/${s.linkedArticleId}/edit`)}
@@ -443,7 +674,7 @@ export default function CommunityReporterPage(){
                 </div>
               </td>
             </tr>
-          ))}
+          );})}
           {!loading && filteredSubmissions.length === 0 && (
             <tr>
               <td colSpan={8} className="p-4 text-center text-slate-500">No submissions found.</td>
@@ -451,6 +682,36 @@ export default function CommunityReporterPage(){
           )}
         </tbody>
       </table>
+      <ReporterProfileDrawer
+        open={profileOpen}
+        reporter={profileSubmission ? {
+          id: profileSubmission.id,
+          reporterKey: profileSubmission.email || profileSubmission.contactEmail || profileSubmission.contactPhone || profileSubmission.id,
+            name: profileSubmission.reporterName || profileSubmission.userName || profileSubmission.name || null,
+            email: profileSubmission.email || profileSubmission.contactEmail || null,
+            phone: profileSubmission.contactPhone || null,
+            city: profileSubmission.city || null,
+            state: profileSubmission.state || null,
+            country: profileSubmission.country || null,
+            notes: undefined,
+            totalStories: 0,
+            pendingStories: 0,
+            approvedStories: 0,
+            lastStoryAt: profileSubmission.createdAt || new Date().toISOString()
+        } : null}
+        onClose={()=> { setProfileOpen(false); setProfileSubmission(null); }}
+        onOpenStories={(key)=> {
+          const qs = new URLSearchParams();
+          if (key) qs.set('reporterKey', key);
+          const name = profileSubmission?.reporterName || profileSubmission?.userName || profileSubmission?.name || '';
+          if (name) qs.set('name', name);
+          navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
+        }}
+        onOpenQueue={(key)=> {
+          navigate(`/community/reporter?reporterKey=${encodeURIComponent(key)}`);
+          setProfileOpen(false);
+        }}
+      />
     </div>
   );
 }

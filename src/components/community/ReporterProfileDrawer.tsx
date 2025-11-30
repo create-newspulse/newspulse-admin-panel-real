@@ -27,7 +27,7 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
   // Sync when reporter changes
   useEffect(() => { setDraftNotes(reporter?.notes || ''); }, [reporter?.notes, reporter?.id]);
 
-  const { mutate: saveNotes, isLoading: saving } = useMutation({
+  const { mutate: saveNotes, isPending: saving } = useMutation({
     mutationFn: async () => {
       if (!key) throw new Error('Missing reporter key');
       return updateReporterContactNotes(key, draftNotes.trim());
@@ -77,6 +77,19 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
         </div>
 
         <div className="p-4 space-y-4">
+          {/* Type + Verification */}
+          <div className="flex items-center gap-2">
+            {reporter?.reporterType && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
+                {reporter.reporterType==='journalist' ? 'Journalist' : 'Community Reporter'}
+              </span>
+            )}
+            {reporter?.verificationLevel && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : reporter.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                {reporter.verificationLevel==='verified' ? 'Verified' : reporter.verificationLevel==='pending' ? 'Pending' : 'Unverified'}
+              </span>
+            )}
+          </div>
           {/* Meta */}
           <div className="flex items-center justify-between">
             <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
@@ -100,6 +113,33 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             <div className="text-sm"><span className="font-medium">Email:</span> {reporter?.email || '—'}</div>
             <div className="text-sm"><span className="font-medium">Phone:</span> {maskedPhone || '—'}</div>
           </div>
+
+          {/* Organisation & Professional */}
+          {(reporter?.organisationName || reporter?.positionTitle || reporter?.beatsProfessional || reporter?.yearsExperience || reporter?.languages || reporter?.websiteOrPortfolio || reporter?.socialLinks) && (
+            <div className="space-y-1">
+              {reporter?.organisationName && (
+                <div className="text-sm"><span className="font-medium">Organisation:</span> {reporter.organisationName} {reporter.organisationType ? `(${reporter.organisationType})` : ''}</div>
+              )}
+              {reporter?.positionTitle && (
+                <div className="text-sm"><span className="font-medium">Position:</span> {reporter.positionTitle}</div>
+              )}
+              {Array.isArray(reporter?.beatsProfessional) && reporter!.beatsProfessional!.length > 0 && (
+                <div className="text-sm"><span className="font-medium">Beats:</span> {reporter!.beatsProfessional!.join(', ')}</div>
+              )}
+              {typeof reporter?.yearsExperience === 'number' && (
+                <div className="text-sm"><span className="font-medium">Experience:</span> {reporter!.yearsExperience} years</div>
+              )}
+              {Array.isArray(reporter?.languages) && reporter!.languages!.length > 0 && (
+                <div className="text-sm"><span className="font-medium">Languages:</span> {reporter!.languages!.join(', ')}</div>
+              )}
+              {reporter?.websiteOrPortfolio && (
+                <div className="text-sm"><span className="font-medium">Website:</span> <a className="text-blue-600 hover:underline" href={reporter.websiteOrPortfolio} target="_blank" rel="noreferrer">{reporter.websiteOrPortfolio}</a></div>
+              )}
+              {reporter?.socialLinks && (
+                <div className="text-sm"><span className="font-medium">Social:</span> {reporter.socialLinks.linkedin && <a className="text-blue-600 hover:underline mr-2" href={reporter.socialLinks.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>} {reporter.socialLinks.twitter && <a className="text-blue-600 hover:underline" href={reporter.socialLinks.twitter} target="_blank" rel="noreferrer">Twitter/X</a>}</div>
+              )}
+            </div>
+          )}
 
           {/* Location */}
           <div className="space-y-1">

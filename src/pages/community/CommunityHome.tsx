@@ -50,6 +50,14 @@ export default function CommunityHome() {
           icon={<ContactRound className="w-6 h-6" />}
           variant="secondary"
         />
+        {/* Journalist Applications */}
+        <HubCard
+          to="/community/journalist-applications"
+          title="Journalist Applications"
+          description="Review and verify professional journalist applicants."
+          icon={<ContactRound className="w-6 h-6" />}
+          variant="secondary"
+        />
       </section>
 
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-indigo-700 text-sm">

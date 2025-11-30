@@ -79,6 +79,7 @@ import ReporterPortal from '@pages/community/ReporterPortal';
 import CommunityHome from '@pages/community/CommunityHome';
 import ReporterContactDirectory from '@pages/community/ReporterContactDirectory';
 import ReporterStoriesAdmin from '@pages/community/ReporterStoriesAdmin';
+import JournalistApplications from '@pages/community/JournalistApplications';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -173,6 +174,8 @@ function App() {
               <Route path="/community/reporter-stories/:reporterKey" element={<Navigate replace to="/community/reporter-stories" />} />
               {/* Reporter Contact Directory (founder/admin only) */}
               <Route path="/community/reporter-contacts" element={<ProtectedRoute><LockCheckWrapper><ReporterContactDirectory /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Journalist Applications (founder/admin only) */}
+              <Route path="/community/journalist-applications" element={<ProtectedRoute><LockCheckWrapper><JournalistApplications /></LockCheckWrapper></ProtectedRoute>} />
               {/* Reporter Portal (admin + public alias) */}
               <Route path="/admin/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />

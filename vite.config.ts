@@ -35,12 +35,12 @@ export default defineConfig(({ mode }): UserConfig => {
       },
     },
 
-  server: {
-      host: true,
-      port: 5173,
-      open: true,
-  // Force 5173; if busy, Vite will exit instead of auto-switching
-  strictPort: true,
+      server: {
+        host: true,
+        port: 5173,
+        open: true,
+        // Force chosen port; prevents silent fallback and gives explicit error if busy
+        strictPort: true,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {

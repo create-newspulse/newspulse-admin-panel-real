@@ -80,7 +80,9 @@ export const UploadCsvDialog: React.FC<Props> = ({ onDone }) => {
       {mutate.data && (
         <div className="text-xs bg-slate-50 p-2 rounded border">
           created: {mutate.data.created}, updated: {mutate.data.updated}, skipped: {mutate.data.skipped}
-          {mutate.data.errors?.length>0 && <pre className="mt-2 text-red-600 whitespace-pre-wrap">{JSON.stringify(mutate.data.errors,null,2)}</pre>}
+          {((mutate.data?.errors?.length ?? 0) > 0) && (
+            <pre className="mt-2 text-red-600 whitespace-pre-wrap">{JSON.stringify(mutate.data?.errors,null,2)}</pre>
+          )}
         </div>
       )}
       <button onClick={onDone} className="px-3 py-1 bg-slate-600 text-white rounded">Close</button>

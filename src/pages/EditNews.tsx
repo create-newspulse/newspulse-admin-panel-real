@@ -144,8 +144,7 @@ export default function EditNews() {
     }
 
     try {
-      const res = await api.put(`/api/admin/articles/${id}`, form);
-      const result = res.data || {};
+      await api.put(`/api/admin/articles/${id}`, form);
 
       toast.success('✅ Article updated');
       navigate('/manage-news');

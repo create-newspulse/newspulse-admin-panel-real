@@ -20,7 +20,7 @@
   "noEmit": true,
   "allowImportingTsExtensions": true,
     "baseUrl": ".",
-  "types": ["node", "react", "react-dom", "vite/client", "vitest", "@testing-library/jest-dom"],
+  "types": ["node", "react", "react-dom", "vitest"],
     "paths": {
       "@/*": ["src/*"],
       "@components/*": ["src/components/*"],
