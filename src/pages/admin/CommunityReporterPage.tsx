@@ -554,15 +554,19 @@ export default function CommunityReporterPage(){
                     {/* Source chips */}
                     {(() => {
                       const sourceType = (s as any).sourceType as 'community'|'journalist'|undefined;
-                      const v = (s as any).reporterVerificationLevel as 'unverified'|'pending'|'verified'|undefined;
+                      const v = (s as any).reporterVerificationLevel as 'community_default'|'pending'|'verified'|'limited'|'revoked'|'unverified'|undefined;
                       if (sourceType === 'journalist' && v === 'verified') {
                         return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200" title="Verified Journalist">Verified Journalist</span>;
                       }
-                      if (sourceType === 'journalist' && v !== 'verified') {
-                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title="Journalist (pending)">Journalist (pending)</span>;
+                      if (sourceType === 'journalist' && (v === 'pending' || v === 'limited' || v === 'revoked' || v === 'unverified')) {
+                        const label = v==='pending' ? 'pending' : v==='limited' ? 'limited' : v==='revoked' ? 'revoked' : 'unverified';
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title={`Journalist (${label})`}>Journalist ({label})</span>;
                       }
                       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-700 border border-purple-200" title="Community Reporter">Community Reporter</span>;
                     })()}
+                    {typeof (s as any).ethicsStrikes === 'number' && (s as any).ethicsStrikes > 0 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title={`Ethics strikes: ${(s as any).ethicsStrikes}`}>⚠ {(s as any).ethicsStrikes}</span>
+                    )}
                   </div>
                 </div>
               </td>

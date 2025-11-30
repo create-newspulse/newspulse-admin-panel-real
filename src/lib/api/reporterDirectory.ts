@@ -17,7 +17,9 @@ export interface ReporterContact {
   lastStoryAt: string; // ISO date
   // Extended fields
   reporterType?: 'journalist' | 'community';
-  verificationLevel?: 'unverified' | 'pending' | 'verified';
+  verificationLevel?: 'community_default' | 'pending' | 'verified' | 'limited' | 'revoked' | 'unverified';
+  status?: 'active' | 'watchlist' | 'suspended' | 'banned';
+  ethicsStrikes?: number | null;
   organisationName?: string | null;
   organisationType?: string | null;
   positionTitle?: string | null;
@@ -26,6 +28,8 @@ export interface ReporterContact {
   languages?: string[] | null;
   websiteOrPortfolio?: string | null;
   socialLinks?: { linkedin?: string; twitter?: string } | null;
+  journalistCharterAccepted?: boolean | null;
+  charterAcceptedAt?: string | null;
 }
 
 export interface ReporterContactListResponse {

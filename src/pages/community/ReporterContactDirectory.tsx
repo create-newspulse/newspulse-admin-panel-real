@@ -85,7 +85,8 @@ export default function ReporterContactDirectory() {
   const [hasNotesOnly, setHasNotesOnly] = useState(false);
   const [activityFilter, setActivityFilter] = useState<'All activity' | 'Very active' | 'Active' | 'Dormant' | 'Inactive'>('All activity');
   const [typeFilter, setTypeFilter] = useState<'All'|'Community'|'Journalist'>('All');
-  const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Unverified'>('All');
+  const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
+  const [statusFilter, setStatusFilter] = useState<'All'|'Active'|'Watchlist'|'Suspended'|'Banned'>('All');
 
   // Load preferences on mount (browser-only)
   useEffect(() => {
@@ -153,15 +154,27 @@ export default function ReporterContactDirectory() {
     }
     if (verificationFilter !== 'All') {
       list = list.filter(r => {
-        const v = (r.verificationLevel || 'unverified');
+        const v = (r.verificationLevel || 'community_default');
         if (verificationFilter === 'Verified') return v === 'verified';
         if (verificationFilter === 'Pending') return v === 'pending';
+        if (verificationFilter === 'Limited') return v === 'limited';
+        if (verificationFilter === 'Revoked') return v === 'revoked';
+        if (verificationFilter === 'Community Default') return v === 'community_default';
         return v === 'unverified';
+      });
+    }
+    if (statusFilter !== 'All') {
+      list = list.filter(r => {
+        const s = (r.status || 'active');
+        if (statusFilter === 'Active') return s === 'active';
+        if (statusFilter === 'Watchlist') return s === 'watchlist';
+        if (statusFilter === 'Suspended') return s === 'suspended';
+        return s === 'banned';
       });
     }
     // Optional default sort: newest last story first, empties at bottom
     return list;
-  }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter]);
+  }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, typeFilter, verificationFilter, statusFilter]);
 
   const sortedReporters = useMemo(() => {
     const arr = [...filteredReporters];
@@ -413,7 +426,11 @@ export default function ReporterContactDirectory() {
             </select>
             <span className="text-xs text-slate-600">Verification:</span>
             <select value={verificationFilter} onChange={(e)=> setVerificationFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
-              {['All','Verified','Pending','Unverified'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              {['All','Verified','Pending','Limited','Revoked','Unverified','Community Default'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            <span className="text-xs text-slate-600">Status:</span>
+            <select value={statusFilter} onChange={(e)=> setStatusFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
+              {['All','Active','Watchlist','Suspended','Banned'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
             </select>
           </div>
           <select
@@ -654,6 +671,7 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Email</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Phone</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
@@ -713,9 +731,25 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : rc.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                    {rc.verificationLevel==='verified' ? 'Verified' : rc.verificationLevel==='pending' ? 'Pending' : 'Unverified'}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : rc.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='revoked' ? 'bg-slate-100 text-slate-700 border-slate-200' : rc.verificationLevel==='community_default' ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                    {rc.verificationLevel==='verified' ? 'Verified' : rc.verificationLevel==='pending' ? 'Pending' : rc.verificationLevel==='limited' ? 'Limited' : rc.verificationLevel==='revoked' ? 'Revoked' : rc.verificationLevel==='community_default' ? 'Community Default' : 'Unverified'}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  {(() => {
+                    const s = rc.status || 'active';
+                    const map: Record<string, string> = {
+                      active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                      watchlist: 'bg-amber-100 text-amber-800 border-amber-200',
+                      suspended: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                      banned: 'bg-red-100 text-red-700 border-red-200',
+                    };
+                    const label: Record<string, string> = { active: 'Active', watchlist: 'Watchlist', suspended: 'Suspended', banned: 'Banned' };
+                    return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${map[s]}`}>{label[s]}</span>;
+                  })()}
+                  {typeof rc.ethicsStrikes === 'number' && rc.ethicsStrikes > 0 && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800 border border-amber-200" title={`Ethics strikes: ${rc.ethicsStrikes}`}>⚠ {rc.ethicsStrikes}</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.email ? (
@@ -731,6 +765,9 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       </button>
                     </div>
                   ) : '—'}
+                  {Array.isArray(rc.languages) && rc.languages.length > 0 && (
+                    <div className="mt-1 text-[10px] text-slate-600">{rc.languages.map(l => (l || '').toUpperCase()).join(' · ')}</div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.phone ? (

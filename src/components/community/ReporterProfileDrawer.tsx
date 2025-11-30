@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ReporterContact, updateReporterContactNotes } from '@/lib/api/reporterDirectory';
+import { updateReporterStatus } from '@/lib/api/communityAdmin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 
@@ -71,25 +72,30 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div>
             <h2 className="text-lg font-semibold">{name}</h2>
-            <p className="text-xs text-slate-600">Founder/Admin only — do not share publicly.</p>
+            <p className="text-xs text-slate-600">{reporter?.email || '—'}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {reporter?.reporterType && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
+                {reporter.reporterType==='journalist' ? 'Journalist' : 'Community'}
+              </span>
+            )}
+            {reporter?.verificationLevel && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : reporter.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : reporter.verificationLevel==='limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : reporter.verificationLevel==='revoked' ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                {reporter.verificationLevel==='verified' ? 'Verified' : reporter.verificationLevel==='pending' ? 'Pending' : reporter.verificationLevel==='limited' ? 'Limited' : reporter.verificationLevel==='revoked' ? 'Revoked' : 'Community Default'}
+              </span>
+            )}
+            {reporter?.status && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.status==='active' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : reporter.status==='watchlist' ? 'bg-amber-100 text-amber-800 border-amber-200' : reporter.status==='suspended' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                {reporter.status.charAt(0).toUpperCase() + reporter.status.slice(1)}
+              </span>
+            )}
           </div>
           <button onClick={onClose} className="px-2 py-1 text-sm rounded-md border hover:bg-slate-50">✕</button>
         </div>
 
         <div className="p-4 space-y-4">
-          {/* Type + Verification */}
-          <div className="flex items-center gap-2">
-            {reporter?.reporterType && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
-                {reporter.reporterType==='journalist' ? 'Journalist' : 'Community Reporter'}
-              </span>
-            )}
-            {reporter?.verificationLevel && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${reporter.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : reporter.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                {reporter.verificationLevel==='verified' ? 'Verified' : reporter.verificationLevel==='pending' ? 'Pending' : 'Unverified'}
-              </span>
-            )}
-          </div>
+          {/* Meta badges duplicated in header; keep story count */}
           {/* Meta */}
           <div className="flex items-center justify-between">
             <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
@@ -132,6 +138,25 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
               {Array.isArray(reporter?.languages) && reporter!.languages!.length > 0 && (
                 <div className="text-sm"><span className="font-medium">Languages:</span> {reporter!.languages!.join(', ')}</div>
               )}
+                        {/* Ethics & Behaviour */}
+                        <div className="space-y-1">
+                          {typeof reporter?.ethicsStrikes === 'number' && (
+                            <div className="text-sm"><span className="font-medium">Ethics strikes:</span> {reporter!.ethicsStrikes}</div>
+                          )}
+                          {Array.isArray((reporter as any)?.behaviourNotes) && ((reporter as any).behaviourNotes.length > 0) && (
+                            <div className="text-sm">
+                              <span className="font-medium">Behaviour notes:</span>
+                              <div className="mt-1 space-y-1">
+                                {((reporter as any).behaviourNotes as Array<{ date?: string; note: string }>).map((n, idx) => (
+                                  <div key={idx} className="text-xs text-slate-700">
+                                    <span className="text-slate-500 mr-1">{n.date ? new Date(n.date).toLocaleString() : ''}</span>
+                                    {n.note}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
               {reporter?.websiteOrPortfolio && (
                 <div className="text-sm"><span className="font-medium">Website:</span> <a className="text-blue-600 hover:underline" href={reporter.websiteOrPortfolio} target="_blank" rel="noreferrer">{reporter.websiteOrPortfolio}</a></div>
               )}
@@ -192,6 +217,15 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             >
               Open in Reporter Queue
             </button>
+            {/* Quick status actions */}
+            {reporter?.id && (
+              <div className="ml-auto flex items-center gap-2">
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { await updateReporterStatus(reporter.id, { status: 'watchlist' }); toast.success('Marked watchlist'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); }}>Mark Watchlist</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { if (window.confirm('Suspend this reporter?')) { await updateReporterStatus(reporter.id, { status: 'suspended' }); toast.success('Suspended'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Suspend</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" onClick={async ()=> { if (window.confirm('Ban this reporter?')) { await updateReporterStatus(reporter.id, { status: 'banned' }); toast.success('Banned'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Ban</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { await updateReporterStatus(reporter.id, { addStrike: true }); toast.success('Ethics strike added'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); }}>Add strike</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
