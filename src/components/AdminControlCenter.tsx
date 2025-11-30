@@ -112,7 +112,7 @@ export default function AdminControlCenter() {
     tempContainer.style.fontSize = '14px';
     tempContainer.style.lineHeight = '1.5';
     tempContainer.innerHTML = `
-      <h2 style="font-size:18px; margin-bottom:12px;">🧩 NewsPulse Admin Settings</h2>
+      <h2 style="font-size:18px; margin-bottom:12px;">🧩 News Pulse Admin Settings</h2>
       <ul>
         <li><strong>AI Trainer:</strong> ${settings.aiTrainer ? 'Enabled ✅' : 'Disabled ❌'}</li>
         <li><strong>AdSense:</strong> ${settings.adsenseEnabled ? 'Enabled ✅' : 'Disabled ❌'}</li>
@@ -130,7 +130,7 @@ export default function AdminControlCenter() {
       .from(tempContainer)
       .set({
         margin: 0.5,
-        filename: 'Admin_Settings_NewsPulse.pdf',
+        filename: 'Admin_Settings_NewsPulse.pdf', /* internal filename kept; branding in UI updated */
         html2canvas: { scale: 2 },
         jsPDF: { orientation: 'portrait' },
       })

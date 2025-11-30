@@ -38,6 +38,14 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
       queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] });
     },
     onError: (e: any) => {
+      if (e?.isUnauthorized) {
+        toast.error('Session expired — please log in again.');
+        return;
+      }
+      if (e?.isNotImplemented) {
+        toast('Notes saving is not available in this environment.', { icon: 'ℹ️' });
+        return;
+      }
       toast.error(e?.message || 'Failed to save notes');
     }
   });
@@ -74,6 +82,18 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
             <span className="text-xs text-slate-500">Last: {reporter?.lastStoryAt ? new Date(reporter.lastStoryAt).toLocaleString() : '—'}</span>
           </div>
+
+          {/* Completeness Notice */}
+          {reporter && (!reporter.phone || (!reporter.city && !reporter.state && !reporter.country)) && (
+            <div className="border rounded-md p-3 bg-slate-50 text-xs text-slate-600 space-y-1">
+              <p className="font-medium flex items-center gap-1">Profile incomplete</p>
+              <p>This profile is missing contact/location details. Update when reliable information is available.</p>
+              <ul className="list-disc ml-4 space-y-0.5">
+                {!reporter.phone && <li>No phone recorded</li>}
+                {!reporter.city && !reporter.state && !reporter.country && <li>No location (city/state/country)</li>}
+              </ul>
+            </div>
+          )}
 
           {/* Contact */}
           <div className="space-y-1">

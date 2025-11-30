@@ -360,7 +360,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           />
           <div className="card p-4">
             <h3 className="font-semibold mb-2">SEO</h3>
-            <div className="text-xs">Title Tag Preview: {title || 'Untitled'} | NewsPulse</div>
+            <div className="text-xs">Title Tag Preview: {title || 'Untitled'} | News Pulse</div>
             <div className="text-xs">Meta Description: {(summary||'').slice(0,140)}</div>
           </div>
           <div className="card p-4">

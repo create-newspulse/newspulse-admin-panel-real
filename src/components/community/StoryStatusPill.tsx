@@ -28,10 +28,10 @@ export default function StoryStatusPill({ status }: { status: CommunityStoryStat
     draft: 'Draft',
     submitted: 'Submitted',
     approved: 'Approved',
-    published: 'Published on NewsPulse',
+    published: 'Published on News Pulse',
     rejected: 'Rejected',
     withdrawn: 'Withdrawn',
-    removed: 'Removed by NewsPulse',
+    removed: 'Removed by News Pulse',
   }[status];
 
   const classes = {

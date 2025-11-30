@@ -164,7 +164,7 @@ export default function SubmitCommunityStory() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold mb-1">{editingId ? 'Edit Story – Community Reporter' : cloneId ? 'New Draft (Cloned)' : 'Submit Story – Community Reporter'}</h1>
-        <p className="text-sm text-slate-600">Write your story here. You can save as a draft or submit it to the NewsPulse editorial team for review.</p>
+        <p className="text-sm text-slate-600">Write your story here. You can save as a draft or submit it to the News Pulse editorial team for review.</p>
       </div>
 
       <div className="card p-4 space-y-4">
@@ -210,7 +210,7 @@ export default function SubmitCommunityStory() {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
             <div>
               <h2 className="text-lg font-semibold">Location & Contact</h2>
-              <p className="text-xs text-slate-500 mt-1">This information is only visible to the NewsPulse editorial team. It will not appear on the public website.</p>
+              <p className="text-xs text-slate-500 mt-1">This information is only visible to the News Pulse editorial team. It will not appear on the public website.</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
@@ -276,7 +276,7 @@ export default function SubmitCommunityStory() {
 
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={confirmGuidelines} onChange={e=> setConfirmGuidelines(e.target.checked)} />
-          I confirm this story is accurate and follows the NewsPulse guidelines.
+          I confirm this story is accurate and follows the News Pulse guidelines.
         </label>
       </div>
 

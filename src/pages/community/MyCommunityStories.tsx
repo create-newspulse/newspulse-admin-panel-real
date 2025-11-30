@@ -75,7 +75,7 @@ export default function MyCommunityStories() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">My Community Stories</h1>
-          <p className="text-sm text-slate-600">View and manage stories you've submitted to NewsPulse.</p>
+          <p className="text-sm text-slate-600">View and manage stories you've submitted to News Pulse.</p>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-secondary" onClick={()=> navigate('/community/submit')}>+ New Story</button>
@@ -182,7 +182,7 @@ export default function MyCommunityStories() {
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">Reason: {viewing.decisionReason}</div>
               )}
               {mapStoryStatus(String(viewing.status)) === 'removed' && (
-                <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">This story was removed by NewsPulse for safety/legal reasons.</div>
+                <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">This story was removed by News Pulse for safety/legal reasons.</div>
               )}
               {viewing.summary && (
                 <p className="text-slate-700">{viewing.summary}</p>

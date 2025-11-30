@@ -44,10 +44,25 @@ export async function listReporterContacts(params?: {
 
 // Update private admin-only reporter notes. Backend should secure this route.
 export async function updateReporterContactNotes(reporterKey: string, notes: string) {
-  const res = await adminApi.post<{ ok: boolean; notes?: string }>(
-    '/admin/community/reporter-contact-notes',
-    { reporterKey, notes }
-  );
-  if (!res.data?.ok) throw new Error('Failed to save reporter notes');
-  return res.data;
+  try {
+    const res = await adminApi.post<{ ok: boolean; notes?: string }>(
+      '/admin/community/reporter-contact-notes',
+      { reporterKey, notes }
+    );
+    if (!res.data?.ok) throw new Error('Failed to save reporter notes');
+    return res.data;
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 401) {
+      const e = new Error('Admin session expired. Please log in again.') as any;
+      e.isUnauthorized = true;
+      throw e;
+    }
+    if (status === 404) {
+      const e = new Error('Notes endpoint not available in this environment.') as any;
+      e.isNotImplemented = true;
+      throw e;
+    }
+    throw err;
+  }
 }

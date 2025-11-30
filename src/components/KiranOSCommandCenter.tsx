@@ -149,7 +149,7 @@ export default function KiranOSCommandCenter({ defaultOpen=false, adminMode=fals
             speakText(answer, lang);
           } catch (err3: any) {
             const msg3 = err3?.response?.data?.error || err3.message || 'Request failed';
-            setMessages(prev => [...prev, { role: 'system', content: `⚠️ ${msg3}. The backend API seems unreachable. Please check your internet connection or the NewsPulse backend status.`, ts: Date.now() }]);
+            setMessages(prev => [...prev, { role: 'system', content: `⚠️ ${msg3}. The backend API seems unreachable. Please check your internet connection or the News Pulse backend status.`, ts: Date.now() }]);
           }
         }
       } else {
