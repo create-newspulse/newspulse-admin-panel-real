@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
 import { normalizeError, appendError } from '@/lib/error';
-import { fetchCommunityReporterSubmissions } from '@/api/adminCommunityReporterApi';
+import { fetchCommunityReporterSubmissions, listCommunityReporterQueue } from '@/api/adminCommunityReporterApi';
 import { debug } from '@/lib/debug';
 import { useAuth } from '@/context/AuthContext';
 import { useNotify } from '@/components/ui/toast-bridge';
@@ -36,7 +36,6 @@ function formatPriorityLabel(priority?: CommunitySubmissionPriority){
 // Removed to avoid unused variable warning
 
 export default function CommunityReporterPage(){
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>([]);
   const [actionId, setActionId] = useState<string|null>(null);
@@ -138,32 +137,49 @@ export default function CommunityReporterPage(){
     };
   }
 
+  // React Query based loading for submissions with server-side filters.
+  const sourceBackend = sourceFilter === 'COMMUNITY' ? 'community' : sourceFilter === 'VERIFIED_JOURNALISTS' ? 'journalists' : undefined;
+  const { isLoading, isError } = (window as any).useQueueQueryHook || {};
+
+  // Inline lightweight custom hook behavior without external abstraction.
+  const [internalLoading, setInternalLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      if (loadedRef.current) return;
-      loadedRef.current = true;
-      setLoading(true); setError(null);
+    async function run() {
+      setInternalLoading(true);
+      setError(null);
       try {
-        const raw = await fetchCommunityReporterSubmissions();
-        debug('[CommunityReporterPage] submissions raw', raw);
+        const raw = await listCommunityReporterQueue({
+          status: viewMode === 'pending' ? 'pending' : 'rejected',
+          priority: priorityFilter === 'ALL' ? undefined : priorityFilter,
+          risk: riskFilter === 'ALL' ? undefined : riskFilter,
+          source: sourceBackend,
+          aiPickOnly,
+        });
         const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
         setSubmissions(list.map(mapRaw));
       } catch (e:any) {
-        if (cancelled) return;
         const n = normalizeError(e, 'Failed to load submissions.');
         setError(n.authExpired ? 'Session expired. Please login again.' : n.message);
+        if (import.meta.env.DEV) debug('[CommunityReporterPage] fetch error status', e?.response?.status);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setInternalLoading(false);
       }
     }
-    load();
+    run();
     return () => { cancelled = true; };
-  }, []);
+  }, [viewMode, priorityFilter, riskFilter, sourceFilter, aiPickOnly]);
 
   async function fetchSubmissions(){
+    // Manual refresh (e.g. cleanup or explicit reload) using same param mapping.
     try {
-      const raw = await fetchCommunityReporterSubmissions();
+      const raw = await listCommunityReporterQueue({
+        status: viewMode === 'pending' ? 'pending' : 'rejected',
+        priority: priorityFilter === 'ALL' ? undefined : priorityFilter,
+        risk: riskFilter === 'ALL' ? undefined : riskFilter,
+        source: sourceBackend,
+        aiPickOnly,
+      });
       debug('[CommunityReporterPage] refresh raw', raw);
       const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
       setSubmissions(list.map(mapRaw));
@@ -505,8 +521,12 @@ export default function CommunityReporterPage(){
           )}
         </div>
       )}
-      {loading && <div>Loading...</div>}
-      {error && !loading && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
+      {internalLoading && <div className="mb-3 text-sm bg-slate-100 text-slate-700 px-3 py-2 rounded border border-slate-200">Loading…</div>}
+      {error && !internalLoading && (
+        <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">
+          Failed to load Community Reporter Queue. {error}
+        </div>
+      )}
       <table className="w-full text-sm border">
         <thead className="bg-slate-100">
           <tr>
@@ -679,9 +699,9 @@ export default function CommunityReporterPage(){
               </td>
             </tr>
           );})}
-          {!loading && filteredSubmissions.length === 0 && (
+          {!internalLoading && !error && filteredSubmissions.length === 0 && (
             <tr>
-              <td colSpan={8} className="p-4 text-center text-slate-500">No submissions found.</td>
+              <td colSpan={10} className="p-4 text-center text-slate-500">No stories found.</td>
             </tr>
           )}
         </tbody>
