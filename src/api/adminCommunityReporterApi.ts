@@ -114,3 +114,28 @@ export async function listCommunityReporterQueue(params: {
     throw err;
   }
 }
+
+// Actions: restore and hard-delete for rejected/trash tab
+export async function restoreCommunitySubmission(id: string) {
+  // Canonical admin path under /api/admin/community-reporter
+  // Frontend base uses adminApi, which prefixes with /admin-api in dev
+  try {
+    const res = await adminApi.post(`/api/admin/community-reporter/submissions/${id}/restore`);
+    return res?.data ?? { ok: true };
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (import.meta.env.DEV) debug('[restoreCommunitySubmission:error]', status, err?.message);
+    throw err;
+  }
+}
+
+export async function hardDeleteCommunitySubmission(id: string) {
+  try {
+    const res = await adminApi.post(`/api/admin/community-reporter/submissions/${id}/hard-delete`);
+    return res?.data ?? { ok: true };
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (import.meta.env.DEV) debug('[hardDeleteCommunitySubmission:error]', status, err?.message);
+    throw err;
+  }
+}

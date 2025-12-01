@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
 import { normalizeError, appendError } from '@/lib/error';
-import { fetchCommunityReporterSubmissions, listCommunityReporterQueue } from '@/api/adminCommunityReporterApi';
+import { fetchCommunityReporterSubmissions, listCommunityReporterQueue, restoreCommunitySubmission, hardDeleteCommunitySubmission } from '@/api/adminCommunityReporterApi';
 import { debug } from '@/lib/debug';
 import { useAuth } from '@/context/AuthContext';
 import { useNotify } from '@/components/ui/toast-bridge';
@@ -261,11 +261,33 @@ export default function CommunityReporterPage(){
   const handleRestore = async (submissionId: string) => {
     setActionId(submissionId); setError(null);
     try {
-      await adminApi.post(`/api/admin/community-reporter/submissions/${submissionId}/restore`);
+      await restoreCommunitySubmission(submissionId);
+      // Remove from rejected list locally; move to pending view if user switches tabs
       setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: 'pending' } : s));
+      // Optionally trigger a soft refresh to keep counts in sync
+      await fetchSubmissions();
     } catch (e:any) {
       const n = normalizeError(e, 'Restore failed');
       setError(prev => appendError(prev, n));
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleHardDelete = async (submissionId: string) => {
+    const ok = window.confirm('Are you sure? This will permanently delete this submission and cannot be undone.');
+    if (!ok) return;
+    setActionId(submissionId); setError(null);
+    try {
+      await hardDeleteCommunitySubmission(submissionId);
+      // Optimistically remove from local list
+      setSubmissions(prev => prev.filter(s => s.id !== submissionId));
+      await fetchSubmissions();
+      notify.ok('Deleted forever');
+    } catch (e:any) {
+      const n = normalizeError(e, 'Delete failed');
+      setError(prev => appendError(prev, n));
+      notify.err('Delete failed', n.message);
     } finally {
       setActionId(null);
     }
@@ -684,11 +706,19 @@ export default function CommunityReporterPage(){
                     >Reject</button>
                   )}
                   {viewMode === 'rejected' && (
-                    <button
-                      disabled={actionId === s.id}
-                      onClick={()=> handleRestore(s.id)}
-                      className="px-3 py-1 text-xs rounded bg-yellow-600 text-white disabled:opacity-60"
-                    >Restore</button>
+                    <>
+                      <button
+                        disabled={actionId === s.id}
+                        onClick={()=> handleRestore(s.id)}
+                        className="px-3 py-1 text-xs rounded bg-yellow-600 text-white disabled:opacity-60"
+                      >Restore</button>
+                      <button
+                        disabled={actionId === s.id}
+                        onClick={()=> handleHardDelete(s.id)}
+                        className="px-3 py-1 text-xs rounded bg-red-700 text-white disabled:opacity-60"
+                        title="Permanently remove"
+                      >Delete forever</button>
+                    </>
                   )}
                 </div>
               </td>
