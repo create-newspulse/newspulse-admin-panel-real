@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { listArticles, deleteArticle, AdminArticle } from '../../../lib/api/articles';
+import { listArticles, deleteArticle, hardDeleteArticle, restoreArticle, AdminArticle } from '../../../lib/api/articles';
 
 export default function DraftDeskPage(){
   const qc = useQueryClient();
   const [toast, setToast] = useState<string|null>(null);
   const [originFilter, setOriginFilter] = useState<'all'|'community'|'editor'|'founder'|'journalist'>('all');
+  const [statusFilter, setStatusFilter] = useState<'draft'|'deleted'>('draft');
   const { data, isLoading } = useQuery({
-    queryKey:['articles','drafts', originFilter],
+    queryKey:['articles','drafts', originFilter, statusFilter],
     queryFn: () => {
-      const params: any = { status: 'draft' };
+      const params: any = { status: statusFilter };
       if (originFilter !== 'all') {
         // Backend contract: support origin/source filter; send origin for compatibility
         params.origin = originFilter;
@@ -19,8 +20,8 @@ export default function DraftDeskPage(){
   });
   const itemsRaw: AdminArticle[] = (data?.data || []) as AdminArticle[];
   const items: AdminArticle[] = useMemo(() =>
-    (itemsRaw || []).filter((a) => a?.status === 'draft'),
-  [itemsRaw]);
+    (itemsRaw || []).filter((a) => a?.status === statusFilter),
+  [itemsRaw, statusFilter]);
 
   async function onDelete(id: string){
     const ok = window.confirm('Move this draft to Deleted? You can restore later from Manage News → Deleted.');
@@ -45,11 +46,51 @@ export default function DraftDeskPage(){
     }
   }
 
+  async function onRestore(id: string){
+    try {
+      await restoreArticle(id);
+      setToast('Article restored to Draft Desk.');
+      setTimeout(()=> setToast(null), 3000);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || e?.message || 'Failed to restore article');
+    } finally {
+      qc.invalidateQueries({ queryKey:['articles'] });
+      qc.invalidateQueries({ queryKey:['articles','drafts'] });
+    }
+  }
+
+  async function onHardDelete(id: string){
+    const ok = window.confirm('Delete this article forever? This cannot be undone.');
+    if (!ok) return;
+    try {
+      await hardDeleteArticle(id);
+      setToast('Article permanently deleted.');
+      setTimeout(()=> setToast(null), 3000);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || e?.message || 'Failed to permanently delete');
+    } finally {
+      qc.invalidateQueries({ queryKey:['articles'] });
+      qc.invalidateQueries({ queryKey:['articles','drafts'] });
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold flex items-center gap-2">📰 Draft Desk</h1>
         <div className="flex items-center gap-2">
+          {/* Status chips */}
+          <button
+            type="button"
+            onClick={()=> setStatusFilter('draft')}
+            className={`px-3 py-1 rounded border text-sm ${statusFilter==='draft' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+          >All Drafts</button>
+          <button
+            type="button"
+            onClick={()=> setStatusFilter('deleted')}
+            className={`px-3 py-1 rounded border text-sm ${statusFilter==='deleted' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+          >Deleted</button>
+          {/* Origin chips */}
           <button
             type="button"
             onClick={()=> setOriginFilter('all')}
@@ -65,6 +106,16 @@ export default function DraftDeskPage(){
             onClick={()=> setOriginFilter('editor')}
             className={`px-3 py-1 rounded border text-sm ${originFilter==='editor' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
           >Editor drafts</button>
+          <button
+            type="button"
+            onClick={()=> setOriginFilter('journalist')}
+            className={`px-3 py-1 rounded border text-sm ${originFilter==='journalist' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+          >Professional Journalist</button>
+          <button
+            type="button"
+            onClick={()=> setOriginFilter('founder')}
+            className={`px-3 py-1 rounded border text-sm ${originFilter==='founder' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+          >Founder</button>
           {/* Future: founder, journalist */}
         </div>
       </div>
@@ -91,20 +142,33 @@ export default function DraftDeskPage(){
                   <span className="px-2 py-0.5 rounded text-xs font-medium border bg-blue-100 text-blue-700 border-blue-200">Community Reporter</span>
                 ) : a?.source === 'editor' ? (
                   <span className="px-2 py-0.5 rounded text-xs font-medium border bg-purple-100 text-purple-700 border-purple-200">Editor Draft</span>
+                ) : a?.source === 'journalist' ? (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium border bg-emerald-100 text-emerald-700 border-emerald-200">Professional Journalist</span>
+                ) : a?.source === 'founder' ? (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium border bg-orange-100 text-orange-700 border-orange-200">Founder</span>
                 ) : (
                   <span className="px-2 py-0.5 rounded text-xs font-medium border bg-slate-100 text-slate-700 border-slate-200">—</span>
                 )}
               </td>
               <td className="p-2 flex gap-2 justify-center">
-                <a href={`/admin/manage-news/${a._id}/edit`} className="btn-secondary">Edit</a>
-                {a?.status === 'draft' && (
-                  <button onClick={()=> onDelete(a._id)} className="btn-secondary">Delete draft</button>
+                {statusFilter==='draft' && (
+                  <>
+                    <a href={`/admin/manage-news/${a._id}/edit`} className="btn-secondary">Edit</a>
+                    <button onClick={()=> onDelete(a._id)} className="btn-secondary">Delete draft</button>
+                  </>
+                )}
+                {statusFilter==='deleted' && (
+                  <>
+                    <button onClick={()=> onRestore(a._id)} className="btn-secondary">Restore</button>
+                    <button onClick={()=> onHardDelete(a._id)} className="btn-secondary">Delete forever</button>
+                  </>
                 )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {/* TODO: Later, we can add a separate "Restored" view if backend returns a restored flag/history; for now, restore returns items to draft status which appear under All Drafts. */}
     </div>
   );
 }
