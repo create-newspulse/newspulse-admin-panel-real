@@ -53,7 +53,8 @@ export default defineConfig(({ mode }): UserConfig => {
         // Proxy /admin-api/* to local backend without rewriting path
         // Backend mounts admin endpoints under '/admin-api', so keep the prefix intact.
         '/admin-api': {
-          target: 'http://localhost:5000',
+          // Local backend dev server; default to 5001 since backend may bump if 5000 is busy
+          target: 'http://localhost:5001',
           changeOrigin: true,
           secure: false,
           // No rewrite: preserve '/admin-api' so routes like '/admin-api/articles/:id' resolve
