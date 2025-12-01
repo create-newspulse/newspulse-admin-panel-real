@@ -662,11 +662,6 @@ export default function CommunityReporterPage(){
               <td className="p-2">
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={()=> handleView(s)} className="px-3 py-1 text-xs rounded bg-blue-600 text-white" disabled={!s.id || s.id==='missing-id'}>View</button>
-                  <button
-                    onClick={()=> openReporterProfile(s)}
-                    className="px-3 py-1 text-xs rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
-                    title="Open reporter profile drawer"
-                  >View Reporter</button>
                   {s.linkedArticleId && (
                     <button
                       onClick={() => navigate(`/admin/articles/${s.linkedArticleId}/edit`)}
