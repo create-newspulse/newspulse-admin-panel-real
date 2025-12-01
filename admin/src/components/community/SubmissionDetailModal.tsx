@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { getCommunitySubmission, updateCommunitySubmissionStatus, CommunitySubmission } from '../../lib/api/communitySubmissions';
+import { getCommunitySubmission, updateCommunitySubmissionDecision, CommunitySubmission } from '../../lib/api/communitySubmissions';
 
 interface Props {
   id: string | null;
   onClose: () => void;
   onStatusChange: (id: string, nextStatus: string, rejectReason?: string) => void;
+  onError?: (message: string) => void;
 }
 
-export default function SubmissionDetailModal({ id, onClose, onStatusChange }: Props){
+export default function SubmissionDetailModal({ id, onClose, onStatusChange, onError }: Props){
   const qc = useQueryClient();
   const [showRejectPrompt, setShowRejectPrompt] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -33,19 +34,29 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange }: P
 
   async function approve(){
     if(!id) return;
-    await updateCommunitySubmissionStatus(id, { status: 'APPROVED', aiHeadline: aiHeadline || item?.aiHeadline, aiBody: aiBody || item?.aiBody });
-    qc.invalidateQueries({ queryKey: ['community-submissions'] });
-    onStatusChange(id, 'APPROVED');
-    onClose();
+    try {
+      await updateCommunitySubmissionDecision(id, 'approve', { aiHeadline: aiHeadline || item?.aiHeadline, aiBody: aiBody || item?.aiBody });
+      qc.invalidateQueries({ queryKey: ['community-submissions'] });
+      onStatusChange(id, 'APPROVED');
+      onClose();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Failed to approve submission.';
+      onError?.(msg);
+    }
   }
   async function rejectSubmit(e: React.FormEvent){
     e.preventDefault();
     if(!id) return;
-    await updateCommunitySubmissionStatus(id, { status: 'REJECTED', rejectReason });
-    qc.invalidateQueries({ queryKey: ['community-submissions'] });
-    onStatusChange(id, 'REJECTED', rejectReason);
-    setShowRejectPrompt(false);
-    onClose();
+    try {
+      await updateCommunitySubmissionDecision(id, 'reject', { rejectReason });
+      qc.invalidateQueries({ queryKey: ['community-submissions'] });
+      onStatusChange(id, 'REJECTED', rejectReason);
+      setShowRejectPrompt(false);
+      onClose();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Failed to reject submission.';
+      onError?.(msg);
+    }
   }
 
   return (

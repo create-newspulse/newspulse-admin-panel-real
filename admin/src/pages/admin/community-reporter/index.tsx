@@ -1,46 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listCommunitySubmissions, CommunitySubmission, CommunitySubmissionPriority } from '../../../lib/api/communitySubmissions';
 import SubmissionDetailModal from '../../../components/community/SubmissionDetailModal';
 
+type StatusFilter = 'ALL' | 'NEW';
+type PriorityFilter = 'ALL' | CommunitySubmissionPriority;
+
 function formatPriorityLabel(priority?: CommunitySubmissionPriority){
   if (priority === 'FOUNDER_REVIEW') return '🔴 Founder Review';
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='FOUNDER_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
-              title="High priority – founder should review first"
+  if (priority === 'EDITOR_REVIEW') return '🟡 Editor Review';
+  if (priority === 'LOW_PRIORITY') return '🟢 Low';
   return '—';
-            🔴 Founder</button>
+}
 
 function priorityRank(priority?: CommunitySubmissionPriority){
   if (priority === 'FOUNDER_REVIEW') return 1;
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='EDITOR_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
-              title="Medium priority – editor can review"
+  if (priority === 'EDITOR_REVIEW') return 2;
+  if (priority === 'LOW_PRIORITY') return 3;
   return 99;
-            🟡 Editor</button>
+}
 
 export default function CommunityReporterPage(){
   const qc = useQueryClient();
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='LOW_PRIORITY' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
-              title="Low priority – safe to review later"
   const [selectedId, setSelectedId] = useState<string|null>(null);
-            🟢 Low</button>
+  const [toast, setToast] = useState<string|null>(null);
+  const [error, setError] = useState<string|null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('NEW');
+  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL');
 
   const { data, isLoading, refetch } = useQuery({
     queryKey:['community-submissions', statusFilter],
     queryFn: () => listCommunitySubmissions(statusFilter==='NEW' ? { status: 'NEW'} : {} )
   });
 
-  const submissionsRaw: CommunitySubmission[] = (data?.data || data || []).slice();
+  const submissionsRaw: CommunitySubmission[] = useMemo(() => {
+    const arr = (data as any)?.data || data || [];
+    return Array.isArray(arr) ? arr.slice() : [];
+  }, [data]);
 
-  const submissions = submissionsRaw
-    .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
-    .slice()
-    .sort((a, b) => {
-      const prioDiff = priorityRank(a.priority) - priorityRank(b.priority);
-      if (prioDiff !== 0) return prioDiff;
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bTime - aTime; // newest first within same priority
-    });
+  const submissions = useMemo(() =>
+    submissionsRaw
+      .filter(s => priorityFilter === 'ALL' ? true : s.priority === priorityFilter)
+      .slice()
+      .sort((a, b) => {
+        const prioDiff = priorityRank(a.priority) - priorityRank(b.priority);
+        if (prioDiff !== 0) return prioDiff;
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return bTime - aTime; // newest first within same priority
+      })
+  , [submissionsRaw, priorityFilter]);
 
   function open(id: string){
     setSelectedId(id);
@@ -49,8 +58,24 @@ export default function CommunityReporterPage(){
     setSelectedId(null);
   }
   function onStatusChange(id: string, nextStatus: string){
+    setError(null);
     setToast(nextStatus === 'APPROVED' ? 'Submission approved.' : 'Submission updated.');
     setTimeout(()=> setToast(null), 3500);
+    // Remove from list immediately if approved while showing Pending
+    if (statusFilter === 'NEW' && nextStatus === 'APPROVED') {
+      qc.setQueryData(['community-submissions', statusFilter], (old: any) => {
+        try {
+          const arr = Array.isArray(old) ? old : (Array.isArray(old?.data) ? old.data : []);
+          const next = arr.filter((s: any) => (s._id || s.id) !== id);
+          return Array.isArray(old) ? next : { ...(old||{}), data: next };
+        } catch { return old; }
+      });
+    }
+    qc.invalidateQueries({ queryKey:['community-submissions'] });
+  }
+  function onError(message: string){
+    setError(message);
+    setTimeout(()=> setError(null), 5000);
   }
 
   useEffect(()=> { refetch(); }, [statusFilter, refetch]);
@@ -60,41 +85,43 @@ export default function CommunityReporterPage(){
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold flex items-center gap-2">🧑‍🤝‍🧑 Community Reporter Queue</h1>
         <div className="flex items-center gap-3">
-              title="High priority 525 founder should review first"
           <div className="flex items-center gap-2">
-            <select value={statusFilter} onChange={e=> setStatusFilter(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
+            <select value={statusFilter} onChange={e=> setStatusFilter(e.target.value as StatusFilter)} className="border rounded px-2 py-1 text-sm">
               <option value="ALL">All statuses</option>
               <option value="NEW">Pending</option>
             </select>
           </div>
-              title="Medium priority 525 editor can review"
           <div className="flex items-center gap-1">
             <span className="text-xs text-slate-600 mr-1">Priority:</span>
             <button
               type="button"
               onClick={()=> setPriorityFilter('ALL')}
               className={`px-2 py-1 text-xs rounded border ${priorityFilter==='ALL' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
-              title="Low priority 525 safe to review later"
+              title="Show all priorities"
             >All</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('FOUNDER_REVIEW')}
               className={`px-2 py-1 text-xs rounded border ${priorityFilter==='FOUNDER_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              title="High priority – founder should review first"
             >🔴 Founder</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('EDITOR_REVIEW')}
               className={`px-2 py-1 text-xs rounded border ${priorityFilter==='EDITOR_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              title="Medium priority – editor can review"
             >🟡 Editor</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('LOW_PRIORITY')}
               className={`px-2 py-1 text-xs rounded border ${priorityFilter==='LOW_PRIORITY' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              title="Low priority – safe to review later"
             >🟢 Low</button>
           </div>
           <button onClick={()=> qc.invalidateQueries({ queryKey:['community-submissions'] })} className="btn-secondary">Refresh</button>
         </div>
       </div>
+      {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
       {toast && <div className="mb-3 text-sm bg-green-100 text-green-700 px-3 py-2 rounded border border-green-200">{toast}</div>}
       {isLoading && <div>Loading...</div>}
       <table className="w-full text-sm border">
@@ -113,7 +140,7 @@ export default function CommunityReporterPage(){
         </thead>
         <tbody>
           {submissions.map((s: any)=>(
-            <tr key={s._id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=> open(s._id)}>
+            <tr key={s._id || s.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=> open(s._id || s.id)}>
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline}</td>
               <td className="p-2" title={s.userName}>{s.userName}</td>
               <td className="p-2" title={s.location}>{s.location || '—'}</td>
@@ -142,7 +169,7 @@ export default function CommunityReporterPage(){
           ))}
           {!isLoading && submissions.length===0 && (
             <tr>
-              <td colSpan={7} className="p-4 text-center text-slate-500">No submissions found.</td>
+              <td colSpan={9} className="p-4 text-center text-slate-500">No submissions found.</td>
             </tr>
           )}
         </tbody>
@@ -152,6 +179,7 @@ export default function CommunityReporterPage(){
         id={selectedId}
         onClose={close}
         onStatusChange={(id, status) => onStatusChange(id, status)}
+        onError={(msg) => onError(msg)}
       />
     </div>
   );

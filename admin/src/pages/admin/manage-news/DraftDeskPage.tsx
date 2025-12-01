@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { listArticles, deleteArticle, AdminArticle } from '../../../lib/api/articles';
+import { listArticles, hardDeleteArticle, AdminArticle } from '../../../lib/api/articles';
 
 export default function DraftDeskPage(){
   const qc = useQueryClient();
@@ -9,13 +9,26 @@ export default function DraftDeskPage(){
   const items: AdminArticle[] = ((data?.data || []) as AdminArticle[]).filter((a) => a?.status === 'draft');
 
   async function onDelete(id: string){
-    const ok = window.confirm('Delete this draft? This will move it to Deleted and it will not appear in Draft Desk or Manage News Drafts.');
+    const ok = window.confirm('Delete this draft forever? This cannot be undone.');
     if (!ok) return;
-    await deleteArticle(id);
-    setToast('Draft deleted.');
-    setTimeout(()=> setToast(null), 3000);
-    qc.invalidateQueries({ queryKey:['articles'] });
-    qc.invalidateQueries({ queryKey:['articles','drafts'] });
+    // Optimistically remove from current list
+    qc.setQueryData(['articles','drafts'], (old: any) => {
+      try {
+        const arr = Array.isArray(old?.data) ? old.data : (Array.isArray(old) ? old : []);
+        const next = arr.filter((a: AdminArticle) => a._id !== id);
+        return Array.isArray(old) ? next : { ...(old||{}), data: next };
+      } catch { return old; }
+    });
+    try {
+      await hardDeleteArticle(id);
+      setToast('Draft deleted.');
+      setTimeout(()=> setToast(null), 3000);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || e?.message || 'Failed to delete draft');
+    } finally {
+      qc.invalidateQueries({ queryKey:['articles'] });
+      qc.invalidateQueries({ queryKey:['articles','drafts'] });
+    }
   }
 
   return (

@@ -36,30 +36,43 @@ export interface AdminArticleListParams {
 }
 
 export async function listArticles(params: AdminArticleListParams = {}) {
-  const { data } = await api.get('/api/articles', { params });
+  // Admin endpoint for listing articles; use status filter like 'draft'.
+  const { data } = await api.get('/api/admin/articles', { params });
   return data;
 }
 export async function getArticle(id: string) {
-  const { data } = await api.get(`/api/articles/${id}`);
+  const { data } = await api.get(`/api/admin/articles/${id}`);
   return data;
 }
 export async function createArticle(body: ArticleInput) {
-  const { data } = await api.post('/api/articles', body);
+  const { data } = await api.post('/api/admin/articles', body);
   return data;
 }
 export async function updateArticle(id: string, body: ArticleInput) {
-  const { data } = await api.put(`/api/articles/${id}`, body);
+  const { data } = await api.put(`/api/admin/articles/${id}`, body);
   return data;
 }
 export async function archiveArticle(id: string) {
-  const { data } = await api.patch(`/api/articles/${id}/archive`);
+  const { data } = await api.patch(`/api/admin/articles/${id}/archive`);
   return data;
 }
 export async function restoreArticle(id: string) {
-  const { data } = await api.patch(`/api/articles/${id}/restore`);
+  const { data } = await api.patch(`/api/admin/articles/${id}/restore`);
   return data;
 }
 export async function deleteArticle(id: string) {
-  const { data } = await api.delete(`/api/articles/${id}`);
+  // Soft delete via admin endpoint (kept for non-draft flows)
+  const { data } = await api.delete(`/api/admin/articles/${id}`);
   return data;
+}
+
+export async function hardDeleteArticle(id: string) {
+  // Primary hard-delete route; backend also supports DELETE with ?hard=true
+  try {
+    const { data } = await api.post(`/api/admin/articles/${id}/hard-delete`);
+    return data;
+  } catch (e) {
+    const { data } = await api.delete(`/api/admin/articles/${id}`, { params: { hard: 'true' } });
+    return data;
+  }
 }

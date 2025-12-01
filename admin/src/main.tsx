@@ -7,6 +7,7 @@ import AddNewsPage from './pages/admin/add-news';
 import ManageNewsPage from './pages/admin/manage-news';
 import EditNewsPage from './pages/admin/manage-news/edit';
 import DraftDeskPage from './pages/admin/manage-news/DraftDeskPage';
+import CommunityReporterPage from './pages/admin/community-reporter';
 import './styles.css';
 import { AdminAuthProvider } from './context/AdminAuthContext';
 
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path='manage-news' element={<ManageNewsPage />} />
             <Route path='drafts' element={<DraftDeskPage />} />
             <Route path='manage-news/:id/edit' element={<EditNewsPage />} />
+            <Route path='community-reporter' element={<CommunityReporterPage />} />
             <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
           </Route>
           {/* Any other root-level path redirects into admin space */}
