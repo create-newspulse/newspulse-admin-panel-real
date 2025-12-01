@@ -37,6 +37,8 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange, onE
     try {
       await updateCommunitySubmissionDecision(id, 'approve', { aiHeadline: aiHeadline || item?.aiHeadline, aiBody: aiBody || item?.aiBody });
       qc.invalidateQueries({ queryKey: ['community-submissions'] });
+      // Ensure Draft Desk sees fresh data after approval; matches structured query key signature
+      qc.invalidateQueries({ queryKey: ['admin-drafts'] });
       onStatusChange(id, 'APPROVED');
       onClose();
     } catch (e: any) {
