@@ -9,7 +9,7 @@ import {
   updateArticleStatus,
   scheduleArticle,
   unscheduleArticle,
-  deleteArticleHard,
+  hardDeleteArticle,
   type Article,
   type ListResponse,
 } from '@/lib/api/articles';
@@ -135,10 +135,29 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     onSuccess: () => { toast.success('Unscheduled'); },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
   });
+  const [hardDeletingId, setHardDeletingId] = React.useState<string | null>(null);
   const mutateDeleteHard = useMutation({
-    mutationFn: (id: string) => deleteArticleHard(id),
+    mutationFn: (id: string) => hardDeleteArticle(id),
+    onMutate: async (id: string) => {
+      setHardDeletingId(id);
+      // Optimistic removal from current page
+      await qc.cancelQueries({ queryKey: ['articles'] });
+      const prev = qc.getQueryData<ListResponse>(['articles', params]);
+      if (prev?.data) {
+        qc.setQueryData(['articles', params], {
+          ...prev,
+          data: prev.data.filter((a: Article) => a._id !== id),
+          total: Math.max(0, (prev.total || 1) - 1),
+        });
+      }
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['articles', params], ctx.prev);
+      toast.error('Hard delete failed');
+    },
     onSuccess: () => { toast.success('Deleted forever'); },
-    onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
+    onSettled: () => { setHardDeletingId(null); qc.invalidateQueries({ queryKey: ['articles'] }); }
   });
   // Scheduling dialog state
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
@@ -238,7 +257,14 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
                   <button onClick={()=> mutateDelete.mutate(r._id)} className="text-red-600 hover:underline">Delete</button>
                 )}
                 {getAvailableActions(r.status as ArticleStatus).includes('deleteHard') && canDelete && (
-                  <button onClick={()=> { if (confirm('Delete forever?')) mutateDeleteHard.mutate(r._id); }} className="text-red-700 hover:underline">Delete forever</button>
+                  <button
+                    disabled={hardDeletingId === r._id}
+                    onClick={()=> {
+                      const ok = confirm('Are you sure? This will permanently delete this article. This action cannot be undone.');
+                      if (ok) mutateDeleteHard.mutate(r._id);
+                    }}
+                    className={`hover:underline ${hardDeletingId === r._id ? 'text-slate-400 cursor-not-allowed' : 'text-red-700'}`}
+                  >{hardDeletingId === r._id ? 'Deleting…' : 'Delete forever'}</button>
                 )}
               </td>
             </tr>

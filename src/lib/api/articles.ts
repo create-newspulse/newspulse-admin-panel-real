@@ -136,6 +136,38 @@ export async function deleteArticleHard(id: string) {
   await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`, { params: { hard: true } });
 }
 
+// New resilient helper: try canonical hard-delete route first, then fallbacks
+export async function hardDeleteArticle(id: string) {
+  // Try explicit hard-delete endpoints first to match backend Part A
+  const candidates = [
+    `${ADMIN_ARTICLES_PATH}/${id}/hard-delete`,
+    `${ADMIN_ARTICLES_PATH}/${id}/hard`,
+  ];
+  let lastErr: any = null;
+  for (const path of candidates) {
+    try {
+      const res = await apiClient.delete(path);
+      const ok = res?.data?.ok === true || res?.data?.success === true || res.status === 200 || res.status === 204;
+      if (!ok) throw new Error('Hard delete failed');
+      return;
+    } catch (e: any) {
+      const status = e?.response?.status;
+      lastErr = e;
+      if (status && status !== 404 && status !== 405) {
+        throw e; // real error other than not implemented
+      }
+      // otherwise try next candidate
+    }
+  }
+  // Legacy fallback: query param variant
+  try {
+    await deleteArticleHard(id);
+    return;
+  } catch (e: any) {
+    throw lastErr || e;
+  }
+}
+
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
   const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
