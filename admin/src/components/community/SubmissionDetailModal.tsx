@@ -5,7 +5,7 @@ import { getCommunitySubmission, updateCommunitySubmissionDecision, CommunitySub
 interface Props {
   id: string | null;
   onClose: () => void;
-  onStatusChange: (id: string, nextStatus: string, extra?: string) => void;
+  onStatusChange: (id: string, nextStatus: string, rejectReason?: string) => void;
   onError?: (message: string) => void;
 }
 
@@ -35,10 +35,9 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange, onE
   async function approve(){
     if(!id) return;
     try {
-      const res = await updateCommunitySubmissionDecision(id, 'approve', { aiHeadline: aiHeadline || item?.aiHeadline, aiBody: aiBody || item?.aiBody });
-      const articleId = (res && (res.articleId || res?.data?.articleId)) ? (res.articleId || res?.data?.articleId) : undefined;
+      await updateCommunitySubmissionDecision(id, 'approve', { aiHeadline: aiHeadline || item?.aiHeadline, aiBody: aiBody || item?.aiBody });
       qc.invalidateQueries({ queryKey: ['community-submissions'] });
-      onStatusChange(id, 'APPROVED', articleId ? String(articleId) : undefined);
+      onStatusChange(id, 'APPROVED');
       onClose();
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || 'Failed to approve submission.';
