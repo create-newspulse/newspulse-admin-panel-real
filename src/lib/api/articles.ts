@@ -52,11 +52,13 @@ export async function listArticles(params: {
   limit?: number;
   sort?: string;
 }): Promise<ListResponse> {
-  // Translate frontend param `status: 'all'` to backend `status: undefined`
-  if (params.status === 'all') {
-    delete params.status;
+  // Translate frontend param `status: 'all'` to explicit include list (exclude deleted)
+  const query: Record<string, any> = { ...params };
+  if (query.status === 'all') {
+    // Explicitly exclude deleted from the All view by requesting only active-like statuses
+    query.status = ['draft', 'scheduled', 'published', 'archived'].join(',');
   }
-  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params });
+  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
   const { ok, items = [], total = 0 } = res.data as ApiResponse;
   if (!ok) throw new Error('Failed to list articles');
   

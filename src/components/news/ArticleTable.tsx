@@ -74,9 +74,14 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
       await qc.cancelQueries({ queryKey: ['articles'] });
       const prev = qc.getQueryData<ListResponse>(['articles', params]);
       if (prev?.data) {
+        // In All view, drop the row immediately; otherwise mark as deleted
+        const inAllView = (params.status ?? 'all') === 'all';
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'deleted' }: a)
+          data: inAllView
+            ? prev.data.filter((a: Article) => a._id !== id)
+            : prev.data.map((a: Article)=> a._id===id? { ...a, status:'deleted' }: a),
+          total: Math.max(0, (prev.total || 1) - (inAllView ? 1 : 0)),
         });
       }
       return { prev };
