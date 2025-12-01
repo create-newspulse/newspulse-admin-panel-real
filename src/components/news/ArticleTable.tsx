@@ -28,6 +28,8 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const qc = useQueryClient();
   const { user } = useAuth();
   const role = user?.role || 'editor';
+  // Call all hooks unconditionally at the top (before any early returns)
+  const { publishEnabled } = usePublishFlag();
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
   const { data, isLoading, error } = useQuery<ListResponse>({ queryKey: ['articles', params], queryFn: () => listArticles(params) });
@@ -175,7 +177,6 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const total = data?.total || 0;
   const canPrev = page > 1;
   const canNext = page < pages;
-  const { publishEnabled } = usePublishFlag();
   return (
     <>
     <table className="w-full text-sm border">
