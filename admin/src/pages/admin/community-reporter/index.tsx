@@ -57,9 +57,13 @@ export default function CommunityReporterPage(){
   function close(){
     setSelectedId(null);
   }
-  function onStatusChange(id: string, nextStatus: string){
+  function onStatusChange(id: string, nextStatus: string, extra?: string){
     setError(null);
-    setToast(nextStatus === 'APPROVED' ? 'Submission approved.' : 'Submission updated.');
+    if (nextStatus === 'APPROVED' && extra) {
+      setToast(`Story approved and moved to Draft Desk (Article #${extra}).`);
+    } else {
+      setToast(nextStatus === 'APPROVED' ? 'Submission approved.' : 'Submission updated.');
+    }
     setTimeout(()=> setToast(null), 3500);
     // Remove from list immediately if approved while showing Pending
     if (statusFilter === 'NEW' && nextStatus === 'APPROVED') {
