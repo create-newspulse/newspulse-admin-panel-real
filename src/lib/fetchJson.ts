@@ -1,8 +1,8 @@
 import { adminRoot } from './adminApi';
 
-// If using proxy '/admin-api' do NOT append '/api'. For direct hosts, we append '/api'.
+// Direct backend origin: append '/api' when base doesn't include it.
 const API_ORIGIN = adminRoot;
-const API_BASE = API_ORIGIN === '/admin-api' ? API_ORIGIN : `${API_ORIGIN}/api`;
+const API_BASE = /\/api$/.test(API_ORIGIN) ? API_ORIGIN : `${API_ORIGIN}/api`;
 
 export type FetchJsonOptions = RequestInit & {
   timeoutMs?: number;
@@ -15,8 +15,8 @@ export async function fetchJson<T = any>(url: string, options: FetchJsonOptions 
   const normalize = (u: string) => {
     if (/^https?:\/\//i.test(u)) return u;
     if (u.startsWith('/api/')) {
-      // Proxy base: strip leading /api so rewrite maps /admin-api/system/health -> backend /api/system/health
-      if (API_ORIGIN === '/admin-api') return `${API_ORIGIN}${u.replace(/^\/api\//, '/')}`;
+      // If base already ends with '/api', avoid duplicating segment
+      if (/\/api$/.test(API_ORIGIN)) return `${API_ORIGIN}${u.replace(/^\/api/, '')}`;
       return `${API_ORIGIN}${u}`;
     }
     if (u.startsWith('/')) {

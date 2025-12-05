@@ -4,7 +4,7 @@ import axios from 'axios';
 // In production, set Vercel env `VITE_ADMIN_API_URL` to the Render backend origin (prefer including `/api`).
 // In local dev, default to `/admin-api` which the Vite proxy forwards to the backend.
 export const ADMIN_API_BASE = (
-  (import.meta.env.VITE_ADMIN_API_URL ?? '/admin-api')
+  import.meta.env.VITE_ADMIN_API_URL || 'http://localhost:10000'
 ).toString().trim().replace(/\/+$/, '');
 
 export const adminRoot = ADMIN_API_BASE; // retained name for existing imports
@@ -108,8 +108,6 @@ try { console.info('[adminApi] base resolved =', adminRoot); } catch {}
 // New unified OTP helpers using resolveAdminPath so proxy base works.
 // Helper to build OTP paths relative to chosen base without duplicating '/admin-api'
 function otpEndpoint(segment: string) {
-  // When using proxy base '/admin-api' we call '/auth/otp/*' (mounted under admin-api root)
-  if (adminRoot === '/admin-api') return `/auth/otp/${segment}`;
   // If the direct origin includes '/api', avoid duplicating it
   if (/\/api$/.test(adminRoot)) return `/auth/otp/${segment}`;
   return `/api/auth/otp/${segment}`;
