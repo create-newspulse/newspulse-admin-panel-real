@@ -4,7 +4,9 @@ import axios from 'axios';
 // In production, set Vercel env `VITE_ADMIN_API_URL` to the Render backend origin (prefer including `/api`).
 // In local dev, default to `/admin-api` which the Vite proxy forwards to the backend.
 export const ADMIN_API_BASE = (
-  import.meta.env.VITE_ADMIN_API_URL || 'http://localhost:10000'
+  import.meta.env.VITE_ADMIN_API_URL ||
+  import.meta.env.VITE_ADMIN_API_BASE_URL ||
+  ''
 ).toString().trim().replace(/\/+$/, '');
 
 export const adminRoot = ADMIN_API_BASE; // retained name for existing imports

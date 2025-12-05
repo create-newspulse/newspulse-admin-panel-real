@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ADMIN_API_BASE } from '../lib/adminApi';
 
-const API_ORIGIN = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
-  import.meta.env.VITE_API_URL?.toString() ||
-  (import.meta.env.MODE === 'development' ? 'http://localhost:10000' : 'https://newspulse-backend-real.onrender.com')
-).replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+const API_BASE = /\/api$/.test(ADMIN_API_BASE)
+  ? ADMIN_API_BASE
+  : `${ADMIN_API_BASE}/api`;
 
 export interface AnchorSource {
   title: string;
