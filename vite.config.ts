@@ -11,7 +11,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
   // In dev, default to local backend if not specified; keep production untouched
-  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:10000' : '');
+  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:5000' : '');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
 
   return {
@@ -54,7 +54,7 @@ export default defineConfig(({ mode }): UserConfig => {
         // Backend mounts admin endpoints under '/admin-api', so keep the prefix intact.
         '/admin-api': {
           // Local backend dev server for admin API
-          target: 'http://localhost:10000',
+          target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
           // No rewrite: preserve '/admin-api' so routes like '/admin-api/articles/:id' resolve

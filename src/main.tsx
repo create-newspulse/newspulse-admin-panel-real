@@ -28,10 +28,9 @@ installHtmlImportGuard();
 
 // Debug env detection for API base on boot (useful on Vercel)
 console.log(
-  '[adminBoot][env] VITE_ADMIN_API_URL =',
-  import.meta.env.VITE_ADMIN_API_URL,
-  'VITE_ADMIN_API_BASE_URL =',
-  import.meta.env.VITE_ADMIN_API_BASE_URL
+  '[adminBoot][env]',
+  'VITE_ADMIN_API_URL =', import.meta.env.VITE_ADMIN_API_URL,
+  'VITE_ADMIN_API_BASE_URL =', import.meta.env.VITE_ADMIN_API_BASE_URL
 );
 
 // Dev-only console error throttling to stop runaway repeated identical logs

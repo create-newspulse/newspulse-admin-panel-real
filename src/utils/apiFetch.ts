@@ -1,12 +1,12 @@
 /// src/utils/apiFetch.ts
 
-// Single base constant:
-// - Prod: VITE_ADMIN_API_URL or VITE_ADMIN_API_BASE_URL
-// - Dev fallback: http://localhost:10000
+// Admin API base resolution
+// - Production: `VITE_ADMIN_API_URL` or `VITE_ADMIN_API_BASE_URL` (Render backend URL)
+// - Development: fallback to `http://localhost:5000`
 const ADMIN_API_BASE = (
   import.meta.env.VITE_ADMIN_API_URL ||
   import.meta.env.VITE_ADMIN_API_BASE_URL ||
-  'http://localhost:10000'
+  (import.meta.env.DEV ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com')
 )
   .toString()
   .trim()
@@ -21,7 +21,7 @@ function resolveUrl(url: string) {
 
   const clean = url.startsWith('/') ? url : `/${url}`;
 
-  // Direct origin base; avoid double '/api' if base already ends with '/api'
+  // Avoid double '/api' if base already ends with '/api'
   if (/\/api$/.test(ADMIN_API_BASE) && /^\/api\//.test(clean)) {
     return `${ADMIN_API_BASE}${clean.replace(/^\/api/, '')}`;
   }
