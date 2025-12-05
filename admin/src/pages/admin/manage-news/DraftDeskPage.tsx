@@ -113,6 +113,22 @@ export default function DraftDeskPage(){
           <button onClick={()=> qc.invalidateQueries({ queryKey:['admin-drafts'] })} className="btn-secondary">Refresh</button>
         </div>
       </div>
+      {/* Deleted actions quick-access */}
+      {(mode==='deleted' || mode==='hard-delete') && (
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-xs text-slate-600">Deleted view:</span>
+          <button
+            type="button"
+            className={`px-2 py-1 text-xs rounded border ${mode==='deleted' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            onClick={()=> setMode('deleted')}
+          >Restore</button>
+          <button
+            type="button"
+            className={`px-2 py-1 text-xs rounded border ${mode==='hard-delete' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-600 border-red-600'}`}
+            onClick={()=> setMode('hard-delete')}
+          >Delete Permanent</button>
+        </div>
+      )}
       {/* Unified filter/action row */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {(['all','deleted','community','editor','pro','founder','restored','hard-delete'] as FilterMode[]).map((m) => (

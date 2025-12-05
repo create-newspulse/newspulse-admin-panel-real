@@ -1,5 +1,7 @@
 // src/utils/apiFetch.ts
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const RAW_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL);
+const FALLBACK = import.meta.env.MODE === 'development' ? 'http://localhost:10000' : 'https://newspulse-backend-real.onrender.com';
+const API_ORIGIN = (RAW_BASE?.toString() || FALLBACK).replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
 
 type ApiOptions = RequestInit & { headers?: Record<string, string> };

@@ -5,10 +5,12 @@ import toast from 'react-hot-toast';
 import {
   listArticles,
   deleteArticle,
+  restoreArticle,
+  hardDeleteArticle,
   Article as NPArticle,
 } from '@/lib/api/articles';
 
-// Extend with optional “community” hints
+// Extend with optional “community / pro / founder” hints
 type Article = NPArticle & {
   source?: string;
   origin?: string;
@@ -29,6 +31,20 @@ function isCommunityDraft(a: Article): boolean {
   return false;
 }
 
+// Rough classification just for filtering / badges
+function getSourceKind(
+  a: Article,
+): 'community' | 'editor' | 'pro' | 'founder' {
+  const raw = (a.source || a.origin || a.submittedBy || '').toLowerCase();
+
+  if (raw.includes('founder') || raw.includes('owner')) return 'founder';
+  if (raw.includes('pro') || raw.includes('professional') || raw.includes('journalist')) {
+    return 'pro';
+  }
+  if (isCommunityDraft(a)) return 'community';
+  return 'editor';
+}
+
 function snippet(txt?: string, n = 150) {
   if (!txt) return '';
   const clean = String(txt).replace(/\s+/g, ' ').trim();
@@ -39,21 +55,29 @@ export default function DraftDeskPage() {
   const [items, setItems] = useState<Article[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'community' | 'editor'>('all');
+
+  // NEW: status + source filters
+  const [statusFilter, setStatusFilter] = useState<'drafts' | 'deleted'>('drafts');
+  const [sourceFilter, setSourceFilter] =
+    useState<'all' | 'community' | 'editor' | 'pro' | 'founder'>('all');
+
   const [preview, setPreview] = useState<Article | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [hardDeletingId, setHardDeletingId] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
-  // Load all drafts once
+  // Load drafts OR deleted drafts whenever statusFilter changes
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       try {
+        const statusParam = statusFilter === 'deleted' ? 'deleted' : 'draft';
         const res = await listArticles({
-          status: 'draft',
+          status: statusParam,
           page: 1,
           limit: 100,
           sort: '-createdAt',
@@ -64,7 +88,9 @@ export default function DraftDeskPage() {
       } catch (err: any) {
         if (!cancelled) {
           toast.error(
-            err?.response?.data?.message || err?.message || 'Failed to load drafts',
+            err?.response?.data?.message ||
+              err?.message ||
+              'Failed to load drafts',
           );
         }
       } finally {
@@ -76,21 +102,24 @@ export default function DraftDeskPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [statusFilter]);
 
   const filtered = useMemo(() => {
     let arr = items;
 
-    if (filter === 'community') arr = arr.filter(isCommunityDraft);
-    if (filter === 'editor') arr = arr.filter((a) => !isCommunityDraft(a));
+    // Apply source filter
+    if (sourceFilter !== 'all') {
+      arr = arr.filter((a) => getSourceKind(a) === sourceFilter);
+    }
 
+    // Apply search
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       arr = arr.filter((a) => (a.title || '').toLowerCase().includes(q));
     }
 
     return arr;
-  }, [items, filter, query]);
+  }, [items, sourceFilter, query]);
 
   const handleDelete = async (id: string) => {
     const draft = items.find((a) => a._id === id);
@@ -103,16 +132,54 @@ export default function DraftDeskPage() {
 
     try {
       setDeletingId(id);
-      // IMPORTANT: reuse the same API as Manage News
+      // Reuse the same API as Manage News (soft delete = status "deleted")
       await deleteArticle(id);
       setItems((prev) => prev.filter((a) => a._id !== id));
       toast.success('Draft moved to Deleted');
     } catch (err: any) {
       toast.error(
-        err?.response?.data?.message || err?.message || 'Failed to delete draft',
+        err?.response?.data?.message ||
+          err?.message ||
+          'Failed to delete draft',
       );
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    const ok = window.confirm('Restore this draft back to All Drafts?');
+    if (!ok) return;
+    try {
+      setRestoringId(id);
+      await restoreArticle(id);
+      // Remove from current Deleted view list
+      setItems(prev => prev.filter(a => a._id !== id));
+      toast.success('Draft restored');
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.message || err?.message || 'Failed to restore draft',
+      );
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  const handleHardDelete = async (id: string) => {
+    const ok = window.confirm('Permanently delete this draft? This cannot be undone.');
+    if (!ok) return;
+    try {
+      setHardDeletingId(id);
+      await hardDeleteArticle(id);
+      // Remove from current Deleted view list
+      setItems(prev => prev.filter(a => a._id !== id));
+      toast.success('Draft permanently deleted');
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.message || err?.message || 'Failed to permanently delete draft',
+      );
+    } finally {
+      setHardDeletingId(null);
     }
   };
 
@@ -132,44 +199,89 @@ export default function DraftDeskPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search headline…"
-          className="px-3 py-2 border rounded w-64"
-        />
-        <div className="ml-2 flex gap-2">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-3 py-1 rounded border text-sm ${
-              filter === 'all'
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-700 border-slate-300'
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilter('community')}
-            className={`px-3 py-1 rounded border text-sm ${
-              filter === 'community'
-                ? 'bg-purple-700 text-white border-purple-700'
-                : 'bg-white text-slate-700 border-slate-300'
-            }`}
-          >
-            Community drafts
-          </button>
-          <button
-            onClick={() => setFilter('editor')}
-            className={`px-3 py-1 rounded border text-sm ${
-              filter === 'editor'
-                ? 'bg-blue-700 text-white border-blue-700'
-                : 'bg-white text-slate-700 border-slate-300'
-            }`}
-          >
-            Editor drafts
-          </button>
+      {/* Search + filters */}
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search headline…"
+            className="px-3 py-2 border rounded w-64"
+          />
+        </div>
+
+        {/* NEW filter bar */}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {/* Status: drafts vs deleted */}
+          <div className="inline-flex rounded border border-slate-300 overflow-hidden">
+            <button
+              onClick={() => setStatusFilter('drafts')}
+              className={`px-3 py-1 text-sm ${
+                statusFilter === 'drafts'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-700'
+              }`}
+            >
+              All Drafts
+            </button>
+            <button
+              onClick={() => setStatusFilter('deleted')}
+              className={`px-3 py-1 text-sm border-l border-slate-300 ${
+                statusFilter === 'deleted'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-700'
+              }`}
+            >
+              Deleted
+            </button>
+          </div>
+
+          {/* Source filters */}
+          <div className="inline-flex flex-wrap gap-2">
+            <button
+              onClick={() => setSourceFilter('community')}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'community'
+                  ? 'bg-purple-700 text-white border-purple-700'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Community drafts
+            </button>
+
+            <button
+              onClick={() => setSourceFilter('editor')}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'editor'
+                  ? 'bg-blue-700 text-white border-blue-700'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Editor drafts
+            </button>
+
+            <button
+              onClick={() => setSourceFilter('pro')}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'pro'
+                  ? 'bg-amber-600 text-white border-amber-600'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Professional Journalist
+            </button>
+
+            <button
+              onClick={() => setSourceFilter('founder')}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'founder'
+                  ? 'bg-emerald-700 text-white border-emerald-700'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Founder
+            </button>
+          </div>
         </div>
       </div>
 
@@ -182,36 +294,57 @@ export default function DraftDeskPage() {
 
       <div className="space-y-3">
         {filtered.map((a) => {
-          const community = isCommunityDraft(a);
+          const sourceKind = getSourceKind(a);
+          const isCommunity = sourceKind === 'community';
+          const isPro = sourceKind === 'pro';
+          const isFounder = sourceKind === 'founder';
+
           return (
             <div
               key={a._id}
               className={`flex items-start justify-between gap-4 p-3 rounded border ${
-                community ? 'bg-purple-50 border-purple-200' : 'bg-white'
+                isCommunity ? 'bg-purple-50 border-purple-200' : 'bg-white'
               } hover:bg-slate-50`}
             >
               <div className="flex-1">
                 <div className="text-xs mb-1 text-slate-600 flex flex-wrap gap-2 items-center">
-                  {community ? (
+                  {isCommunity && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
                       🧑‍🤝‍🧑 Community Reporter
                     </span>
-                  ) : (
+                  )}
+                  {!isCommunity && isPro && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                      🎙️ Professional Journalist
+                    </span>
+                  )}
+                  {!isCommunity && !isPro && isFounder && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ⭐ Founder Draft
+                    </span>
+                  )}
+                  {!isCommunity && !isPro && !isFounder && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
                       ✍️ Editor Draft
                     </span>
                   )}
+
                   {a.city || a.location ? <span>· {a.city || a.location}</span> : null}
                   {a.language ? <span>· {a.language?.toUpperCase()}</span> : null}
                   {a.category ? <span>· {a.category}</span> : null}
                   {a.createdAt ? (
                     <span>· {new Date(a.createdAt).toLocaleString()}</span>
                   ) : null}
+                  {a.status ? <span>· status: {a.status}</span> : null}
                 </div>
+
                 <div className="font-semibold">{a.title || 'Untitled'}</div>
                 <div className="text-sm text-slate-600 mt-1">
                   {snippet(
-                    a.content || (a as any).body || a.summary || (a as any).description,
+                    a.content ||
+                      (a as any).body ||
+                      a.summary ||
+                      (a as any).description,
                     160,
                   )}
                 </div>
@@ -226,7 +359,8 @@ export default function DraftDeskPage() {
                   View story
                 </button>
 
-                {a.status === 'draft' && (
+                {/* Actions for All Drafts */}
+                {statusFilter === 'drafts' && a.status === 'draft' && (
                   <>
                     <button
                       type="button"
@@ -242,6 +376,28 @@ export default function DraftDeskPage() {
                       onClick={() => handleDelete(a._id)}
                     >
                       {deletingId === a._id ? 'Deleting…' : 'Delete draft'}
+                    </button>
+                  </>
+                )}
+
+                {/* Actions for Deleted view: show regardless of exact status string */}
+                {statusFilter === 'deleted' && (
+                  <>
+                    <button
+                      type="button"
+                      className="px-3 py-1 rounded border text-center bg-white hover:bg-slate-100 disabled:opacity-60"
+                      disabled={restoringId === a._id}
+                      onClick={() => handleRestore(a._id)}
+                    >
+                      {restoringId === a._id ? 'Restoring…' : 'Restore'}
+                    </button>
+                    <button
+                      type="button"
+                      className="px-3 py-1 rounded border text-center bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                      disabled={hardDeletingId === a._id}
+                      onClick={() => handleHardDelete(a._id)}
+                    >
+                      {hardDeletingId === a._id ? 'Deleting…' : 'Delete Permanent'}
                     </button>
                   </>
                 )}
@@ -270,15 +426,36 @@ export default function DraftDeskPage() {
               </button>
             </div>
             <div className="text-xs mb-3 text-slate-600 flex flex-wrap gap-2 items-center">
-              {isCommunityDraft(preview) ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                  🧑‍🤝‍🧑 Community Reporter
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
-                  ✍️ Editor Draft
-                </span>
-              )}
+              {(() => {
+                const sourceKind = getSourceKind(preview as Article);
+                if (sourceKind === 'community') {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                      🧑‍🤝‍🧑 Community Reporter
+                    </span>
+                  );
+                }
+                if (sourceKind === 'pro') {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                      🎙️ Professional Journalist
+                    </span>
+                  );
+                }
+                if (sourceKind === 'founder') {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ⭐ Founder Draft
+                    </span>
+                  );
+                }
+                return (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
+                    ✍️ Editor Draft
+                  </span>
+                );
+              })()}
+
               {preview.language ? (
                 <span>· {preview.language?.toUpperCase()}</span>
               ) : null}
@@ -289,6 +466,7 @@ export default function DraftDeskPage() {
               {preview.createdAt ? (
                 <span>· {new Date(preview.createdAt).toLocaleString()}</span>
               ) : null}
+              {preview.status ? <span>· status: {preview.status}</span> : null}
             </div>
             <div className="text-sm whitespace-pre-wrap leading-relaxed">
               {String(

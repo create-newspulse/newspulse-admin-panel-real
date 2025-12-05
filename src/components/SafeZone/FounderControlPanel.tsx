@@ -1,5 +1,9 @@
 import { useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_ORIGIN = (
+  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
+  import.meta.env.VITE_API_URL?.toString() ||
+  (import.meta.env.MODE === 'development' ? 'http://localhost:10000' : 'https://newspulse-backend-real.onrender.com')
+).replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
 import { fetchJson } from '@lib/fetchJson';
 import { useNotification } from '@context/NotificationContext';

@@ -34,6 +34,7 @@ app.use('/api/notifications', require('./routes/pushPreview')); // Optional: Pus
 app.use('/api/analytics', require('./routes/analytics'));
 
 // ✅ News System
+app.use('/api/news', require('./routes/news/list'));                  // Basic list + breaking + trending (dev mock)
 app.use('/api/news', require('./routes/news/saveNews'));              // /news/all, etc.
 app.use('/api/news', require('./routes/news/add'));                   // Add news
 app.use('/api/news', require('./routes/news/trendingController'));   // Trending score (if used)

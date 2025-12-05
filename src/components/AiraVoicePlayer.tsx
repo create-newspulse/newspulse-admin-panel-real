@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
+const API_ORIGIN = (
+  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
+  import.meta.env.VITE_API_URL?.toString() ||
+  (import.meta.env.MODE === 'development' ? 'http://localhost:10000' : 'https://newspulse-backend-real.onrender.com')
+).replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
 
 // Unified API base derived from VITE_API_URL; legacy API_BASE_PATH removed
