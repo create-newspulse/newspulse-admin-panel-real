@@ -1,13 +1,18 @@
 import axios from 'axios';
 
-// Central admin API base.
-// In production, set Vercel env `VITE_ADMIN_API_URL` to the Render backend origin (prefer including `/api`).
-// In local dev, default to `/admin-api` which the Vite proxy forwards to the backend.
-export const ADMIN_API_BASE = (
-  import.meta.env.VITE_ADMIN_API_URL ||
-  import.meta.env.VITE_ADMIN_API_BASE_URL ||
-  ''
-).toString().trim().replace(/\/+$/, '');
+// Unified base URL resolution with prod safety (no localhost fallback in prod)
+const rawBase =
+  (import.meta.env as any).VITE_ADMIN_API_URL ||
+  (import.meta.env as any).VITE_API_URL ||
+  ((import.meta.env as any).DEV ? 'http://localhost:10000' : '');
+
+if (!rawBase) {
+  // Only reached in production builds when env is missing
+  try { console.error('[adminApi] Missing VITE_ADMIN_API_URL in production build'); } catch {}
+  throw new Error('Missing admin API base URL');
+}
+
+export const ADMIN_API_BASE = rawBase.toString().replace(/\/+$/, '');
 
 export const adminRoot = ADMIN_API_BASE; // retained name for existing imports
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
