@@ -1,18 +1,21 @@
 // src/utils/apiFetch.ts
-const RAW_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL);
-const FALLBACK = import.meta.env.MODE === 'development' ? 'http://localhost:10000' : 'https://newspulse-backend-real.onrender.com';
-const API_ORIGIN = (RAW_BASE?.toString() || FALLBACK).replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+// Single base constant: prod via VITE_ADMIN_API_URL; dev fallback '/admin-api'
+const ADMIN_API_BASE = (
+  (import.meta.env.VITE_ADMIN_API_URL ?? '/admin-api')
+).toString().trim().replace(/\/+$/, '');
 
 type ApiOptions = RequestInit & { headers?: Record<string, string> };
 
 function resolveUrl(url: string) {
   if (/^https?:\/\//i.test(url)) return url;
-  // already full api path
-  if (url.startsWith('/api/')) return `${API_ORIGIN}${url}`;
-  // system or other root paths -> prefix /api
-  if (url.startsWith('/')) return `${API_BASE}${url}`; // '/system/x' -> origin/api/system/x
-  return `${API_BASE}/${url}`;
+  const clean = url.startsWith('/') ? url : `/${url}`;
+  // Dev proxy base
+  if (ADMIN_API_BASE === '/admin-api') return `${ADMIN_API_BASE}${clean}`;
+  // Direct origin base; avoid double '/api' if base already ends with '/api'
+  if (/\/api$/.test(ADMIN_API_BASE) && /^\/api\//.test(clean)) {
+    return `${ADMIN_API_BASE}${clean.replace(/^\/api/, '')}`;
+  }
+  return `${ADMIN_API_BASE}${clean}`;
 }
 
 export async function apiFetch<T = any>(url: string, options: ApiOptions = {}): Promise<T> {

@@ -1,18 +1,13 @@
 import axios from 'axios';
 
-// Single source of truth for admin API base URL.
-// Prefer explicit env override (VITE_ADMIN_API_BASE_URL, VITE_API_URL, VITE_ADMIN_API_URL),
-// fall back to localhost in dev and production backend in prod.
-const rawEnv = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL ||
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_ADMIN_API_URL ||
-  ''
-).toString().trim();
-const FALLBACK_ADMIN_BASE = import.meta.env.MODE === 'development'
-  ? 'http://localhost:10000'
-  : 'https://newspulse-backend-real.onrender.com';
-export const adminRoot = rawEnv || FALLBACK_ADMIN_BASE; // retain exported name for existing imports
+// Central admin API base.
+// In production, set Vercel env `VITE_ADMIN_API_URL` to the Render backend origin (prefer including `/api`).
+// In local dev, default to `/admin-api` which the Vite proxy forwards to the backend.
+export const ADMIN_API_BASE = (
+  (import.meta.env.VITE_ADMIN_API_URL ?? '/admin-api')
+).toString().trim().replace(/\/+$/, '');
+
+export const adminRoot = ADMIN_API_BASE; // retained name for existing imports
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
 // Unified token retrieval for reuse across components/utilities.
@@ -99,7 +94,10 @@ if (import.meta.env.DEV) {
 // For direct base we prepend the full origin.
 export function resolveAdminPath(p: string): string {
   const clean = p.startsWith('/') ? p : `/${p}`;
-  // Always resolve relative to the chosen base URL
+  // Avoid double '/api' if base already ends with '/api'
+  if (/\/api$/.test(adminRoot) && /^\/api\//.test(clean)) {
+    return `${adminRoot}${clean.replace(/^\/api/, '')}`;
+  }
   return `${adminRoot}${clean}`;
 }
 
@@ -110,9 +108,10 @@ try { console.info('[adminApi] base resolved =', adminRoot); } catch {}
 // New unified OTP helpers using resolveAdminPath so proxy base works.
 // Helper to build OTP paths relative to chosen base without duplicating '/admin-api'
 function otpEndpoint(segment: string) {
-  // When using proxy base '/admin-api' we call '/auth/otp/*' (legacy absolute mounted at root)
-  // When using a direct origin (not exactly '/admin-api') we assume backend exposes '/api/auth/otp/*'
+  // When using proxy base '/admin-api' we call '/auth/otp/*' (mounted under admin-api root)
   if (adminRoot === '/admin-api') return `/auth/otp/${segment}`;
+  // If the direct origin includes '/api', avoid duplicating it
+  if (/\/api$/.test(adminRoot)) return `/auth/otp/${segment}`;
   return `/api/auth/otp/${segment}`;
 }
 
