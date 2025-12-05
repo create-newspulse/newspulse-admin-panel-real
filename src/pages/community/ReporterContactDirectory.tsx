@@ -50,6 +50,7 @@ export default function ReporterContactDirectory() {
 
   // Fetch base reporter list (broad; we will filter client-side)
   const { data, isLoading, isError, error } = useReporterContactsQuery({ page, limit: 200 });
+  const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
   const items = (data?.items ?? []) as ReporterContact[];
 
 
@@ -338,6 +339,12 @@ export default function ReporterContactDirectory() {
         <h1 className="text-3xl font-bold tracking-tight">Reporter Contact Directory</h1>
         <p className="text-sm text-slate-600">Secure list of reporter contact & location for follow-up. Founder/Admin only.</p>
       </header>
+
+      {unauthorized && (
+        <div className="mt-4 p-3 rounded-md border bg-amber-50 text-amber-800">
+          You don't have permission to view the Reporter Contact Directory or your session is missing. Please login with an account that has access, or contact an admin.
+        </div>
+      )}
 
       {/* Mobile location toggle (only if states available) */}
       {hasStates && (

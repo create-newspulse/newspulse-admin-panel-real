@@ -3,7 +3,7 @@ import axios from "axios";
 import { toast } from 'react-hot-toast';
 
 const baseURL =
-	(import.meta.env.VITE_ADMIN_API_BASE as string | undefined) ||
+	(import.meta.env.VITE_ADMIN_API_URL as string | undefined) ||
 	"https://newspulse-backend-real.onrender.com";
 
 export const adminApi = axios.create({
@@ -57,32 +57,26 @@ if (!interceptorsAttached) {
 					reqUrl,
 					error?.response?.headers?.["content-type"] || ""
 				);
-				// Handle admin auth expiry on 401 for /admin/* endpoints
-				if (
-					status === 401 &&
-					reqUrl && /\/admin\//.test(reqUrl) &&
-					typeof window !== 'undefined' &&
-					!authRedirectTriggered &&
-					window.location.pathname !== '/login'
-				) {
-					try {
-						// Clear known admin auth token storage keys
-						localStorage.removeItem('newsPulseAdminAuth');
-						localStorage.removeItem('np_admin_access_token');
-						localStorage.removeItem('np_admin_token');
-					} catch {}
-					// Mark so we don't spam redirects if many requests fail together
-					authRedirectTriggered = true;
-					// User feedback – toast if available, fallback to console
-					try {
-						toast.error('[Auth] Session expired – please log in again.');
-					} catch {
-						console.log('[Auth] Session expired – please log in again.');
+				// Handle 401 only when backend signals token expiration/invalid
+				if (status === 401) {
+					const code = error?.response?.data?.code || error?.response?.data?.errorCode;
+					const isTokenExpired = code === 'TOKEN_EXPIRED_OR_INVALID' || code === 'UNAUTHORIZED';
+					if (
+						isTokenExpired &&
+						reqUrl && /\/admin\//.test(reqUrl) &&
+						typeof window !== 'undefined' &&
+						!authRedirectTriggered &&
+						window.location.pathname !== '/login'
+					) {
+						try {
+							localStorage.removeItem('newsPulseAdminAuth');
+							localStorage.removeItem('np_admin_access_token');
+							localStorage.removeItem('np_admin_token');
+						} catch {}
+						authRedirectTriggered = true;
+						try { toast.error('[Auth] Session expired – please log in again.'); } catch {}
+						try { window.location.assign('/login'); } catch {}
 					}
-					// Redirect to login
-					try {
-						window.location.assign('/login');
-					} catch {}
 				}
 			} catch {}
 			return Promise.reject(error);
