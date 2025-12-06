@@ -89,6 +89,7 @@ export const OwnerModules = [
   { id: 'polls', label: 'Live Polls', component: lazyComp(() => import('../../components/SafeZone/LiveNewsPollsPanel.tsx')) },
   { id: 'help', label: 'Feature Help', component: lazyComp(() => import('../../components/SafeZone/FeatureHelpPanel.tsx')) },
   { id: 'audit', label: 'Audit Viewer', component: lazyComp(() => import('./tabs/AuditViewer.tsx')) },
+  { id: 'feature-toggles', label: 'Feature Toggles', component: lazyComp(() => import('./tabs/FeatureToggles.tsx')) },
     ],
   },
 ];

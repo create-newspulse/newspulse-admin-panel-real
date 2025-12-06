@@ -5,6 +5,8 @@ import { createCommunityArticle, updateArticle, getArticle, type Article } from 
 import { useLocation } from 'react-router-dom';
 import { getMyStory } from '@/lib/api/communityStories';
 import { ARTICLE_CATEGORIES } from '@/lib/categories';
+import { submitCommunityStory, type SubmitStoryResult } from '@/lib/api/communityReporterApi';
+import SubmissionSuccessCard from '@/features/community/SubmissionSuccessCard';
 
 interface SubmitStoryFormValues {
   title: string;
@@ -45,6 +47,8 @@ export default function SubmitCommunityStory() {
   const [contactOk, setContactOk] = useState(false);
   const [futureContactOk, setFutureContactOk] = useState(false);
   const [confirmGuidelines, setConfirmGuidelines] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitStoryResult | null>(null);
 
   const mutation = useMutation({
     mutationFn: async (status: Article['status']) => {
@@ -152,12 +156,61 @@ export default function SubmitCommunityStory() {
     if (!mutation.isPending) mutation.mutate('draft');
   }
 
-  function handleSubmitForReview() {
+  async function handleSubmitForReview() {
     const v = validateCommon();
     if (v) { toast.error(v); return; }
     if (!confirmGuidelines) { toast.error('Please confirm the guidelines before submitting.'); return; }
-    // Current ArticleStatus union has no explicit "submitted"; reuse draft with community origin
-    if (!mutation.isPending) mutation.mutate('draft');
+
+    const payload: any = {
+      title,
+      language,
+      category,
+      summary: summary || undefined,
+      content: body,
+      location: {
+        city: city || undefined,
+        state: stateName || undefined,
+        country: country || undefined,
+        district: district || undefined,
+      },
+      contact: {
+        name: (contactName || '').trim() || undefined,
+        email: (contactEmail || '').trim() || undefined,
+        phone: (contactPhone || '').trim() || undefined,
+        preferredContact: (contactMethod ? contactMethod : 'no_preference'),
+        canContactForThisStory: !!contactOk,
+        canContactForFutureStories: !!futureContactOk,
+      },
+    };
+
+    try {
+      setIsSubmitting(true);
+      const res = await submitCommunityStory(payload);
+      if (!res.ok) {
+        toast.error(res.message || 'Could not submit story.');
+        return;
+      }
+      setSubmitResult(res);
+      toast.success('Story submitted successfully');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || 'Network error while submitting story.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleNewStory() {
+    setSubmitResult(null);
+    // Clear form
+    setTitle(''); setLanguage('en'); setCategory(ARTICLE_CATEGORIES[0]); setCity(''); setStateName(''); setCountry('India'); setDistrict('');
+    setSummary(''); setBody(''); setContactName(''); setContactEmail(''); setContactPhone(''); setContactMethod(''); setContactOk(false); setFutureContactOk(false); setConfirmGuidelines(false);
+  }
+
+  if (submitResult) {
+    return (
+      <SubmissionSuccessCard result={submitResult} onNewStory={handleNewStory} />
+    );
   }
 
   return (
@@ -282,7 +335,7 @@ export default function SubmitCommunityStory() {
 
       <div className="sticky bottom-0 bg-white border-t border-slate-200 py-3 flex gap-3 justify-end">
         <button type="button" onClick={handleSaveDraft} className="btn-secondary" disabled={mutation.isPending}>{editingId ? 'Update Draft' : 'Save as Draft'}</button>
-        <button type="button" onClick={handleSubmitForReview} className="btn" disabled={mutation.isPending}>{mutation.isPending ? (editingId ? 'Updating…' : 'Saving…') : editingId ? 'Update & Keep Draft' : 'Submit for Review'}</button>
+        <button type="button" onClick={handleSubmitForReview} className="btn" disabled={mutation.isPending || isSubmitting}>{(mutation.isPending || isSubmitting) ? (editingId ? 'Updating…' : 'Submitting…') : editingId ? 'Update & Keep Draft' : 'Submit for Review'}</button>
       </div>
     </div>
   );
