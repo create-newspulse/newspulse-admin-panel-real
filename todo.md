@@ -1,0 +1,1 @@
+- [ ] revert type to commonjs in admin-backend/package.json
