@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NewsPulse Login</title>
+    <style>
+        body, h1, input, button {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            background-color: #f4f7fb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .login-container {
+            background-color: #ffffff;
+            width: 360px;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        .login-container h1 {
+            text-align: center;
+            margin-bottom: 24px;
+            color: #2c3e50;
+            font-size: 24px;
+        }
+        .input-group {
+            margin-bottom: 16px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #34495e;
+            font-size: 14px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #2c3e50;
+        }
+        .login-actions {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        button {
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        .btn-login {
+            background-color: #1c77f0;
+        }
+        .btn-login:hover {
+            background-color: #0f63d1;
+        }
+        .forgot-password {
+            text-align: center;
+            font-size: 12px;
+        }
+        .forgot-password a {
+            color: #1c77f0;
+            text-decoration: none;
+        }
+        .forgot-password a:hover {
+            text-decoration: underline;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            width: 320px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        .modal-content h2 {
+            margin-bottom: 16px;
+            color: #2c3e50;
+        }
+        .modal-content .close-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 20px;
+            color: #34495e;
+            cursor: pointer;
+        }
+        .otp-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #dfe6e9;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .btn-submit-otp {
+            background-color: #1c77f0;
+        }
+        .btn-submit-otp:hover {
+            background-color: #0f63d1;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>NewsPulse Login</h1>
+        <form id="loginForm">
+            <div class="input-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <div class="login-actions">
+                <button type="submit" class="btn-login">Login</button>
+                <div class="forgot-password">
+                    <a href="#" id="forgotPasswordLink">Forgot Password?</a>
+                </div>
+            </div>
+        </form>
+    </div>
+    <div id="otpModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeOtpModal">&times;</span>
+            <h2>Password Reset</h2>
+            <form id="otpForm">
+                <p style="font-size:14px;margin-bottom:12px;color:#34495e;">An OTP has been sent to your registered email. Please enter it below along with your new password.</p>
+                <input type="text" id="otp" class="otp-input" placeholder="Enter OTP" required>
+                <input type="password" id="newPassword" class="otp-input" placeholder="New Password" required>
+                <button type="submit" class="btn-submit-otp">Submit</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        const otpModal = document.getElementById('otpModal');
+        const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+        const closeOtpModal = document.getElementById('closeOtpModal');
+        forgotPasswordLink.addEventListener('click', function(event) {
+            event.preventDefault();
+            otpModal.style.display = 'flex';
+        });
+        closeOtpModal.addEventListener('click', function() {
+            otpModal.style.display = 'none';
+        });
+        window.addEventListener('click', function(event) {
+            if (event.target === otpModal) {
+                otpModal.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

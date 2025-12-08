@@ -1,0 +1,163 @@
+import React, { useState } from 'react';
+import api from '@/utils/api';
+
+const AiToolsPanel: React.FC = () => {
+  const [text, setText] = useState('');
+  const [lang, setLang] = useState<'Gujarati'|'Hindi'|'English'>('Gujarati');
+  const [loading, setLoading] = useState<string | null>(null);
+  const [result, setResult] = useState<string>('');
+  const [lastReq, setLastReq] = useState<{ path: string; body: any } | null>(null);
+
+  async function callTool(path: string, body: any) {
+    setLoading(path);
+    setResult('');
+    setLastReq({ path, body });
+    try {
+      const res = await api.post(`/api/ai/tools/${path}`, body, { validateStatus: () => true });
+      if (res.status === 401) {
+        setResult('AI auth not configured on backend (401). Please check API credentials.');
+        return;
+      }
+      if (res.status === 429) {
+        const limitedBy = res.headers['x-rate-limited-by'] || '';
+        const hint = limitedBy === 'queue' ? 'AI is busy right now. Wait a few seconds, then retry.' : 'Too many requests or upstream quota hit. Please retry shortly.';
+        const detail = res.data?.message || res.data?.detail || '';
+        setResult(`AI rate limited (429).\n${hint}${detail ? `\nDetails: ${detail}` : ''}`.trim());
+        return;
+      }
+      if (res.status >= 400) {
+        const msg = res.data?.message || res.data?.error || `HTTP ${res.status}`;
+        setResult(`Error: ${msg}`);
+        return;
+      }
+      const json = res.data;
+      if (json?.ok && (json.result || json.raw)) {
+        setResult(typeof json.result === 'string' ? json.result : JSON.stringify(json.result, null, 2));
+      } else if (json?.content) {
+        setResult(json.content);
+      } else {
+        setResult(JSON.stringify(json, null, 2));
+      }
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (/timeout|network|fetch|ECONNREFUSED|ENOTFOUND/i.test(msg)) {
+        setResult('Error: Failed to reach backend API. Please check your network or backend availability.');
+      } else {
+        setResult(`Error: ${msg}`);
+      }
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border dark:border-slate-700 p-4 bg-white dark:bg-slate-900">
+      <h3 className="text-xl font-bold mb-3">AI Tools</h3>
+      <textarea
+        className="w-full border dark:border-slate-700 rounded-lg p-3 mb-3 dark:bg-slate-800"
+        rows={6}
+        placeholder="Paste article text or headline here..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+
+      <div className="flex flex-wrap gap-2 items-center mb-3">
+        <select
+          className="border dark:border-slate-700 rounded-lg p-2 dark:bg-slate-800"
+          value={lang}
+          onChange={(e) => setLang(e.target.value as any)}
+        >
+          <option value="Gujarati">Gujarati</option>
+          <option value="Hindi">Hindi</option>
+          <option value="English">English</option>
+        </select>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('summarize', { text, bullets: 2 })}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading === 'summarize' ? 'Summarizing…' : 'Summarize'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('translate', { text, targetLang: lang })}
+          className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+        >
+          {loading === 'translate' ? 'Translating…' : `Translate → ${lang}`}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('fact-check', { text })}
+          className="px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+        >
+          {loading === 'fact-check' ? 'Checking…' : 'Fact Check'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('headline', { title: text })}
+          className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+        >
+          {loading === 'headline' ? 'Ranking…' : 'Rank Headline'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('seo-meta', { text })}
+          className="px-3 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50"
+        >
+          {loading === 'seo-meta' ? 'Optimizing…' : 'SEO Meta'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('voice-script', { text, durationSec: 25 })}
+          className="px-3 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50"
+        >
+          {loading === 'voice-script' ? 'Writing…' : 'Voice Script'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('inverted-pyramid', { text, targetLang: lang })}
+          className="px-3 py-2 bg-amber-700 text-white rounded-lg hover:bg-amber-800 disabled:opacity-50"
+        >
+          {loading === 'inverted-pyramid' ? 'Structuring…' : 'Inverted Pyramid'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('5w1h', { text, targetLang: lang })}
+          className="px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
+        >
+          {loading === '5w1h' ? 'Extracting…' : '5W1H'}
+        </button>
+
+        <button
+          disabled={!!loading}
+          onClick={() => callTool('topband', { text, targetLang: lang })}
+          className="px-3 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50"
+        >
+          {loading === 'topband' ? 'Generating…' : 'Topband One‑Liners'}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 mb-2">
+        {result && lastReq && !loading && (
+          <button
+            onClick={() => callTool(lastReq.path, lastReq.body)}
+            className="px-2 py-1 text-xs bg-slate-200 dark:bg-slate-700 rounded hover:bg-slate-300 dark:hover:bg-slate-600"
+          >
+            Retry
+          </button>
+        )}
+      </div>
+      <pre className="whitespace-pre-wrap text-sm bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border dark:border-slate-700 overflow-auto max-h-72">{result}</pre>
+    </div>
+  );
+};
+
+export default AiToolsPanel;

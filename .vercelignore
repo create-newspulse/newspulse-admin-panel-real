@@ -1,0 +1,46 @@
+# Vercel Ignore – trimmed to keep hobby plan under 12 functions while preserving Vite src/**
+
+# Allow only essential serverless functions
+# Important: When ignoring a folder, you must un-ignore the folder itself and parents
+# to allow specific files inside it to be included.
+# Direct mode: exclude all Serverless Functions so Hobby plan stays under limit
+api/**
+
+# Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
+/admin-backend/
+/backend/
+/newspulse-backend/
+/render-backend-real/
+/legacy/
+/legacy-js-backup/
+/kiranos/
+/requests/
+/tests/
+/tmp-hook-test/
+
+# Ignore ONLY the root Next.js pages directory, keep src/pages for Vite
+/pages/
+
+# General junk / secrets / build artifacts
+*.log
+*.local
+*.env*
+serviceAccountKey.json
+node_modules/
+dist/
+.cache/
+.next/
+out/
+uploads/
+backups/
+logs/
+*.key
+*.pem
+*.p12
+*.crt
+*.enc
+*.bak
+.vscode/
+.idea/
+.DS_Store
+*.swp

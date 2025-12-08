@@ -1,0 +1,2 @@
+Deploy trigger: 2025-11-20T00:00:00Z
+Reason: force Vercel redeploy from main

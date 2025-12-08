@@ -1,0 +1,2 @@
+Triggering Vercel deploy to verify submodule warning suppression.
+Timestamp: 2025-10-29T00:00:00Z

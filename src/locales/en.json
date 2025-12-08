@@ -1,0 +1,38 @@
+{
+  "home": "Home",
+  "welcome": "Welcome",
+  "logout": "Logout",
+  "language": "Language",
+  "dashboard": "Admin Dashboard",
+  "addNews": "Add News",
+  "manage": "Manage News",
+  "pushHistory": "Push History",
+  "civicHub": "Civic Hub",
+  "inspirationHub": "Inspiration Hub",
+  "light": "Light",
+  "dark": "Dark",
+  "safeOwnerZone": "Safe Owner Zone",
+  "aiPanel": "AI Panel",
+  "aiHeader": "News Pulse AI Engine",
+  "aiEngineLabel": "AI Engine",
+  "autoMode": "Auto",
+
+  "loadingDashboard": "Loading dashboard stats...",
+  "dashboardError": "Failed to load dashboard stats. Please ensure the backend server is running.",
+  "weeklyAiInsights": "Weekly AI Insights",
+
+  "aiSummaryTitle": "AI Summary Report",
+  "aiSummaryBody": "📝 Last week, 82 new stories were suggested by the AI engine.",
+  "topNewsTitle": "Top Performing News",
+  "topNewsBody": "🔥 ‘India’s Tech Leap in 2025’ had 21k reads and 97% engagement.",
+
+  "ticker": {
+    "loading": "🔄 Fetching live updates...",
+    "noUpdates": "⚠️ No updates available right now.",
+    "error": "❌ Unable to load ticker. Please check connection."
+  },
+
+  "safeZone": {
+    "MonitorHubPanel": "Monitor Hub"
+  }
+}

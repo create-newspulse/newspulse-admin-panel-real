@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "moduleResolution": "Bundler",              // Vite + TS 5
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "useDefineForClassFields": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noImplicitReturns": true,
+    "allowJs": false,
+  "noEmit": true,
+  "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+  "types": ["node", "react", "react-dom", "vitest"],
+    "paths": {
+      "@/*": ["src/*"],
+      "@components/*": ["src/components/*"],
+      "@pages/*": ["src/pages/*"],
+      "@context/*": ["src/context/*"],
+      "@lib/*": ["src/lib/*"],
+      "@hooks/*": ["src/hooks/*"],
+      "@assets/*": ["src/assets/*"],
+      "@styles/*": ["src/styles/*"],
+      "@utils/*": ["src/utils/*"],
+      "@config/*": ["src/config/*"],
+      "@types/*": ["src/types/*"],
+      "@features/*": ["src/features/*"]
+    }
+  },
+  "include": ["src", "components", "api", "tests", "vite.config.ts", "env.d.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "legacy",
+    "pages",
+    "src/pages/api",
+    "admin-backend",
+    "newspulse-backend",
+    "newspulse-backend-real",
+    "backend"
+  ]
+}

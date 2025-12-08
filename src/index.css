@@ -1,0 +1,128 @@
+/* Tailwind v3 entrypoints */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🌐 Global Base Styles */
+@layer base {
+  :root { color-scheme: light; }
+  html.dark :root { color-scheme: dark; }
+
+  html { scroll-behavior: smooth; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
+  body {
+    @apply antialiased text-slate-900 bg-slate-100 transition-colors duration-300 ease-in-out selection:bg-blue-100 selection:text-blue-900;
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  html.dark body,
+  .dark-body {
+    @apply bg-[#0b1725] text-slate-100 selection:bg-blue-800 selection:text-white;
+  }
+
+  *, *::before, *::after { @apply box-border; }
+
+  a { @apply text-blue-600 hover:text-blue-800 underline underline-offset-2 transition-colors duration-200; }
+
+  button, input, textarea, select {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2;
+  }
+
+  img { @apply max-w-full h-auto; }
+
+  h1, h2, h3, h4, h5, h6 { @apply font-semibold text-slate-900 dark:text-white; }
+}
+
+/* 🖱️ Scrollbar & Animation Utilities */
+@layer utilities {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background-color: rgba(100, 116, 139, 0.4); border-radius: 9999px; }
+  html.dark ::-webkit-scrollbar-thumb { background-color: rgba(203, 213, 225, 0.3); }
+
+  @keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+  }
+
+  .animate-marquee {
+    animation: marquee 15s linear infinite;
+    white-space: nowrap;
+    display: inline-block;
+    min-width: 100%;
+  }
+}
+
+/* 🧱 Reusable Component Classes */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors duration-200;
+  }
+
+  .btn-danger { @apply px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700; }
+
+  .card { @apply bg-white dark:bg-slate-800 rounded-2xl shadow-md p-6 transition-shadow duration-300; }
+
+  .container-box { @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8; }
+
+  .section-title { @apply text-2xl font-bold text-slate-800 dark:text-slate-100 mb-4; }
+
+  /* 📢 Floating Ticker Bar */
+  .ticker-bar {
+    @apply fixed z-50 w-full bg-yellow-200 dark:bg-yellow-800 text-black dark:text-white px-4 py-2 text-sm font-semibold shadow overflow-hidden;
+  }
+  .ticker-bar-top { @apply top-0; }
+  .ticker-bar-bottom { @apply bottom-0; }
+
+  /* 🎛️ Toggle Switch */
+  .toggle { @apply relative inline-block w-12 h-6 transition duration-200 ease-in; }
+  .toggle input { @apply sr-only; } /* uses built-in utility, no circular apply */
+  .toggle-bg { @apply absolute inset-0 bg-gray-300 rounded-full; }
+  .toggle-dot { @apply absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition transform; }
+  input:checked ~ .toggle-dot { @apply translate-x-6; }
+  input:checked ~ .toggle-bg { @apply bg-blue-500; }
+}
+
+/* 🌟 AI Glow Utilities */
+@layer components {
+  .glow-panel {
+    @apply shadow-[0_0_20px_rgba(99,102,241,0.4)] dark:shadow-[0_0_20px_rgba(147,197,253,0.2)];
+  }
+
+  .ai-highlight { @apply border-2 border-blue-500/50 dark:border-blue-400/30 rounded-xl; }
+
+  .hover-glow { @apply transition-transform duration-200 ease-out hover:scale-[1.02]; }
+
+  .ai-title { @apply text-lg font-bold text-blue-700 dark:text-blue-200; }
+
+  .ai-desc { @apply text-sm text-slate-600 dark:text-slate-300; }
+
+  .ai-card { @apply bg-white dark:bg-slate-800 p-5 rounded-2xl; }
+}
+
+/* 🧪 Debug output box for long strings (HTML/JSON) */
+.ai-debug-box {
+  white-space: pre-wrap;        /* wrap long lines */
+  word-wrap: break-word;        /* legacy wrap support */
+  overflow-wrap: anywhere;      /* modern wrap */
+  overflow-x: auto;             /* scroll only if needed */
+  max-width: 100%;              /* stay within container */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: #f8fafc;          /* slate-50 */
+  color: #111827;               /* slate-900 */
+  border-radius: 8px;
+  padding: 12px;
+}
+html.dark .ai-debug-box {
+  background: rgba(2,6,23,0.5); /* slate-900/50 */
+  color: #e5e7eb;               /* gray-200 */
+}

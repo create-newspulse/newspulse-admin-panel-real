@@ -1,0 +1,90 @@
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String     @id @default(auto()) @map("_id") @db.ObjectId
+  email         String     @unique
+  passwordHash  String
+  role          Role
+  status        UserStatus @default(ACTIVE)
+  mfa           Mfa?
+  lastLoginAt   DateTime?
+  failedLogins  Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  sessions      Session[]
+  audit         AuditLog[]
+  passwordResets PasswordReset[]
+}
+
+model Session {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  ua         String?
+  ip         String?
+  revoked    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+}
+
+model AuditLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String?  @db.ObjectId
+  user       User?    @relation(fields: [userId], references: [id])
+  type       AuditType
+  ip         String?
+  ua         String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+}
+
+model Mfa {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @unique @db.ObjectId
+  user          User     @relation(fields: [userId], references: [id])
+  totpSecret    String?
+  passkeys      Json?
+  recoveryCodes String[] @db.String
+  enabled       Boolean  @default(false)
+}
+model PasswordReset {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  tokenHash  String
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+enum Role {
+  FOUNDER
+  ADMIN
+  EDITOR
+  REPORTER
+  COPY
+  MODERATOR
+  ANALYST
+  INTERN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AuditType {
+  LOGIN
+  LOGOUT
+  MFA_SETUP
+  MFA_VERIFY
+  PASSKEY_REGISTER
+  PASSWORD_RESET
+}

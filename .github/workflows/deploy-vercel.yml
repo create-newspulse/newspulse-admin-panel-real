@@ -1,0 +1,12 @@
+name: DEPRECATED Vercel Deploys (use vercel-deploy.yml)
+
+on:
+  # Keep manual only to avoid duplicate deploys
+  workflow_dispatch:
+
+jobs:
+  disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This workflow is deprecated. Use .github/workflows/vercel-deploy.yml instead."

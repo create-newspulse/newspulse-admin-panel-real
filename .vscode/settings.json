@@ -1,6 +1,7 @@
 {
     "git.ignoreLimitWarning": true,
-    "CodeGPT.apiKey": "Ollama",
+    "files.autoSave": "onFocusChange",
+    "files.autoSaveDelay": 1000,
     "typescript.tsdk": "newspulse-admin-panel-real-main/node_modules/typescript/lib",
     "typescript.enablePromptUseWorkspaceTsdk": true
 }

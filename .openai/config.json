@@ -1,0 +1,5 @@
+{
+  "project": "newspulse",
+  "defaultModel": "gpt-5.1",
+  "localInference": false
+}

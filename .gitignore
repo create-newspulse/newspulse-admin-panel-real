@@ -1,3 +1,114 @@
+<<<<<<< HEAD
 render-backend-real/
 newspulse-admin-panel-real-main/admin-backend/
 newspulse-admin-panel-real-main/admin-backend/**
+# Common ignores from remote
+node_modules/
+dist/
+.DS_Store
+.env*
+coverage/
+tmp/
+=======
+# ====================================================
+# ✅ Node Modules & Build Artifacts
+# ====================================================
+node_modules/
+**/node_modules/
+dist/
+build/
+.cache/
+.next/
+out/
+.turbo/
+.deno/
+.render/
+.vercel/
+.netlify/
+*.tsbuildinfo
+*.tgz
+
+# ====================================================
+# ✅ Environment Files & Secrets
+# ====================================================
+# Generic envs
+.env
+.env.*
+*.env
+
+# Keep example env templates in Git
+!.env.example
+!.env.*.example
+!.env.local.example
+!.env.production.example
+
+# Project-specific envs
+admin-backend/.env
+admin-backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Private keys / certificates
+*.key
+*.pem
+*.crt
+*.p12
+*.bak
+*.enc
+
+# Service account & credential JSON
+*.credentials.json
+*.serviceaccount.json
+serviceAccountKey.json
+**/serviceAccountKey.json
+backend/serviceAccountKey.json
+admin-backend/serviceAccountKey.json
+admin-backend/config/news-pulse-gemini-key.json
+admin-backend/config/*.json
+config/drive-key.json
+
+# AI logs & sensitive JSON data
+admin-backend/data/ai-heal-log.json
+admin-backend/data/ai-training-info.json
+admin-backend/data/kiranos-core-log.json
+admin-backend/data/system-intel-log.json
+admin-backend/data/*.secret.json
+**/news-pulse-*.json
+
+# ====================================================
+# ✅ Logs
+# ====================================================
+logs/
+admin-backend/backend/logs/
+admin-backend/logs/
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ====================================================
+# ✅ Compiled JS copies inside src (TS is source of truth)
+# ====================================================
+src/**/*.js
+src/**/*.js.map
+
+# ====================================================
+# ✅ Runtime, Uploads & Temp Files
+# ====================================================
+admin-backend/uploads/
+admin-backend/data/backup-*.zip
+frontend/public/temp/
+frontend/public/uploads/
+tmp/
+temp/
+
+# ====================================================
+# ✅ Editor & OS Artifacts
+# ====================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+>>>>>>> origin/main
