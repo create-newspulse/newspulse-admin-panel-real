@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { listJournalistApplications, verifyJournalist, rejectJournalist, JournalistApplication, updateReporterStatus } from '@/lib/api/communityAdmin';
 
-function Badge({ label, tone }: { label: string; tone: 'blue'|'purple'|'green'|'yellow'|'gray' }) {
+function Badge({ label, tone }: { label: string; tone: 'blue'|'purple'|'green'|'yellow'|'gray'|'red' }) {
   const toneMap: Record<string, string> = {
     blue: 'bg-blue-100 text-blue-700 border-blue-200',
     purple: 'bg-purple-100 text-purple-700 border-purple-200',
     green: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     yellow: 'bg-amber-100 text-amber-800 border-amber-200',
     gray: 'bg-slate-100 text-slate-700 border-slate-200',
+    red: 'bg-red-100 text-red-700 border-red-200',
   };
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${toneMap[tone]}`}>{label}</span>;
 }
@@ -102,7 +103,13 @@ export default function JournalistApplications() {
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge label={app.reporterType === 'journalist' ? 'Journalist' : 'Community Reporter'} tone={app.reporterType==='journalist'?'blue':'purple'} />
-                      <Badge label={app.verificationLevel === 'verified' ? 'Verified' : app.verificationLevel === 'pending' ? 'Pending' : app.verificationLevel === 'limited' ? 'Limited' : app.verificationLevel === 'revoked' ? 'Revoked' : 'Community Default'} tone={app.verificationLevel==='verified'?'green':app.verificationLevel==='pending'?'yellow':app.verificationLevel==='limited'?'yellow':app.verificationLevel==='revoked'?'gray':'gray'} />
+                      {(() => {
+                        const v = app.verificationLevel;
+                        if (v === 'verified') return <Badge label="Verified journalist" tone="green" />;
+                        if (v === 'pending' || v === 'limited') return <Badge label="Pending verification" tone="yellow" />;
+                        if (v === 'revoked') return <Badge label="Revoked" tone="red" />;
+                        return <Badge label="Community Default" tone="gray" />;
+                      })()}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm">

@@ -1,12 +1,12 @@
 import axios, { AxiosInstance } from 'axios';
 
 // Centralized Admin API base per spec:
-// Use env var when provided, else default to '/admin-api' to work with proxy/rewrites.
+// Prefer explicit env vars; if unset, default to Render backend origin to avoid localhost errors.
 // Support both VITE_ADMIN_API_BASE and VITE_ADMIN_API_BASE_URL.
 const API_BASE_URL = (
   (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() ||
   (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined)?.trim() ||
-  '/admin-api'
+  'https://newspulse-backend-real.onrender.com'
 );
 
 // Extend axios instance with monitorHub helper

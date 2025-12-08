@@ -5,18 +5,10 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
 import type { ReporterContact } from '@/lib/api/reporterDirectory.ts';
 import { listReporterContacts } from '@/lib/api/reporterDirectory.ts';
+import { useAuth } from '@/context/AuthContext.tsx';
+import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
-// Compute reporter activity status based on last story date
-function getActivityStatus(lastStoryAt?: string | null): 'Very active' | 'Active' | 'Dormant' | 'Inactive' {
-  if (!lastStoryAt) return 'Inactive';
-  const last = new Date(lastStoryAt).getTime();
-  if (Number.isNaN(last)) return 'Inactive';
-  const days = Math.floor((Date.now() - last) / (1000 * 60 * 60 * 24));
-  if (days <= 7) return 'Very active';
-  if (days <= 30) return 'Active';
-  if (days <= 90) return 'Dormant';
-  return 'Inactive';
-}
+// Deprecated: legacy activity from lastStoryAt removed in favor of backend activity field
 
 // Helper: treat any variant of "All…" as no filter
 const isAllFilter = (value?: string | null) => {
@@ -56,6 +48,9 @@ export default function ReporterContactDirectory() {
   const [stateVal, setStateVal] = useState<string | undefined>(undefined);
   const [cityVal, setCityVal] = useState<string | undefined>(undefined);
   const [countryVal, setCountryVal] = useState<string | undefined>(undefined);
+  const [districtFilter, setDistrictFilter] = useState<'all' | string>('all');
+  const [areaTypeFilter, setAreaTypeFilter] = useState<'all' | 'metro' | 'corporation' | 'district_hq' | 'taluka' | 'village' | 'other'>('all');
+  const [beatFilter, setBeatFilter] = useState<'all' | string>('all');
   const [page] = useState(1);
   const notify = (useNotify?.() as unknown) as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
   const [sortBy, setSortBy] = useState<undefined | 'name' | 'stories' | 'lastStory' | 'activity'>(undefined);
@@ -68,6 +63,7 @@ export default function ReporterContactDirectory() {
   const [isError, setIsError] = useState<boolean>(false);
   const [error, setError] = useState<any>(null);
   const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // Fetch via admin reporters API whenever filters/search change
   // Note: depends on filter states declared below; place after declarations to avoid TS block-scope issues
@@ -94,10 +90,24 @@ export default function ReporterContactDirectory() {
     return ['All cities', ...Array.from(new Set(base.map(i => norm(i.city, 'city')).filter(Boolean))).sort()];
   }, [items, countryVal, stateVal]);
 
+  // Districts based on selected country/state
+  const filteredDistricts = useMemo(() => {
+    const base = items.filter(i => {
+      const ctry = norm(i.country, 'country').toLowerCase();
+      const st = norm(i.state, 'state').toLowerCase();
+      if (countryVal && countryVal !== 'All countries' && ctry !== countryVal.toLowerCase()) return false;
+      if (stateVal && stateVal !== 'All states' && st !== stateVal.toLowerCase()) return false;
+      return true;
+    });
+    const set = new Set<string>();
+    base.forEach(i => { const d = String((i as any).district || '').trim(); if (d) set.add(d); });
+    return ['All districts', ...Array.from(set).sort()];
+  }, [items, countryVal, stateVal]);
+
   // Removed auto-default country selection to avoid unintended filtering
 
   // Client-side filtered reporters
-  const [activityFilter, setActivityFilter] = useState<'All activity' | 'Very active' | 'Active' | 'Dormant' | 'Inactive'>('All activity');
+  const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive' | 'new' | 'on_leave' | 'blacklisted'>('all');
   const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
 
   // Load preferences on mount (browser-only)
@@ -112,6 +122,9 @@ export default function ReporterContactDirectory() {
         if (typeof data.countryVal === 'string' || data.countryVal === undefined) setCountryVal(data.countryVal);
         if (typeof data.stateVal === 'string' || data.stateVal === undefined) setStateVal(data.stateVal);
         if (typeof data.cityVal === 'string' || data.cityVal === undefined) setCityVal(data.cityVal);
+        if (typeof data.districtFilter === 'string') setDistrictFilter(data.districtFilter);
+        if (typeof data.areaTypeFilter === 'string') setAreaTypeFilter(data.areaTypeFilter);
+        if (typeof data.beatFilter === 'string') setBeatFilter(data.beatFilter);
         if (typeof data.hasNotesOnly === 'boolean') setHasNotesOnly(data.hasNotesOnly);
         if (typeof data.activityFilter === 'string') setActivityFilter(data.activityFilter);
         if (typeof data.sortBy === 'string' || data.sortBy === undefined) setSortBy(data.sortBy);
@@ -128,6 +141,9 @@ export default function ReporterContactDirectory() {
       countryVal,
       stateVal,
       cityVal,
+      districtFilter,
+      areaTypeFilter,
+      beatFilter,
       hasNotesOnly,
       activityFilter,
       sortBy,
@@ -136,7 +152,7 @@ export default function ReporterContactDirectory() {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
     } catch {}
-  }, [searchQuery, countryVal, stateVal, cityVal, hasNotesOnly, activityFilter, sortBy, sortDirection]);
+  }, [searchQuery, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, hasNotesOnly, activityFilter, sortBy, sortDirection]);
 
   // Fetch via admin reporters API whenever filters/search change
   useEffect(() => {
@@ -152,8 +168,12 @@ export default function ReporterContactDirectory() {
           type: typeFilter !== 'all' ? typeFilter : undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           hasNotes: hasNotesOnly || undefined,
+          district: districtFilter || 'all',
+          areaType: areaTypeFilter || 'all',
+          beat: beatFilter || 'all',
+          activity: activityFilter || 'all',
           page, limit: 200,
-        });
+        } as any);
         if (cancelled) return;
         setItems(res.rows);
         setTotal(res.total);
@@ -167,7 +187,7 @@ export default function ReporterContactDirectory() {
     }
     run();
     return () => { cancelled = true; };
-  }, [searchQuery, countryVal, stateVal, cityVal, typeFilter, statusFilter, hasNotesOnly, page]);
+  }, [searchQuery, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, activityFilter, typeFilter, statusFilter, hasNotesOnly, page, refreshTick]);
 
   // moved to module scope
 
@@ -198,10 +218,32 @@ export default function ReporterContactDirectory() {
       list = list.filter(r => !!(r.notes && String(r.notes).trim().length > 0));
     }
 
-    // Activity
-    if (!isAllFilter(activityFilter)) {
-      const f = activityFilter!.toString();
-      list = list.filter(r => getActivityStatus(r.lastStoryAt) === f);
+    // Activity (backend field)
+    if (activityFilter && activityFilter !== 'all') {
+      const f = activityFilter.toString().toLowerCase();
+      list = list.filter(r => (String((r as any).activity || '').toLowerCase()) === f);
+    }
+
+    // District
+    if (districtFilter && districtFilter !== 'all') {
+      const f = districtFilter.toString().toLowerCase();
+      list = list.filter(r => (String((r as any).district || '').toLowerCase()) === f);
+    }
+
+    // Area type
+    if (areaTypeFilter && areaTypeFilter !== 'all') {
+      const f = areaTypeFilter.toString().toLowerCase();
+      list = list.filter(r => (String((r as any).areaType || '').toLowerCase()) === f);
+    }
+
+    // Beat
+    if (beatFilter && beatFilter !== 'all') {
+      const f = beatFilter.toString().toLowerCase();
+      list = list.filter(r => {
+        const beats = ((r as any).beatsProfessional || (r as any).beats || []) as string[];
+        const joined = Array.isArray(beats) ? beats.map(b => (b || '').toLowerCase()) : [String(beats || '').toLowerCase()];
+        return joined.includes(f);
+      });
     }
 
     // Type
@@ -237,7 +279,7 @@ export default function ReporterContactDirectory() {
     }
 
     return list;
-  }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, typeFilter, verificationFilter, statusFilter]);
+  }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter]);
 
   const sortedReporters = useMemo(() => {
     const arr = [...filteredReporters];
@@ -268,10 +310,10 @@ export default function ReporterContactDirectory() {
         return 0;
       });
     } else if (sortBy === 'activity') {
-      const rank = { 'Very active': 3, 'Active': 2, 'Dormant': 1, 'Inactive': 0 } as const;
+      const rank = { active: 4, new: 3, on_leave: 2, inactive: 1, blacklisted: 0 } as const;
       arr.sort((a, b) => {
-        const ra = rank[getActivityStatus(a.lastStoryAt)];
-        const rb = rank[getActivityStatus(b.lastStoryAt)];
+        const ra = rank[String((a as any).activity || '').toLowerCase() as keyof typeof rank] ?? -1;
+        const rb = rank[String((b as any).activity || '').toLowerCase() as keyof typeof rank] ?? -1;
         if (ra < rb) return -1 * dir;
         if (ra > rb) return 1 * dir;
         return 0;
@@ -455,11 +497,24 @@ export default function ReporterContactDirectory() {
         <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="px-3 py-2 border rounded-md text-sm">
           {uniqueCountries.map(c => <option key={c ?? 'All countries'} value={c === 'All countries' ? '' : (c ?? '')}>{c}</option>)}
         </select>
-        <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); }} className="px-3 py-2 border rounded-md text-sm">
+        <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); setDistrictFilter('all'); }} className="px-3 py-2 border rounded-md text-sm">
           {uniqueStates.map(s => <option key={s ?? 'All states'} value={s === 'All states' ? '' : (s ?? '')}>{s}</option>)}
+        </select>
+        {/* District */}
+        <select value={districtFilter} onChange={(e) => setDistrictFilter((e.target.value || 'all') as 'all' | string)} className="px-3 py-2 border rounded-md text-sm">
+          {filteredDistricts.map(d => <option key={d ?? 'All districts'} value={d === 'All districts' ? 'all' : (d ?? '')}>{d}</option>)}
         </select>
         <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="px-3 py-2 border rounded-md text-sm">
           {filteredCities.map(c => <option key={c ?? 'All cities'} value={c === 'All cities' ? '' : (c ?? '')}>{c}</option>)}
+        </select>
+        {/* Area type */}
+        <select value={areaTypeFilter} onChange={(e) => setAreaTypeFilter((e.target.value || 'all') as any)} className="px-3 py-2 border rounded-md text-sm">
+          <option value="all">All areas</option>
+          <option value="metro">Metro city</option>
+          <option value="corporation">Municipal corporation</option>
+          <option value="district_hq">District HQ</option>
+          <option value="taluka">Taluka / block</option>
+          <option value="village">Village / rural</option>
         </select>
         <input
           value={searchQuery}
@@ -473,9 +528,12 @@ export default function ReporterContactDirectory() {
             setCountryVal(undefined);
             setStateVal(undefined);
             setCityVal(undefined);
+            setDistrictFilter('all');
+            setAreaTypeFilter('all');
+            setBeatFilter('all');
             setSearchQuery('');
             setHasNotesOnly(false);
-            setActivityFilter('All activity');
+            setActivityFilter('all');
             setSortBy(undefined);
             setSortDirection('desc');
             if (typeof window !== 'undefined') {
@@ -489,6 +547,12 @@ export default function ReporterContactDirectory() {
             Has notes
           </label>
           <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-600">Beat:</span>
+            <select value={beatFilter} onChange={(e)=> setBeatFilter((e.target.value || 'all') as 'all' | string)} className="text-xs px-2 py-2 border rounded-md">
+              {['all','Politics','Crime','Youth','Education','Business','Sports','Civic issues'].map(opt => (
+                <option key={opt} value={opt}>{opt === 'all' ? 'All beats' : opt}</option>
+              ))}
+            </select>
             <span className="text-xs text-slate-600">Type:</span>
             <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as 'all'|'community'|'journalist')} className="text-xs px-2 py-2 border rounded-md">
               <option value="all">All</option>
@@ -509,15 +573,22 @@ export default function ReporterContactDirectory() {
           </div>
           <select
             value={activityFilter}
-            onChange={(e) => setActivityFilter(e.target.value as any)}
+            onChange={(e) => setActivityFilter((e.target.value || 'all') as any)}
             className="text-xs px-2 py-2 border rounded-md"
             title="Filter by activity"
           >
-            {['All activity','Very active','Active','Dormant','Inactive'].map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
+            {[
+              { label: 'All activity', value: 'all' },
+              { label: 'Active', value: 'active' },
+              { label: 'Inactive', value: 'inactive' },
+              { label: 'New', value: 'new' },
+              { label: 'On leave', value: 'on_leave' },
+              { label: 'Blacklisted', value: 'blacklisted' },
+            ].map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <span className="text-xs text-slate-500">{filteredReporters.length} / {total} shown</span>
+          <span className="text-xs text-slate-500">{items.length} / {total} shown</span>
           {(() => {
             const totalReporters = filteredReporters.length;
             const completeProfiles = filteredReporters.filter(r => r.phone && (r.city || r.state || r.country)).length;
@@ -590,6 +661,7 @@ export default function ReporterContactDirectory() {
               return next;
             });
           }}
+          onRequestRefresh={() => setRefreshTick(t => t + 1)}
           onSelect={(r) => { setSelectedReporter(r); setIsProfileOpen(true); }}
         />
 
@@ -665,8 +737,9 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
   );
 }
 
-function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, notify }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } }) {
+function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, onRequestRefresh, notify }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; onRequestRefresh: () => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } }) {
   const navigate = useNavigate();
+  const { isFounder } = useAuth();
   // For sort indicator, we pull from parent via URL? Simpler: local props not available.
   // We'll read from window state via a tiny hook? Instead, render indicators via a simple context closure.
   // To keep it straightforward, we add minimal inline indicators by querying current sort from the DOM-less vars through closures.
@@ -742,12 +815,13 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                 Name <SortIndicator column="name" />
               </button>
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Email</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600" title={!isFounder ? 'Contact details may be masked for non-Founder' : undefined}>Email</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Phone</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status / Strikes</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600" title={!isFounder ? 'Contact details may be masked for non-Founder' : undefined}>Phone</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">District</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
@@ -771,7 +845,7 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
         <tbody className="divide-y divide-slate-200 bg-white">
           {items.length === 0 ? (
             <tr>
-              <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
+              <td colSpan={15} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
             </tr>
           ) : (
             items.map((rc) => (
@@ -795,6 +869,13 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       <span title="Has founder/admin notes" className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">Notes</span>
                     )}
                   </div>
+                  {(() => {
+                    const beats = ((rc as any).beatsProfessional || (rc as any).beats || []) as string[];
+                    if (Array.isArray(beats) && beats.length > 0) {
+                      return <div className="mt-1 text-[11px] text-slate-600">Beats: {beats.join(', ')}</div>;
+                    }
+                    return null;
+                  })()}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
@@ -819,11 +900,47 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       banned: 'bg-red-100 text-red-700 border-red-200',
                     };
                     const label: Record<string, string> = { active: 'Active', watchlist: 'Watchlist', suspended: 'Suspended', banned: 'Banned' };
-                    return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${map[s]}`}>{label[s]}</span>;
+                    const activity = String(((rc as any).activity || '')).toLowerCase();
+                    const activityMap: Record<string, string> = {
+                      active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                      new: 'bg-blue-100 text-blue-700 border-blue-200',
+                      on_leave: 'bg-amber-100 text-amber-800 border-amber-200',
+                      inactive: 'bg-slate-100 text-slate-700 border-slate-200',
+                      blacklisted: 'bg-red-100 text-red-700 border-red-200',
+                    };
+                    const activityLabel: Record<string, string> = { active: 'Active', new: 'New', on_leave: 'On leave', inactive: 'Inactive', blacklisted: 'Blacklisted' };
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${map[s]}`}>{label[s]}</span>
+                        {activity && activity !== s && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${activityMap[activity]}`}>{activityLabel[activity] || activity}</span>
+                        )}
+                        {isFounder && (
+                          <select
+                            className="ml-2 text-xs px-2 py-1 border rounded-md bg-white"
+                            value={s}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={async (e) => {
+                              e.stopPropagation();
+                              const next = e.target.value as 'active'|'watchlist'|'suspended'|'banned';
+                              const id = (rc as any)._id || rc.id || rc.reporterKey || rc.email || '';
+                              try {
+                                await updateReporterStatus(String(id), { status: next });
+                                notify?.ok?.('Status updated', `Set to ${next}`);
+                                onRequestRefresh();
+                              } catch (err:any) {
+                                notify?.error?.('Failed to update status');
+                              }
+                            }}
+                            title="Founder-only: change reporter status"
+                          >
+                            {['active','watchlist','suspended','banned'].map(v => <option key={v} value={v}>{label[v]}</option>)}
+                          </select>
+                        )}
+                        <span className="ml-2 text-[11px] text-slate-600">Strikes: {typeof rc.ethicsStrikes === 'number' ? rc.ethicsStrikes : 0}</span>
+                      </div>
+                    );
                   })()}
-                  {typeof rc.ethicsStrikes === 'number' && rc.ethicsStrikes > 0 && (
-                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800 border border-amber-200" title={`Ethics strikes: ${rc.ethicsStrikes}`}>⚠ {rc.ethicsStrikes}</span>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.email ? (
@@ -858,45 +975,74 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm">{norm(rc.city, 'city') || (!rc.city && !rc.state && !rc.country ? <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">Location not set</span> : '—')}</td>
+                <td className="px-4 py-3 text-sm">{String(((rc as any).district || '')).trim() || '—'}</td>
                 <td className="px-4 py-3 text-sm">{norm(rc.state, 'state') || '—'}</td>
                 <td className="px-4 py-3 text-sm">{norm(rc.country, 'country') || '—'}</td>
                 <td className="px-4 py-3 text-sm">{rc.totalStories}</td>
                 <td className="px-4 py-3 text-sm">
                   {(() => {
-                    const status = getActivityStatus(rc.lastStoryAt);
+                    const activity = String(((rc as any).activity || '')).toLowerCase();
+                    const label: Record<string, string> = { active: 'Active', new: 'New', on_leave: 'On leave', inactive: 'Inactive', blacklisted: 'Blacklisted' };
                     const styles: Record<string, string> = {
-                      'Very active': 'bg-green-100 text-green-700',
-                      'Active': 'bg-emerald-100 text-emerald-700',
-                      'Dormant': 'bg-amber-100 text-amber-700',
-                      'Inactive': 'bg-slate-100 text-slate-600',
+                      active: 'bg-emerald-100 text-emerald-700',
+                      new: 'bg-blue-100 text-blue-700',
+                      on_leave: 'bg-amber-100 text-amber-700',
+                      inactive: 'bg-slate-100 text-slate-600',
+                      blacklisted: 'bg-red-100 text-red-700',
                     };
-                    return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${styles[status]}`}>{status}</span>;
+                    return activity ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${styles[activity]}`}>{label[activity] || activity}</span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">—</span>
+                    );
                   })()}
                 </td>
                 <td className="px-4 py-3 text-sm">{rc.lastStoryAt ? new Date(rc.lastStoryAt).toLocaleString() : '—'}</td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const key = rc.reporterKey || rc.id || rc.email || '';
-                      const name = rc.name || rc.email || 'Unknown reporter';
-                      const qs = new URLSearchParams();
-                      if (key) qs.set('reporterKey', key);
-                      if (name) qs.set('name', name);
-                      navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
-                    }}
-                    className="text-xs px-3 py-1 rounded-md border hover:bg-slate-50"
-                  >
-                    View Stories
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onSelect(rc); }}
-                    className="ml-2 text-xs px-3 py-1 rounded-md border hover:bg-slate-50"
-                  >
-                    View Profile
-                  </button>
+                  {(() => {
+                    function normalizePhone(phone?: string, country?: string): string {
+                      const raw = String(phone || '').replace(/[^0-9+]/g, '');
+                      if (!raw) return '';
+                      if (raw.startsWith('+')) return raw;
+                      const c = String(country || '').toLowerCase();
+                      const defaultCode = c === 'india' || c === 'in' ? '+91' : '+91';
+                      return `${defaultCode}${raw}`;
+                    }
+                    const normalizedPhone = normalizePhone(rc.phone || undefined, (norm(rc.country, 'country') || undefined) as string | undefined);
+                    const id = (rc as any)._id || rc.id || rc.reporterKey || rc.email || '';
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        {rc.phone && (
+                          <a href={`tel:${rc.phone}`} onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">Call</a>
+                        )}
+                        {normalizedPhone && (
+                          <a href={`https://wa.me/${normalizedPhone.replace('+','')}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">WhatsApp</a>
+                        )}
+                        {rc.email && (
+                          <a href={`mailto:${rc.email}`} onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">Email</a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const qs = new URLSearchParams();
+                            if (id) qs.set('reporterId', String(id));
+                            navigate(`/community/reporter-queue?${qs.toString()}`);
+                          }}
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
+                        >
+                          View stories
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onSelect(rc); }}
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
+                        >
+                          Profile
+                        </button>
+                      </span>
+                    );
+                  })()}
                 </td>
               </tr>
             ))

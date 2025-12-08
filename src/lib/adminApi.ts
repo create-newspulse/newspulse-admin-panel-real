@@ -7,8 +7,8 @@ const explicitBase = envAny.VITE_ADMIN_API_BASE_URL;
 const isDev = !!envAny.DEV;
 const computedBase = explicitBase ? String(explicitBase) : (isDev ? '/admin-api' : '');
 
-// Fallback to localhost in non-dev when no base provided (rare), to keep behavior predictable.
-const baseURL = computedBase || 'http://localhost:5000';
+// Fallback to Render backend in non-dev when no base provided.
+const baseURL = computedBase || 'https://newspulse-backend-real.onrender.com';
 
 export const ADMIN_API_BASE = String(baseURL).replace(/\/+$/, '');
 export const adminRoot = ADMIN_API_BASE; // retained for existing imports/usages

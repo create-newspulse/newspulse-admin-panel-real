@@ -352,7 +352,7 @@ export default function CommunityReporterPage(){
         if (sourceFilter === 'ALL') return true;
         const src = (s as any).sourceType as 'community'|'journalist'|undefined;
         const v = (s as any).reporterVerificationLevel as 'unverified'|'pending'|'verified'|undefined;
-        if (sourceFilter === 'COMMUNITY') return src !== 'journalist';
+        if (sourceFilter === 'COMMUNITY') return (src !== 'journalist') || (v !== 'verified');
         // VERIFIED_JOURNALISTS
         return src === 'journalist' && v === 'verified';
       })
@@ -598,7 +598,7 @@ export default function CommunityReporterPage(){
                       const sourceType = (s as any).sourceType as 'community'|'journalist'|undefined;
                       const v = (s as any).reporterVerificationLevel as 'community_default'|'pending'|'verified'|'limited'|'revoked'|'unverified'|undefined;
                       if (sourceType === 'journalist' && v === 'verified') {
-                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200" title="Verified Journalist">Verified Journalist</span>;
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200" title="Verified Journalist">Verified Journalist ✅</span>;
                       }
                       if (sourceType === 'journalist' && (v === 'pending' || v === 'limited' || v === 'revoked' || v === 'unverified')) {
                         const label = v==='pending' ? 'pending' : v==='limited' ? 'limited' : v==='revoked' ? 'revoked' : 'unverified';

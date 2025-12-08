@@ -3,6 +3,13 @@ import adminApi from '@/api/adminApi';
 export type VerificationLevel = 'community_default' | 'pending' | 'verified' | 'limited' | 'revoked' | 'unverified';
 export type ReporterType = 'journalist' | 'community';
 export type ReporterStatus = 'active' | 'watchlist' | 'suspended' | 'banned';
+export type CommunitySettings = {
+  communityReporterEnabled: boolean;
+  allowNewSubmissions: boolean;
+  allowMyStoriesPortal: boolean;
+  allowJournalistApplications: boolean;
+  safeModeManualReviewOnly: boolean;
+};
 
 export interface JournalistApplication {
   _id: string;
@@ -70,4 +77,22 @@ export async function updateReporterStatus(
   );
   if (!res.data?.ok) throw new Error('Failed to update reporter status');
   return res.data;
+}
+
+// Founder-only: fetch current community reporter feature toggles
+export async function fetchCommunitySettings(): Promise<CommunitySettings> {
+  const res = await adminApi.get<{ success?: boolean; ok?: boolean; settings: CommunitySettings }>(
+    '/api/admin/community/settings'
+  );
+  // Prefer res.data.settings as per spec
+  return res.data.settings;
+}
+
+// Founder-only: update community reporter feature toggles
+export async function updateCommunitySettings(patch: Partial<CommunitySettings>): Promise<CommunitySettings> {
+  const res = await adminApi.patch<{ success?: boolean; ok?: boolean; settings: CommunitySettings }>(
+    '/api/admin/community/settings',
+    patch
+  );
+  return res.data.settings;
 }

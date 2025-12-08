@@ -77,6 +77,9 @@ if (!interceptorsAttached) {
 						try { toast.error('[Auth] Session expired – please log in again.'); } catch {}
 						try { window.location.assign('/login'); } catch {}
 					}
+				} else if (status === 403) {
+					// Do not force logout; surface a helpful toast
+					try { toast.error('You do not have permission to perform this action.'); } catch {}
 				}
 			} catch {}
 			return Promise.reject(error);
