@@ -83,7 +83,8 @@ export default function DraftDeskPage() {
           sort: '-createdAt',
         });
         if (!cancelled) {
-          setItems(res.data as Article[]);
+          // Safely adapt to API shape { rows, total, page?, limit? }
+          setItems((res as any)?.rows ?? (res as any)?.data ?? []);
         }
       } catch (err: any) {
         if (!cancelled) {
@@ -104,8 +105,11 @@ export default function DraftDeskPage() {
     };
   }, [statusFilter]);
 
+  // Base array for all drafts with safe default
+  const allDrafts: Article[] = Array.isArray(items) ? items : [];
+
   const filtered = useMemo(() => {
-    let arr = items;
+    let arr: Article[] = allDrafts;
 
     // Apply source filter
     if (sourceFilter !== 'all') {
@@ -119,7 +123,7 @@ export default function DraftDeskPage() {
     }
 
     return arr;
-  }, [items, sourceFilter, query]);
+  }, [allDrafts, sourceFilter, query]);
 
   const handleDelete = async (id: string) => {
     const draft = items.find((a) => a._id === id);

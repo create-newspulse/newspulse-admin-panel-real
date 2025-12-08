@@ -3,8 +3,8 @@ import { useMemo, useState, useEffect } from 'react';
 import { Copy as CopyIcon } from 'lucide-react';
 import { useNotify } from '@/components/ui/toast-bridge';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
-import { useReporterContactsQuery } from '@/features/community/api/reporterDirectory.ts';
 import type { ReporterContact } from '@/lib/api/reporterDirectory.ts';
+import { listReporterContacts } from '@/lib/api/reporterDirectory.ts';
 
 // Compute reporter activity status based on last story date
 function getActivityStatus(lastStoryAt?: string | null): 'Very active' | 'Active' | 'Dormant' | 'Inactive' {
@@ -17,6 +17,15 @@ function getActivityStatus(lastStoryAt?: string | null): 'Very active' | 'Active
   if (days <= 90) return 'Dormant';
   return 'Inactive';
 }
+
+// Helper: treat any variant of "All…" as no filter
+const isAllFilter = (value?: string | null) => {
+  if (!value) return true;
+  const v = value.toString().trim().toLowerCase();
+  if (v === 'all' || v === 'all activity') return true;
+  if (v.startsWith('all ')) return true; // e.g., "all states", "all countries"
+  return false;
+};
 
 // Normalize any non-string value into a displayable string and extract nested keys if present.
 function norm(val: any, prefer?: 'city'|'state'|'country'): string {
@@ -39,6 +48,10 @@ function norm(val: any, prefer?: 'city'|'state'|'country'): string {
 export default function ReporterContactDirectory() {
   const STORAGE_KEY = 'reporterDirectoryPreferences';
   const navigate = useNavigate();
+  // Primary filter states declared first to avoid block-scope usage errors
+  const [typeFilter, setTypeFilter] = useState<'all' | 'community' | 'journalist'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked' | 'archived'>('all');
+  const [hasNotesOnly, setHasNotesOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [stateVal, setStateVal] = useState<string | undefined>(undefined);
   const [cityVal, setCityVal] = useState<string | undefined>(undefined);
@@ -49,14 +62,16 @@ export default function ReporterContactDirectory() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Fetch base reporter list (broad; we will filter client-side)
-  const { data, isLoading, isError, error } = useReporterContactsQuery({ page, limit: 200 });
+  const [items, setItems] = useState<ReporterContact[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isError, setIsError] = useState<boolean>(false);
+  const [error, setError] = useState<any>(null);
   const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
-  const items = (data?.rows ?? []) as ReporterContact[];
-  // Optional debug: confirm payload shape from backend mapping
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.debug('[ReporterContactDirectory] contacts payload', { total: data?.total, count: items.length });
-  }
+
+  // Fetch via admin reporters API whenever filters/search change
+  // Note: depends on filter states declared below; place after declarations to avoid TS block-scope issues
+  // The actual effect is defined later after filter state hooks.
 
 
   // Derive unique sets from current dataset
@@ -79,20 +94,11 @@ export default function ReporterContactDirectory() {
     return ['All cities', ...Array.from(new Set(base.map(i => norm(i.city, 'city')).filter(Boolean))).sort()];
   }, [items, countryVal, stateVal]);
 
-  // Default country to India if present and not yet chosen
-  useEffect(() => {
-    if (!countryVal) {
-      const hasIndia = items.some(i => norm(i.country, 'country').toLowerCase() === 'india');
-      if (hasIndia) setCountryVal('India');
-    }
-  }, [items, countryVal]);
+  // Removed auto-default country selection to avoid unintended filtering
 
   // Client-side filtered reporters
-  const [hasNotesOnly, setHasNotesOnly] = useState(false);
   const [activityFilter, setActivityFilter] = useState<'All activity' | 'Very active' | 'Active' | 'Dormant' | 'Inactive'>('All activity');
-  const [typeFilter, setTypeFilter] = useState<'All'|'Community'|'Journalist'>('All');
   const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
-  const [statusFilter, setStatusFilter] = useState<'All'|'Active'|'Watchlist'|'Suspended'|'Banned'>('All');
 
   // Load preferences on mount (browser-only)
   useEffect(() => {
@@ -132,53 +138,104 @@ export default function ReporterContactDirectory() {
     } catch {}
   }, [searchQuery, countryVal, stateVal, cityVal, hasNotesOnly, activityFilter, sortBy, sortDirection]);
 
+  // Fetch via admin reporters API whenever filters/search change
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setIsLoading(true); setIsError(false); setError(null);
+      try {
+        const res = await listReporterContacts({
+          search: searchQuery || undefined,
+          country: countryVal && countryVal !== 'All countries' ? countryVal : undefined,
+          state: stateVal && stateVal !== 'All states' ? stateVal : undefined,
+          city: cityVal && cityVal !== 'All cities' ? cityVal : undefined,
+          type: typeFilter !== 'all' ? typeFilter : undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          hasNotes: hasNotesOnly || undefined,
+          page, limit: 200,
+        });
+        if (cancelled) return;
+        setItems(res.rows);
+        setTotal(res.total);
+      } catch (e:any) {
+        if (cancelled) return;
+        setIsError(true);
+        setError(e);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [searchQuery, countryVal, stateVal, cityVal, typeFilter, statusFilter, hasNotesOnly, page]);
+
   // moved to module scope
 
   const filteredReporters = useMemo(() => {
     let list = items;
-    if (countryVal && countryVal !== 'All countries') {
-      list = list.filter(r => norm(r.country, 'country').toLowerCase() === countryVal.toLowerCase());
+    // Location filters
+    if (!isAllFilter(countryVal)) {
+      const f = countryVal!.toString().toLowerCase();
+      list = list.filter(r => norm(r.country, 'country').toLowerCase() === f);
     }
-    if (stateVal && stateVal !== 'All states') {
-      list = list.filter(r => norm(r.state, 'state').toLowerCase() === stateVal.toLowerCase());
+    if (!isAllFilter(stateVal)) {
+      const f = stateVal!.toString().toLowerCase();
+      list = list.filter(r => norm(r.state, 'state').toLowerCase() === f);
     }
-    if (cityVal && cityVal !== 'All cities') {
-      list = list.filter(r => norm(r.city, 'city').toLowerCase() === cityVal.toLowerCase());
+    if (!isAllFilter(cityVal)) {
+      const f = cityVal!.toString().toLowerCase();
+      list = list.filter(r => norm(r.city, 'city').toLowerCase() === f);
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+
+    // Search
+    if (searchQuery?.trim()) {
+      const q = searchQuery.trim().toLowerCase();
       list = list.filter(r => [r.name, r.email, r.phone].some(f => norm(f).toLowerCase().includes(q)));
     }
+
+    // Notes-only
     if (hasNotesOnly) {
       list = list.filter(r => !!(r.notes && String(r.notes).trim().length > 0));
     }
-    if (activityFilter !== 'All activity') {
-      list = list.filter(r => getActivityStatus(r.lastStoryAt) === activityFilter);
+
+    // Activity
+    if (!isAllFilter(activityFilter)) {
+      const f = activityFilter!.toString();
+      list = list.filter(r => getActivityStatus(r.lastStoryAt) === f);
     }
-    if (typeFilter !== 'All') {
-      list = list.filter(r => (r.reporterType || 'community') === (typeFilter === 'Journalist' ? 'journalist' : 'community'));
+
+    // Type
+    if (typeFilter !== 'all') {
+      list = list.filter(r => (r.reporterType || 'community').toString().toLowerCase() === typeFilter);
     }
-    if (verificationFilter !== 'All') {
+
+    // Verification
+    if (!isAllFilter(verificationFilter)) {
+      const f = verificationFilter!.toString().toLowerCase();
       list = list.filter(r => {
-        const v = (r.verificationLevel || 'community_default');
-        if (verificationFilter === 'Verified') return v === 'verified';
-        if (verificationFilter === 'Pending') return v === 'pending';
-        if (verificationFilter === 'Limited') return v === 'limited';
-        if (verificationFilter === 'Revoked') return v === 'revoked';
-        if (verificationFilter === 'Community Default') return v === 'community_default';
-        return v === 'unverified';
+        const v = (r.verificationLevel || 'community_default').toString().toLowerCase();
+        if (f === 'verified') return v === 'verified';
+        if (f === 'pending') return v === 'pending';
+        if (f === 'limited') return v === 'limited';
+        if (f === 'revoked') return v === 'revoked';
+        if (f === 'community default') return v === 'community_default';
+        if (f === 'unverified') return v === 'unverified';
+        return true;
       });
     }
-    if (statusFilter !== 'All') {
+
+    // Status
+    if (statusFilter !== 'all') {
       list = list.filter(r => {
-        const s = (r.status || 'active');
-        if (statusFilter === 'Active') return s === 'active';
-        if (statusFilter === 'Watchlist') return s === 'watchlist';
-        if (statusFilter === 'Suspended') return s === 'suspended';
-        return s === 'banned';
+        const s = (r.status || 'active').toString().toLowerCase();
+        // Map legacy UI statuses where needed
+        if (statusFilter === 'active') return s === 'active';
+        if (statusFilter === 'blocked') return s === 'blocked' || s === 'suspended';
+        if (statusFilter === 'archived') return s === 'archived' || s === 'banned';
+        return false;
       });
     }
-    // Optional default sort: newest last story first, empties at bottom
+
     return list;
   }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, typeFilter, verificationFilter, statusFilter]);
 
@@ -433,16 +490,21 @@ export default function ReporterContactDirectory() {
           </label>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-600">Type:</span>
-            <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
-              {['All','Community','Journalist'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as 'all'|'community'|'journalist')} className="text-xs px-2 py-2 border rounded-md">
+              <option value="all">All</option>
+              <option value="community">Community</option>
+              <option value="journalist">Journalist</option>
             </select>
             <span className="text-xs text-slate-600">Verification:</span>
             <select value={verificationFilter} onChange={(e)=> setVerificationFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
               {['All','Verified','Pending','Limited','Revoked','Unverified','Community Default'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
             </select>
             <span className="text-xs text-slate-600">Status:</span>
-            <select value={statusFilter} onChange={(e)=> setStatusFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
-              {['All','Active','Watchlist','Suspended','Banned'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            <select value={statusFilter} onChange={(e)=> setStatusFilter(e.target.value as 'all'|'active'|'blocked'|'archived')} className="text-xs px-2 py-2 border rounded-md">
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="blocked">Blocked</option>
+              <option value="archived">Archived</option>
             </select>
           </div>
           <select
@@ -455,7 +517,7 @@ export default function ReporterContactDirectory() {
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
-          <span className="text-xs text-slate-500">{filteredReporters.length} / {items.length} shown</span>
+          <span className="text-xs text-slate-500">{filteredReporters.length} / {total} shown</span>
           {(() => {
             const totalReporters = filteredReporters.length;
             const completeProfiles = filteredReporters.filter(r => r.phone && (r.city || r.state || r.country)).length;
@@ -707,7 +769,7 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 bg-white">
-          {(!items || items.length === 0) ? (
+          {items.length === 0 ? (
             <tr>
               <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
             </tr>

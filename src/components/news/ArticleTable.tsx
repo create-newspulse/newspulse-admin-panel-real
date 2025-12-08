@@ -33,7 +33,6 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
   const { data, isLoading, error } = useQuery<ListResponse>({ queryKey: ['articles', params], queryFn: () => listArticles(params) });
-  const rows = data?.rows ?? [];
   // Optimistic mutations
   const mutateArchive = useMutation({
     mutationFn: archiveArticle,
@@ -177,10 +176,12 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     const n = normalizeError(error, 'Error loading articles');
     return <div className="text-red-600">{n.message}</div>;
   }
-  const rows = data?.data || [];
+  // derive table rows and total from the query result
+  const rows = data?.rows ?? data?.data ?? [];
+  const total = data?.total ?? rows.length;
+
   const page = data?.page || 1;
   const pages = data?.pages || 1;
-  const total = data?.total || 0;
   const canPrev = page > 1;
   const canNext = page < pages;
   return (

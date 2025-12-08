@@ -140,3 +140,22 @@ export async function hardDeleteCommunitySubmission(id: string) {
     throw err;
   }
 }
+
+// Normalized reporter contacts list for the Reporter Contact Directory page
+export async function listContacts(params: Record<string, any> = {}) {
+  const res = await adminApi.get('/api/community-reporter/contacts', { params });
+
+  type ApiPayload = {
+    ok?: boolean;
+    success?: boolean;
+    status?: number;
+    data?: any[];
+    total?: number;
+  };
+
+  const payload = res.data as ApiPayload;
+  const contacts = Array.isArray(payload.data) ? payload.data : [];
+  const total = typeof payload.total === 'number' ? payload.total : contacts.length;
+
+  return { contacts, total };
+}

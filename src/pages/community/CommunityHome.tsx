@@ -1,8 +1,41 @@
 import { Link } from 'react-router-dom';
 import { Users, LayoutGrid, FileText, PenSquare } from 'lucide-react';
 import { ContactRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import adminApi from '@/api/adminApi';
+
+type CommunityStats = {
+  pendingStories: number;
+  approvedStories: number;
+  rejectedStories: number;
+  totalReporters: number;
+  verifiedJournalists: number;
+};
 
 export default function CommunityHome() {
+  const [stats, setStats] = useState<CommunityStats | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await adminApi.get<any>('/api/admin/community/stats');
+        const s = res?.data ?? {};
+        const norm: CommunityStats = {
+          pendingStories: Number(s.pendingStories ?? s.pending ?? 0),
+          approvedStories: Number(s.approvedStories ?? s.approved ?? 0),
+          rejectedStories: Number(s.rejectedStories ?? s.rejected ?? 0),
+          totalReporters: Number(s.totalReporters ?? s.reporters ?? 0),
+          verifiedJournalists: Number(s.verifiedJournalists ?? s.verified ?? 0),
+        };
+        if (!cancelled) setStats(norm);
+      } catch (e: any) {
+        if (!cancelled) setStatsError('Failed to load stats');
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
   // Breadcrumbs are globally rendered; keep local minimal description
   return (
     <div className="px-6 py-4 max-w-6xl mx-auto space-y-8">
@@ -14,6 +47,30 @@ export default function CommunityHome() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Community Hub</h1>
           <p className="text-sm text-slate-600 mt-1">Central place for all Community Reporter tools.</p>
+          {/* Top stats pills with higher contrast for accessibility */}
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <button
+              className="inline-flex items-center gap-2 rounded-full bg-slate-200 px-4 py-1 text-xs md:text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+            >
+              <span>Pending stories</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{stats?.pendingStories ?? 0}</span>
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-full bg-slate-200 px-4 py-1 text-xs md:text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+            >
+              <span>Total reporters</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{stats?.totalReporters ?? 0}</span>
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-full bg-slate-200 px-4 py-1 text-xs md:text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+            >
+              <span>Verified journalists</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{stats?.verifiedJournalists ?? 0}</span>
+            </button>
+          </div>
+          {statsError && (
+            <div className="mt-2 text-xs text-red-700">{statsError}</div>
+          )}
         </div>
       </header>
 
@@ -103,3 +160,5 @@ function HubCard({ to, title, description, icon, variant = 'neutral' }: HubCardP
     </Link>
   );
 }
+
+// StatChip removed in favor of higher contrast pills

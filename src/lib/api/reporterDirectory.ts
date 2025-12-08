@@ -42,25 +42,75 @@ export interface ReporterContactListResponse {
 }
 
 export async function listReporterContacts(params?: {
-  q?: string;
+  search?: string;
   city?: string;
   state?: string;
   country?: string;
+  type?: 'community' | 'journalist';
+  status?: 'active' | 'blocked' | 'archived';
+  hasNotes?: boolean;
   page?: number;
   limit?: number;
   sortBy?: 'lastStoryAt' | 'totalStories';
   sortDir?: 'asc' | 'desc';
 }) {
-  // Backend route per spec: GET /api/community-reporter/contacts
-  const res = await adminApi.get<any>('/api/community-reporter/contacts', { params });
+  // Updated canonical backend route: GET /api/admin/reporters
+  const res = await adminApi.get<any>('/api/admin/reporters', { params });
+
+  type ApiContact = {
+    _id: string;
+    fullName: string;
+    email: string;
+    phone?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    type: 'community' | 'journalist';
+    verificationStatus: 'none' | 'pending' | 'verified' | 'rejected';
+    status: 'active' | 'blocked' | 'archived';
+    storiesCount: number;
+    lastStoryAt?: string;
+    activity?: 'active' | 'new';
+    notes?: string;
+  };
+
   const payload = res?.data ?? {};
-  const rows: ReporterContact[] = Array.isArray(payload.data) ? payload.data : [];
+  const rowsRaw: ApiContact[] = Array.isArray(payload.data)
+    ? payload.data
+    : Array.isArray(payload.items)
+      ? payload.items
+      : Array.isArray(payload.rows)
+        ? payload.rows
+        : [];
+  const rows: ReporterContact[] = rowsRaw.map((c) => ({
+    id: String(c._id),
+    reporterKey: c._id,
+    name: c.fullName ?? null,
+    email: c.email ?? null,
+    phone: c.phone ?? null,
+    city: c.city ?? null,
+    state: c.state ?? null,
+    country: c.country ?? null,
+    notes: c.notes ?? null,
+    totalStories: c.storiesCount ?? 0,
+    pendingStories: 0,
+    approvedStories: 0,
+    lastStoryAt: c.lastStoryAt ?? '',
+    reporterType: c.type,
+    verificationLevel: (c.verificationStatus === 'verified'
+      ? 'verified'
+      : c.verificationStatus === 'pending'
+        ? 'pending'
+        : c.verificationStatus === 'rejected'
+          ? 'revoked'
+          : 'unverified'),
+    status: (c.status === 'blocked' ? 'suspended' : c.status === 'archived' ? 'banned' : 'active'),
+  }));
   const total: number = typeof payload.total === 'number' ? payload.total : rows.length;
   return {
     ok: payload.ok === true || payload.success === true,
     rows,
     total,
-    // maintain items for any legacy readers
     items: rows,
   } satisfies ReporterContactListResponse;
 }
