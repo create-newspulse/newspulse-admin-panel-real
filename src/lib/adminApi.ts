@@ -1,20 +1,17 @@
 import axios from 'axios';
 
-// Unified base URL resolution with prod safety (no localhost fallback in prod)
-const rawBase =
-  (import.meta.env as any).VITE_ADMIN_API_URL ||
-  (import.meta.env as any).VITE_API_URL ||
-  ((import.meta.env as any).DEV ? 'http://localhost:10000' : '');
+// Prefer the dev proxy base '/admin-api' in development when not explicitly set.
+// Otherwise, respect VITE_ADMIN_API_BASE_URL (e.g., direct origin like 'http://localhost:5000').
+const envAny = import.meta.env as any;
+const explicitBase = envAny.VITE_ADMIN_API_BASE_URL;
+const isDev = !!envAny.DEV;
+const computedBase = explicitBase ? String(explicitBase) : (isDev ? '/admin-api' : '');
 
-if (!rawBase) {
-  // Only reached in production builds when env is missing
-  try { console.error('[adminApi] Missing VITE_ADMIN_API_URL in production build'); } catch {}
-  throw new Error('Missing admin API base URL');
-}
+// Fallback to localhost in non-dev when no base provided (rare), to keep behavior predictable.
+const baseURL = computedBase || 'http://localhost:5000';
 
-export const ADMIN_API_BASE = rawBase.toString().replace(/\/+$/, '');
-
-export const adminRoot = ADMIN_API_BASE; // retained name for existing imports
+export const ADMIN_API_BASE = String(baseURL).replace(/\/+$/, '');
+export const adminRoot = ADMIN_API_BASE; // retained for existing imports/usages
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
 // Unified token retrieval for reuse across components/utilities.
@@ -24,20 +21,13 @@ export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true
 // 3. np_admin_token
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  let token: string | null = null;
+  // Spec requires using 'adminToken' from localStorage
   try {
-    const raw = localStorage.getItem('newsPulseAdminAuth');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed?.accessToken) token = String(parsed.accessToken);
-        else if (parsed?.token) token = String(parsed.token);
-      } catch {}
-    }
-  } catch {}
-  if (!token) token = localStorage.getItem('np_admin_access_token');
-  if (!token) token = localStorage.getItem('np_admin_token');
-  return token;
+    const token = localStorage.getItem('adminToken');
+    return token ? String(token) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Attach Authorization header from localStorage (JWT) for all requests
@@ -63,9 +53,7 @@ adminApi.interceptors.response.use(
     // Auto-redirect on 401 for protected admin API paths
     if (status === 401 && /\/api\/admin\//.test(url)) {
       try {
-        localStorage.removeItem('newsPulseAdminAuth');
-        localStorage.removeItem('np_admin_token');
-        localStorage.removeItem('np_admin_access_token');
+        localStorage.removeItem('adminToken');
       } catch {}
       try { console.warn('[adminApi] 401 detected – redirecting to /admin/login'); } catch {}
       if (typeof window !== 'undefined') {
@@ -104,6 +92,14 @@ export function resolveAdminPath(p: string): string {
   // Avoid double '/api' if base already ends with '/api'
   if (/\/api$/.test(adminRoot) && /^\/api\//.test(clean)) {
     return `${adminRoot}${clean.replace(/^\/api/, '')}`;
+  }
+  // If using proxy base '/admin-api', strip leading '/api' from paths
+  if (/\/admin-api$/.test(adminRoot) && /^\/api\//.test(clean)) {
+    return `${adminRoot}${clean.replace(/^\/api/, '')}`;
+  }
+  // Avoid accidental double '/api/api/...'
+  if (/\/api$/.test(adminRoot) && /^\/api\/api\//.test(clean)) {
+    return `${adminRoot}${clean.replace(/^\/api\//, '/')}`;
   }
   return `${adminRoot}${clean}`;
 }

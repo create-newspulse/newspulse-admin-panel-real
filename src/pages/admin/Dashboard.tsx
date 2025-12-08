@@ -13,7 +13,7 @@ import { fetchJson } from '@lib/fetchJson';
 import { adminRoot, resolveAdminPath } from '@lib/adminApi';
 
 // api client from src/lib/api.ts (default export = axios instance)
-import apiClient from '@lib/api';
+import { adminApi } from '@lib/adminApi';
 
 type DashboardStats = {
   total: number;
@@ -82,17 +82,36 @@ const Dashboard = () => {
       };
 
       try {
-        // Prefer the centralized axios client (handles base, creds, errors)
-        try {
-          const r1 = await apiClient.get('/dashboard-stats');
-          const payload = r1.data?.data ?? r1.data;
-          setStats(normalize(payload));
-          return;
-        } catch (e1: any) {
-          // Fallback alias
-          const r2 = await apiClient.get('/stats');
-          const payload2 = r2.data?.data ?? r2.data;
-          setStats(normalize(payload2));
+        // Try multiple normalized paths to tolerate different mounts
+        const candidates = [
+          '/api/dashboard-stats',
+          '/dashboard-stats',
+          '/api/stats',
+          '/stats',
+          '/admin/stats',
+          '/api/admin/stats',
+        ];
+        let loaded: DashboardStats | null = null;
+        for (const c of candidates) {
+          try {
+            const p = resolveAdminPath(c);
+            const r = await adminApi.get(p);
+            const payload = r.data?.data ?? r.data;
+            loaded = normalize(payload);
+            break;
+          } catch (e: any) {
+            const s = e?.response?.status;
+            if (s && s !== 404) {
+              // Non-404 error: surface it
+              throw e;
+            }
+            continue;
+          }
+        }
+        if (loaded) {
+          setStats(loaded);
+        } else {
+          throw new Error('No stats endpoint available');
         }
       } catch (err: any) {
         console.error('❌ Dashboard API Error:', err?.message || err);

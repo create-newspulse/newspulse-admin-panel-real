@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppLayout from './pages/AppLayout';
+import FeatureTogglesPage from './pages/admin/founder/FeatureTogglesPage';
 import AddNewsPage from './pages/admin/add-news';
 import ManageNewsPage from './pages/admin/manage-news';
 import EditNewsPage from './pages/admin/manage-news/edit';
@@ -29,8 +30,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path='drafts' element={<DraftDeskPage />} />
             <Route path='manage-news/:id/edit' element={<EditNewsPage />} />
             <Route path='community-reporter' element={<CommunityReporterPage />} />
+            <Route path='founder/feature-toggles' element={<FeatureTogglesPage />} />
             <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
           </Route>
+          {/* Friendly alias requested: /founder/feature-toggles */}
+          <Route path='/founder/feature-toggles' element={<Navigate to='/admin/founder/feature-toggles' replace />} />
           {/* Any other root-level path redirects into admin space */}
           <Route path='*' element={<Navigate to='/admin/manage-news' replace />} />
         </Routes>

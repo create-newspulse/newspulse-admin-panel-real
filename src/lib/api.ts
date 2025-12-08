@@ -2,7 +2,12 @@ import axios, { AxiosInstance } from 'axios';
 
 // Centralized Admin API base per spec:
 // Use env var when provided, else default to '/admin-api' to work with proxy/rewrites.
-const API_BASE_URL = (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() || '/admin-api';
+// Support both VITE_ADMIN_API_BASE and VITE_ADMIN_API_BASE_URL.
+const API_BASE_URL = (
+  (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() ||
+  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined)?.trim() ||
+  '/admin-api'
+);
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -21,6 +26,24 @@ export const api: ExtendedApi = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: false,
 }) as ExtendedApi;
+
+// Normalize path joins so base '/admin-api' works with callers using '/api/...'
+api.interceptors.request.use((cfg) => {
+  try {
+    const base = (cfg.baseURL || '').toString();
+    let url = (cfg.url || '').toString();
+    if (/\/admin-api$/.test(base) && /^\/api\//.test(url)) {
+      url = url.replace(/^\/api/, '');
+      cfg.url = url;
+    }
+    // Avoid accidental double '/api/api/...'
+    if (/\/api$/.test(base) && /^\/api\//.test(url)) {
+      url = url.replace(/^\/api\//, '');
+      cfg.url = `/${url}`;
+    }
+  } catch {}
+  return cfg;
+});
 
 // Stub legacy helpers to avoid undefined method errors; components can feature-detect responses.
 api.systemHealth = async () => ({ ok: true, status: 'unknown' });
@@ -102,32 +125,26 @@ if (import.meta.env.DEV) {
 // Dashboard / Monitor Hub stats helper
 // Tries modern path first then legacy fallback, normalizes shape.
 api.monitorHub = async () => {
-  // Prefer canonical backend path; include fallback alias variants to tolerate mixed deployments.
-  // With baseURL '/admin-api', do not prefix with extra '/api'
-  const paths = ['/api/system/monitor-hub', '/system/monitor-hub', '/admin/stats'];
-  let lastErr: any = null;
-  for (const p of paths) {
-    try {
-      const res = await api.get(p);
-      const raw = res.data || {};
-      const data = raw.data || raw.stats || raw; // tolerate different wrappers
-      return {
-        ok: raw.ok === true || raw.success === true || !!raw.data || !!raw.stats,
-        ...data,
-        _raw: raw,
-        _endpoint: p,
-      };
-    } catch (err: any) {
-      lastErr = err;
-      const status = err?.response?.status;
-      if (status === 401 || status === 403) {
-        return { ok: false, auth: true, status, error: 'unauthorized' };
-      }
-      continue;
+  // Use authenticated admin client for system monitor (backend path: /api/system/monitor-hub)
+  // Avoid double slashes; adminApi handles Authorization header.
+  const { adminApi } = await import('./adminApi');
+  try {
+    const res = await adminApi.get('/api/system/monitor-hub');
+    const raw = res.data || {};
+    const data = raw.data || raw.stats || raw;
+    return {
+      ok: raw.ok === true || raw.success === true || !!raw.data || !!raw.stats || true,
+      ...data,
+      _raw: raw,
+      _endpoint: '/api/system/monitor-hub',
+    };
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 401 || status === 403) {
+      return { ok: false, auth: true, status, error: 'unauthorized' };
     }
+    return { ok: false, status: status ?? null, error: 'monitor-hub-unavailable' };
   }
-  const status = lastErr?.response?.status;
-  return { ok: false, status: status ?? null, error: 'monitor-hub-unavailable' };
 };
 
 // Unified settings loader with stub & 404 suppression.

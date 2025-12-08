@@ -38,7 +38,7 @@
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^7.0.11",
     "openai": "^5.10.2",
     "sanitize-html": "^2.13.0",
     "slugify": "^1.6.6",

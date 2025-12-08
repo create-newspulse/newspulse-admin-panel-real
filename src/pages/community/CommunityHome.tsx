@@ -58,6 +58,14 @@ export default function CommunityHome() {
           icon={<ContactRound className="w-6 h-6" />}
           variant="secondary"
         />
+        {/* Founder-only: Community Reporter Feature Toggles */}
+        <HubCard
+          to="/founder/feature-toggles"
+          title="Community Reporter Feature Toggles – Founder only"
+          description="Configure visibility of the public Reporter Portal features."
+          icon={<LayoutGrid className="w-6 h-6" />}
+          variant="secondary"
+        />
       </section>
 
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-indigo-700 text-sm">

@@ -95,7 +95,8 @@ export async function listCommunityReporterQueue(params: {
   if (params.source) query.source = params.source; // omit when ALL
   if (params.aiPickOnly) query.aiPick = true;
   try {
-    const res = await adminApi.get('/api/admin/community/submissions', { params: query });
+    // Use canonical backend route for the queue
+    const res = await adminApi.get('/api/community-reporter/queue', { params: query });
     const data = res?.data ?? {};
     const submissions = Array.isArray(data.submissions)
       ? data.submissions

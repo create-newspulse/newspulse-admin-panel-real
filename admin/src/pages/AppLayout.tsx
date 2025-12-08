@@ -10,6 +10,7 @@ export default function AppLayout(){
           <Link to="/admin/drafts" className="hover:underline">Draft Desk</Link>
           <Link to="/admin/add-news" className="hover:underline">Add News</Link>
           <Link to="/admin/community-reporter" className="hover:underline">Community Reporter</Link>
+          <Link to="/admin/founder/feature-toggles" className="hover:underline">Feature Toggles</Link>
         </nav>
       </header>
       <main className="max-w-5xl mx-auto p-4">

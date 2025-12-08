@@ -14,6 +14,7 @@ export default defineConfig(({ mode }): UserConfig => {
   const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:5000' : '');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
 
+  const DEV_PORT = 5173;
   return {
     envPrefix: 'VITE_',
     base: '/',
@@ -37,9 +38,9 @@ export default defineConfig(({ mode }): UserConfig => {
 
       server: {
         host: true,
-        port: 5173,
+        port: DEV_PORT,
         open: true,
-        // Force chosen port; prevents silent fallback and gives explicit error if busy
+        // Keep the standard Vite port
         strictPort: true,
       cors: true,
       // Proxy all API + sockets to backend in dev
@@ -50,14 +51,12 @@ export default defineConfig(({ mode }): UserConfig => {
           secure: false,
           // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
-        // Proxy /admin-api/* to local backend without rewriting path
-        // Backend mounts admin endpoints under '/admin-api', so keep the prefix intact.
+        // Proxy /admin-api/* -> backend /api/* per spec
         '/admin-api': {
-          // Local backend dev server for admin API
           target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
-          // No rewrite: preserve '/admin-api' so routes like '/admin-api/articles/:id' resolve
+          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
         },
         '/socket.io': {
           target: API_WS,

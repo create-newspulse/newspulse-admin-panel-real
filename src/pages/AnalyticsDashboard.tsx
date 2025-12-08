@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslate } from '../hooks/useTranslate';
 import useAuthGuard from '../hooks/useAuthGuard'; // 🔐 Guard
-import api from '@lib/api';
+import { adminApi, resolveAdminPath } from '@lib/adminApi';
 
 import {
   BarChart,
@@ -37,17 +37,35 @@ export default function AnalyticsDashboard() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        // ✅ USE this for all API calls (no localhost, no hardcoded full URLs)
-        const res = await api.get('/api/dashboard-stats');
-        if (res.data?.success && res.data.data) {
-          setSummary({
-            totalViews: res.data.data.totalViews ?? 0,
-            viewsToday: res.data.data.viewsToday ?? 0,
-            topPages: res.data.data.topPages ?? [],
-          });
-        } else {
-          setError(res.data?.message || 'Failed to load analytics data');
+        const candidates = [
+          '/api/dashboard-stats',
+          '/dashboard-stats',
+          '/api/stats',
+          '/stats',
+          '/admin/stats',
+          '/api/admin/stats',
+        ];
+        let ok = false;
+        for (const c of candidates) {
+          try {
+            const p = resolveAdminPath(c);
+            const res = await adminApi.get(p);
+            const data = res.data?.data ?? res.data;
+            if (data) {
+              setSummary({
+                totalViews: data.totalViews ?? data?.totals?.views ?? 0,
+                viewsToday: data.viewsToday ?? data?.totals?.viewsToday ?? 0,
+                topPages: data.topPages ?? [],
+              });
+              ok = true;
+              break;
+            }
+          } catch (e: any) {
+            if (e?.response?.status && e.response.status !== 404) throw e;
+            continue;
+          }
         }
+        if (!ok) throw new Error('No analytics endpoint available');
       } catch (err: any) {
         console.error('❌ Failed to load analytics:', err?.message);
         setError(err?.message || 'Analytics fetch failed');

@@ -59,6 +59,8 @@ import EnhancedSecurityDashboard from '@components/advanced/EnhancedSecurityDash
 import EditorialWorkflowEngine from '@components/advanced/EditorialWorkflowEngine';
 import FounderControlCenter from '@components/advanced/FounderControlCenter';
 import FounderControlPage from '@pages/admin/founder-control';
+import FeatureTogglesPage from '@pages/founder/FeatureTogglesPage';
+import FeatureTogglesCommunityReporter from '@/pages/founder/FeatureTogglesCommunityReporter';
 // Temporary import of Community Reporter page from legacy admin folder until unified move
 import CommunityReporterPage from '@pages/admin/CommunityReporterPage';
 import CommunityReporterDetailPage from '@pages/admin/CommunityReporterDetailPage';
@@ -80,6 +82,7 @@ import CommunityHome from '@pages/community/CommunityHome';
 import ReporterContactDirectory from '@pages/community/ReporterContactDirectory';
 import ReporterStoriesAdmin from '@pages/community/ReporterStoriesAdmin';
 import JournalistApplications from '@pages/community/JournalistApplications';
+import ReporterPortalPreview from '@pages/community/ReporterPortalPreview';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
@@ -179,6 +182,8 @@ function App() {
               {/* Reporter Portal (admin + public alias) */}
               <Route path="/admin/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Internal founder-only Reporter Portal preview */}
+              <Route path="/community/reporter-portal" element={<FounderRoute><ReporterPortalPreview /></FounderRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
               <Route path="/test-push" element={<ProtectedRoute><LockCheckWrapper><TestNotification /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/saved-news" element={<ProtectedRoute><LockCheckWrapper><SavedNews /></LockCheckWrapper></ProtectedRoute>} />
@@ -187,6 +192,8 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+              {/* Founder-only Feature Toggles – Community Reporter */}
+              <Route path="/founder/feature-toggles" element={<FounderRoute><FeatureTogglesCommunityReporter /></FounderRoute>} />
               {/* Legacy path kept as redirect for backward compatibility */}
               <Route path="/safe-owner" element={<Navigate to="/safeownerzone/founder" replace />} />
               <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />

@@ -69,6 +69,14 @@ export default function FounderControlPage() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Quick Access: Feature Toggles */}
+      <div className="mt-4">
+        <a href="/founder/feature-toggles" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm">
+          ⚙️ Feature Toggles
+          <span className="opacity-80">Control Reporter Portal visibility</span>
+        </a>
+      </div>
     </div>
   );
 
