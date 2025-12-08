@@ -33,16 +33,17 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
   const { data, isLoading, error } = useQuery<ListResponse>({ queryKey: ['articles', params], queryFn: () => listArticles(params) });
+  const rows = data?.rows ?? [];
   // Optimistic mutations
   const mutateArchive = useMutation({
     mutationFn: archiveArticle,
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
       const prev = qc.getQueryData<ListResponse>(['articles', params]);
-      if (prev?.data) {
+      if (prev?.rows) {
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'archived' }: a)
+          rows: prev.rows.map((a: Article)=> a._id===id? { ...a, status:'archived' }: a)
         });
       }
       return { prev };
@@ -56,10 +57,10 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
       const prev = qc.getQueryData<ListResponse>(['articles', params]);
-      if (prev?.data) {
+      if (prev?.rows) {
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: prev.data.map((a: Article)=> a._id===id? { ...a, status:'draft' }: a)
+          rows: prev.rows.map((a: Article)=> a._id===id? { ...a, status:'draft' }: a)
         });
       }
       return { prev };
@@ -73,14 +74,14 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     onMutate: async (id: string) => {
       await qc.cancelQueries({ queryKey: ['articles'] });
       const prev = qc.getQueryData<ListResponse>(['articles', params]);
-      if (prev?.data) {
+      if (prev?.rows) {
         // In All view, drop the row immediately; otherwise mark as deleted
         const inAllView = (params.status ?? 'all') === 'all';
         qc.setQueryData(['articles', params], {
           ...prev,
-          data: inAllView
-            ? prev.data.filter((a: Article) => a._id !== id)
-            : prev.data.map((a: Article)=> a._id===id? { ...a, status:'deleted' }: a),
+          rows: inAllView
+            ? prev.rows.filter((a: Article) => a._id !== id)
+            : prev.rows.map((a: Article)=> a._id===id? { ...a, status:'deleted' }: a),
           total: Math.max(0, (prev.total || 1) - (inAllView ? 1 : 0)),
         });
       }

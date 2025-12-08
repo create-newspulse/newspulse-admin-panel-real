@@ -32,10 +32,11 @@ interface ApiResponse {
 }
 
 export interface ListResponse {
-  data: Article[];
+  // Canonical shape used by UI tables
+  rows: Article[];
+  total: number;
   page: number;
   pages: number;
-  total: number;
 }
 
 const ADMIN_ARTICLES_PATH = '/articles';
@@ -59,12 +60,12 @@ export async function listArticles(params: {
     query.status = ['draft', 'scheduled', 'published', 'archived'].join(',');
   }
   const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
-  const { ok, items = [], total = 0 } = res.data as ApiResponse;
-  if (!ok) throw new Error('Failed to list articles');
-  
+  const payload = res.data as any;
+  const rows: Article[] = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.items) ? payload.items : []);
+  const total: number = typeof payload?.total === 'number' ? payload.total : rows.length;
   const limit = params.limit || 20;
   return {
-    data: items,
+    rows,
     total,
     page: params.page || 1,
     pages: Math.ceil(total / limit),
