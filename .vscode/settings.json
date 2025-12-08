@@ -1,0 +1,6 @@
+{
+    "git.ignoreLimitWarning": true,
+    "CodeGPT.apiKey": "Ollama",
+    "typescript.tsdk": "newspulse-admin-panel-real-main/node_modules/typescript/lib",
+    "typescript.enablePromptUseWorkspaceTsdk": true
+}

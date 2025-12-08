@@ -1,0 +1,20 @@
+# Exclude heavy / noisy folders from AI context to speed up responses
+node_modules/
+.next/
+.turbo/
+.cache/
+dist/
+build/
+.vercel/
+.vscode/
+.git/
+**/*.log
+**/*.mp4
+**/*.zip
+**/*.jpg
+**/*.png
+coverage/
+# Add large generated JSON/data directories
+admin-backend/backend/data/
+render-backend-real/node_modules/
+newspulse-backend/node_modules/
