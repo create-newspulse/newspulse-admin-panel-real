@@ -33,9 +33,12 @@ export interface ReporterContact {
 }
 
 export interface ReporterContactListResponse {
-  ok: boolean;
-  items: ReporterContact[];
+  ok?: boolean;
+  // New canonical shape returned to UI consumers
+  rows: ReporterContact[];
   total: number;
+  // Back-compat for any legacy usages reading items
+  items?: ReporterContact[];
 }
 
 export async function listReporterContacts(params?: {
@@ -48,13 +51,18 @@ export async function listReporterContacts(params?: {
   sortBy?: 'lastStoryAt' | 'totalStories';
   sortDir?: 'asc' | 'desc';
 }) {
-  const res = await adminApi.get<ReporterContactListResponse>('/admin/community/reporter-contacts', { params });
-
-  if (!res.data?.ok) {
-    throw new Error('Failed to load reporter contacts');
-  }
-
-  return res.data;
+  // Backend route per spec: GET /api/community-reporter/contacts
+  const res = await adminApi.get<any>('/api/community-reporter/contacts', { params });
+  const payload = res?.data ?? {};
+  const rows: ReporterContact[] = Array.isArray(payload.data) ? payload.data : [];
+  const total: number = typeof payload.total === 'number' ? payload.total : rows.length;
+  return {
+    ok: payload.ok === true || payload.success === true,
+    rows,
+    total,
+    // maintain items for any legacy readers
+    items: rows,
+  } satisfies ReporterContactListResponse;
 }
 
 // Update private admin-only reporter notes. Backend should secure this route.

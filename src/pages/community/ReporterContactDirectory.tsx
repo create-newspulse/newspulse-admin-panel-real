@@ -51,7 +51,12 @@ export default function ReporterContactDirectory() {
   // Fetch base reporter list (broad; we will filter client-side)
   const { data, isLoading, isError, error } = useReporterContactsQuery({ page, limit: 200 });
   const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
-  const items = (data?.items ?? []) as ReporterContact[];
+  const items = (data?.rows ?? []) as ReporterContact[];
+  // Optional debug: confirm payload shape from backend mapping
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.debug('[ReporterContactDirectory] contacts payload', { total: data?.total, count: items.length });
+  }
 
 
   // Derive unique sets from current dataset
