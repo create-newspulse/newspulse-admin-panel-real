@@ -83,8 +83,8 @@ adminApi.interceptors.response.use(
       try { console.warn('[adminApi] 401 detected – redirecting to /admin/login'); } catch {}
       if (typeof window !== 'undefined') {
         // Avoid infinite loops if already on login
-        if (!window.location.pathname.includes('/admin/login')) {
-          window.location.href = '/admin/login';
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
         }
       }
     }
@@ -211,4 +211,80 @@ export interface CommunityCleanupResponse {
 export async function cleanupOldLowPriorityCommunityStories(): Promise<CommunityCleanupResponse> {
   const { data } = await adminApi.post('/community-reporter/cleanup');
   return data as CommunityCleanupResponse;
+}
+
+// --- Community Reporter & System Health helpers ---
+// System Health
+export async function getSystemHealth(): Promise<any> {
+  const { data } = await adminApi.get('/system/health');
+  return data;
+}
+
+// Community Reporter Queue
+export interface CommunityQueueItem {
+  id?: string;
+  _id?: string;
+  title?: string;
+  status?: string;
+  createdAt?: string;
+  [key: string]: any;
+}
+export async function fetchCommunityReporterQueue(): Promise<CommunityQueueItem[]> {
+  const { data } = await adminApi.get('/community-reporter/queue');
+  return Array.isArray(data) ? data : (data?.items || []);
+}
+
+// Reporter Contacts with query normalization
+export interface ReporterContactQuery {
+  activity?: 'all' | 'active' | 'inactive' | string;
+  district?: string;
+  area?: string;
+  beats?: string;
+  page?: number;
+  limit?: number;
+}
+export interface ReporterContact {
+  id?: string;
+  _id?: string;
+  name?: string;
+  phone?: string;
+  district?: string;
+  area?: string;
+  beats?: string[] | string;
+  activity?: string;
+  [key: string]: any;
+}
+
+function normalizeReporterQuery(q: ReporterContactQuery = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  // activity: map UI label "All activity" -> "all"
+  const activityRaw = (q.activity ?? '').toString().trim();
+  const activity = activityRaw.toLowerCase() === 'all activity' ? 'all' : activityRaw.toLowerCase();
+  if (activity) params.set('activity', activity);
+
+  // district/area/beats: omit if empty or "all"
+  const district = (q.district ?? '').toString().trim();
+  if (district && district.toLowerCase() !== 'all') params.set('district', district);
+
+  const area = (q.area ?? '').toString().trim();
+  if (area && area.toLowerCase() !== 'all') params.set('area', area);
+
+  const beats = (q.beats ?? '').toString().trim();
+  if (beats && beats.toLowerCase() !== 'all' && beats.toLowerCase() !== 'allbeats') params.set('beats', beats);
+
+  // pagination: default limit 200
+  const page = q.page ?? 1;
+  const limit = q.limit ?? 200;
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+
+  return params;
+}
+
+export async function listReporterContacts(q: ReporterContactQuery = {}): Promise<ReporterContact[]> {
+  const params = normalizeReporterQuery(q);
+  const url = `/reporters?${params.toString()}`;
+  const { data } = await adminApi.get(url);
+  const rows = Array.isArray(data) ? data : (data?.items || data?.rows || []);
+  return rows as ReporterContact[];
 }
