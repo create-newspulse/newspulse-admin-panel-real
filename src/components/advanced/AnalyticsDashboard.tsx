@@ -71,6 +71,25 @@ export default function AnalyticsDashboard(): JSX.Element {
     if (typeof value !== 'number' || Number.isNaN(value)) return '0';
     return value.toLocaleString('en-IN');
   };
+  const safeNumber = (value: unknown, fallback = 0): number => {
+    if (typeof value === 'number' && !Number.isNaN(value)) return value;
+    const n = Number(value);
+    if (Number.isNaN(n)) return fallback;
+    return n;
+  };
+
+  const formatFixed = (
+    value: unknown,
+    digits = 1,
+    fallback = '0'
+  ): string => {
+    const n = safeNumber(value, 0);
+    try {
+      return n.toFixed(digits);
+    } catch {
+      return fallback;
+    }
+  };
   const [loading, setLoading] = useState(true);
   const [revenue, setRevenue] = useState<RevenueData | null>(null);
   const [traffic, setTraffic] = useState<TrafficData | null>(null);
@@ -210,11 +229,11 @@ export default function AnalyticsDashboard(): JSX.Element {
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
-                  <div className="text-2xl font-bold">${revenue?.rpm.toFixed(2)}</div>
+                  <div className="text-2xl font-bold">${formatFixed(revenue?.rpm, 2, '0.00')}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
-                  <div className="text-2xl font-bold">{typeof revenue?.ctr === 'number' ? revenue.ctr : 0}%</div>
+                  <div className="text-2xl font-bold">{formatFixed(revenue?.ctr, 1, '0.0')}%</div>
                 </div>
               </div>
 
@@ -269,11 +288,11 @@ export default function AnalyticsDashboard(): JSX.Element {
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
-                  <div className="text-2xl font-bold text-blue-600">{adPerf?.ctr}%</div>
+                  <div className="text-2xl font-bold text-blue-600">{formatFixed(adPerf?.ctr, 1, '0.0')}%</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
-                  <div className="text-2xl font-bold text-green-600">${typeof adPerf?.rpm === 'number' ? adPerf.rpm.toFixed(2) : '0.00'}</div>
+                  <div className="text-2xl font-bold text-green-600">${formatFixed(adPerf?.rpm, 2, '0.00')}</div>
                 </div>
               </div>
 
