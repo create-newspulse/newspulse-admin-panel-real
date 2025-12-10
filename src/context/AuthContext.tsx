@@ -28,17 +28,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const STORAGE_KEY = 'newsPulseAdminAuth';
   const AUTH_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
-  const SESSION_ENDPOINT = '/api/admin/me';
+  // Resolve relative to admin base; avoid double /api/admin
+  const SESSION_ENDPOINT = '/me';
 
   // Consider cookie-session success (no token) as authenticated if we have user
   // Auth considered valid if we have a token or a resolved user
   const isAuthenticated = !!token || !!user;
   const isFounder = (user?.role || '').toLowerCase() === 'founder';
 
-  // PRODUCTION ADMIN LOGIN (Vercel):
-  // POST /admin/login on https://newspulse-backend-real.onrender.com
-  // Expects response: { ok: true, user: {...}, ... } (token may be absent)
-  const LOGIN_PATH = '/admin/login';
+  // Resolve relative to admin base; avoid double '/admin' in path
+  // Direct/base: <origin>/api/admin/login ; Proxy: /admin-api/admin/login
+  const LOGIN_PATH = '/login';
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);

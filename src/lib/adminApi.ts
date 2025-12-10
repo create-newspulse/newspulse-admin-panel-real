@@ -1,17 +1,36 @@
 import axios from 'axios';
 
-// Prefer the dev proxy base '/admin-api' in development when not explicitly set.
-// Otherwise, respect VITE_ADMIN_API_BASE_URL (e.g., direct origin like 'http://localhost:5000').
+// Compute a single admin API base that always points to '/api/admin'
 const envAny = import.meta.env as any;
-const explicitBase = envAny.VITE_ADMIN_API_BASE_URL;
 const isDev = !!envAny.DEV;
-const computedBase = explicitBase ? String(explicitBase) : (isDev ? '/admin-api' : '');
+const fromAdminBase = (envAny.VITE_ADMIN_API_BASE_URL || '').toString().trim();
+const fromApiUrl = (envAny.VITE_API_URL || '').toString().trim();
+const fromApiRoot = (envAny.VITE_API_ROOT || '').toString().trim();
 
-// Fallback to Render backend in non-dev when no base provided.
-const baseURL = computedBase || 'https://newspulse-backend-real.onrender.com';
+function stripTrailing(u: string) { return u.replace(/\/+$/, ''); }
+function ensureAdminBase(u: string) {
+  const base = stripTrailing(u);
+  return /\/api\/admin$/.test(base) ? base : `${base}/api/admin`;
+}
 
-export const ADMIN_API_BASE = String(baseURL).replace(/\/+$/, '');
-export const adminRoot = ADMIN_API_BASE; // retained for existing imports/usages
+let ADMIN_API_BASE = '';
+if (fromAdminBase) {
+  ADMIN_API_BASE = ensureAdminBase(fromAdminBase);
+} else if (fromApiUrl) {
+  ADMIN_API_BASE = ensureAdminBase(fromApiUrl);
+} else if (fromApiRoot) {
+  ADMIN_API_BASE = ensureAdminBase(fromApiRoot);
+} else if (isDev) {
+  // Dev proxy base
+  ADMIN_API_BASE = '/admin-api/admin';
+} else {
+  // Production fallback
+  ADMIN_API_BASE = 'https://newspulse-backend-real.onrender.com/api/admin';
+}
+
+export const adminRoot = ADMIN_API_BASE;
+// Back-compat for components importing ADMIN_API_BASE
+export const ADMIN_API_BASE = adminRoot;
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
 // Unified token retrieval for reuse across components/utilities.
@@ -89,19 +108,9 @@ if (import.meta.env.DEV) {
 // For direct base we prepend the full origin.
 export function resolveAdminPath(p: string): string {
   const clean = p.startsWith('/') ? p : `/${p}`;
-  // Avoid double '/api' if base already ends with '/api'
-  if (/\/api$/.test(adminRoot) && /^\/api\//.test(clean)) {
-    return `${adminRoot}${clean.replace(/^\/api/, '')}`;
-  }
-  // If using proxy base '/admin-api', strip leading '/api' from paths
-  if (/\/admin-api$/.test(adminRoot) && /^\/api\//.test(clean)) {
-    return `${adminRoot}${clean.replace(/^\/api/, '')}`;
-  }
-  // Avoid accidental double '/api/api/...'
-  if (/\/api$/.test(adminRoot) && /^\/api\/api\//.test(clean)) {
-    return `${adminRoot}${clean.replace(/^\/api\//, '/')}`;
-  }
-  return `${adminRoot}${clean}`;
+  // Paths should be relative to '/api/admin', so do not include '/api' or '/admin' prefixes here
+  const normalized = clean.replace(/^\/api\//, '/').replace(/^\/admin\//, '/');
+  return `${adminRoot}${normalized}`;
 }
 
 // Diagnostic (dev + prod) to confirm chosen base.
@@ -158,7 +167,7 @@ export async function resetPasswordWithToken(email: string, resetToken: string, 
 // Unified admin login with automatic path fallback
 export interface LoginDTO { email: string; password: string }
 export async function loginAdmin(dto: LoginDTO) {
-  const paths = [resolveAdminPath('/admin/login'), resolveAdminPath('/api/admin/login')];
+  const paths = [resolveAdminPath('/login')];
   let lastErr: any = null;
   for (const p of paths) {
     try {
