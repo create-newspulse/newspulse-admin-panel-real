@@ -273,7 +273,7 @@ export default function AnalyticsDashboard(): JSX.Element {
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
-                  <div className="text-2xl font-bold text-green-600">${adPerf?.rpm.toFixed(2)}</div>
+                  <div className="text-2xl font-bold text-green-600">${typeof adPerf?.rpm === 'number' ? adPerf.rpm.toFixed(2) : '0.00'}</div>
                 </div>
               </div>
 
