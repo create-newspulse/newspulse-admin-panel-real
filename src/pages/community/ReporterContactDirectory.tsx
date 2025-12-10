@@ -208,9 +208,20 @@ export default function ReporterContactDirectory() {
     }
 
     // Search
-    if (searchQuery?.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter(r => [r.name, r.email, r.phone].some(f => norm(f).toLowerCase().includes(q)));
+    const sq = (searchQuery ?? '').toString();
+    if (sq.trim()) {
+      const q = sq.trim().toLowerCase();
+      list = list.filter(r => {
+        const haystack = [
+          r.name,
+          r.email,
+          r.phone,
+          norm(r.city, 'city'),
+          norm(r.state, 'state'),
+          norm(r.country, 'country'),
+        ].filter(Boolean).map(v => norm(v)).join(' ').toLowerCase();
+        return haystack.includes(q);
+      });
     }
 
     // Notes-only
@@ -280,6 +291,17 @@ export default function ReporterContactDirectory() {
 
     return list;
   }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter]);
+
+  // Debug logs for investigation (will be trimmed later)
+  useEffect(() => {
+    // Raw vs filtered list visibility
+    console.log('[ReporterDirectory] raw reporters', items);
+    console.log('[ReporterDirectory] filters', {
+      countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter,
+      typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly,
+    }, 'search', (searchQuery ?? '').toString());
+    console.log('[ReporterDirectory] filtered reporters', filteredReporters);
+  }, [items, filteredReporters, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly, searchQuery]);
 
   const sortedReporters = useMemo(() => {
     const arr = [...filteredReporters];
@@ -588,7 +610,8 @@ export default function ReporterContactDirectory() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <span className="text-xs text-slate-500">{items.length} / {total} shown</span>
+          {/* Use filtered list for shown count to match table */}
+          <span className="text-xs text-slate-500">{filteredReporters.length} / {items.length} shown</span>
           {(() => {
             const totalReporters = filteredReporters.length;
             const completeProfiles = filteredReporters.filter(r => r.phone && (r.city || r.state || r.country)).length;
