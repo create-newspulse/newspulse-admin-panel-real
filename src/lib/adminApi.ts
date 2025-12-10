@@ -3,14 +3,19 @@ import axios from 'axios';
 // Compute a single admin API base that always points to '/api/admin'
 const envAny = import.meta.env as any;
 const isDev = !!envAny.DEV;
-const fromAdminBase = (envAny.VITE_ADMIN_API_BASE_URL || '').toString().trim();
+const fromAdminBase = (envAny.VITE_ADMIN_API_BASE_URL || envAny.VITE_ADMIN_API_BASE || '').toString().trim();
 const fromApiUrl = (envAny.VITE_API_URL || '').toString().trim();
 const fromApiRoot = (envAny.VITE_API_ROOT || '').toString().trim();
 
 function stripTrailing(u: string) { return u.replace(/\/+$/, ''); }
 function ensureAdminBase(u: string) {
   const base = stripTrailing(u);
-  return /\/api\/admin$/.test(base) ? base : `${base}/api/admin`;
+  // If already correct
+  if (base.endsWith('/api/admin')) return base;
+  // If ends with '/api', just append '/admin'
+  if (base.endsWith('/api')) return `${base}/admin`;
+  // Otherwise, append '/api/admin'
+  return `${base}/api/admin`;
 }
 
 // Internal accumulator to avoid name collision with exported symbol
@@ -22,7 +27,7 @@ if (fromAdminBase) {
 } else if (fromApiRoot) {
   ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromApiRoot);
 } else if (isDev) {
-  // Dev proxy base
+  // Dev proxy base: use Vercel rewrite path; already includes '/admin'
   ADMIN_API_BASE_INTERNAL = '/admin-api/admin';
 } else {
   // Production fallback
