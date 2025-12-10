@@ -20,10 +20,14 @@ export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true
 // 3. np_admin_token
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  // Spec requires using 'adminToken' from localStorage
   try {
-    const token = localStorage.getItem('adminToken');
-    return token ? String(token) : null;
+    // Prefer unified keys set by AuthContext/Login
+    const keys = ['np_admin_access_token', 'np_admin_token', 'adminToken'];
+    for (const k of keys) {
+      const val = localStorage.getItem(k);
+      if (val && String(val).trim().length > 0) return String(val);
+    }
+    return null;
   } catch {
     return null;
   }
