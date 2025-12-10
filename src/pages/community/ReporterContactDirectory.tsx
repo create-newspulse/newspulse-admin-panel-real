@@ -59,6 +59,20 @@ export default function ReporterContactDirectory() {
 
   // Query backend for reporter contacts (paginated, large page to reduce client fetches)
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // Fetch via admin reporters API whenever filters/search change
+  // Note: depends on filter states declared below; place after declarations to avoid TS block-scope issues
+  // The actual effect is defined later after filter state hooks.
+
+
+  // Derive unique sets from current dataset (computed after items are defined)
+
+  // Removed auto-default country selection to avoid unintended filtering
+
+  // Client-side filtered reporters
+  const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive' | 'new' | 'on_leave' | 'blacklisted'>('all');
+  const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
+  // Fetch data via useQuery after all filter states are declared
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['reporter-contacts', {
       country: countryVal, state: stateVal, city: cityVal, district: districtFilter,
@@ -77,17 +91,11 @@ export default function ReporterContactDirectory() {
   const total = typeof data?.total === 'number' ? data.total : reporters.length;
   const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
 
-  // Fetch via admin reporters API whenever filters/search change
-  // Note: depends on filter states declared below; place after declarations to avoid TS block-scope issues
-  // The actual effect is defined later after filter state hooks.
-
-
-  // Derive unique sets from current dataset
-  // Unique value derivation (case-sensitive as stored)
+  // Derive unique sets from current dataset (computed after items are defined)
   const uniqueCountries = useMemo(() => ['All countries', ...Array.from(new Set(items.map(i => norm(i.country, 'country')).filter(Boolean))).sort()], [items]);
   const uniqueStates = useMemo(() => {
     const base = countryVal && countryVal !== 'All countries'
-      ? items.filter(i => norm(i.country, 'country').toLowerCase() === countryVal.toLowerCase())
+      ? items.filter(i => norm(i.country, 'country').toLowerCase() === (countryVal as string).toLowerCase())
       : items;
     return ['All states', ...Array.from(new Set(base.map(i => norm(i.state, 'state')).filter(Boolean))).sort()];
   }, [items, countryVal]);
@@ -95,32 +103,24 @@ export default function ReporterContactDirectory() {
     const base = items.filter(i => {
       const ctry = norm(i.country, 'country').toLowerCase();
       const st = norm(i.state, 'state').toLowerCase();
-      if (countryVal && countryVal !== 'All countries' && ctry !== countryVal.toLowerCase()) return false;
-      if (stateVal && stateVal !== 'All states' && st !== stateVal.toLowerCase()) return false;
+      if (countryVal && countryVal !== 'All countries' && ctry !== (countryVal as string).toLowerCase()) return false;
+      if (stateVal && stateVal !== 'All states' && st !== (stateVal as string).toLowerCase()) return false;
       return true;
     });
     return ['All cities', ...Array.from(new Set(base.map(i => norm(i.city, 'city')).filter(Boolean))).sort()];
   }, [items, countryVal, stateVal]);
-
-  // Districts based on selected country/state
   const filteredDistricts = useMemo(() => {
     const base = items.filter(i => {
       const ctry = norm(i.country, 'country').toLowerCase();
       const st = norm(i.state, 'state').toLowerCase();
-      if (countryVal && countryVal !== 'All countries' && ctry !== countryVal.toLowerCase()) return false;
-      if (stateVal && stateVal !== 'All states' && st !== stateVal.toLowerCase()) return false;
+      if (countryVal && countryVal !== 'All countries' && ctry !== (countryVal as string).toLowerCase()) return false;
+      if (stateVal && stateVal !== 'All states' && st !== (stateVal as string).toLowerCase()) return false;
       return true;
     });
     const set = new Set<string>();
     base.forEach(i => { const d = String((i as any).district || '').trim(); if (d) set.add(d); });
     return ['All districts', ...Array.from(set).sort()];
   }, [items, countryVal, stateVal]);
-
-  // Removed auto-default country selection to avoid unintended filtering
-
-  // Client-side filtered reporters
-  const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive' | 'new' | 'on_leave' | 'blacklisted'>('all');
-  const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
 
   // Load preferences on mount (browser-only)
   useEffect(() => {
