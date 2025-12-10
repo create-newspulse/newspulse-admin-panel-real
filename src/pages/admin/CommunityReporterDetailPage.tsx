@@ -54,7 +54,7 @@ export default function CommunityReporterDetailPage() {
     if (!id || id === 'undefined') return;
     setActionLoading(true); setError(null);
     try {
-      const res = await adminApi.post<CommunityApproveResponse>(`/api/admin/community-reporter/submissions/${id}/decision`, { decision });
+      const res = await adminApi.post<CommunityApproveResponse>(`/community-reporter/submissions/${id}/decision`, { decision });
       const data = res.data as CommunityApproveResponse;
 
       if (!data || !data.submission) {

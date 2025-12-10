@@ -9,12 +9,12 @@ export interface CommunityReporterConfig {
 }
 
 async function getCommunityReporterConfig(): Promise<CommunityReporterConfig> {
-  const res = await adminApi.get<CommunityReporterConfig>('/api/admin/community-reporter/config');
+  const res = await adminApi.get<CommunityReporterConfig>('/community-reporter/config');
   return res.data as CommunityReporterConfig;
 }
 
 async function updateCommunityReporterConfig(partial: Partial<CommunityReporterConfig>): Promise<CommunityReporterConfig> {
-  const res = await adminApi.put<CommunityReporterConfig>('/api/admin/community-reporter/config', partial);
+  const res = await adminApi.put<CommunityReporterConfig>('/community-reporter/config', partial);
   return res.data as CommunityReporterConfig;
 }
 

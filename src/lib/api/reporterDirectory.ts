@@ -55,7 +55,7 @@ export async function listReporterContacts(params?: {
   sortDir?: 'asc' | 'desc';
 }) {
   // Updated canonical backend route: GET /api/admin/reporters
-  const res = await adminApi.get<any>('/api/admin/reporters', { params });
+  const res = await adminApi.get<any>('/reporters', { params });
 
   type ApiContact = {
     _id: string;

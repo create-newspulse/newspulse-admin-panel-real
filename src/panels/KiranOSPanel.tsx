@@ -250,7 +250,7 @@ export default function KiranOSPanel() {
   const handleManualCommand = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && manualCommand.trim()) {
       try {
-        const res = await apiClient.post('/api/system/ai-command', {
+        const res = await apiClient.post('/system/ai-command', {
           command: manualCommand.trim(),
           trigger: 'manual',
         });

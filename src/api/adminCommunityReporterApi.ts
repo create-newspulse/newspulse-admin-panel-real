@@ -96,7 +96,7 @@ export async function listCommunityReporterQueue(params: {
   if (params.aiPickOnly) query.aiPick = true;
   try {
     // Use canonical backend route for the queue
-    const res = await adminApi.get('/api/community-reporter/queue', { params: query });
+    const res = await adminApi.get('/community-reporter/queue', { params: query });
     const data = res?.data ?? {};
     const submissions = Array.isArray(data.submissions)
       ? data.submissions
@@ -121,7 +121,7 @@ export async function restoreCommunitySubmission(id: string) {
   // Canonical admin path under /api/admin/community-reporter
   // Frontend base uses adminApi, which prefixes with /admin-api in dev
   try {
-    const res = await adminApi.post(`/api/admin/community-reporter/submissions/${id}/restore`);
+    const res = await adminApi.post(`/community-reporter/submissions/${id}/restore`);
     return res?.data ?? { ok: true };
   } catch (err: any) {
     const status = err?.response?.status;
@@ -132,7 +132,7 @@ export async function restoreCommunitySubmission(id: string) {
 
 export async function hardDeleteCommunitySubmission(id: string) {
   try {
-    const res = await adminApi.post(`/api/admin/community-reporter/submissions/${id}/hard-delete`);
+    const res = await adminApi.post(`/community-reporter/submissions/${id}/hard-delete`);
     return res?.data ?? { ok: true };
   } catch (err: any) {
     const status = err?.response?.status;
@@ -143,7 +143,7 @@ export async function hardDeleteCommunitySubmission(id: string) {
 
 // Normalized reporter contacts list for the Reporter Contact Directory page
 export async function listContacts(params: Record<string, any> = {}) {
-  const res = await adminApi.get('/api/community-reporter/contacts', { params });
+  const res = await adminApi.get('/community-reporter/contacts', { params });
 
   type ApiPayload = {
     ok?: boolean;

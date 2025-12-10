@@ -27,7 +27,7 @@ export async function listReporterStoriesForAdmin(
 ) {
   // Try a canonical admin endpoint; adjust as needed when backend confirms
   const query = { reporterKey, ...(params || {}) };
-  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/api/admin/community/submissions', { params: query });
+  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/community/submissions', { params: query });
   if (!data?.ok) throw new Error('Failed to load reporter stories');
   return data;
 }

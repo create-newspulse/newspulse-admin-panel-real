@@ -19,7 +19,7 @@ export default function CommunityHome() {
     let cancelled = false;
     async function load() {
       try {
-        const res = await adminApi.get<any>('/api/admin/community/stats');
+        const res = await adminApi.get<any>('/community/stats');
         const s = res?.data ?? {};
         const norm: CommunityStats = {
           pendingStories: Number(s.pendingStories ?? s.pending ?? 0),

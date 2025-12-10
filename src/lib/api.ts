@@ -129,14 +129,14 @@ api.monitorHub = async () => {
   // Avoid double slashes; adminApi handles Authorization header.
   const { adminApi } = await import('./adminApi');
   try {
-    const res = await adminApi.get('/api/system/monitor-hub');
+    const res = await adminApi.get('/system/monitor-hub');
     const raw = res.data || {};
     const data = raw.data || raw.stats || raw;
     return {
       ok: raw.ok === true || raw.success === true || !!raw.data || !!raw.stats || true,
       ...data,
       _raw: raw,
-      _endpoint: '/api/system/monitor-hub',
+      _endpoint: '/system/monitor-hub',
     };
   } catch (err: any) {
     const status = err?.response?.status;

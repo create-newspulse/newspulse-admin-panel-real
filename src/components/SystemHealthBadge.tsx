@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE } from '@lib/apiBase';
-// Health endpoint unified via API_BASE (direct origin adds /api, proxy base stays /admin-api)
-const HEALTH_URL = `${API_BASE}/system/health`;
+// Build health URL from admin API base, stripping a trailing /api once
+const RAW_ADMIN_BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? 'http://localhost:5000/api';
+const ADMIN_BASE_NO_API = RAW_ADMIN_BASE.replace(/\/api\/?$/, '');
+const HEALTH_URL = `${ADMIN_BASE_NO_API}/system/health`;
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -81,36 +82,36 @@ export default function SystemHealthBadge(): JSX.Element {
   const latency = typeof info?.latencyMs === 'number' ? `${Math.round(info!.latencyMs!)}ms` : '—';
 
   useEffect(() => {
-    let mounted = true;
-    let timer: any;
+    let isMounted = true;
 
     const pull = async () => {
       try {
-        const r = await fetch(HEALTH_URL, { credentials: 'include' });
+        const r = await fetch(HEALTH_URL, { method: 'GET', credentials: 'include' });
         const ct = r.headers.get('content-type') || '';
         if (!/application\/json/i.test(ct)) {
           const text = await r.text().catch(() => '');
-          if (mounted) setInfo({ success: false, status: r.status, backend: { nonJson: true, text } });
+          if (!isMounted) return;
+          setInfo({ success: false, status: r.status, backend: { nonJson: true, text } });
           return;
         }
         const json = (await r.json()) as HealthPayload;
-        if (mounted) setInfo(json);
+        if (!isMounted) return;
+        setInfo(json);
         setError(null);
       } catch (e: any) {
-        if (mounted) {
-          setError(e?.message || 'Health fetch failed');
-          setInfo({ success: false });
-        }
-      } finally {
-        // schedule next poll
-        timer = setTimeout(pull, 10_000);
+        if (!isMounted) return;
+        // Reduce console noise: rely on UI message instead of logging
+        setError(e?.message || 'Failed to fetch');
+        setInfo({ success: false });
       }
     };
 
+    // initial call
     pull();
+    const id = window.setInterval(pull, 60_000);
     return () => {
-      mounted = false;
-      if (timer) clearTimeout(timer);
+      isMounted = false;
+      window.clearInterval(id);
     };
   }, [refreshTick]);
 

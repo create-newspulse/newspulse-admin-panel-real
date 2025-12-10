@@ -124,7 +124,7 @@ const Dashboard = () => {
     const fetchAICommand = async () => {
       try {
         // Build health endpoint with duplication-safe resolver
-        const healthPath = resolveAdminPath('/api/system/health');
+        const healthPath = resolveAdminPath('/system/health');
         const json = await fetchJson(healthPath);
         setAiCommand(json);
       } catch (err: any) {

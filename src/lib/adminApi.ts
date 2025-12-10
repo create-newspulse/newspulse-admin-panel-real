@@ -13,22 +13,23 @@ function ensureAdminBase(u: string) {
   return /\/api\/admin$/.test(base) ? base : `${base}/api/admin`;
 }
 
-let ADMIN_API_BASE = '';
+// Internal accumulator to avoid name collision with exported symbol
+let ADMIN_API_BASE_INTERNAL = '';
 if (fromAdminBase) {
-  ADMIN_API_BASE = ensureAdminBase(fromAdminBase);
+  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromAdminBase);
 } else if (fromApiUrl) {
-  ADMIN_API_BASE = ensureAdminBase(fromApiUrl);
+  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromApiUrl);
 } else if (fromApiRoot) {
-  ADMIN_API_BASE = ensureAdminBase(fromApiRoot);
+  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromApiRoot);
 } else if (isDev) {
   // Dev proxy base
-  ADMIN_API_BASE = '/admin-api/admin';
+  ADMIN_API_BASE_INTERNAL = '/admin-api/admin';
 } else {
   // Production fallback
-  ADMIN_API_BASE = 'https://newspulse-backend-real.onrender.com/api/admin';
+  ADMIN_API_BASE_INTERNAL = 'https://newspulse-backend-real.onrender.com/api/admin';
 }
 
-export const adminRoot = ADMIN_API_BASE;
+export const adminRoot = ADMIN_API_BASE_INTERNAL;
 // Back-compat for components importing ADMIN_API_BASE
 export const ADMIN_API_BASE = adminRoot;
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
@@ -203,6 +204,6 @@ export interface CommunityCleanupResponse {
 }
 
 export async function cleanupOldLowPriorityCommunityStories(): Promise<CommunityCleanupResponse> {
-  const { data } = await adminApi.post('/api/admin/community-reporter/cleanup');
+  const { data } = await adminApi.post('/community-reporter/cleanup');
   return data as CommunityCleanupResponse;
 }
