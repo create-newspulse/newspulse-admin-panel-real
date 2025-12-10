@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom';
 import { useMemo, useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Copy as CopyIcon } from 'lucide-react';
 import { useNotify } from '@/components/ui/toast-bridge';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
 import type { ReporterContact } from '@/lib/api/reporterDirectory.ts';
-import { listReporterContacts } from '@/lib/api/reporterDirectory.ts';
+import { adminApi, resolveAdminPath } from '@/lib/adminApi';
 import { useAuth } from '@/context/AuthContext.tsx';
 import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
@@ -56,14 +57,25 @@ export default function ReporterContactDirectory() {
   const [sortBy, setSortBy] = useState<undefined | 'name' | 'stories' | 'lastStory' | 'activity'>(undefined);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  // Fetch base reporter list (broad; we will filter client-side)
-  const [items, setItems] = useState<ReporterContact[]>([]);
-  const [total, setTotal] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isError, setIsError] = useState<boolean>(false);
-  const [error, setError] = useState<any>(null);
-  const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
+  // Query backend for reporter contacts (paginated, large page to reduce client fetches)
   const [refreshTick, setRefreshTick] = useState(0);
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['reporter-contacts', {
+      country: countryVal, state: stateVal, city: cityVal, district: districtFilter,
+      area: areaTypeFilter, beat: beatFilter, type: typeFilter, verification: verificationFilter,
+      status: statusFilter, activity: activityFilter, hasNotes: hasNotesOnly, searchQuery, refreshTick
+    }],
+    queryFn: async () => {
+      const res = await adminApi.get(resolveAdminPath('/admin/community/reporter-contacts'), {
+        params: { page: 1, limit: 200 },
+      });
+      return res.data;
+    },
+  });
+  const reporters: ReporterContact[] = (data?.items as ReporterContact[]) ?? (data?.rows as ReporterContact[]) ?? [];
+  const items = reporters;
+  const total = typeof data?.total === 'number' ? data.total : reporters.length;
+  const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
 
   // Fetch via admin reporters API whenever filters/search change
   // Note: depends on filter states declared below; place after declarations to avoid TS block-scope issues
@@ -154,154 +166,101 @@ export default function ReporterContactDirectory() {
     } catch {}
   }, [searchQuery, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, hasNotesOnly, activityFilter, sortBy, sortDirection]);
 
-  // Fetch via admin reporters API whenever filters/search change
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setIsLoading(true); setIsError(false); setError(null);
-      try {
-        const res = await listReporterContacts({
-          search: searchQuery || undefined,
-          country: countryVal && countryVal !== 'All countries' ? countryVal : undefined,
-          state: stateVal && stateVal !== 'All states' ? stateVal : undefined,
-          city: cityVal && cityVal !== 'All cities' ? cityVal : undefined,
-          type: typeFilter !== 'all' ? typeFilter : undefined,
-          status: statusFilter !== 'all' ? statusFilter : undefined,
-          hasNotes: hasNotesOnly || undefined,
-          district: districtFilter || 'all',
-          areaType: areaTypeFilter || 'all',
-          beat: beatFilter || 'all',
-          activity: activityFilter || 'all',
-          page, limit: 200,
-        } as any);
-        if (cancelled) return;
-        setItems(res.rows);
-        setTotal(res.total);
-      } catch (e:any) {
-        if (cancelled) return;
-        setIsError(true);
-        setError(e);
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    }
-    run();
-    return () => { cancelled = true; };
-  }, [searchQuery, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, activityFilter, typeFilter, statusFilter, hasNotesOnly, page, refreshTick]);
+  // Remove legacy effect-based fetch; useQuery handles loading + error
 
   // moved to module scope
 
-  const filteredReporters = useMemo(() => {
-    let list = items;
-    // Location filters
-    if (!isAllFilter(countryVal)) {
-      const f = countryVal!.toString().toLowerCase();
-      list = list.filter(r => norm(r.country, 'country').toLowerCase() === f);
-    }
-    if (!isAllFilter(stateVal)) {
-      const f = stateVal!.toString().toLowerCase();
-      list = list.filter(r => norm(r.state, 'state').toLowerCase() === f);
-    }
-    if (!isAllFilter(cityVal)) {
-      const f = cityVal!.toString().toLowerCase();
-      list = list.filter(r => norm(r.city, 'city').toLowerCase() === f);
+  // Unified, permissive filter logic per spec
+  type Filters = {
+    country: string;
+    state: string;
+    district: string;
+    city: string;
+    area: string;
+    beat: string;
+    type: string;
+    verification: string;
+    status: string;
+    activity: string;
+    hasNotes: boolean;
+  };
+  const reporterMatchesFilters = (r: ReporterContact, filters: Filters, search: string): boolean => {
+    const normL = (v?: string | null) => (v || '').toLowerCase();
+
+    // country/state/district/city/area
+    if (filters.country !== 'all' && normL(r.country) !== normL(filters.country)) return false;
+    if (filters.state !== 'all' && normL(r.state) !== normL(filters.state)) return false;
+    if (filters.district !== 'all' && normL((r as any).district) !== normL(filters.district)) return false;
+    if (filters.city !== 'all' && normL(r.city) !== normL(filters.city)) return false;
+    if (filters.area !== 'all' && normL((r as any).areaType) !== normL(filters.area)) return false;
+
+    // beat
+    if (filters.beat !== 'all beats' && filters.beat !== 'all') {
+      if (normL((r as any).beat) !== normL(filters.beat)) return false;
     }
 
-    // Search
-    const sq = (searchQuery ?? '').toString();
-    if (sq.trim()) {
-      const q = sq.trim().toLowerCase();
-      list = list.filter(r => {
-        const haystack = [
-          r.name,
-          r.email,
-          r.phone,
-          norm(r.city, 'city'),
-          norm(r.state, 'state'),
-          norm(r.country, 'country'),
-        ].filter(Boolean).map(v => norm(v)).join(' ').toLowerCase();
-        return haystack.includes(q);
-      });
+    // type / verification / status
+    if (filters.type !== 'all' && normL((r as any).type || (r as any).reporterType) !== normL(filters.type)) return false;
+    if (filters.verification !== 'all' && normL((r as any).verificationStatus || (r as any).verificationLevel) !== normL(filters.verification)) return false;
+    if (filters.status !== 'all' && normL((r as any).status) !== normL(filters.status)) return false;
+
+    // activity – only filter when not "all activity"
+    if (filters.activity !== 'all activity' && filters.activity !== 'all') {
+      const hasAnyStory = (r.totalStories ?? 0) > 0 || !!r.lastStoryAt;
+      const isActive = hasAnyStory;
+      if (filters.activity === 'active' && !isActive) return false;
+      if (filters.activity === 'inactive' && isActive) return false;
     }
 
-    // Notes-only
-    if (hasNotesOnly) {
-      list = list.filter(r => !!(r.notes && String(r.notes).trim().length > 0));
+    // hasNotes
+    if (filters.hasNotes && !(r.notes || (r as any).privateNotes || '').trim()) return false;
+
+    // search
+    const q = (search || '').trim().toLowerCase();
+    if (q) {
+      const haystack = [
+        r.name,
+        r.email,
+        r.phone,
+        r.city,
+        r.state,
+        r.country,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
 
-    // Activity (backend field)
-    if (activityFilter && activityFilter !== 'all') {
-      const f = activityFilter.toString().toLowerCase();
-      list = list.filter(r => (String((r as any).activity || '').toLowerCase()) === f);
-    }
+    return true;
+  };
 
-    // District
-    if (districtFilter && districtFilter !== 'all') {
-      const f = districtFilter.toString().toLowerCase();
-      list = list.filter(r => (String((r as any).district || '').toLowerCase()) === f);
-    }
+  const filters: Filters = {
+    country: (countryVal ? String(countryVal).toLowerCase() : 'all'),
+    state: (stateVal ? String(stateVal).toLowerCase() : 'all'),
+    district: (districtFilter ? String(districtFilter).toLowerCase() : 'all'),
+    city: (cityVal ? String(cityVal).toLowerCase() : 'all'),
+    area: (areaTypeFilter ? String(areaTypeFilter).toLowerCase() : 'all'),
+    beat: (beatFilter ? String(beatFilter).toLowerCase() : 'all beats'),
+    type: typeFilter ?? 'all',
+    verification: (String(verificationFilter || 'all')).toLowerCase(),
+    status: statusFilter ?? 'all',
+    activity: activityFilter ?? 'all activity',
+    hasNotes: !!hasNotesOnly,
+  };
 
-    // Area type
-    if (areaTypeFilter && areaTypeFilter !== 'all') {
-      const f = areaTypeFilter.toString().toLowerCase();
-      list = list.filter(r => (String((r as any).areaType || '').toLowerCase()) === f);
-    }
-
-    // Beat
-    if (beatFilter && beatFilter !== 'all') {
-      const f = beatFilter.toString().toLowerCase();
-      list = list.filter(r => {
-        const beats = ((r as any).beatsProfessional || (r as any).beats || []) as string[];
-        const joined = Array.isArray(beats) ? beats.map(b => (b || '').toLowerCase()) : [String(beats || '').toLowerCase()];
-        return joined.includes(f);
-      });
-    }
-
-    // Type
-    if (typeFilter !== 'all') {
-      list = list.filter(r => (r.reporterType || 'community').toString().toLowerCase() === typeFilter);
-    }
-
-    // Verification
-    if (!isAllFilter(verificationFilter)) {
-      const f = verificationFilter!.toString().toLowerCase();
-      list = list.filter(r => {
-        const v = (r.verificationLevel || 'community_default').toString().toLowerCase();
-        if (f === 'verified') return v === 'verified';
-        if (f === 'pending') return v === 'pending';
-        if (f === 'limited') return v === 'limited';
-        if (f === 'revoked') return v === 'revoked';
-        if (f === 'community default') return v === 'community_default';
-        if (f === 'unverified') return v === 'unverified';
-        return true;
-      });
-    }
-
-    // Status
-    if (statusFilter !== 'all') {
-      list = list.filter(r => {
-        const s = (r.status || 'active').toString().toLowerCase();
-        // Map legacy UI statuses where needed
-        if (statusFilter === 'active') return s === 'active';
-        if (statusFilter === 'blocked') return s === 'blocked' || s === 'suspended';
-        if (statusFilter === 'archived') return s === 'archived' || s === 'banned';
-        return false;
-      });
-    }
-
-    return list;
-  }, [items, countryVal, stateVal, cityVal, searchQuery, hasNotesOnly, activityFilter, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter]);
+  const filteredReporters = useMemo(() => reporters.filter((r) => reporterMatchesFilters(r, filters, searchQuery)), [reporters, filters, searchQuery]);
 
   // Debug logs for investigation (will be trimmed later)
   useEffect(() => {
     // Raw vs filtered list visibility
-    console.log('[ReporterDirectory] raw reporters', items);
+    console.log('[ReporterDirectory] raw reporters', reporters);
     console.log('[ReporterDirectory] filters', {
       countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter,
       typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly,
     }, 'search', (searchQuery ?? '').toString());
     console.log('[ReporterDirectory] filtered reporters', filteredReporters);
-  }, [items, filteredReporters, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly, searchQuery]);
+  }, [reporters, filteredReporters, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly, searchQuery]);
 
   const sortedReporters = useMemo(() => {
     const arr = [...filteredReporters];
@@ -611,7 +570,7 @@ export default function ReporterContactDirectory() {
             ))}
           </select>
           {/* Use filtered list for shown count to match table */}
-          <span className="text-xs text-slate-500">{filteredReporters.length} / {items.length} shown</span>
+          <span className="text-xs text-slate-500">{filteredReporters.length} / {reporters.length} shown</span>
           {(() => {
             const totalReporters = filteredReporters.length;
             const completeProfiles = filteredReporters.filter(r => r.phone && (r.city || r.state || r.country)).length;
@@ -676,7 +635,6 @@ export default function ReporterContactDirectory() {
             setSelectedIds(prev => {
               const next = new Set(prev);
               if (allSelected) {
-                // clear selection for visible ones only
                 allVisibleIds.forEach(id => next.delete(id));
               } else {
                 allVisibleIds.forEach(id => next.add(id));
@@ -847,11 +805,13 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">District</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
-              <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('stories') || undefined}>
-                Stories <SortIndicator column="stories" />
-              </button>
-            </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
+                <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('stories') || undefined}>
+                  Stories <SortIndicator column="stories" />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Approved</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Pending</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
               <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('activity') || undefined}>
                 Activity <SortIndicator column="activity" />
@@ -1002,6 +962,8 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                 <td className="px-4 py-3 text-sm">{norm(rc.state, 'state') || '—'}</td>
                 <td className="px-4 py-3 text-sm">{norm(rc.country, 'country') || '—'}</td>
                 <td className="px-4 py-3 text-sm">{rc.totalStories}</td>
+                <td className="px-4 py-3 text-sm">{typeof rc.approvedStories === 'number' ? rc.approvedStories : 0}</td>
+                <td className="px-4 py-3 text-sm">{typeof rc.pendingStories === 'number' ? rc.pendingStories : 0}</td>
                 <td className="px-4 py-3 text-sm">
                   {(() => {
                     const activity = String(((rc as any).activity || '')).toLowerCase();
