@@ -19,6 +19,30 @@ build/
 !.env.local.example
 !.env.production.example
 
+# Secrets & keys
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.jks
+*.keystore
+*service-account*.json
+*credentials*.json
+firebase*.json
+
+# Databases & local data
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+prisma/*.db
+**/backend/data/**
+**/admin-backend/backend/data/**
+uploads/
+public/uploads/
+
 # Logs
 logs/
 **/*.log
