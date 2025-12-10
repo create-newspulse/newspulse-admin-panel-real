@@ -51,15 +51,11 @@ adminApi.interceptors.response.use(
     const ct = error?.response?.headers?.['content-type'];
     // Clean 401 handling: clear token and redirect once to /admin/login
     if (status === 401) {
-      // Skip auto-logout for Community Reporter Queue endpoint; let page show error banner
-      const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
-      if (!isCommunityQueue) {
-        try { localStorage.removeItem('adminToken'); } catch {}
-        try { console.warn('[adminApi] Session expired (401). Redirecting to /admin/login'); } catch {}
-        if (typeof window !== 'undefined') {
-          const alreadyOnLogin = window.location.pathname.includes('/admin/login') || window.location.pathname.includes('/login');
-          if (!alreadyOnLogin) window.location.href = '/admin/login';
-        }
+      try { localStorage.removeItem('adminToken'); } catch {}
+      try { console.warn('[adminApi] Session expired (401). Redirecting to /admin/login'); } catch {}
+      if (typeof window !== 'undefined') {
+        const alreadyOnLogin = window.location.pathname.includes('/admin/login') || window.location.pathname.includes('/login');
+        if (!alreadyOnLogin) window.location.href = '/admin/login';
       }
     }
     // Reduce spam: avoid logging route-not-found noise for monitor endpoints
