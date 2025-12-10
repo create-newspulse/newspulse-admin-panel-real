@@ -60,6 +60,17 @@ type ABTest = {
 };
 
 export default function AnalyticsDashboard(): JSX.Element {
+  const formatDateTime = (value?: string | number | Date | null): string => {
+    if (!value) return '—';
+    const d = value instanceof Date ? value : new Date(value as any);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+  };
+
+  const formatNumber = (value?: number | null): string => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '0';
+    return value.toLocaleString('en-IN');
+  };
   const [loading, setLoading] = useState(true);
   const [revenue, setRevenue] = useState<RevenueData | null>(null);
   const [traffic, setTraffic] = useState<TrafficData | null>(null);
@@ -191,11 +202,11 @@ export default function AnalyticsDashboard(): JSX.Element {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">Total Revenue</div>
-                  <div className="text-2xl font-bold text-green-600">${revenue?.total.toLocaleString()}</div>
+                  <div className="text-2xl font-bold text-green-600">${formatNumber(revenue?.total ?? null)}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">Today</div>
-                  <div className="text-2xl font-bold">${revenue?.today.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">${formatNumber(revenue?.today ?? null)}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
@@ -203,7 +214,7 @@ export default function AnalyticsDashboard(): JSX.Element {
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
-                  <div className="text-2xl font-bold">{revenue?.ctr}%</div>
+                  <div className="text-2xl font-bold">{typeof revenue?.ctr === 'number' ? revenue.ctr : 0}%</div>
                 </div>
               </div>
 
@@ -224,19 +235,19 @@ export default function AnalyticsDashboard(): JSX.Element {
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <span>This Week</span>
-                      <span className="font-semibold">${revenue?.week.toLocaleString()}</span>
+                      <span className="font-semibold">${formatNumber(revenue?.week ?? null)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>This Month</span>
-                      <span className="font-semibold">${revenue?.month.toLocaleString()}</span>
+                      <span className="font-semibold">${formatNumber(revenue?.month ?? null)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Ad Impressions</span>
-                      <span className="font-semibold">{adPerf?.impressions.toLocaleString()}</span>
+                      <span className="font-semibold">{formatNumber(adPerf?.impressions ?? null)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Ad Clicks</span>
-                      <span className="font-semibold">{adPerf?.clicks.toLocaleString()}</span>
+                      <span className="font-semibold">{formatNumber(adPerf?.clicks ?? null)}</span>
                     </div>
                   </div>
                 </div>
@@ -250,11 +261,11 @@ export default function AnalyticsDashboard(): JSX.Element {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">Impressions</div>
-                  <div className="text-2xl font-bold">{adPerf?.impressions.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatNumber(adPerf?.impressions ?? null)}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">Clicks</div>
-                  <div className="text-2xl font-bold">{adPerf?.clicks.toLocaleString()}</div>
+                  <div className="text-2xl font-bold">{formatNumber(adPerf?.clicks ?? null)}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
                   <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
