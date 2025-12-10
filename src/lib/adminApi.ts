@@ -1,41 +1,15 @@
 import axios from 'axios';
 
-// Compute a single admin API base that always points to '/api/admin'
+// Standardize base URL: prefer VITE_ADMIN_API_BASE_URL or proxy '/admin-api', then append '/api/admin'.
 const envAny = import.meta.env as any;
-const isDev = !!envAny.DEV;
-const fromAdminBase = (envAny.VITE_ADMIN_API_BASE_URL || envAny.VITE_ADMIN_API_BASE || '').toString().trim();
-const fromApiUrl = (envAny.VITE_API_URL || '').toString().trim();
-const fromApiRoot = (envAny.VITE_API_ROOT || '').toString().trim();
+const rawHost = (
+  envAny.VITE_ADMIN_API_BASE_URL ||
+  envAny.VITE_ADMIN_API_URL ||
+  ''
+).toString().trim();
+const baseHost = rawHost || 'http://localhost:5000';
+export const adminRoot = `${baseHost.replace(/\/+$/, '')}/api/admin`;
 
-function stripTrailing(u: string) { return u.replace(/\/+$/, ''); }
-function ensureAdminBase(u: string) {
-  const base = stripTrailing(u);
-  // If already correct
-  if (base.endsWith('/api/admin')) return base;
-  // If ends with '/api', just append '/admin'
-  if (base.endsWith('/api')) return `${base}/admin`;
-  // Otherwise, append '/api/admin'
-  return `${base}/api/admin`;
-}
-
-// Internal accumulator to avoid name collision with exported symbol
-let ADMIN_API_BASE_INTERNAL = '';
-if (fromAdminBase) {
-  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromAdminBase);
-} else if (fromApiUrl) {
-  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromApiUrl);
-} else if (fromApiRoot) {
-  ADMIN_API_BASE_INTERNAL = ensureAdminBase(fromApiRoot);
-} else if (isDev) {
-  // Dev proxy base: use Vercel rewrite path; already includes '/admin'
-  ADMIN_API_BASE_INTERNAL = '/admin-api/admin';
-} else {
-  // Production fallback
-  ADMIN_API_BASE_INTERNAL = 'https://newspulse-backend-real.onrender.com/api/admin';
-}
-
-export const adminRoot = ADMIN_API_BASE_INTERNAL;
-// Back-compat for components importing ADMIN_API_BASE
 export const ADMIN_API_BASE = adminRoot;
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
 
@@ -75,21 +49,18 @@ adminApi.interceptors.response.use(
     const status = error?.response?.status;
     const url = error?.config?.url || error?.response?.config?.url || '';
     const ct = error?.response?.headers?.['content-type'];
-    // Auto-redirect on 401 for protected admin API paths
-    if (status === 401 && /\/api\/admin\//.test(url)) {
-      try {
-        localStorage.removeItem('adminToken');
-      } catch {}
-      try { console.warn('[adminApi] 401 detected – redirecting to /admin/login'); } catch {}
+    // Clean 401 handling: clear token and redirect once to /admin/login
+    if (status === 401) {
+      try { localStorage.removeItem('adminToken'); } catch {}
+      try { console.warn('[adminApi] Session expired (401). Redirecting to /admin/login'); } catch {}
       if (typeof window !== 'undefined') {
-        // Avoid infinite loops if already on login
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
-        }
+        const alreadyOnLogin = window.location.pathname.includes('/admin/login') || window.location.pathname.includes('/login');
+        if (!alreadyOnLogin) window.location.href = '/admin/login';
       }
     }
-    // Suppress noisy 404 for /api/admin/me specifically
-    if (!(status === 404 && url.endsWith('/api/admin/me'))) {
+    // Reduce spam: avoid logging route-not-found noise for monitor endpoints
+    const suppress = (status === 404 && (/\/system\/monitor-hub$/.test(url) || /\/api\/admin\/me$/.test(url)));
+    if (!suppress) {
       try { console.error('[adminApi:err]', status, url, ct); } catch {}
     }
     return Promise.reject(error);
@@ -114,7 +85,6 @@ if (import.meta.env.DEV) {
 // For direct base we prepend the full origin.
 export function resolveAdminPath(p: string): string {
   const clean = p.startsWith('/') ? p : `/${p}`;
-  // Paths should be relative to '/api/admin', so do not include '/api' or '/admin' prefixes here
   const normalized = clean.replace(/^\/api\//, '/').replace(/^\/admin\//, '/');
   return `${adminRoot}${normalized}`;
 }
@@ -229,8 +199,10 @@ export interface CommunityQueueItem {
   createdAt?: string;
   [key: string]: any;
 }
-export async function fetchCommunityReporterQueue(): Promise<CommunityQueueItem[]> {
-  const { data } = await adminApi.get('/community-reporter/queue');
+export async function fetchCommunityReporterQueue(status: 'pending' | 'rejected' = 'pending'): Promise<CommunityQueueItem[]> {
+  const { data } = await adminApi.get('/community-reporter/queue', {
+    params: { status },
+  });
   return Array.isArray(data) ? data : (data?.items || []);
 }
 
@@ -283,7 +255,7 @@ function normalizeReporterQuery(q: ReporterContactQuery = {}): URLSearchParams {
 
 export async function listReporterContacts(q: ReporterContactQuery = {}): Promise<ReporterContact[]> {
   const params = normalizeReporterQuery(q);
-  const url = `/reporters?${params.toString()}`;
+  const url = `/community/reporters?${params.toString()}`;
   const { data } = await adminApi.get(url);
   const rows = Array.isArray(data) ? data : (data?.items || data?.rows || []);
   return rows as ReporterContact[];

@@ -2,9 +2,10 @@ import { Link } from 'react-router-dom';
 import { Users, LayoutGrid, FileText, PenSquare } from 'lucide-react';
 import { ContactRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import adminApi from '@/api/adminApi';
+import { fetchCommunityStats, type CommunityStats } from '@/api/adminCommunityReporterApi';
+import { toast } from 'react-hot-toast';
 
-type CommunityStats = {
+type UiCommunityStats = {
   pendingStories: number;
   approvedStories: number;
   rejectedStories: number;
@@ -13,23 +14,26 @@ type CommunityStats = {
 };
 
 export default function CommunityHome() {
-  const [stats, setStats] = useState<CommunityStats | null>(null);
+  const [stats, setStats] = useState<UiCommunityStats | null>(null);
   const [statsError, setStatsError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const res = await adminApi.get<any>('/community/stats');
-        const s = res?.data ?? {};
-        const norm: CommunityStats = {
-          pendingStories: Number(s.pendingStories ?? s.pending ?? 0),
-          approvedStories: Number(s.approvedStories ?? s.approved ?? 0),
-          rejectedStories: Number(s.rejectedStories ?? s.rejected ?? 0),
-          totalReporters: Number(s.totalReporters ?? s.reporters ?? 0),
-          verifiedJournalists: Number(s.verifiedJournalists ?? s.verified ?? 0),
+        const s: CommunityStats = await fetchCommunityStats();
+        const norm: UiCommunityStats = {
+          pendingStories: s.pendingCount,
+          approvedStories: s.approvedCount,
+          rejectedStories: s.rejectedCount,
+          totalReporters: 0,
+          verifiedJournalists: 0,
         };
         if (!cancelled) setStats(norm);
       } catch (e: any) {
+        const status = e?.response?.status;
+        if (status === 401) {
+          try { toast.error('Session expired. Please log in again'); } catch {}
+        }
         if (!cancelled) setStatsError('Failed to load stats');
       }
     }

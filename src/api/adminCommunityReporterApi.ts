@@ -2,12 +2,20 @@ import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { adminApi } from '@/lib/adminApi';
 import { debug } from '@/lib/debug';
 
-// Legacy-style simple fetch without AI/risk mapping
-export async function fetchCommunitySubmissions(): Promise<CommunitySubmission[]> {
-  const res = await fetch('/api/admin/community-reporter');
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  return (json?.data ?? []).map((s: any) => ({
+// Canonical paginated submissions list via adminApi
+export async function fetchCommunitySubmissions(params: { page?: number; limit?: number; status?: string } = {}): Promise<CommunitySubmission[]> {
+  const res = await adminApi.get('/community-reporter/submissions', { params });
+  const data = res?.data ?? {};
+  const items = Array.isArray(data)
+    ? data
+    : Array.isArray((data as any).items)
+      ? (data as any).items
+      : Array.isArray((data as any).submissions)
+        ? (data as any).submissions
+        : Array.isArray((data as any).data)
+          ? (data as any).data
+          : [];
+  return items.map((s: any) => ({
     id: String(s.id ?? s._id ?? s.ID ?? s.uuid ?? ''),
     headline: s.headline ?? '',
     body: s.body ?? '',
@@ -18,7 +26,7 @@ export async function fetchCommunitySubmissions(): Promise<CommunitySubmission[]
 }
 
 export async function fetchCommunitySubmissionById(id: string): Promise<CommunitySubmission> {
-  const path = `/api/admin/community-reporter/submissions/${id}`;
+  const path = `/community-reporter/submissions/${id}`;
   try {
     const res = await adminApi.get(path);
     const s = res.data?.submission ?? res.data ?? {};
@@ -37,48 +45,20 @@ export async function fetchCommunitySubmissionById(id: string): Promise<Communit
   }
 }
 
-export async function fetchCommunityReporterSubmissions(params?: { status?: 'pending' | 'rejected' | 'all' }) {
-  // Canonical admin path; include status filter if provided,
-  // with robust response normalization to avoid UI being stuck.
-  const candidates = [
-    { path: '/api/admin/community-reporter/submissions', supportsParams: true },
-    { path: '/api/community/submissions', supportsParams: false },
-    { path: '/community/submissions', supportsParams: false }
-  ] as const;
-  let lastErr: any = null;
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => { try { controller.abort(); } catch {} }, 10000) : null;
-  for (const c of candidates) {
-    try {
-      const cfg = c.supportsParams ? { params: { status: params?.status || 'pending' } } : {};
-      const res = await adminApi.get(c.path, { ...(cfg as any), signal: controller ? (controller as any).signal : undefined } as any);
-      if (import.meta.env.DEV) debug('[communityReporterApi] GET', c.path, 'status=', res.status);
-      const data = res?.data ?? {};
-      // Normalize common shapes: {items: [...]}, {submissions: [...]}, or array
-      const submissions = Array.isArray(data)
-        ? data
-        : Array.isArray(data.submissions)
-          ? data.submissions
-          : Array.isArray(data.items)
-            ? data.items
-            : Array.isArray(data.data)
-              ? data.data
-              : [];
-      if (timer) try { clearTimeout(timer); } catch {}
-      return { submissions };
-    } catch (e: any) {
-      lastErr = e;
-    }
-  }
-  // Graceful dev fallback to avoid UI lock if backend down
-  if (import.meta.env.DEV) {
-    debug('[communityReporterApi] all paths failed; returning empty list fallback');
-    return { submissions: [] };
-  }
-  // Surface meaningful error
-  const status = lastErr?.response?.status;
-  if (status) throw new Error(`HTTP ${status}`);
-  throw lastErr || new Error('Failed to load submissions');
+export async function fetchCommunityReporterSubmissions(params?: { status?: 'pending' | 'rejected' | 'all'; page?: number; limit?: number }) {
+  const query = { status: params?.status ?? 'pending', page: params?.page, limit: params?.limit };
+  const res = await adminApi.get('/community-reporter/submissions', { params: query });
+  const data = res?.data ?? {};
+  const submissions = Array.isArray(data)
+    ? data
+    : Array.isArray((data as any).submissions)
+      ? (data as any).submissions
+      : Array.isArray((data as any).items)
+        ? (data as any).items
+        : Array.isArray((data as any).data)
+          ? (data as any).data
+          : [];
+  return { submissions };
 }
 
 // New explicit queue fetch with filter parameters passed to backend.
@@ -114,6 +94,32 @@ export async function listCommunityReporterQueue(params: {
     if (import.meta.env.DEV) debug('[communityReporterQueue:error]', status, err?.message);
     throw err;
   }
+}
+
+// Simple helper with default status, guaranteed Authorization via adminApi
+export async function fetchCommunityReporterQueue(status: 'pending' | 'rejected' = 'pending') {
+  const { submissions } = await listCommunityReporterQueue({ status });
+  return submissions;
+}
+
+// Community Stats API wrapper and type
+export interface CommunityStats {
+  pendingCount: number;
+  rejectedCount: number;
+  approvedCount: number;
+  totalStories: number;
+}
+
+export async function fetchCommunityStats(): Promise<CommunityStats> {
+  const res = await adminApi.get('/community/stats');
+  const s = res?.data ?? {};
+  const stats: CommunityStats = {
+    pendingCount: Number(s.pendingCount ?? s.pendingStories ?? s.pending ?? 0),
+    rejectedCount: Number(s.rejectedCount ?? s.rejectedStories ?? s.rejected ?? 0),
+    approvedCount: Number(s.approvedCount ?? s.approvedStories ?? s.approved ?? 0),
+    totalStories: Number(s.totalStories ?? s.total ?? 0),
+  };
+  return stats;
 }
 
 // Actions: restore and hard-delete for rejected/trash tab

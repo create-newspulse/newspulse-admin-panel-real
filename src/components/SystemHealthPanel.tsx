@@ -50,8 +50,7 @@ function deriveStatus(data: HealthEnvelope): HealthStatus {
 }
 
 // Unified health endpoint using API_BASE helper.
-import { API_BASE } from '@lib/apiBase';
-const HEALTH_URL = `${API_BASE}/system/health`;
+import { adminApi } from '@/lib/adminApi';
 
 export default function SystemHealthPanel(): JSX.Element {
   const [env, setEnv] = useState<HealthEnvelope | null>(null);
@@ -69,14 +68,14 @@ export default function SystemHealthPanel(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await fetch(HEALTH_URL, { credentials: 'include' });
-        const ct = r.headers.get('content-type') || '';
+        const r = await adminApi.get('/system/health');
+        const ct = r.headers['content-type'] || '';
         if (!/application\/json/i.test(ct)) {
           const txt = await r.text().catch(() => '');
           if (mounted) setEnv({ success: false, status: r.status, contentType: ct, backend: { nonJson: true, text: txt } });
           return;
         }
-        const json = (await r.json()) as HealthEnvelope;
+        const json = r.data as HealthEnvelope;
         if (mounted) {
           setEnv(json);
           setError(null);

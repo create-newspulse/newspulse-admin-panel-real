@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 // Build health URL from admin API base, stripping a trailing /api once
-const RAW_ADMIN_BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? 'http://localhost:5000/api';
-const ADMIN_BASE_NO_API = RAW_ADMIN_BASE.replace(/\/api\/?$/, '');
-const HEALTH_URL = `${ADMIN_BASE_NO_API}/system/health`;
+import { adminApi } from '@/lib/adminApi';
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -86,7 +84,7 @@ export default function SystemHealthBadge(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await fetch(HEALTH_URL, { method: 'GET', credentials: 'include' });
+        const r = await adminApi.get('/system/health');
         const ct = r.headers.get('content-type') || '';
         if (!/application\/json/i.test(ct)) {
           const text = await r.text().catch(() => '');
@@ -94,14 +92,14 @@ export default function SystemHealthBadge(): JSX.Element {
           setInfo({ success: false, status: r.status, backend: { nonJson: true, text } });
           return;
         }
-        const json = (await r.json()) as HealthPayload;
+        const json = (await r.data) as HealthPayload;
         if (!isMounted) return;
         setInfo(json);
         setError(null);
       } catch (e: any) {
         if (!isMounted) return;
         // Reduce console noise: rely on UI message instead of logging
-        setError(e?.message || 'Failed to fetch');
+        setError(e?.response?.data?.message || 'Failed to fetch');
         setInfo({ success: false });
       }
     };

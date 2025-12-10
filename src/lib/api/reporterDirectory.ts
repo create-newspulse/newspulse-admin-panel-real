@@ -54,8 +54,8 @@ export async function listReporterContacts(params?: {
   sortBy?: 'lastStoryAt' | 'totalStories';
   sortDir?: 'asc' | 'desc';
 }) {
-  // Updated canonical backend route: GET /api/admin/reporters
-  const res = await adminApi.get<any>('/reporters', { params });
+  // Updated canonical backend route: GET /api/admin/community/reporters
+  const res = await adminApi.get<any>('/community/reporters', { params });
 
   type ApiContact = {
     _id: string;
