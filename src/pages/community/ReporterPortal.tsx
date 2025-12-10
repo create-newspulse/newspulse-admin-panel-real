@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { fetchCommunityReporterSubmissions } from '@/api/adminCommunityReporterApi';
+import { fetchCommunityStats, fetchCommunitySubmissions } from '@/lib/communityAdminApi';
 import { Users, FileText, PenSquare, BarChart3, ArrowRight, AlertCircle } from 'lucide-react';
 import MyCommunityStories from '@/pages/community/MyCommunityStories';
 
@@ -24,12 +24,11 @@ export default function ReporterPortal() {
 
   const isFounder = !!(user?.role && String(user.role).toLowerCase().includes('founder'));
   const isAdmin = !!(user?.role && String(user.role).toLowerCase().includes('admin'));
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['community-admin-portal'],
+  const { data: submissions, isLoading, isError, error } = useQuery({
+    queryKey: ['community-admin-submissions'],
     queryFn: async () => {
-      const raw = await fetchCommunityReporterSubmissions();
-      const list: any[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-      // Normalize status lower-case
+      const raw = await fetchCommunitySubmissions({ status: 'pending' });
+      const list: any[] = Array.isArray(raw?.items) ? raw.items : Array.isArray(raw) ? raw : Array.isArray((raw as any)?.submissions) ? (raw as any).submissions : [];
       return list.map(s => ({
         id: String(s.id || s._id || s.ID || s.uuid || 'missing-id'),
         headline: s.headline || '',
@@ -49,15 +48,30 @@ export default function ReporterPortal() {
     staleTime: 20_000,
   });
 
-  const items = useMemo(() => (Array.isArray(data) ? data : []), [data]);
+  const { data: statsData } = useQuery({
+    queryKey: ['community-admin-stats'],
+    queryFn: async () => await fetchCommunityStats(),
+    staleTime: 20_000,
+  });
+
+  const items = useMemo(() => (Array.isArray(submissions) ? submissions : []), [submissions]);
 
   const stats = useMemo<StatsShape>(() => {
+    const s = statsData as any;
+    if (s && typeof s === 'object') {
+      return {
+        total: Number(s.totalStories ?? s.total ?? 0),
+        pending: Number(s.pendingCount ?? s.pending ?? 0),
+        approved: Number(s.approvedCount ?? s.approved ?? 0),
+        rejected: Number(s.rejectedCount ?? s.rejected ?? 0),
+      };
+    }
     const total = items.length;
     const pending = items.filter(s => ['pending','new','under_review'].includes(String(s.status))).length;
     const approved = items.filter(s => ['approved','published'].includes(String(s.status))).length;
     const rejected = items.filter(s => ['rejected','trash'].includes(String(s.status))).length;
     return { total, pending, approved, rejected };
-  }, [items]);
+  }, [items, statsData]);
 
   const recent = useMemo(() => items.slice().sort((a,b) => {
     const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;

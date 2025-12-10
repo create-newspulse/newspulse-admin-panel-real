@@ -207,7 +207,7 @@ export default function CommunityReporterPage(){
     setActionId(submissionId); setError(null);
     try {
       const res = await adminApi.post<CommunityDecisionResponse>(
-        `/api/admin/community-reporter/submissions/${submissionId}/decision`,
+        `/community-reporter/submissions/${submissionId}/decision`,
         { decision }
       );
       const data = res.data as CommunityDecisionResponse;

@@ -27,7 +27,19 @@ export async function listReporterStoriesForAdmin(
 ) {
   // Try a canonical admin endpoint; adjust as needed when backend confirms
   const query = { reporterKey, ...(params || {}) };
-  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/community/submissions', { params: query });
+  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/community-reporter/submissions', { params: query });
   if (!data?.ok) throw new Error('Failed to load reporter stories');
+  return data;
+}
+
+// Admin-only: community stats summary tiles
+export async function fetchCommunityStats() {
+  const { data } = await adminApi.get('/community/stats');
+  return data;
+}
+
+// Admin-only: paginated submissions list
+export async function fetchCommunitySubmissions(params: { page?: number; limit?: number; status?: string }) {
+  const { data } = await adminApi.get('/community-reporter/submissions', { params });
   return data;
 }
