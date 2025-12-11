@@ -1,139 +1,158 @@
-import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext.tsx';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { adminApi } from '@/lib/adminApi.ts';
 import { useNotify } from '@/components/ui/toast-bridge';
-import { fetchCommunitySettings, updateCommunitySettings } from '@/lib/api/communityAdmin.ts';
-import type { CommunitySettings } from '@/lib/api/communityAdmin.ts';
+
+// Shape of settings we care about on this page
+type CommunityFeatureToggles = {
+  communityReporterEnabled: boolean;
+  reporterPortalEnabled: boolean;
+};
+
+type FeatureTogglesResponse = {
+  ok?: boolean;
+  success?: boolean;
+  settings: CommunityFeatureToggles;
+};
 
 export default function FeatureTogglesCommunityReporter() {
-  const { isFounder } = useAuth();
+  const { isFounder } = useAuth(); // still available for info text if you want
   const notify = useNotify();
-  const [settings, setSettings] = useState<CommunitySettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const s = await fetchCommunitySettings();
-        if (!cancelled) setSettings(s);
-      } catch (e: any) {
-        const status = e?.response?.status;
-        const msg = status ? `Request failed with status code ${status}` : e?.message || 'Unable to load settings';
-        if (!cancelled) setError(msg);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [reload]);
+  // ---- LOAD CURRENT SETTINGS ----
+  const {
+    data: settings,
+    isLoading,
+    isError,
+    isFetching,
+  } = useQuery<CommunityFeatureToggles>({
+    queryKey: ['founder-feature-toggles'],
+    queryFn: async () => {
+      const res = await adminApi.get<FeatureTogglesResponse>('/founder/feature-toggles');
+      return res.data.settings;
+    },
+  });
 
-  async function saveChanges() {
-    if (!settings || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const updated = await updateCommunitySettings(settings);
-      setSettings(updated);
-      notify.ok('Settings updated');
-    } catch (e: any) {
-      const status = e?.response?.status;
-      if (status === 403) {
-        setError('You do not have permission to change these settings.');
-      } else {
-        const msg = e?.message || 'Failed to save settings';
-        setError(msg);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
+  // ---- UPDATE SETTINGS (PATCH) ----
+  const mutation = useMutation({
+    mutationFn: async (partial: Partial<CommunityFeatureToggles>) => {
+      const res = await adminApi.patch<FeatureTogglesResponse>('/founder/feature-toggles', partial);
+      return res.data.settings;
+    },
+    onSuccess: (newSettings) => {
+      // update cache so UI reflects the latest state immediately
+      queryClient.setQueryData<CommunityFeatureToggles>(
+        ['founder-feature-toggles'],
+        newSettings,
+      );
+      notify.ok('Feature toggles updated');
+    },
+    onError: () => {
+      notify.err('Failed to update feature toggles');
+    },
+  });
+
+  const disabled = isLoading || isFetching || mutation.isPending;
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Community Reporter Feature Toggles</h1>
-      <p className="text-sm text-slate-600">Founder-only switches to open/close Community Reporter program.</p>
+      <p className="text-sm text-slate-600">
+        Founder-only switches to open/close Community Reporter program.
+      </p>
 
-      {error && (
-        <div className="p-4 border rounded border-red-300 text-red-700 flex items-center justify-between">
-          <span>{error}</span>
-          <button type="button" onClick={() => setReload(r => r + 1)} className="px-3 py-1 text-sm bg-red-600 text-white rounded">Retry</button>
+      {isError && (
+        <div className="p-4 border rounded border-red-300 text-red-700">
+          Failed to load feature toggles.
         </div>
       )}
 
-      {loading && <div className="p-4 border rounded">Loading settings...</div>}
+      {isLoading && (
+        <div className="p-4 border rounded">
+          Loading…
+        </div>
+      )}
 
-      {!loading && settings && (
-        <div className="border rounded p-4 bg-white">
-          <div className="space-y-4">
-            <ToggleRow
-              label="Enable Community Reporter module"
-              description="When off, all public Community Reporter entry points are disabled."
-              checked={settings.communityReporterEnabled}
-              disabled={!isFounder}
-              onChange={(v) => setSettings(s => s ? { ...s, communityReporterEnabled: v } : s)}
-            />
-            <ToggleRow
-              label="Accept new Community Reporter submissions"
-              checked={settings.allowNewSubmissions}
-              disabled={!isFounder}
-              onChange={(v) => setSettings(s => s ? { ...s, allowNewSubmissions: v } : s)}
-            />
-            <ToggleRow
-              label="Allow My Community Stories portal"
-              checked={settings.allowMyStoriesPortal}
-              disabled={!isFounder}
-              onChange={(v) => setSettings(s => s ? { ...s, allowMyStoriesPortal: v } : s)}
-            />
-            <ToggleRow
-              label="Accept Journalist verification applications"
-              checked={settings.allowJournalistApplications}
-              disabled={!isFounder}
-              onChange={(v) => setSettings(s => s ? { ...s, allowJournalistApplications: v } : s)}
-            />
-            <ToggleRow
-              label="Safe Mode – manual review only"
-              checked={settings.safeModeManualReviewOnly}
-              disabled={!isFounder}
-              onChange={(v) => setSettings(s => s ? { ...s, safeModeManualReviewOnly: v } : s)}
+      {!isLoading && settings && (
+        <section className="space-y-6 max-w-2xl">
+          {/* Community Reporter toggle */}
+          <div className="flex items-center justify-between border rounded-xl bg-white px-6 py-4">
+            <div>
+              <h2 className="font-semibold">Community Reporter</h2>
+              <p className="text-sm text-slate-500">
+                Public can submit stories from the live site.
+              </p>
+            </div>
+            <InlineToggleSwitch
+              checked={!!settings.communityReporterEnabled}
+              disabled={disabled}
+              onChange={(checked) =>
+                mutation.mutate({ communityReporterEnabled: checked })
+              }
             />
           </div>
 
-          {!isFounder && (
-            <div className="mt-4 text-xs text-slate-600">Only the Founder can change these settings.</div>
+          {/* Reporter Portal toggle */}
+          <div className="flex items-center justify-between border rounded-xl bg-white px-6 py-4">
+            <div>
+              <h2 className="font-semibold">Reporter Portal</h2>
+              <p className="text-sm text-slate-500">
+                Reporter login &amp; dashboard access.
+              </p>
+            </div>
+            <InlineToggleSwitch
+              checked={!!settings.reporterPortalEnabled}
+              disabled={disabled}
+              onChange={(checked) =>
+                mutation.mutate({ reporterPortalEnabled: checked })
+              }
+            />
+          </div>
+
+          {mutation.isPending && (
+            <div className="text-sm text-slate-500">Saving…</div>
           )}
 
-          {isFounder && (
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={saveChanges}
-                disabled={saving}
-                className="px-4 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
-              >{saving ? 'Saving...' : 'Save changes'}</button>
+          {!mutation.isPending && isFounder === false && (
+            <div className="text-xs text-slate-500">
+              Note: Backend will still enforce founder-only access. If you are not the founder,
+              these changes may be rejected.
             </div>
           )}
-        </div>
+        </section>
       )}
     </div>
   );
 }
 
-function ToggleRow({ label, description, checked, disabled, onChange }: { label: string; description?: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+type ToggleProps = {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+};
+
+function InlineToggleSwitch({ checked, disabled, onChange }: ToggleProps) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <div className="font-medium">{label}</div>
-        {description && <div className="text-xs text-slate-600 mt-1">{description}</div>}
-      </div>
-      <label className={`inline-flex items-center gap-2 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-        <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} disabled={disabled} />
-        <span className="text-sm">{checked ? 'ON' : 'OFF'}</span>
-      </label>
-    </div>
+    <button
+      type="button"
+      aria-pressed={checked}
+      aria-disabled={disabled}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      className={[
+        'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+        disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+        checked ? 'bg-emerald-500' : 'bg-slate-300',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
+          checked ? 'translate-x-5' : 'translate-x-1',
+        ].join(' ')}
+      />
+    </button>
   );
 }
