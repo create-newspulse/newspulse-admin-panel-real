@@ -268,3 +268,35 @@ export async function listReporterContacts(q: ReporterContactQuery = {}): Promis
   const rows = Array.isArray(data) ? data : (data?.items || data?.rows || []);
   return rows as ReporterContact[];
 }
+
+// --- Founder Feature Toggles (Community Reporter) ---
+// ON = closed, OFF = open
+export type FounderFeatureToggles = {
+  communityReporterClosed: boolean;
+  reporterPortalClosed: boolean;
+  updatedAt?: string;
+};
+
+export async function getFounderFeatureToggles(): Promise<FounderFeatureToggles> {
+  const res = await adminApi.get('/founder/feature-toggles');
+  const raw = res.data as any;
+  const s = raw?.settings ?? raw ?? {};
+  return {
+    communityReporterClosed: !!s.communityReporterClosed,
+    reporterPortalClosed: !!s.reporterPortalClosed,
+    updatedAt: s.updatedAt,
+  };
+}
+
+export async function patchFounderFeatureToggles(
+  patch: Partial<FounderFeatureToggles>
+): Promise<FounderFeatureToggles> {
+  const res = await adminApi.patch('/founder/feature-toggles', patch);
+  const raw = res.data as any;
+  const s = raw?.settings ?? raw ?? {};
+  return {
+    communityReporterClosed: !!s.communityReporterClosed,
+    reporterPortalClosed: !!s.reporterPortalClosed,
+    updatedAt: s.updatedAt,
+  };
+}

@@ -1,12 +1,10 @@
 import { useAuth } from '@/context/AuthContext.tsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '@/lib/adminApi.ts';
+import { getFounderFeatureToggles, patchFounderFeatureToggles, type FounderFeatureToggles } from '@/lib/adminApi.ts';
 import { useNotify } from '@/components/ui/toast-bridge';
 
-type CommunityFeatureToggles = {
-  communityReporterEnabled: boolean;
-  reporterPortalEnabled: boolean;
-};
+// ON = closed, OFF = open
+type CommunityFeatureToggles = FounderFeatureToggles;
 
 export default function FeatureTogglesCommunityReporter() {
   const { isFounder } = useAuth();
@@ -15,22 +13,11 @@ export default function FeatureTogglesCommunityReporter() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['founder-feature-toggles'],
-    queryFn: async (): Promise<CommunityFeatureToggles> => {
-      const res = await adminApi.get('/founder/feature-toggles');
-      const raw = res.data as any;
-      const settings = raw.settings ?? raw;
-      return {
-        communityReporterEnabled: !!settings.communityReporterEnabled,
-        reporterPortalEnabled: !!settings.reporterPortalEnabled,
-      };
-    },
+    queryFn: async (): Promise<CommunityFeatureToggles> => getFounderFeatureToggles(),
   });
 
   const mutation = useMutation({
-    mutationFn: async (partial: Partial<CommunityFeatureToggles>) => {
-      const res = await adminApi.patch('/founder/feature-toggles', partial);
-      return res.data;
-    },
+    mutationFn: async (partial: Partial<CommunityFeatureToggles>) => patchFounderFeatureToggles(partial),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['founder-feature-toggles'] });
       notify.ok('Feature toggles updated');
@@ -70,11 +57,9 @@ export default function FeatureTogglesCommunityReporter() {
               </p>
             </div>
             <InlineToggleSwitch
-              checked={!data.communityReporterEnabled}
+              checked={!!data.communityReporterClosed}
               disabled={!isFounder || saving}
-              onChange={(checked) =>
-                mutation.mutate({ communityReporterEnabled: !checked })
-              }
+              onChange={(checked) => mutation.mutate({ communityReporterClosed: checked })}
             />
           </div>
 
@@ -87,11 +72,9 @@ export default function FeatureTogglesCommunityReporter() {
               </p>
             </div>
             <InlineToggleSwitch
-              checked={!data.reporterPortalEnabled}
+              checked={!!data.reporterPortalClosed}
               disabled={!isFounder || saving}
-              onChange={(checked) =>
-                mutation.mutate({ reporterPortalEnabled: !checked })
-              }
+              onChange={(checked) => mutation.mutate({ reporterPortalClosed: checked })}
             />
           </div>
 
