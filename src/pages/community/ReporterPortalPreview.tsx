@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 
 const reporterPortalUrl =
   import.meta.env.VITE_PUBLIC_REPORTER_PORTAL_URL ??
@@ -35,13 +36,22 @@ const ReporterPortalPreview: React.FC = () => {
           </code>
         </div>
 
-        <button
-          type="button"
-          onClick={handleOpenPortal}
-          className="inline-flex items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
-        >
-          Open Reporter Portal in new tab
-        </button>
+        <div className="mt-2 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleOpenPortal}
+            className="inline-flex items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
+          >
+            Open Reporter Portal in new tab
+          </button>
+
+          <Link
+            to="/community/my-stories"
+            className="inline-flex items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
+          >
+            Open My Community Stories (admin)
+          </Link>
+        </div>
 
         <p className="text-xs text-muted-foreground">
           Tip: Keep this admin tab open for Founder control, and use the new tab
