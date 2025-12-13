@@ -5,6 +5,9 @@ import { listAdminCommunityStories, type AdminCommunityStory } from '@/lib/api/c
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
 
+const REPORTER_PORTAL_URL =
+  import.meta.env.VITE_PUBLIC_REPORTER_PORTAL_URL || 'https://newspulse.co.in/community-reporter';
+
 function formatDate(value?: string) {
   if (!value) return '-';
   const d = new Date(value);
@@ -62,6 +65,39 @@ const MyCommunityStoriesPage: React.FC = () => {
         <p className="mt-1 text-sm text-gray-600">
           View and manage stories you&apos;ve submitted to News Pulse.
         </p>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-semibold text-slate-900">
+              Reporter Portal (Public view)
+            </div>
+            <p className="text-xs text-slate-600">
+              Open the public Community Reporter Portal in a new tab. You can keep this admin list open
+              and switch between Founder view and reporter view.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              URL:&nbsp;
+              <span className="font-mono">{REPORTER_PORTAL_URL}</span>
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (REPORTER_PORTAL_URL) {
+                window.open(REPORTER_PORTAL_URL, '_blank', 'noopener,noreferrer');
+              } else {
+                alert('Reporter Portal URL is not configured yet.');
+              }
+            }}
+            className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium
+                       bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            Open Reporter Portal in new tab
+          </button>
+        </div>
       </div>
 
       {/* Actions + Filters row */}
