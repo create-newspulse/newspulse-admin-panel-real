@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { fetchCommunitySubmissionById } from '@/api/adminCommunityReporterApi';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { adminApi } from '@/lib/adminApi';
@@ -10,6 +10,7 @@ export default function CommunityReporterDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const fromReporterStoriesKey: string | undefined = (location.state as any)?.reporterKey;
   const fromReporterStoriesName: string | undefined = (location.state as any)?.reporterName;
   const [loading, setLoading] = useState(false);
@@ -82,7 +83,8 @@ export default function CommunityReporterDetailPage() {
         notify.ok('Story updated', 'Submission rejected.');
       }
 
-      navigate('/admin/community-reporter');
+      // Redirect back respecting origin (My Stories vs previous page)
+      goBack();
     } catch (e:any) {
       setError('Failed to update submission. Please try again.');
     } finally {
@@ -91,6 +93,12 @@ export default function CommunityReporterDetailPage() {
   }
 
   function goBack() {
+    // Prefer explicit return to My Stories when routed from that page
+    const from = searchParams.get('from');
+    if (from === 'my-stories') {
+      navigate('/community/my-stories');
+      return;
+    }
     // Prefer returning to Reporter Stories listing if context is available
     if (fromReporterStoriesKey) {
       const key = fromReporterStoriesKey.trim();

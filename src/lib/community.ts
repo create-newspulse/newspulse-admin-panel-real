@@ -44,3 +44,20 @@ export async function listReporterStoriesForAdmin(
   }
   throw lastErr || new Error('Reporter stories endpoint not available');
 }
+
+// New: Fetch stories by reporter email for admin view
+// Preferred route: GET /api/admin/community/reporter-stories-by-email?email=...
+// Fallback:      GET /api/community-reporter/my-stories?email=... (public alias)
+export async function listReporterStoriesByEmail(
+  email: string,
+  params?: { page?: number; limit?: number; status?: string; q?: string }
+): Promise<ReporterAdminStoryListResponse> {
+  const cleanEmail = (email || '').trim();
+  if (!cleanEmail) throw new Error('Email is required');
+  const query = { ...(params || {}), email: cleanEmail } as Record<string, any>;
+  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/community/reporter-stories', {
+    params: query,
+  });
+  if (!data?.ok) throw new Error('Failed to load reporter stories');
+  return data;
+}

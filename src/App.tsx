@@ -192,6 +192,8 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+              {/* Redirect /founder → /founder/feature-toggles */}
+              <Route path="/founder" element={<Navigate to="/founder/feature-toggles" replace />} />
               {/* Founder-only Feature Toggles – Community Reporter */}
               <Route path="/founder/feature-toggles" element={<FounderRoute><FeatureTogglesCommunityReporter /></FounderRoute>} />
               {/* Legacy path kept as redirect for backward compatibility */}
