@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { listReporterStoriesByEmail } from '@/lib/community';
-import type { ReporterAdminStory } from '@/lib/community';
+import { useAuth } from '@/context/AuthContext';
+import { listAdminCommunityStories, type AdminCommunityStory } from '@/lib/api/communityReporterStories';
 
-type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
+type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
 
 function formatDate(value?: string) {
   if (!value) return '-';
@@ -15,34 +15,42 @@ function formatDate(value?: string) {
 const MyCommunityStoriesPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, isReady, restoreSession } = useAuth();
   const inferredEmail = new URLSearchParams(location.search).get('email') || '';
-  const [activeEmail, setActiveEmail] = useState<string>(inferredEmail);
-  const [stories, setStories] = useState<ReporterAdminStory[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [activeEmail] = useState<string>(inferredEmail);
+  const [stories, setStories] = useState<AdminCommunityStory[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [searchText, setSearchText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   async function loadStories() {
-    const email = (activeEmail || '').trim();
-    if (!email) { setError('Enter your reporter email to load stories.'); return; }
+    setIsLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const res = await listReporterStoriesByEmail(email, {
+      const fetched = await listAdminCommunityStories({
         status: statusFilter === 'all' ? undefined : statusFilter,
-        q: searchText || undefined,
+        search: searchQuery || undefined,
+        // email is optional; founder scope handled server-side
+        email: undefined,
       });
-      setStories(res.items || []);
+      setStories(Array.isArray(fetched) ? fetched : []);
     } catch (err: any) {
       console.error('Failed to load community stories', err);
-      setError(err?.message || 'Failed to load community stories.');
+      setError('Failed to load community stories.');
       setStories([]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }
+
+  // Initial load and when filters change (Apply/Refresh triggers explicitly too)
+  useEffect(() => {
+    // First load with status='all' and empty search
+    void loadStories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -86,6 +94,7 @@ const MyCommunityStoriesPage: React.FC = () => {
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
+            <option value="withdrawn">Withdrawn</option>
           </select>
         </div>
 
@@ -96,8 +105,8 @@ const MyCommunityStoriesPage: React.FC = () => {
           <input
             className="w-64 rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             placeholder="Title contains..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
           <button
             className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
@@ -142,44 +151,43 @@ const MyCommunityStoriesPage: React.FC = () => {
           </thead>
 
           <tbody className="divide-y divide-gray-200">
-            {loading && (
+            {isLoading && (
               <tr>
                 <td
                   colSpan={9}
-                  className="px-4 py-6 text-center text-sm text-gray-500"
+                  className="text-center py-8 text-slate-500"
                 >
                   Loading community stories…
                 </td>
               </tr>
             )}
 
-            {!loading && error && (
+            {!isLoading && error && (
               <tr>
                 <td
                   colSpan={9}
-                  className="px-4 py-6 text-center text-sm text-red-600"
+                  className="text-center py-8 text-red-600"
                 >
                   {error}
                 </td>
               </tr>
             )}
 
-            {!loading && !error && stories.length === 0 && (
+            {!isLoading && !error && stories.length === 0 && (
               <tr>
                 <td
                   colSpan={9}
-                  className="px-4 py-6 text-center text-sm text-gray-500"
+                  className="text-center py-8 text-slate-500"
                 >
-                  You haven’t submitted any stories yet. Use the Reporter Portal
-                  or Submit Story page to send your first report.
+                  No community stories found. Use the Reporter Portal or Submit Story page to send your first report.
                 </td>
               </tr>
             )}
 
-            {!loading && !error && stories.map((story) => (
+            {!isLoading && !error && stories.map((story) => (
                 <tr key={story.id}>
                   <td className="px-4 py-3 text-sm text-gray-900">
-                    {story.title || (story as any).headline || '—'}
+                    {story.headline || (story as any).title || '—'}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {story.summary || (story as any).aiSummary || '—'}
