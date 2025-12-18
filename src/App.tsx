@@ -86,6 +86,10 @@ import ReporterPortalPreview from '@pages/community/ReporterPortalPreview';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
+// Settings Center (admin)
+import SettingsLayout from '@pages/admin/settings/SettingsLayout';
+import SettingsHome from '@pages/admin/settings/SettingsHome';
+import FrontendUiSettings from '@pages/admin/settings/FrontendUiSettings';
 import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
@@ -192,6 +196,11 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+              {/* Settings Center (layout + minimal routes) */}
+              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>}>
+                <Route index element={<SettingsHome />} />
+                <Route path="frontend-ui" element={<FrontendUiSettings />} />
+              </Route>
               {/* Redirect /founder → /founder/feature-toggles */}
               <Route path="/founder" element={<Navigate to="/founder/feature-toggles" replace />} />
               {/* Founder-only Feature Toggles – Community Reporter */}

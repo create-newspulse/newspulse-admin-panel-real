@@ -32,18 +32,21 @@ export default function Navbar() {
           <nav className="flex flex-wrap items-center gap-4 text-sm font-medium">
 
             {/* 🔗 Main Menu */}
-            {left.map(({ path, icon, label, key }) => (
-              <Link
-                key={key}
-                to={path}
-                className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${
-                  location.pathname === path ? 'text-blue-400' : 'text-white'
-                }`}
-              >
-                <span>{icon}</span>
-                {label}
-              </Link>
-            ))}
+            {left.map(({ path, icon, label, key }) => {
+              const isActive = location.pathname === path || location.pathname.startsWith(path + '/');
+              return (
+                <Link
+                  key={key}
+                  to={path}
+                  className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${
+                    isActive ? 'text-blue-400' : 'text-white'
+                  }`}
+                >
+                  <span>{icon}</span>
+                  {label}
+                </Link>
+              );
+            })}
             {/* Right-side utilities */}
             {right.map(({ key, path, icon, label }) => (
               path.startsWith('#') ? (
@@ -67,7 +70,7 @@ export default function Navbar() {
                     {icon} {label}
                   </button>
                 ) : (
-                  <Link key={key} to={path} className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${location.pathname === path ? 'text-blue-400' : 'text-white'}`}>
+                  <Link key={key} to={path} className={`flex items-center gap-1 px-2 py-1 rounded hover:text-blue-400 transition-colors ${(location.pathname === path || location.pathname.startsWith(path + '/')) ? 'text-blue-400' : 'text-white'}`}>
                     <span>{icon}</span>{label}
                   </Link>
                 )

@@ -31,6 +31,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'media', label:'Media', path:'/admin/media-library', roles:['editor','admin','founder'], icon:'📸' },
   { key:'seo', label:'SEO', path:'/admin/seo', roles:['admin','founder'], icon:'🔍' },
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'👩‍💻' },
+  // Settings entry
+  { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Legacy Safe Owner Zone (old page) — hidden to avoid duplication with v5 modules
   { key:'soz', label:'Safe Owner Zone', path:'/safeownerzone/founder', roles:['founder'], icon:'🧩', hidden: true },
   // Founder Zone (v5 routes)

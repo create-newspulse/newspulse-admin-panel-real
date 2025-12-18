@@ -6,6 +6,7 @@ import SystemAlerts from '@/components/alerts/SystemAlerts';
 import DraftDeskPage from '@/pages/admin/DraftDeskPage';
 import FeatureTogglesCommunityReporter from '@/pages/founder/FeatureTogglesCommunityReporter';
 import ReporterPortalPreview from '@/pages/founder/ReporterPortalPreview';
+import SiteControls from '@/pages/SiteControls';
 
 // Placeholder pages
 function Page({ title }: { title: string }) { return <div className="space-y-4"><h1 className="text-2xl font-semibold">{title}</h1><p className="opacity-70 text-sm">TODO: implement "{title}"</p></div>; }
@@ -24,6 +25,7 @@ export default function PanelRouter() {
           <Route path="founder/vaults" element={<RequireRole allow={['founder']}><Page title="Vaults" /></RequireRole>} />
           <Route path="founder/ai-control" element={<RequireRole allow={['founder']}><Page title="AI Control" /></RequireRole>} />
           <Route path="founder/feature-toggles" element={<RequireRole allow={['founder']}><FeatureTogglesCommunityReporter /></RequireRole>} />
+          <Route path="founder/site-controls" element={<RequireRole allow={['founder']}><SiteControls /></RequireRole>} />
           <Route path="founder/reporter-portal" element={<RequireRole allow={['founder','admin']}><ReporterPortalPreview /></RequireRole>} />
           <Route path="founder/analytics-revenue" element={<RequireRole allow={['founder']}><Page title="Analytics & Revenue" /></RequireRole>} />
           <Route path="founder/logs" element={<RequireRole allow={['founder']}><Page title="Founder Logs" /></RequireRole>} />

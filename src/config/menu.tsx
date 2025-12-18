@@ -24,6 +24,7 @@ export const MENU: Item[] = [
   { key:'securityLockdown', label:'Security & Lockdown', path:'/panel/founder/security', icon:ShieldCheckIcon, roles:['founder'], section:'founder' },
   { key:'vaults', label:'Vaults', path:'/panel/founder/vaults', icon:FolderOpenIcon, roles:['founder'], section:'founder' },
   { key:'aiControl', label:'AI Control', path:'/panel/founder/ai-control', icon:CpuChipIcon, roles:['founder'], section:'founder' },
+  { key:'siteControls', label:'Site Controls', path:'/panel/founder/site-controls', icon:WrenchIcon, roles:['founder'], section:'founder' },
   { key:'featureToggles', label:'Feature Toggles', path:'/panel/founder/feature-toggles', icon:WrenchIcon, roles:['founder'], section:'founder' },
   { key:'analyticsRevenue', label:'Analytics & Revenue', path:'/panel/founder/analytics-revenue', icon:PresentationChartLineIcon, roles:['founder'], section:'founder' },
   { key:'founderLogs', label:'Founder Logs', path:'/panel/founder/logs', icon:ClipboardDocumentCheckIcon, roles:['founder'], section:'founder' },
