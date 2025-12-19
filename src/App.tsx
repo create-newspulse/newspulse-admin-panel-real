@@ -86,8 +86,21 @@ import ReporterPortalPreview from '@pages/community/ReporterPortalPreview';
 import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
+import Denied from '@pages/Denied';
 // Settings Center (admin)
 import SettingsLayout from '@pages/admin/settings/SettingsLayout';
+import SettingsHome from '@pages/admin/settings/SettingsHome';
+import FrontendUiSettings from '@pages/admin/settings/FrontendUiSettings';
+import NavigationSettings from '@pages/admin/settings/NavigationSettings';
+import PublishingSettings from '@pages/admin/settings/PublishingSettings';
+import AIModulesSettings from '@pages/admin/settings/AIModulesSettings';
+import VoiceLanguagesSettings from '@pages/admin/settings/VoiceLanguagesSettings';
+import CommunitySettings from '@pages/admin/settings/CommunitySettings';
+import MonetizationSettings from '@pages/admin/settings/MonetizationSettings';
+import IntegrationsSettings from '@pages/admin/settings/IntegrationsSettings';
+import SecuritySettings from '@pages/admin/settings/SecuritySettings';
+import BackupsSettings from '@pages/admin/settings/BackupsSettings';
+import AuditLogsSettings from '@pages/admin/settings/AuditLogsSettings';
 import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
@@ -196,8 +209,21 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
-              {/* Settings Center (shell only) */}
-              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>} />
+              {/* Settings Center (layout + minimal routes) */}
+              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>}>
+                <Route index element={<SettingsHome />} />
+                <Route path="frontend-ui" element={<FrontendUiSettings />} />
+                <Route path="navigation" element={<NavigationSettings />} />
+                <Route path="publishing" element={<PublishingSettings />} />
+                <Route path="ai-modules" element={<AIModulesSettings />} />
+                <Route path="voice-languages" element={<VoiceLanguagesSettings />} />
+                <Route path="community" element={<CommunitySettings />} />
+                <Route path="monetization" element={<MonetizationSettings />} />
+                <Route path="integrations" element={<IntegrationsSettings />} />
+                <Route path="security" element={<FounderRoute><SecuritySettings /></FounderRoute>} />
+                <Route path="backups" element={<FounderRoute><BackupsSettings /></FounderRoute>} />
+                <Route path="audit-logs" element={<AuditLogsSettings />} />
+              </Route>
               {/* Redirect /founder → /founder/feature-toggles */}
               <Route path="/founder" element={<Navigate to="/founder/feature-toggles" replace />} />
               {/* Founder-only Feature Toggles – Community Reporter */}
@@ -260,6 +286,7 @@ function App() {
               <Route path="/admin/login" element={<SimpleLogin />} />
               {/* Placeholder employee login redirect (no separate UI yet) */}
               <Route path="/employee/login" element={<SimpleLogin />} />
+              <Route path="/denied" element={<Denied />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
