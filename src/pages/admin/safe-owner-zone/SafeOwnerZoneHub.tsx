@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useNotify } from '@/components/ui/toast-bridge';
 import type { OwnerZoneShellContext } from './SafeOwnerZoneShell';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import ownerPasskeyApi from '@/lib/ownerPasskeyApi';
+import { useOwnerKeyStore } from '@/lib/ownerKeyStore';
 
 type AuditRow = {
   ts?: string;
@@ -57,6 +60,7 @@ function classifyAudit(r: AuditRow): 'Security' | 'AI' | 'Settings' | 'Revenue' 
 
 export default function SafeOwnerZoneHub() {
   const notify = useNotify();
+  const unlockForMs = useOwnerKeyStore((s) => s.unlockForMs);
   const {
     backendConnected,
     settings,
@@ -71,6 +75,70 @@ export default function SafeOwnerZoneHub() {
   } = useOutletContext<OwnerZoneShellContext>();
 
   const [timelineFilter, setTimelineFilter] = useState<'All' | 'Security' | 'AI' | 'Settings' | 'Revenue'>('All');
+
+  const [passkeyKnown, setPasskeyKnown] = useState(false);
+  const [hasPasskey, setHasPasskey] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState<'none' | 'setup' | 'unlock'>('none');
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await ownerPasskeyApi.status();
+        const v = Boolean((r as any)?.hasPasskey);
+        if (!mounted) return;
+        setHasPasskey(v);
+        setPasskeyKnown(true);
+      } catch {
+        if (!mounted) return;
+        // If status endpoint isn't available yet, assume no passkey so setup is visible.
+        setHasPasskey(false);
+        setPasskeyKnown(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function onSetupPasskey() {
+    if (passkeyBusy !== 'none') return;
+    setPasskeyBusy('setup');
+    try {
+      const options = await ownerPasskeyApi.registerOptions();
+      const attestation = await startRegistration(options as any);
+      await ownerPasskeyApi.registerVerify(attestation);
+      setHasPasskey(true);
+      setPasskeyKnown(true);
+      notify.ok('Passkey setup complete');
+    } catch (e: any) {
+      notify.err('Passkey setup failed', e?.message || 'Unknown error');
+    } finally {
+      setPasskeyBusy('none');
+    }
+  }
+
+  async function onUnlockOwnerKey() {
+    if (passkeyBusy !== 'none') return;
+    setPasskeyBusy('unlock');
+    try {
+      const options = await ownerPasskeyApi.authOptions();
+      const assertion = await startAuthentication(options as any);
+      const verifyRes: any = await ownerPasskeyApi.authVerify(assertion);
+      const ttlMs =
+        typeof verifyRes?.ttlMs === 'number'
+          ? verifyRes.ttlMs
+          : typeof verifyRes?.ttlSec === 'number'
+            ? verifyRes.ttlSec * 1000
+            : 10 * 60 * 1000;
+      unlockForMs(ttlMs);
+      notify.ok('Owner Key unlocked');
+    } catch (e: any) {
+      notify.err('Unlock failed', e?.message || 'Unknown error');
+    } finally {
+      setPasskeyBusy('none');
+    }
+  }
 
   const readOnlyToggle: ToggleState = useMemo(() => {
     if (!settings) return { value: undefined, label: 'ReadOnly', statusText: '—', disabled: true };
@@ -167,6 +235,44 @@ export default function SafeOwnerZoneHub() {
           Backend not connected — showing placeholders
         </div>
       ) : null}
+
+      {/* Owner Key (Passkey/WebAuthn) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-lg font-semibold">Owner Key</div>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Passkey-based unlock for high-risk actions.</div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {!hasPasskey ? (
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                onClick={onSetupPasskey}
+                disabled={passkeyBusy !== 'none'}
+              >
+                {passkeyBusy === 'setup' ? 'Setting up…' : 'Setup Passkey'}
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              onClick={onUnlockOwnerKey}
+              disabled={passkeyBusy !== 'none'}
+            >
+              {passkeyBusy === 'unlock' ? 'Unlocking…' : 'Unlock Owner Key'}
+            </button>
+          </div>
+        </div>
+
+        {!passkeyKnown ? (
+          <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            Passkey status unavailable — showing setup by default.
+          </div>
+        ) : null}
+      </div>
 
       {/* B) Main content grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

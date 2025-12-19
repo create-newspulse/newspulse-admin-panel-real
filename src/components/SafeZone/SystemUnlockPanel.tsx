@@ -1,36 +1,10 @@
 // ✅ File: components/SafeZone/SystemUnlockPanel.tsx
 
-import React, { useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
-import { fetchJson } from '@lib/fetchJson';
+import React from 'react';
+import { Link } from 'react-router-dom';
 import { FaUnlockAlt } from 'react-icons/fa';
 
 const SystemUnlockPanel: React.FC = () => {
-  const [pin, setPin] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-
-  const handleUnlock = async () => {
-    if (!pin) return;
-    setStatus('loading');
-
-    try {
-      const data = await fetchJson<{ success?: boolean }>(`${API_BASE}/system/reactivate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
-      if (data.success ?? true) {
-        setStatus('success');
-      } else {
-        setStatus('error');
-      }
-    } catch (err) {
-      console.error('Unlock error:', err);
-      setStatus('error');
-    }
-  };
-
   return (
     <section className="p-5 md:p-6 bg-green-50 dark:bg-green-900/10 border border-green-400/30 rounded-2xl shadow-inner max-h-[90vh] overflow-y-auto">
       <p className="text-green-600 dark:text-green-400 font-mono text-sm mb-2">✅ SystemUnlockPanel Loaded</p>
@@ -40,30 +14,16 @@ const SystemUnlockPanel: React.FC = () => {
         Reactivate System
       </h2>
 
-      <input
-        type="password"
-        placeholder="Enter Unlock PIN"
-        value={pin}
-        onChange={(e) => setPin(e.target.value)}
-        className="mt-3 px-3 py-2 rounded border border-green-400 text-sm w-full dark:bg-green-800/10"
-      />
-
-      <button
-        onClick={handleUnlock}
-        disabled={!pin || status === 'loading'}
-        className={`mt-3 px-4 py-2 rounded-md font-semibold text-white transition duration-200 flex items-center gap-2 ${
-          pin ? 'bg-green-600 hover:bg-green-700' : 'bg-green-300 cursor-not-allowed'
-        }`}
-      >
-        {status === 'loading' ? 'Reactivating...' : '♻️ Reactivate System'}
-      </button>
-
-      {status === 'success' && (
-        <p className="text-green-600 font-mono mt-2">✅ System reactivated successfully!</p>
-      )}
-      {status === 'error' && (
-        <p className="text-red-600 font-mono mt-2">❌ Invalid PIN or server error.</p>
-      )}
+      <div className="mt-3 rounded-xl border border-green-400/30 bg-white/70 p-4 text-sm text-slate-700 dark:bg-slate-900/30 dark:text-slate-200">
+        <div className="font-semibold">Manage Owner Key</div>
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">PIN-based unlock has been removed. Use the Safe Owner Zone hub.</div>
+        <Link
+          to="/admin/safe-owner-zone"
+          className="mt-3 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+        >
+          Manage Owner Key → Safe Owner Zone
+        </Link>
+      </div>
     </section>
   );
 };

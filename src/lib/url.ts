@@ -10,7 +10,12 @@ export const ADMIN_API_BASE = '/admin-api';
 
 // Helper: build an admin API URL (expects `path` may start with '/api/...')
 export function adminApiUrl(path: string) {
-  return joinPath(ADMIN_API_BASE, path);
+  const raw = (path || '').toString().trim();
+  const withLeadingSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  // IMPORTANT: when using the '/admin-api' proxy base, do not include a leading
+  // '/api/' segment. The proxy already rewrites '/admin-api/*' -> backend '/api/*'.
+  const normalized = withLeadingSlash.replace(/^\/api\//, '/');
+  return joinPath(ADMIN_API_BASE, normalized);
 }
 
 export default joinPath;

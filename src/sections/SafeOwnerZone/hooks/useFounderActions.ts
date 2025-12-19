@@ -77,7 +77,7 @@ export function useFounderActions() {
   }
 
   return {
-    lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin: string }) => post('/api/founder/lockdown', payload),
+    lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin?: string }) => post('/api/founder/lockdown', payload),
     unlock: (pin: string) => post('/api/founder/unlock', { pin }),
     snapshot: (note?: string) => post('/api/founder/snapshot', { note }),
     rollback: (snapshotId: string, dryRun = true) => post('/api/founder/rollback', { snapshotId, dryRun }),

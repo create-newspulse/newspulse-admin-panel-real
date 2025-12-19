@@ -15,6 +15,7 @@ import { PublishFlagProvider } from '@/context/PublishFlagContext';
 import Navbar from '@components/Navbar';
 import Breadcrumbs from '@components/Breadcrumbs';
 import LockCheckWrapper from '@components/LockCheckWrapper';
+import OwnerBar from '@/components/OwnerBar';
 import ProtectedRoute from '@components/ProtectedRoute';
 import FounderRoute from '@components/FounderRoute';
 
@@ -158,6 +159,7 @@ function App() {
       <I18nextProvider i18n={i18n}>
         <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-slate-900 text-white' : 'bg-white text-black'}`}>
           <Navbar />
+          {isAuthenticated && !isAuthPage ? <OwnerBar /> : null}
           {/* Optional: lightweight env overlay for debugging prod vs local differences */}
           {import.meta.env.VITE_SHOW_ENV_TEST === 'true' && <EnvTest />}
           {isAuthenticated && !isAuthPage && <Breadcrumbs />}

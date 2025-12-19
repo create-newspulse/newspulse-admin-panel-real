@@ -5,6 +5,7 @@ import { useFounderActions } from '@/sections/SafeOwnerZone/hooks/useFounderActi
 import { useNotify } from '@/components/ui/toast-bridge';
 import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
+import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
 
 export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
 
@@ -17,13 +18,8 @@ export type OwnerZoneShellContext = {
   lastAuditAt: string | null;
 
   status: OwnerZoneStatus;
-
-  pin: string;
-  dangerUnlocked: boolean;
   canUseDangerActions: boolean;
   busy: boolean;
-
-  unlockDangerActions: () => Promise<void>;
   updateAdminSettings: (patch: any, auditAction?: string) => Promise<void>;
   doSnapshot: () => Promise<void>;
   openRollback: () => void;
@@ -66,7 +62,9 @@ function statusPillClass(status: OwnerZoneStatus) {
 
 export default function SafeOwnerZoneShell() {
   const notify = useNotify();
-  const { unlock, snapshot, lockdown, listSnapshots } = useFounderActions();
+  const { snapshot, lockdown, listSnapshots } = useFounderActions();
+  const setOwnerMode = useOwnerKeyStore((s) => s.setMode);
+  const ownerUnlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
 
   const [settings, setSettings] = useState<any | null>(null);
   const [health, setHealth] = useState<any | null>(null);
@@ -74,9 +72,6 @@ export default function SafeOwnerZoneShell() {
   const [lastSnapshotAt, setLastSnapshotAt] = useState<string | null>(null);
 
   const [backendConnected, setBackendConnected] = useState(true);
-
-  const [pin, setPin] = useState('');
-  const [dangerUnlocked, setDangerUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -119,11 +114,6 @@ export default function SafeOwnerZoneShell() {
     };
   }, [listSnapshots]);
 
-  // Security hygiene: if the PIN changes, relock danger actions.
-  useEffect(() => {
-    setDangerUnlocked(false);
-  }, [pin]);
-
   const status: OwnerZoneStatus = useMemo(() => {
     if (!backendConnected || !settings) return 'Awaiting backend';
     const isLockdown = settings?.security?.lockdown === true;
@@ -133,24 +123,15 @@ export default function SafeOwnerZoneShell() {
     return 'UNLOCKED';
   }, [backendConnected, settings]);
 
+  useEffect(() => {
+    if (status === 'LOCKDOWN') setOwnerMode('LOCKDOWN');
+    else if (status === 'READ-ONLY') setOwnerMode('READONLY');
+    else if (status === 'UNLOCKED') setOwnerMode('NORMAL');
+  }, [status, setOwnerMode]);
+
   const lastAuditAt = useMemo(() => (audit?.[0]?.ts ? audit[0].ts : null), [audit]);
 
-  const canUseDangerActions = Boolean(pin.trim()) && dangerUnlocked && !busy;
-
-  async function unlockDangerActions() {
-    if (!pin.trim() || busy) return;
-    setBusy(true);
-    try {
-      await unlock(pin.trim());
-      setDangerUnlocked(true);
-      notify.ok('Danger actions unlocked');
-    } catch (e: any) {
-      notify.err('Unlock failed', e?.message || 'Unknown error');
-      setDangerUnlocked(false);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const canUseDangerActions = isOwnerKeyUnlocked(ownerUnlockedUntilMs) && !busy;
 
   async function doSnapshot() {
     if (!canUseDangerActions) return;
@@ -185,11 +166,8 @@ export default function SafeOwnerZoneShell() {
     lastSnapshotAt,
     lastAuditAt,
     status,
-    pin,
-    dangerUnlocked,
     canUseDangerActions,
     busy,
-    unlockDangerActions,
     updateAdminSettings,
     doSnapshot,
     openRollback: () => setRollbackOpen(true),
@@ -225,31 +203,6 @@ export default function SafeOwnerZoneShell() {
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                className="w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                placeholder="Founder PIN"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                type="password"
-                inputMode="numeric"
-              />
-              <button
-                type="button"
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                disabled={!pin.trim() || dangerUnlocked || busy}
-                onClick={unlockDangerActions}
-              >
-                Unlock Danger Actions
-              </button>
-
-              {!dangerUnlocked ? (
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                  Danger locked
-                </span>
-              ) : null}
-            </div>
-
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -319,7 +272,7 @@ export default function SafeOwnerZoneShell() {
           if (!canUseDangerActions) return;
           setBusy(true);
           try {
-            const r: any = await lockdown({ reason: 'Owner Control Center emergency lockdown', scope: 'site', pin: pin.trim() });
+            const r: any = await lockdown({ reason: 'Owner Control Center emergency lockdown', scope: 'site' });
             (window as any).__LOCK_STATE__ = r?.ok ? 'LOCKED' : (window as any).__LOCK_STATE__ || 'UNLOCKED';
             if (r?.ok) notify.ok('Lockdown enabled');
             else notify.err('Lockdown failed', r?.error || 'Unknown error');

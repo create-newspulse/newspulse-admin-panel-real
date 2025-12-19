@@ -7,7 +7,11 @@ export const join = (...parts: string[]) =>
     .join("/");
 
 export async function adminFetch(path: string, init?: RequestInit) {
-  const url = `/${join(ADMIN_API_BASE, path)}`;
+  const raw = (path ?? "").toString().trim();
+  // Normalize: for proxy base '/admin-api', strip a leading 'api/' segment.
+  // The proxy already rewrites '/admin-api/*' -> backend '/api/*'.
+  const normalizedPath = raw.replace(/^\/+/, "").replace(/^api\//, "");
+  const url = `/${join(ADMIN_API_BASE, normalizedPath)}`;
   if (import.meta.env.DEV) console.log("[adminFetch]", url);
   const res = await fetch(url, {
     credentials: "include",

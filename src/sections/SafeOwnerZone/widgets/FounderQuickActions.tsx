@@ -4,20 +4,22 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import RollbackDryRunDialog from './RollbackDryRunDialog';
 import RollbackDialog from './RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
+import { Link } from 'react-router-dom';
+import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
 
 export default function FounderQuickActions() {
   const { lockdown, snapshot, rotatePin } = useFounderActions();
   const notify = useNotify();
-  const [pin, setPin] = useState('');
+  const ownerUnlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
   const [busy, setBusy] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
   const [rotateConfirmOpen, setRotateConfirmOpen] = useState(false);
   async function handleLock() {
-  if (!pin) { notify.err('PIN required'); return; }
+  if (!isOwnerKeyUnlocked(ownerUnlockedUntilMs)) { notify.err('Owner Key required'); return; }
     setBusy(true);
     try {
-  const r = await lockdown({ reason: 'Manual emergency', scope: 'site', pin });
+  const r = await lockdown({ reason: 'Manual emergency', scope: 'site' });
   (window as any).__LOCK_STATE__ = r.ok ? 'LOCKED' : (window as any).__LOCK_STATE__ || 'UNLOCKED';
   if (r.ok) notify.ok('Lockdown enabled'); else notify.err('Lockdown failed', r.error);
     } finally { setBusy(false); }
@@ -32,16 +34,18 @@ export default function FounderQuickActions() {
   }
   return (
     <div className="flex flex-wrap gap-2 items-center">
-      <input
-        className="border px-2 py-1 rounded text-sm"
-        placeholder="Founder PIN"
-        value={pin}
-        onChange={e => setPin(e.target.value)}
-      />
+      {!isOwnerKeyUnlocked(ownerUnlockedUntilMs) ? (
+        <Link
+          to="/admin/safe-owner-zone"
+          className="rounded px-3 py-1 bg-blue-600 text-white text-sm"
+        >
+          Manage Owner Key → Safe Owner Zone
+        </Link>
+      ) : null}
       <button
         className="rounded px-3 py-1 bg-red-600 text-white text-sm disabled:opacity-50"
         onClick={() => setLockConfirmOpen(true)}
-        disabled={!pin || busy}
+        disabled={!isOwnerKeyUnlocked(ownerUnlockedUntilMs) || busy}
       >Lockdown</button>
       <button
         className="rounded px-3 py-1 bg-blue-600 text-white text-sm disabled:opacity-50"

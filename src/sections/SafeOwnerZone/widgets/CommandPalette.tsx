@@ -2,16 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { useFounderActions } from '../hooks/useFounderActions';
 import { useNotify } from '@/components/ui/toast-bridge';
 import { useNavigate } from 'react-router-dom';
+import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
 
 type Item = { id: string; title: string; hint?: string; run: () => Promise<void> | void };
 
 export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [pin, setPin] = useState('');
   const navigate = useNavigate();
   const { lockdown, snapshot, listSnapshots, rollback } = useFounderActions();
   const notify = useNotify();
+  const ownerUnlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -28,12 +29,13 @@ export default function CommandPalette() {
     { id: 'nav:security', title: 'Open → Security & Lockdown', run: () => navigate('/safeownerzone/security') },
     { id: 'nav:compliance', title: 'Open → Compliance & Policy', run: () => navigate('/safeownerzone/compliance') },
     { id: 'nav:ai', title: 'Open → AI Control', run: () => navigate('/safeownerzone/ai') },
+    { id: 'nav:ownerkey', title: 'Manage Owner Key → Safe Owner Zone', run: () => navigate('/admin/safe-owner-zone') },
     {
       id: 'action:lockdown',
-      title: 'Trigger Lockdown (requires PIN)',
+      title: 'Trigger Lockdown (requires Owner Key)',
       run: async () => {
-        if (!pin) { notify.err('PIN required'); return; }
-        const r = await lockdown({ reason: 'Palette action', scope: 'site', pin });
+        if (!isOwnerKeyUnlocked(ownerUnlockedUntilMs)) { notify.err('Owner Key required'); return; }
+        const r = await lockdown({ reason: 'Palette action', scope: 'site' });
         (window as any).__LOCK_STATE__ = r.ok ? 'LOCKED' : (window as any).__LOCK_STATE__ || 'UNLOCKED';
         if (r.ok) notify.ok('Lockdown ON'); else notify.err('Lockdown failed', r.error);
       }
@@ -58,7 +60,7 @@ export default function CommandPalette() {
         if (res.ok) notify.ok('Rollback dry-run OK', id); else notify.err('Rollback dry-run failed', res.error);
       }
     },
-  ], [pin, navigate, lockdown, snapshot, listSnapshots, rollback]);
+  ], [navigate, lockdown, snapshot, listSnapshots, rollback, notify, ownerUnlockedUntilMs]);
 
   const filtered = items.filter(i => i.title.toLowerCase().includes(q.toLowerCase()));
 
@@ -71,7 +73,6 @@ export default function CommandPalette() {
       <div className="mx-auto mt-24 w-full max-w-xl rounded-lg bg-white p-4 shadow" onClick={e => e.stopPropagation()}>
         <div className="flex gap-2 mb-2">
           <input className="flex-1 border rounded px-3 py-2" autoFocus placeholder="Type a command…" value={q} onChange={e => setQ(e.target.value)} />
-          <input className="w-40 border rounded px-2" placeholder="Founder PIN" value={pin} onChange={e => setPin(e.target.value)} />
         </div>
         <ul className="max-h-64 overflow-auto">
           {filtered.map(i => (
