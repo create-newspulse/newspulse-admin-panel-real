@@ -35,16 +35,16 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Legacy Safe Owner Zone (old page) — hidden to avoid duplication with v5 modules
   { key:'soz', label:'Safe Owner Zone', path:'/safeownerzone/founder', roles:['founder'], icon:'🧩', hidden: true },
-  // Founder Zone (v5 routes)
-  { key:'fz-founder', label:'Founder Command', path:'/safeownerzone/founder', roles:['founder'], icon:'🎛️' },
+  // Founder Zone (canonical v5 panel routes)
+  { key:'fz-founder', label:'Founder Command', path:'/panel/founder/command', roles:['founder'], icon:'🎛️' },
   // Founder Security module – clarify scope
-  { key:'fz-security', label:'Security & Lockdown', path:'/safeownerzone/security', roles:['founder'], icon:'🛡️' },
-  { key:'fz-compliance', label:'Compliance', path:'/safeownerzone/compliance', roles:['founder'], icon:'📜' },
-  { key:'fz-ai', label:'AI Control', path:'/safeownerzone/ai', roles:['founder'], icon:'🤖' },
-  { key:'fz-vaults', label:'Vaults', path:'/safeownerzone/vaults', roles:['founder'], icon:'🔐' },
-  { key:'fz-ops', label:'Operations', path:'/safeownerzone/ops', roles:['founder'], icon:'📈' },
-  { key:'fz-revenue', label:'Revenue', path:'/safeownerzone/revenue', roles:['founder'], icon:'💰' },
-  { key:'fz-admin', label:'Admin Oversight', path:'/safeownerzone/admin', roles:['founder'], icon:'🪪' },
+  { key:'fz-security', label:'Security & Lockdown', path:'/panel/founder/security', roles:['founder'], icon:'🛡️' },
+  { key:'fz-compliance', label:'Compliance', path:'/panel/founder/compliance', roles:['founder'], icon:'📜' },
+  { key:'fz-ai', label:'AI Control', path:'/panel/founder/ai-control', roles:['founder'], icon:'🤖' },
+  { key:'fz-vaults', label:'Vaults', path:'/panel/founder/vaults', roles:['founder'], icon:'🔐' },
+  { key:'fz-ops', label:'Operations', path:'/panel/founder/ops', roles:['founder'], icon:'📈' },
+  { key:'fz-revenue', label:'Revenue', path:'/panel/founder/analytics-revenue', roles:['founder'], icon:'💰' },
+  { key:'fz-admin', label:'Admin Oversight', path:'/panel/founder/admin', roles:['founder'], icon:'🪪' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
   { key:'youth', label:'Youth Pulse', path:'/admin/youth-pulse', roles:['editor','admin','founder'], icon:'🌐' },
   // Right side utility items

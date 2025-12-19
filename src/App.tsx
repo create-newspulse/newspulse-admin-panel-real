@@ -88,8 +88,6 @@ import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 // Settings Center (admin)
 import SettingsLayout from '@pages/admin/settings/SettingsLayout';
-import SettingsHome from '@pages/admin/settings/SettingsHome';
-import FrontendUiSettings from '@pages/admin/settings/FrontendUiSettings';
 import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
@@ -154,12 +152,14 @@ function App() {
               <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
-              {/* Manage News routes & aliases */}
-              <Route path="/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/manage-news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/news" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              {/* Ensure /admin/articles renders the Manage News list (breadcrumb shows 'Manage News') */}
+              {/* Add News legacy redirect */}
+              <Route path="/admin/add" element={<Navigate to="/add" replace />} />
+              {/* Manage News canonical route + redirects */}
               <Route path="/admin/articles" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/manage-news" element={<Navigate to="/admin/articles" replace />} />
+              <Route path="/admin/manage-news" element={<Navigate to="/admin/articles" replace />} />
+              <Route path="/admin/news" element={<Navigate to="/admin/articles" replace />} />
+              <Route path="/admin/manage" element={<Navigate to="/admin/articles" replace />} />
               {/* Draft Desk */}
               <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter Queue & Detail */}
@@ -196,11 +196,8 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
-              {/* Settings Center (layout + minimal routes) */}
-              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>}>
-                <Route index element={<SettingsHome />} />
-                <Route path="frontend-ui" element={<FrontendUiSettings />} />
-              </Route>
+              {/* Settings Center (shell only) */}
+              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>} />
               {/* Redirect /founder → /founder/feature-toggles */}
               <Route path="/founder" element={<Navigate to="/founder/feature-toggles" replace />} />
               {/* Founder-only Feature Toggles – Community Reporter */}
@@ -225,6 +222,15 @@ function App() {
               <Route path="/admin/editorial" element={<ProtectedRoute><Editorial /></ProtectedRoute>} />
 
               {/* 🧩 Founder-only Safe Owner Zone v5 (React Router adaptation) */}
+              {/* Legacy Safe Owner Zone redirects to canonical panel routes */}
+              <Route path="/safeownerzone/founder" element={<Navigate to="/panel/founder/command" replace />} />
+              <Route path="/safeownerzone/security" element={<Navigate to="/panel/founder/security" replace />} />
+              <Route path="/safeownerzone/compliance" element={<Navigate to="/panel/founder/compliance" replace />} />
+              <Route path="/safeownerzone/ai" element={<Navigate to="/panel/founder/ai-control" replace />} />
+              <Route path="/safeownerzone/vaults" element={<Navigate to="/panel/founder/vaults" replace />} />
+              <Route path="/safeownerzone/ops" element={<Navigate to="/panel/founder/ops" replace />} />
+              <Route path="/safeownerzone/revenue" element={<Navigate to="/panel/founder/analytics-revenue" replace />} />
+              <Route path="/safeownerzone/admin" element={<Navigate to="/panel/founder/admin" replace />} />
               {/* Base path redirects to default module via OwnerZoneRoute */}
               <Route path="/safeownerzone" element={<OwnerZoneRoute />} />
               <Route path="/safeownerzone/:module" element={<OwnerZoneRoute />} />

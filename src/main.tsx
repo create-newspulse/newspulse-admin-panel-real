@@ -8,6 +8,7 @@ import ErrorBoundary from './components/common/ErrorBoundary';
 import { ErrorBoundary as SystemErrorBoundary } from './components/system/ErrorBoundary';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import "./index.css";
+import { runNavAudit } from '@/dev/navAudit';
 
 // 🧠 Global Providers
 // Use path aliases consistently to avoid duplicate module instances in dev (prevents double Contexts)
@@ -102,3 +103,7 @@ createRoot(rootEl).render(
     </SystemErrorBoundary>
   </Providers>
 );
+
+if (import.meta.env.DEV) {
+  try { runNavAudit(); } catch {}
+}

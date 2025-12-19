@@ -2,6 +2,7 @@
 import { NavLink } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { leftNav, type Role } from "@/config/nav";
 
 export default function AdminNavbar() {
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -35,30 +36,17 @@ export default function AdminNavbar() {
       </div>
 
       <div className="flex flex-wrap gap-4 items-center">
-        <NavLink
-          to="/admin/dashboard"
-          className={({ isActive }) =>
-            isActive ? `${navLinkClass} ${activeLinkClass}` : navLinkClass
-          }
-        >
-          📊 Dashboard
-        </NavLink>
-        <NavLink
-          to="/admin/add"
-          className={({ isActive }) =>
-            isActive ? `${navLinkClass} ${activeLinkClass}` : navLinkClass
-          }
-        >
-          ➕ Add News
-        </NavLink>
-        <NavLink
-          to="/admin/manage"
-          className={({ isActive }) =>
-            isActive ? `${navLinkClass} ${activeLinkClass}` : navLinkClass
-          }
-        >
-          📁 Manage News
-        </NavLink>
+        {leftNav('admin' as Role).filter(i => !i.hidden).slice(0,5).map(item => (
+          <NavLink
+            key={item.key}
+            to={item.path}
+            className={({ isActive }) =>
+              isActive ? `${navLinkClass} ${activeLinkClass}` : navLinkClass
+            }
+          >
+            {item.icon} {item.label}
+          </NavLink>
+        ))}
 
         <button
           onClick={handleLogout}
