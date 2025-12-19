@@ -9,6 +9,15 @@ const Breadcrumbs = () => {
   const SEGMENT_LABELS: Record<string, string> = {
     admin: "Admin",
     safeownerzone: "Safe Owner Zone",
+    'safe-owner-zone': 'Safe Owner Zone',
+    founder: 'Founder Command',
+    'security-lockdown': 'Security & Lockdown',
+    compliance: 'Compliance',
+    'ai-control': 'AI Control',
+    vaults: 'Vaults',
+    operations: 'Operations',
+    revenue: 'Revenue',
+    'admin-oversight': 'Admin Oversight',
     'ai-engine': 'AI Engine',
     // News management aliases → single label
     articles: 'Manage News',
@@ -23,6 +32,7 @@ const Breadcrumbs = () => {
   const PATH_LABELS: Record<string, string> = {
     "/admin/security": "Zero-Trust Security",
     "/safeownerzone/security": "Security & Lockdown",
+    "/admin/safe-owner-zone/security-lockdown": "Security & Lockdown",
     "/community/reporter": "Community Reporter Queue",
   };
 

@@ -1,7 +1,7 @@
 // 📁 src/App.tsx
 
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
 import { I18nextProvider } from 'react-i18next';
@@ -101,10 +101,30 @@ import IntegrationsSettings from '@pages/admin/settings/IntegrationsSettings';
 import SecuritySettings from '@pages/admin/settings/SecuritySettings';
 import BackupsSettings from '@pages/admin/settings/BackupsSettings';
 import AuditLogsSettings from '@pages/admin/settings/AuditLogsSettings';
-import OwnerZoneRoute from './sections/SafeOwnerZone/OwnerZoneRoute';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
 import SimpleLogin from '@pages/auth/SimpleLogin';
+import { RequireRole } from '@/routes/guards';
+import SafeOwnerZoneLayout from '@/pages/admin/safe-owner-zone/SafeOwnerZoneLayout';
+import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
+import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
+
+function LegacySafeOwnerZoneRedirect() {
+  const { module } = useParams();
+  const m = String(module || '').toLowerCase();
+  const map: Record<string, string> = {
+    founder: 'founder',
+    security: 'security-lockdown',
+    compliance: 'compliance',
+    ai: 'ai-control',
+    vaults: 'vaults',
+    ops: 'operations',
+    revenue: 'revenue',
+    admin: 'admin-oversight',
+  };
+  const slug = map[m];
+  return <Navigate to={slug ? `/admin/safe-owner-zone/${slug}` : '/admin/safe-owner-zone'} replace />;
+}
 
 function App() {
   console.log('Router loaded: main admin router');
@@ -229,7 +249,27 @@ function App() {
               {/* Founder-only Feature Toggles – Community Reporter */}
               <Route path="/founder/feature-toggles" element={<FounderRoute><FeatureTogglesCommunityReporter /></FounderRoute>} />
               {/* Legacy path kept as redirect for backward compatibility */}
-              <Route path="/safe-owner" element={<Navigate to="/safeownerzone/founder" replace />} />
+              <Route path="/safe-owner" element={<Navigate to="/admin/safe-owner-zone" replace />} />
+              {/* New canonical Safe Owner Zone hub */}
+              <Route
+                path="/admin/safe-owner-zone"
+                element={
+                  <RequireRole allow={['founder', 'admin']}>
+                    <SafeOwnerZoneLayout />
+                  </RequireRole>
+                }
+              >
+                <Route index element={<SafeOwnerZoneHub />} />
+                <Route path="founder" element={<SafeOwnerZoneModule slug="founder" />} />
+                <Route path="security-lockdown" element={<SafeOwnerZoneModule slug="security-lockdown" />} />
+                <Route path="compliance" element={<SafeOwnerZoneModule slug="compliance" />} />
+                <Route path="ai-control" element={<SafeOwnerZoneModule slug="ai-control" />} />
+                <Route path="vaults" element={<SafeOwnerZoneModule slug="vaults" />} />
+                <Route path="operations" element={<SafeOwnerZoneModule slug="operations" />} />
+                <Route path="revenue" element={<SafeOwnerZoneModule slug="revenue" />} />
+                <Route path="admin-oversight" element={<SafeOwnerZoneModule slug="admin-oversight" />} />
+              </Route>
+
               <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />
               <Route path="/safe-owner/language-settings" element={<FounderRoute><LanguageManager /></FounderRoute>} />
               <Route path="/safe-owner/panel-guide" element={<FounderRoute><PanelGuide /></FounderRoute>} />
@@ -247,19 +287,9 @@ function App() {
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
               <Route path="/admin/editorial" element={<ProtectedRoute><Editorial /></ProtectedRoute>} />
 
-              {/* 🧩 Founder-only Safe Owner Zone v5 (React Router adaptation) */}
-              {/* Legacy Safe Owner Zone redirects to canonical panel routes */}
-              <Route path="/safeownerzone/founder" element={<Navigate to="/panel/founder/command" replace />} />
-              <Route path="/safeownerzone/security" element={<Navigate to="/panel/founder/security" replace />} />
-              <Route path="/safeownerzone/compliance" element={<Navigate to="/panel/founder/compliance" replace />} />
-              <Route path="/safeownerzone/ai" element={<Navigate to="/panel/founder/ai-control" replace />} />
-              <Route path="/safeownerzone/vaults" element={<Navigate to="/panel/founder/vaults" replace />} />
-              <Route path="/safeownerzone/ops" element={<Navigate to="/panel/founder/ops" replace />} />
-              <Route path="/safeownerzone/revenue" element={<Navigate to="/panel/founder/analytics-revenue" replace />} />
-              <Route path="/safeownerzone/admin" element={<Navigate to="/panel/founder/admin" replace />} />
-              {/* Base path redirects to default module via OwnerZoneRoute */}
-              <Route path="/safeownerzone" element={<OwnerZoneRoute />} />
-              <Route path="/safeownerzone/:module" element={<OwnerZoneRoute />} />
+              {/* Legacy Safe Owner Zone v5 routes: redirect to canonical /admin/safe-owner-zone */}
+              <Route path="/safeownerzone" element={<Navigate to="/admin/safe-owner-zone" replace />} />
+              <Route path="/safeownerzone/:module" element={<LegacySafeOwnerZoneRedirect />} />
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />

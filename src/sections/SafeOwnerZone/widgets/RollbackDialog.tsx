@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useFounderActions } from '../hooks/useFounderActions';
 import { useNotify } from '@/components/ui/toast-bridge';
+import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
 
 export default function RollbackDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { listSnapshots, diffSnapshot, rollback } = useFounderActions();
@@ -8,6 +9,7 @@ export default function RollbackDialog({ open, onClose }: { open: boolean; onClo
   const [snapshots, setSnaps] = useState<any[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [rows, setRows] = useState<any[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
     listSnapshots().then(r => setSnaps(r.items || []));
@@ -50,8 +52,23 @@ export default function RollbackDialog({ open, onClose }: { open: boolean; onClo
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button className="px-3 py-1 border rounded" onClick={onClose}>Cancel</button>
-          <button className="px-3 py-1 rounded bg-blue-600 text-white" disabled={!selected} onClick={confirm}>Apply Rollback</button>
+          <button
+            className="px-3 py-1 rounded bg-blue-600 text-white"
+            disabled={!selected}
+            onClick={() => setConfirmOpen(true)}
+          >Apply Rollback</button>
         </div>
+
+        <ConfirmDangerModal
+          open={confirmOpen}
+          title="Apply rollback"
+          description="This will revert settings/content to the selected snapshot. Type CONFIRM to proceed."
+          requirePin={false}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={async () => {
+            await confirm();
+          }}
+        />
       </div>
     </div>
   );

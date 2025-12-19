@@ -20,14 +20,17 @@ export default function PanelRouter() {
           <Route path="" element={<><QuickCards /><div className="mt-6"><SystemAlerts /></div></>} />
 
           {/* Founder */}
-          <Route path="founder/command" element={<RequireRole allow={['founder']}><Page title="Founder Command" /></RequireRole>} />
-          <Route path="founder/security" element={<RequireRole allow={['founder']}><Page title="Security & Lockdown" /></RequireRole>} />
-          <Route path="founder/vaults" element={<RequireRole allow={['founder']}><Page title="Vaults" /></RequireRole>} />
-          <Route path="founder/ai-control" element={<RequireRole allow={['founder']}><Page title="AI Control" /></RequireRole>} />
+          <Route path="founder/command" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/founder" replace /></RequireRole>} />
+          <Route path="founder/security" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/security-lockdown" replace /></RequireRole>} />
+          <Route path="founder/compliance" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/compliance" replace /></RequireRole>} />
+          <Route path="founder/vaults" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/vaults" replace /></RequireRole>} />
+          <Route path="founder/ai-control" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/ai-control" replace /></RequireRole>} />
+          <Route path="founder/ops" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/operations" replace /></RequireRole>} />
+          <Route path="founder/admin" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/admin-oversight" replace /></RequireRole>} />
           <Route path="founder/feature-toggles" element={<RequireRole allow={['founder']}><FeatureTogglesCommunityReporter /></RequireRole>} />
           <Route path="founder/site-controls" element={<RequireRole allow={['founder']}><SiteControls /></RequireRole>} />
           <Route path="founder/reporter-portal" element={<RequireRole allow={['founder','admin']}><ReporterPortalPreview /></RequireRole>} />
-          <Route path="founder/analytics-revenue" element={<RequireRole allow={['founder']}><Page title="Analytics & Revenue" /></RequireRole>} />
+          <Route path="founder/analytics-revenue" element={<RequireRole allow={['founder']}><Navigate to="/admin/safe-owner-zone/revenue" replace /></RequireRole>} />
           <Route path="founder/logs" element={<RequireRole allow={['founder']}><Page title="Founder Logs" /></RequireRole>} />
           <Route path="founder/system-intel" element={<RequireRole allow={['founder']}><Page title="System Intelligence Panel" /></RequireRole>} />
 

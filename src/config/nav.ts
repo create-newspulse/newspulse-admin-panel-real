@@ -34,17 +34,16 @@ export const NAV_ITEMS: NavItem[] = [
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Legacy Safe Owner Zone (old page) — hidden to avoid duplication with v5 modules
-  { key:'soz', label:'Safe Owner Zone', path:'/safeownerzone/founder', roles:['founder'], icon:'🧩', hidden: true },
-  // Founder Zone (canonical v5 panel routes)
-  { key:'fz-founder', label:'Founder Command', path:'/panel/founder/command', roles:['founder'], icon:'🎛️' },
-  // Founder Security module – clarify scope
-  { key:'fz-security', label:'Security & Lockdown', path:'/panel/founder/security', roles:['founder'], icon:'🛡️' },
-  { key:'fz-compliance', label:'Compliance', path:'/panel/founder/compliance', roles:['founder'], icon:'📜' },
-  { key:'fz-ai', label:'AI Control', path:'/panel/founder/ai-control', roles:['founder'], icon:'🤖' },
-  { key:'fz-vaults', label:'Vaults', path:'/panel/founder/vaults', roles:['founder'], icon:'🔐' },
-  { key:'fz-ops', label:'Operations', path:'/panel/founder/ops', roles:['founder'], icon:'📈' },
-  { key:'fz-revenue', label:'Revenue', path:'/panel/founder/analytics-revenue', roles:['founder'], icon:'💰' },
-  { key:'fz-admin', label:'Admin Oversight', path:'/panel/founder/admin', roles:['founder'], icon:'🪪' },
+  { key:'soz', label:'Safe Owner Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩', hidden: true },
+  // Safe Owner Zone (modules)
+  { key:'fz-founder', label:'Founder Command', path:'/admin/safe-owner-zone/founder', roles:['founder','admin'], icon:'🎛️' },
+  { key:'fz-security', label:'Security & Lockdown', path:'/admin/safe-owner-zone/security-lockdown', roles:['founder','admin'], icon:'🛡️' },
+  { key:'fz-compliance', label:'Compliance', path:'/admin/safe-owner-zone/compliance', roles:['founder','admin'], icon:'📜' },
+  { key:'fz-ai', label:'AI Control', path:'/admin/safe-owner-zone/ai-control', roles:['founder','admin'], icon:'🤖' },
+  { key:'fz-vaults', label:'Vaults', path:'/admin/safe-owner-zone/vaults', roles:['founder','admin'], icon:'🔐' },
+  { key:'fz-ops', label:'Operations', path:'/admin/safe-owner-zone/operations', roles:['founder','admin'], icon:'📈' },
+  { key:'fz-revenue', label:'Revenue', path:'/admin/safe-owner-zone/revenue', roles:['founder','admin'], icon:'💰' },
+  { key:'fz-admin', label:'Admin Oversight', path:'/admin/safe-owner-zone/admin-oversight', roles:['founder','admin'], icon:'🪪' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
   { key:'youth', label:'Youth Pulse', path:'/admin/youth-pulse', roles:['editor','admin','founder'], icon:'🌐' },
   // Right side utility items
