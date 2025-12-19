@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { adminApi } from '@lib/adminApi';
+import { adminJson } from '@/lib/adminApiClient';
 
 // Define the type for the training info (customize as per your real data)
 interface AITrainingInfo {
@@ -39,13 +39,17 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
 
   useEffect(() => {
     setLoading(true);
-  adminApi.get('/system/ai-training-info')
-      .then(res => {
-        setInfo((res.data as any)?.data ?? null);
+    (async () => {
+      try {
+        const json = await adminJson<{ data: AITrainingInfo }>('api/admin/system/ai-training-info');
+        setInfo(json?.data ?? null);
         setError(null);
-      })
-      .catch(() => setError('Failed to load AI training info.'))
-      .finally(() => setLoading(false));
+      } catch (e: any) {
+        setError('Failed to load AI training info.');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   return (

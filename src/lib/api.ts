@@ -6,7 +6,7 @@ import axios, { AxiosInstance } from 'axios';
 const API_BASE_URL = (
   (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() ||
   (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined)?.trim() ||
-  'https://newspulse-backend-real.onrender.com'
+  '/admin-api'
 );
 
 // Extend axios instance with monitorHub helper

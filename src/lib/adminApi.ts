@@ -1,14 +1,21 @@
 import axios from 'axios';
 
-// Standardize base URL: prefer VITE_ADMIN_API_BASE_URL or proxy '/admin-api', then append '/api/admin'.
+// Standardize base URL: prefer explicit VITE_ADMIN_API_BASE_URL or VITE_API_URL.
+// Fallback to proxy '/admin-api' only when no direct base is provided.
 const envAny = import.meta.env as any;
 const rawHost = (
   envAny.VITE_ADMIN_API_BASE_URL ||
   envAny.VITE_ADMIN_API_URL ||
+  envAny.VITE_API_URL ||
   ''
 ).toString().trim();
-const baseHost = rawHost || 'http://localhost:5000';
-export const adminRoot = `${baseHost.replace(/\/+$/, '')}/api/admin`;
+const baseHost = rawHost || '/admin-api';
+
+// If base ends with '/api', append '/admin'; otherwise append '/api/admin'
+const trimmed = baseHost.replace(/\/+$/, '');
+export const adminRoot = /\/api$/i.test(trimmed)
+  ? `${trimmed}/admin`
+  : `${trimmed}/api/admin`;
 
 export const ADMIN_API_BASE = adminRoot;
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
@@ -58,13 +65,20 @@ adminApi.interceptors.response.use(
       // Skip auto-logout for Community Reporter Queue endpoint; let page show error banner
       const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
       if (!isCommunityQueue) {
-        try { localStorage.removeItem('adminToken'); } catch {}
-        try { console.warn('[adminApi] Session expired (401). Redirecting to /admin/login'); } catch {}
-        if (typeof window !== 'undefined') {
-          const alreadyOnLogin = window.location.pathname.includes('/admin/login') || window.location.pathname.includes('/login');
-          if (!alreadyOnLogin) window.location.href = '/admin/login';
-        }
+        try {
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('np_admin_token');
+          localStorage.removeItem('np_admin_access_token');
+          localStorage.removeItem('newsPulseAdminAuth');
+        } catch {}
+        try { console.warn('[adminApi] Session expired (401) – logging out'); } catch {}
+        try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
       }
+    }
+    // 403 → surface Access Denied but do not logout
+    if (status === 403) {
+      try { (error as any).isForbidden = true; } catch {}
+      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:forbidden')); } catch {}
     }
     // Reduce spam: avoid logging route-not-found noise for monitor endpoints
     const suppress = (status === 404 && (/\/system\/monitor-hub$/.test(url) || /\/api\/admin\/me$/.test(url)));

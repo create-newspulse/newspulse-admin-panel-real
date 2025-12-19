@@ -64,22 +64,24 @@ if (!interceptorsAttached) {
 					if (
 						isTokenExpired &&
 						reqUrl && /\/admin\//.test(reqUrl) &&
-						typeof window !== 'undefined' &&
-						!authRedirectTriggered &&
-						window.location.pathname !== '/login'
+					typeof window !== 'undefined' &&
+					!authRedirectTriggered
 					) {
 						try {
 							localStorage.removeItem('newsPulseAdminAuth');
 							localStorage.removeItem('np_admin_access_token');
 							localStorage.removeItem('np_admin_token');
+							localStorage.removeItem('adminToken');
 						} catch {}
 						authRedirectTriggered = true;
 						try { toast.error('[Auth] Session expired – please log in again.'); } catch {}
-						try { window.location.assign('/login'); } catch {}
+						try { window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
 					}
 				} else if (status === 403) {
-					// Do not force logout; surface a helpful toast
+					// Do not force logout; surface toast and emit forbidden event so router can show Access Denied
 					try { toast.error('You do not have permission to perform this action.'); } catch {}
+					try { (error as any).isForbidden = true; } catch {}
+					try { window.dispatchEvent(new CustomEvent('np:forbidden')); } catch {}
 				}
 			} catch {}
 			return Promise.reject(error);

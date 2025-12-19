@@ -9,12 +9,27 @@ const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
+  const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
+  const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
-  // In dev, default to local backend if not specified; keep production untouched
-  const API_HTTP = rawAdminBase || (mode === 'development' ? 'http://localhost:5000' : '');
-  const API_WS   = stripSlash(env.VITE_API_WS)  || API_HTTP; // default WS -> same host if available
+  // Prefer explicit dev proxy target, then existing fallbacks
+  const API_TARGET = stripSlash(env.VITE_ADMIN_API_TARGET) || rawAdminBase || '';
+  // Explicit backend URL for dev proxy of /admin-api/* → backend
+  const BACKEND_URL = stripSlash(env.VITE_BACKEND_URL || '');
+  const API_WS   = stripSlash(env.VITE_API_WS)  || API_TARGET; // default WS -> same host if available
 
   const DEV_PORT = 5173;
+  // Dev diagnostic: show current admin API proxy target
+  if (mode === 'development') {
+    // eslint-disable-next-line no-console
+    console.log('[vite] Admin API target:', API_TARGET || '(undefined)');
+    if (BACKEND_URL) {
+      console.log('[vite] Dev proxy BACKEND_URL:', BACKEND_URL);
+    }
+    if (API_TARGET && /\/api\/?$/.test(API_TARGET)) {
+      console.warn('[vite] Note: Target ends with /api; proxy will strip /admin-api/api to avoid double prefix.');
+    }
+  }
   return {
     envPrefix: 'VITE_',
     base: '/',
@@ -46,17 +61,27 @@ export default defineConfig(({ mode }): UserConfig => {
       // Proxy all API + sockets to backend in dev
       proxy: {
         '/api': {
-          target: `${API_HTTP}`,
+          target: `${API_TARGET}`,
           changeOrigin: true,
           secure: false,
-          // keep path as-is (no rewrite) so /api/* hits backend /api/*
         },
-        // Proxy /admin-api/* -> backend /api/* per spec
-        '/admin-api': {
-          target: 'http://localhost:5000',
+        // Support public settings in local dev (maps /settings/* -> /api/settings/*)
+        '/settings': {
+          target: `${API_TARGET}`,
           changeOrigin: true,
           secure: false,
-          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
+          rewrite: (path) => path.replace(/^\/settings/, '/api/settings'),
+        },
+        // Proxy /admin-api/* -> backend. Rewrite strategy:
+        // - If backend routes are under '/admin/*', remove '/admin-api'
+        // - If backend routes are under '/api/admin/*', keep frontend path and add '/api' via Vercel or backend config.
+        // For local dev we strip '/admin-api' to hit '/admin/*' directly.
+        '/admin-api': {
+          target: BACKEND_URL || env.VITE_ADMIN_API_TARGET || API_TARGET,
+          changeOrigin: true,
+          secure: false,
+          // Remove the '/admin-api' prefix so '/admin-api/api/*' → '/api/*' at backend
+          rewrite: (path) => path.replace(/^\/admin-api/, ''),
         },
         '/socket.io': {
           target: API_WS,
@@ -82,10 +107,12 @@ export default defineConfig(({ mode }): UserConfig => {
     },
 
     define: {
-      'import.meta.env.VITE_ADMIN_API_BASE_URL': JSON.stringify(API_HTTP),
-      'import.meta.env.VITE_API_URL': JSON.stringify(API_HTTP),
+      'import.meta.env.VITE_ADMIN_API_BASE_URL': JSON.stringify(API_TARGET),
+      'import.meta.env.VITE_API_URL': JSON.stringify(API_TARGET),
       'import.meta.env.VITE_API_WS': JSON.stringify(API_WS),
       'import.meta.env.VITE_SITE_NAME': JSON.stringify(env.VITE_SITE_NAME ?? ''),
+      'import.meta.env.VITE_USE_PROXY': JSON.stringify(useProxy),
+      'import.meta.env.VITE_ADMIN_API_ORIGIN': JSON.stringify(adminApiOrigin),
     },
 
     build: {
@@ -134,6 +161,22 @@ export default defineConfig(({ mode }): UserConfig => {
         });
       }
     }],
+
+    // Startup banner reminding restart when env/proxy changes
+    customLogger: {
+      info(msg) {
+        // eslint-disable-next-line no-console
+        console.info(msg);
+        // eslint-disable-next-line no-console
+        if (msg.includes('ready in')) {
+          console.warn('[vite] If you change VITE_ADMIN_API_TARGET or proxy, restart `npm run dev`.');
+          console.warn('[vite] Admin API dev proxy →', env.VITE_ADMIN_API_TARGET || API_TARGET || '(unset)');
+        }
+      },
+      warn(msg) { console.warn(msg); },
+      error(msg) { console.error(msg); },
+      clearScreen: undefined,
+    },
 
     // Speed up dev for common deps (optional)
     optimizeDeps: {

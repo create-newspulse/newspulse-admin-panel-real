@@ -5,10 +5,13 @@ import axios from "axios";
 const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, "") : u);
 
 // Read from Vite env (only VITE_* are exposed)
+const USE_PROXY = String(import.meta.env?.VITE_USE_PROXY || '').toLowerCase() === 'true';
+const ORIGIN = stripSlash(import.meta.env?.VITE_ADMIN_API_ORIGIN);
 const RAW_NEW = stripSlash(import.meta.env?.VITE_ADMIN_API_URL);
 const RAW_ADMIN = stripSlash(import.meta.env?.VITE_ADMIN_API_BASE_URL);
 const RAW_LEGACY = stripSlash(import.meta.env?.VITE_API_URL);
-const API_ROOT = RAW_NEW || RAW_ADMIN || RAW_LEGACY || (import.meta.env.MODE === 'development' ? 'http://localhost:5000' : 'https://newspulse-backend-real.onrender.com');
+// Prefer explicit origin; fallback to '/admin-api' when proxy is enabled; otherwise use any legacy base.
+const API_ROOT = (USE_PROXY ? '/admin-api' : (ORIGIN || RAW_NEW || RAW_ADMIN || RAW_LEGACY || '')) || '/admin-api';
 // Compose final baseURL WITHOUT automatic /api suffix now.
 const api = axios.create({
   baseURL: `${API_ROOT.replace(/\/$/, '')}`,

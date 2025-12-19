@@ -1,16 +1,23 @@
-// Unified API base with prod safety (no localhost fallback in prod)
-const __rawBase =
-	(import.meta.env as any).VITE_ADMIN_API_URL ||
-	(import.meta.env as any).VITE_API_URL ||
-	((import.meta.env as any).DEV ? 'http://localhost:10000' : '');
+// Centralized API URL builder for proxy vs direct modes
+import { ADMIN_API_BASE, adminApiUrl as adminJoin } from '@/lib/url';
+const envAny = import.meta.env as any;
+const USE_PROXY = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true';
+const ORIGIN = ((envAny.VITE_ADMIN_API_ORIGIN || '') as string).replace(/\/+$/, ''); // no /api suffix
 
-if (!__rawBase) {
-	try { console.error('[apiBase] Missing VITE_ADMIN_API_URL in production build'); } catch {}
-	throw new Error('Missing admin API base URL');
+// apiUrl builds a full URL given a canonical path that begins with '/api/...'
+// - Proxy mode: '/api/x' -> '/admin-api/api/x' (keeps '/api' in path)
+// - Direct mode: '<origin>/api/x'
+export function apiUrl(path: string): string {
+	const p = path.startsWith('/') ? path : `/${path}`;
+	if (USE_PROXY || !ORIGIN) {
+		// keep '/api' so Vite/Vercel proxy can strip '/admin-api' and hit backend '/api/*'
+		return adminJoin(p);
+	}
+	return `${ORIGIN}${p}`;
 }
 
-export const API_BASE = __rawBase.toString().replace(/\/+$/, '');
+// Convenience constants
+export const HEALTH_URL = apiUrl('/api/system/health');
+export const AI_TRAINING_INFO_URL = apiUrl('/api/admin/system/ai-training-info');
 
-export const HEALTH_URL = `${API_BASE}/api/system/health`;
-export const AI_TRAINING_INFO_URL = `${API_BASE}/system/ai-training-info`;
-export default API_BASE;
+export default apiUrl;

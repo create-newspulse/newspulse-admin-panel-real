@@ -1,4 +1,5 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 
 type NavItem = { label: string; href: string; icon?: React.ReactNode };
 
@@ -51,19 +52,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const NavLinks = (
     <nav className="p-3 space-y-1">
       {nav.map(item => {
-        const isActive = path && path.toLowerCase().startsWith(item.href.toLowerCase());
+        const lc = item.href.toLowerCase();
         return (
-          <a
+          <NavLink
             key={item.href}
-            href={item.href}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors duration-150 
-              ${isActive ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-100' : 'hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800'}`}
+            to={item.href}
+            className={({ isActive }) => {
+              const active = isActive || (path && path.toLowerCase().startsWith(lc));
+              return `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors duration-150 ${
+                active ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-100' : 'hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800'
+              }`;
+            }}
           >
             <span aria-hidden>
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${isActive ? 'bg-blue-600' : 'bg-blue-500'}`} />
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${(path && path.toLowerCase().startsWith(lc)) ? 'bg-blue-600' : 'bg-blue-500'}`} />
             </span>
             {item.label}
-          </a>
+          </NavLink>
         );
       })}
     </nav>

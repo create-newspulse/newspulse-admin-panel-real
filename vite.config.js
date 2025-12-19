@@ -9,8 +9,8 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const rawApi = stripSlash(env.VITE_API_URL);
     // If VITE_API_URL is provided, always prefer it (even if it's localhost)
-    // Otherwise, in dev default to localhost:5000; in prod, to our secure proxy path
-    const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:5000' : '/admin-api');
+    // Otherwise, in dev default to localhost:3002; in prod, to our secure proxy path
+    const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:3002' : '/admin-api');
     const API_WS = stripSlash(env.VITE_API_WS) || API_HTTP; // default WS -> same host
     return {
         plugins: [react()],

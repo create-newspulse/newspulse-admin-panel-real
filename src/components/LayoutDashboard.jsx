@@ -1,5 +1,6 @@
 // src/components/LayoutDashboard.jsx
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 
 export default function LayoutDashboard({ children }) {
   return (
@@ -9,10 +10,10 @@ export default function LayoutDashboard({ children }) {
       <aside className="w-64 bg-white dark:bg-slate-800 shadow-lg p-4 hidden md:block">
         <h2 className="text-xl font-bold mb-6">📰 News Pulse</h2>
         <nav className="space-y-2">
-          <a href="/admin/dashboard" className="block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700">Dashboard</a>
-          <a href="/admin/news" className="block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700">Articles</a>
-          <a href="/admin/users" className="block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700">Users</a>
-          <a href="/admin/settings" className="block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700">Settings</a>
+          <NavLink to="/admin/dashboard" className={({isActive}) => `block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700 ${isActive ? 'bg-blue-100 dark:bg-slate-700' : ''}`}>Dashboard</NavLink>
+          <NavLink to="/admin/news" className={({isActive}) => `block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700 ${isActive ? 'bg-blue-100 dark:bg-slate-700' : ''}`}>Articles</NavLink>
+          <NavLink to="/admin/users" className={({isActive}) => `block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700 ${isActive ? 'bg-blue-100 dark:bg-slate-700' : ''}`}>Users</NavLink>
+          <NavLink to="/admin/settings" className={({isActive}) => `block p-2 rounded hover:bg-blue-100 dark:hover:bg-slate-700 ${isActive ? 'bg-blue-100 dark:bg-slate-700' : ''}`}>Settings</NavLink>
         </nav>
       </aside>
 

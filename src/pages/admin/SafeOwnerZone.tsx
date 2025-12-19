@@ -25,9 +25,8 @@ import KiranOSCommandCenter from "../../components/KiranOSCommandCenter";
 import AITrainer from "../../panels/AITrainer";
 import AdminControlCenter from "../../components/AdminControlCenter";
 import LiveNewsPollsPanel from "../../components/SafeZone/LiveNewsPollsPanel";
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
-const AI_TRAINING_INFO_URL = `${API_BASE}/system/ai-training-info`;
+import { apiUrl } from "@/lib/apiBase";
+const AI_TRAINING_INFO_URL = apiUrl('/api/admin/system/ai-training-info');
 import ErrorBoundary from "../../components/common/ErrorBoundary";
 import { safeLazy } from "@/utils/safeLazy";
 

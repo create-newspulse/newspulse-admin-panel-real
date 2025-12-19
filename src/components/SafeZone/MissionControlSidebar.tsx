@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { NavLink } from 'react-router-dom';
 
 const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
 const API_BASE = `${API_ORIGIN}/api`;
@@ -143,9 +144,9 @@ export default function MissionControlSidebar({
             <span className="text-[10px] text-gray-400">Status from KiranOS</span>
           </div>
           <p className="text-blue-300 text-sm">
-            <a href="/admin/control-constitution" className="hover:underline">
+            <NavLink to="/admin/control-constitution" className="hover:underline">
               🔎 View Constitution Page
-            </a>
+            </NavLink>
           </p>
           <p className="text-[10px] text-gray-500 italic">
             Last Check: {lastCheck}

@@ -1,6 +1,7 @@
 // newspulse-admin-panel-real-main/src/pages/ManageNews.tsx
 
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArticleTable } from '@/components/news/ArticleTable';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
@@ -36,6 +37,7 @@ export default function ManageNews() {
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const { publishEnabled, override, setOverride, envDefault } = usePublishFlag();
   const { isFounder } = useAuth();
+  const navigate = useNavigate();
 
   // Workflow transition (mirrors legacy doTransition)
   const doTransition = async (id: string, action: ArticleWorkflowAction) => {
@@ -72,7 +74,7 @@ export default function ManageNews() {
             CSV Upload
           </button>
           <button
-            onClick={() => (window.location.href = '/add')}
+            onClick={() => navigate('/add')}
             className="px-3 py-1 bg-green-600 text-white rounded"
           >
             Add New

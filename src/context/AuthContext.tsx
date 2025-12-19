@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { setAuthToken } from '@/lib/api';
 import { adminApi } from '@/lib/adminApi';
 
@@ -14,12 +15,13 @@ export interface AuthContextValue {
   isRestoring: boolean; // true while calling session restore endpoint
   restoreSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  logout: (reason?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -122,13 +124,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback((reason?: string) => {
     setAuthToken(null);
     setTokenState(null);
     setUser(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     try { localStorage.removeItem('np_admin_token'); } catch {}
-    if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage');
+    if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage', { reason: reason || 'manual' });
   }, []);
 
   // Hydrate from localStorage once on mount
@@ -155,6 +157,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       }
+      // Fallback: if no structured storage found, try legacy token keys
+      if (!localStorage.getItem(STORAGE_KEY)) {
+        try {
+          const legacy = localStorage.getItem('np_admin_access_token') || localStorage.getItem('np_admin_token');
+          if (legacy && String(legacy).trim()) {
+            const normalized = String(legacy).replace(/^Bearer\s+/i, '');
+            setTokenState(normalized);
+            setAuthToken(normalized);
+          }
+        } catch {}
+      }
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed', e);
     } finally {
@@ -162,6 +175,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (import.meta.env.DEV) console.debug('[Auth] hydration complete');
     }
   }, []);
+
+  // React to global logout/forbidden events emitted by interceptors
+  useEffect(() => {
+    function onLogout() {
+      logout('401');
+      try { navigate('/admin/login', { replace: true }); } catch {}
+    }
+    function onForbidden() {
+      // Only route if currently authenticated; otherwise let ProtectedRoute handle
+      if (isAuthenticated) {
+        try { navigate('/unauthorized', { replace: true }); } catch {}
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('np:logout', onLogout as any);
+      window.addEventListener('np:forbidden', onForbidden as any);
+      return () => {
+        window.removeEventListener('np:logout', onLogout as any);
+        window.removeEventListener('np:forbidden', onForbidden as any);
+      };
+    }
+    return () => {};
+  }, [isAuthenticated, navigate, logout]);
 
   // Track attempted restore to prevent loops
   const restoreAttemptedRef = useRef(false);

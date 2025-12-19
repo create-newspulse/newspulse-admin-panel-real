@@ -34,15 +34,85 @@ app.use((req, res, next) => {
   next();
 });
 
-// ===== IMPORT NEW FEATURE ROUTES =====
-import webauthnRoute from './backend/routes/security/webauthn.js';
-import rateLimitingRoute from './backend/routes/security/rate-limiting.js';
-import auditTrailRoute from './backend/routes/security/audit-trail.js';
-import sessionsRoute from './backend/routes/security/sessions.js';
-import rbacRoute from './backend/routes/security/rbac.js';
-import webStoriesRoute from './backend/routes/stories/web-stories.js';
-import commentModRoute from './backend/routes/moderation/comments.js';
-import seoToolsRoute from './backend/routes/seo/tools.js';
+// ===== Admin Settings (demo storage) =====
+const DEFAULT_SETTINGS = {
+  ui: {
+    showExploreCategories: true,
+    showCategoryStrip: true,
+    showTrendingStrip: true,
+    showLiveUpdatesTicker: false,
+    showBreakingTicker: false,
+    showQuickTools: true,
+    showAppPromo: false,
+    showFooter: true,
+    theme: 'system',
+    density: 'comfortable',
+  },
+  navigation: { enableTopNav: true, enableSidebar: true, enableBreadcrumbs: true },
+  publishing: { autoPublishApproved: false, reviewWorkflow: 'basic', defaultVisibility: 'public' },
+  ai: { editorialAssistant: false, autoSummaries: false, contentTagging: true, model: 'gpt' },
+  voice: { ttsEnabled: false, ttsVoice: 'female_en', rtlEnabled: false, languages: ['en'] },
+  community: { reporterPortalEnabled: true, commentsEnabled: true, moderationLevel: 'moderated' },
+  monetization: { adsEnabled: false, sponsorBlocks: false, membershipEnabled: false },
+  integrations: { analyticsEnabled: true, analyticsProvider: 'ga4', newsletterProvider: 'none' },
+  security: { lockdown: false, twoFactorRequired: false, allowedHosts: [] },
+  backups: { enabled: false, cadence: 'weekly' },
+  audit: { enabled: true, retentionDays: 90 },
+  version: 1,
+  updatedAt: new Date().toISOString(),
+};
+
+let SITE_SETTINGS = { ...DEFAULT_SETTINGS };
+
+app.get('/api/admin/settings', (req, res) => {
+  try {
+    const s = SITE_SETTINGS && typeof SITE_SETTINGS === 'object' ? SITE_SETTINGS : DEFAULT_SETTINGS;
+    return res.status(200).json(s);
+  } catch (e) {
+    return res.status(200).json(DEFAULT_SETTINGS);
+  }
+});
+
+app.put('/api/admin/settings', (req, res) => {
+  try {
+    const patch = req.body || {};
+    const merged = { ...SITE_SETTINGS, ...patch, version: (SITE_SETTINGS.version || 1) + 1, updatedAt: new Date().toISOString() };
+    // shallow merge per section to avoid dropping nested fields
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      if (typeof DEFAULT_SETTINGS[key] === 'object' && !Array.isArray(DEFAULT_SETTINGS[key])) {
+        merged[key] = { ...DEFAULT_SETTINGS[key], ...(SITE_SETTINGS[key] || {}), ...(patch[key] || {}) };
+      }
+    }
+    SITE_SETTINGS = merged;
+    console.log('[audit] update-settings', { version: SITE_SETTINGS.version });
+    return res.status(200).json(SITE_SETTINGS);
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+});
+
+// ===== OPTIONAL FEATURE ROUTES (guarded to avoid CJS/ESM boundary issues locally) =====
+const ENABLE_SECURITY_ROUTES = String(process.env.DEMO_SECURITY_ROUTES || '').toLowerCase() === 'true';
+let webauthnRoute, rateLimitingRoute, auditTrailRoute, sessionsRoute, rbacRoute, webStoriesRoute, commentModRoute, seoToolsRoute;
+if (ENABLE_SECURITY_ROUTES) {
+  try {
+    const m1 = await import('./backend/routes/security/webauthn.js');
+    const m2 = await import('./backend/routes/security/rate-limiting.js');
+    const m3 = await import('./backend/routes/security/audit-trail.js');
+    const m4 = await import('./backend/routes/security/sessions.js');
+    const m5 = await import('./backend/routes/security/rbac.js');
+    const m6 = await import('./backend/routes/stories/web-stories.js');
+    const m7 = await import('./backend/routes/moderation/comments.js');
+    const m8 = await import('./backend/routes/seo/tools.js');
+    webauthnRoute = m1.default; rateLimitingRoute = m2.default; auditTrailRoute = m3.default; sessionsRoute = m4.default;
+    rbacRoute = m5.default; webStoriesRoute = m6.default; commentModRoute = m7.default; seoToolsRoute = m8.default;
+    console.log('✅ Optional security/feature routes enabled');
+  } catch (e) {
+    console.log('⚠️  Skipping optional security/feature routes:', e?.message || e);
+  }
+} else {
+  console.log('ℹ️  DEMO_SECURITY_ROUTES not enabled; skipping optional security/feature routes');
+}
 
 // ===== OPENAI VISION FOR ALT-TEXT =====
 let openaiClient = null;
@@ -171,15 +241,15 @@ app.get('/api/vault/list', (req, res) => {
   });
 });
 
-// ===== MOUNT NEW FEATURE ROUTES =====
-app.use('/api/security/webauthn', webauthnRoute);
-app.use('/api/security/rate-limit', rateLimitingRoute);
-app.use('/api/security/audit', auditTrailRoute);
-app.use('/api/security/sessions', sessionsRoute);
-app.use('/api/security/rbac', rbacRoute);
-app.use('/api/web-stories', webStoriesRoute);
-app.use('/api/moderation/comments', commentModRoute);
-app.use('/api/seo', seoToolsRoute);
+// ===== MOUNT OPTIONAL FEATURE ROUTES (if loaded) =====
+if (webauthnRoute) app.use('/api/security/webauthn', webauthnRoute);
+if (rateLimitingRoute) app.use('/api/security/rate-limit', rateLimitingRoute);
+if (auditTrailRoute) app.use('/api/security/audit', auditTrailRoute);
+if (sessionsRoute) app.use('/api/security/sessions', sessionsRoute);
+if (rbacRoute) app.use('/api/security/rbac', rbacRoute);
+if (webStoriesRoute) app.use('/api/web-stories', webStoriesRoute);
+if (commentModRoute) app.use('/api/moderation/comments', commentModRoute);
+if (seoToolsRoute) app.use('/api/seo', seoToolsRoute);
 
 // ===== ANALYTICS STUBS (for existing Analytics dashboard) =====
 app.get('/api/analytics/revenue', (req, res) => {
