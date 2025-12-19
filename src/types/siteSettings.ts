@@ -23,6 +23,7 @@ export const SiteSettingsSchema = z.object({
   // Publishing
   publishing: z.object({
     autoPublishApproved: z.boolean().default(false),
+    readOnly: z.boolean().optional(),
     reviewWorkflow: z.enum(['none','basic','strict']).default('basic'),
     defaultVisibility: z.enum(['public','private','scheduled']).default('public'),
   }),
@@ -57,6 +58,7 @@ export const SiteSettingsSchema = z.object({
     analyticsEnabled: z.boolean().default(true),
     analyticsProvider: z.enum(['none','ga4','plausible']).default('ga4'),
     newsletterProvider: z.enum(['none','mailchimp','resend']).default('none'),
+    externalFetch: z.boolean().optional(),
   }),
   // Security (founder-only)
   security: z.object({
