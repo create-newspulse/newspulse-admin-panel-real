@@ -105,7 +105,7 @@ import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
 import SimpleLogin from '@pages/auth/SimpleLogin';
 import { RequireRole } from '@/routes/guards';
-import SafeOwnerZoneLayout from '@/pages/admin/safe-owner-zone/SafeOwnerZoneLayout';
+import SafeOwnerZoneShell from '@/pages/admin/safe-owner-zone/SafeOwnerZoneShell';
 import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
 import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
 
@@ -255,7 +255,7 @@ function App() {
                 path="/admin/safe-owner-zone"
                 element={
                   <RequireRole allow={['founder', 'admin']}>
-                    <SafeOwnerZoneLayout />
+                    <SafeOwnerZoneShell />
                   </RequireRole>
                 }
               >

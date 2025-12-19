@@ -1,11 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import settingsApi from '@/lib/settingsApi';
-import { useFounderActions } from '@/sections/SafeOwnerZone/hooks/useFounderActions';
+import { useMemo, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { useNotify } from '@/components/ui/toast-bridge';
-import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
-import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
-import { useAuth } from '@/context/AuthContext';
+import type { OwnerZoneShellContext } from './SafeOwnerZoneShell';
 
 type AuditRow = {
   ts?: string;
@@ -18,7 +14,7 @@ type AuditRow = {
 type ToggleState = { value: boolean | undefined; label: string; statusText: string; disabled: boolean };
 
 function formatWhen(ts: string | null | undefined) {
-  if (!ts) return 'Awaiting backend';
+  if (!ts) return '—';
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   return d.toLocaleString();
@@ -61,105 +57,35 @@ function classifyAudit(r: AuditRow): 'Security' | 'AI' | 'Settings' | 'Revenue' 
 
 export default function SafeOwnerZoneHub() {
   const notify = useNotify();
-  const { user } = useAuth();
-  const { snapshot, lockdown, listSnapshots } = useFounderActions();
+  const {
+    backendConnected,
+    settings,
+    health,
+    audit,
+    canUseDangerActions,
+    busy,
+    doSnapshot,
+    openRollback,
+    openEmergencyLockdown,
+    updateAdminSettings,
+  } = useOutletContext<OwnerZoneShellContext>();
 
-  const [settings, setSettings] = useState<any>(null);
-  const [health, setHealth] = useState<any>(null);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [lastSnapshotAt, setLastSnapshotAt] = useState<string | null>(null);
-  const [pin, setPin] = useState('');
-  const [dangerUnlocked, setDangerUnlocked] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [timelineFilter, setTimelineFilter] = useState<'All' | 'Security' | 'AI' | 'Settings' | 'Revenue'>('All');
 
-  const [rollbackOpen, setRollbackOpen] = useState(false);
-  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-    settingsApi
-      .getAdminSettings()
-      .then((s) => mounted && setSettings(s))
-      .catch(() => mounted && setSettings(null));
-
-    fetch('/api/system/health', { credentials: 'include' })
-      .then((r) => r.json())
-      .then((j) => mounted && setHealth(j))
-      .catch(() => mounted && setHealth(null));
-
-    fetch('/api/audit/recent?limit=20', { credentials: 'include' })
-      .then((r) => r.json())
-      .then((j) => mounted && setAudit(Array.isArray(j?.items) ? j.items.slice(0, 20) : []))
-      .catch(() => mounted && setAudit([]));
-
-    // Best-effort snapshot timestamp (for header)
-    listSnapshots()
-      .then((r: any) => {
-        if (!mounted) return;
-        const items = Array.isArray(r?.items) ? r.items : [];
-        const latest = items[0] || null;
-        const ts =
-          latest?.ts ||
-          latest?.createdAt ||
-          latest?.created_at ||
-          latest?.time ||
-          latest?.at ||
-          null;
-        setLastSnapshotAt(typeof ts === 'string' ? ts : null);
-      })
-      .catch(() => mounted && setLastSnapshotAt(null));
-
-    return () => {
-      mounted = false;
-    };
-  }, [listSnapshots]);
-
-  const lockState = useMemo(() => {
-    const lockdown = settings?.security?.lockdown === true;
-    const readOnly = settings?.publishing?.readOnly === true;
-    if (lockdown) return { label: 'LOCKDOWN' as const, tone: 'danger' as const };
-    if (readOnly) return { label: 'READ-ONLY' as const, tone: 'warn' as const };
-    return { label: 'UNLOCKED' as const, tone: 'ok' as const };
-  }, [settings]);
-
-  const headerPillClass =
-    lockState.tone === 'danger'
-      ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700'
-      : lockState.tone === 'warn'
-        ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700'
-        : 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700';
-
-  const accessBadge = useMemo(() => {
-    const role = String((user as any)?.role || '').toLowerCase();
-    if (role === 'founder') return { label: 'FOUNDER ACCESS', tone: 'founder' as const };
-    if (role === 'admin') return { label: 'ADMIN ACCESS', tone: 'admin' as const };
-    return { label: 'ACCESS', tone: 'admin' as const };
-  }, [user]);
-
-  const accessBadgeClass =
-    accessBadge.tone === 'founder'
-      ? 'bg-slate-50 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-white dark:border-slate-700'
-      : 'bg-slate-50 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-white dark:border-slate-700';
-
-  const lastAuditAt = useMemo(() => (audit?.[0]?.ts ? audit[0].ts : null), [audit]);
-
-  const canUseDangerActions = dangerUnlocked && Boolean(pin);
-
   const readOnlyToggle: ToggleState = useMemo(() => {
-    if (!settings) return { value: undefined, label: 'ReadOnly', statusText: 'Awaiting backend', disabled: true };
+    if (!settings) return { value: undefined, label: 'ReadOnly', statusText: '—', disabled: true };
     const v = settings?.publishing?.readOnly;
     return { value: typeof v === 'boolean' ? v : undefined, label: 'ReadOnly', statusText: typeof v === 'boolean' ? (v ? 'Enabled' : 'Disabled') : 'Not configured', disabled: !canUseDangerActions || busy };
   }, [settings, canUseDangerActions, busy]);
 
   const autoPublishToggle: ToggleState = useMemo(() => {
-    if (!settings) return { value: undefined, label: 'AutoPublish', statusText: 'Awaiting backend', disabled: true };
+    if (!settings) return { value: undefined, label: 'AutoPublish', statusText: '—', disabled: true };
     const v = settings?.publishing?.autoPublishApproved;
     return { value: typeof v === 'boolean' ? v : undefined, label: 'AutoPublish', statusText: typeof v === 'boolean' ? (v ? 'Enabled' : 'Disabled') : 'Not configured', disabled: !canUseDangerActions || busy };
   }, [settings, canUseDangerActions, busy]);
 
   const externalFetchToggle: ToggleState = useMemo(() => {
-    if (!settings) return { value: undefined, label: 'ExternalFetch', statusText: 'Awaiting backend', disabled: true };
+    if (!settings) return { value: undefined, label: 'ExternalFetch', statusText: '—', disabled: true };
     const v = settings?.integrations?.externalFetch;
     return { value: typeof v === 'boolean' ? v : undefined, label: 'ExternalFetch', statusText: typeof v === 'boolean' ? (v ? 'Enabled' : 'Disabled') : 'Not configured', disabled: !canUseDangerActions || busy };
   }, [settings, canUseDangerActions, busy]);
@@ -167,10 +93,10 @@ export default function SafeOwnerZoneHub() {
   const healthState = useMemo(() => {
     if (!health) {
       return {
-        api: 'Awaiting backend',
-        dbPing: 'Awaiting backend',
-        lastJob: 'Awaiting backend',
-        uptime: 'Awaiting backend',
+        api: '—',
+        dbPing: '—',
+        lastJob: '—',
+        uptime: '—',
       };
     }
     if (health?.proxied === false) {
@@ -203,9 +129,9 @@ export default function SafeOwnerZoneHub() {
 
     return {
       api: ok ? 'OK' : 'Degraded',
-      dbPing: typeof dbPingMs === 'number' ? `${dbPingMs} ms` : typeof dbPingMs === 'string' ? dbPingMs : 'Awaiting backend',
-      lastJob: typeof lastJob === 'string' ? lastJob : lastJob ? String(lastJob) : 'Awaiting backend',
-      uptime: typeof uptime === 'number' ? `${Math.round(uptime)} s` : typeof uptime === 'string' ? uptime : 'Awaiting backend',
+      dbPing: typeof dbPingMs === 'number' ? `${dbPingMs} ms` : typeof dbPingMs === 'string' ? dbPingMs : '—',
+      lastJob: typeof lastJob === 'string' ? lastJob : lastJob ? String(lastJob) : '—',
+      uptime: typeof uptime === 'number' ? `${Math.round(uptime)} s` : typeof uptime === 'string' ? uptime : '—',
     };
   }, [health]);
 
@@ -217,113 +143,30 @@ export default function SafeOwnerZoneHub() {
 
   async function toggleSetting(kind: 'readOnly' | 'autoPublish' | 'externalFetch', next: boolean) {
     if (!settings) return;
-    setBusy(true);
     try {
       if (kind === 'readOnly') {
-        const s = await settingsApi.putAdminSettings({ publishing: { readOnly: next } } as any, { action: 'owner.zone.toggle.readonly' });
-        setSettings(s);
+        await updateAdminSettings({ publishing: { readOnly: next } } as any, 'owner.zone.toggle.readonly');
         notify.ok('Updated', `ReadOnly ${next ? 'enabled' : 'disabled'}`);
       } else if (kind === 'autoPublish') {
-        const s = await settingsApi.putAdminSettings({ publishing: { autoPublishApproved: next } } as any, { action: 'owner.zone.toggle.autopublish' });
-        setSettings(s);
+        await updateAdminSettings({ publishing: { autoPublishApproved: next } } as any, 'owner.zone.toggle.autopublish');
         notify.ok('Updated', `AutoPublish ${next ? 'enabled' : 'disabled'}`);
       } else {
-        const s = await settingsApi.putAdminSettings({ integrations: { externalFetch: next } } as any, { action: 'owner.zone.toggle.externalfetch' });
-        setSettings(s);
+        await updateAdminSettings({ integrations: { externalFetch: next } } as any, 'owner.zone.toggle.externalfetch');
         notify.ok('Updated', `ExternalFetch ${next ? 'enabled' : 'disabled'}`);
       }
     } catch (e: any) {
       notify.err('Update failed', e?.message || 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doSnapshot() {
-    try {
-      const r = await snapshot('Safe Owner Zone HUB snapshot');
-      if (r.ok) notify.ok('Snapshot created', r.id);
-      else notify.err('Snapshot failed', r.error);
-    } catch (e: any) {
-      notify.err('Snapshot failed', e?.message || 'Unknown error');
     }
   }
 
   return (
     <div className="space-y-6">
-      {/* A) Command Center Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight">Owner Control Center</h1>
-              <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${headerPillClass}`}>
-                {lockState.label}
-              </span>
-              <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${accessBadgeClass}`}>
-                {accessBadge.label}
-              </span>
-            </div>
-            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Safe Owner Zone — system controls, health, and audit visibility.</div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-              <div className="text-xs font-semibold text-slate-500 dark:text-slate-300">Last snapshot</div>
-              <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{formatWhen(lastSnapshotAt)}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-              <div className="text-xs font-semibold text-slate-500 dark:text-slate-300">Last audit event</div>
-              <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{formatWhen(lastAuditAt)}</div>
-            </div>
-          </div>
+      {/* A) Backend banner (ONLY once; no per-line repetition) */}
+      {!backendConnected ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+          Backend not connected — showing placeholders
         </div>
-
-        <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-2">
-            <input
-              className="w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-              placeholder="Founder PIN"
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value);
-                // If pin is cleared, relock actions.
-                if (!e.target.value) setDangerUnlocked(false);
-              }}
-              type="password"
-              inputMode="numeric"
-            />
-            <button
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-              disabled={!pin || dangerUnlocked}
-              onClick={() => setDangerUnlocked(true)}
-              title={dangerUnlocked ? 'Danger actions unlocked for this session' : 'Unlock dangerous actions'}
-            >
-              {dangerUnlocked ? 'Unlocked' : 'Unlock Danger Actions'}
-            </button>
-          </div>
-
-          <div className="text-xs text-slate-600 dark:text-slate-300">
-            Dangerous actions are disabled until you unlock.
-          </div>
-        </div>
-      </div>
-
-      {/* D) Pinned links row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Link className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" to="/admin/safe-owner-zone/founder">
-          🎛️ Founder Command
-        </Link>
-        <Link className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" to="/admin/safe-owner-zone/security-lockdown">
-          🛡️ Security &amp; Lockdown
-        </Link>
-        <Link className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" to="/admin/settings/audit-logs">
-          🧾 Audit Logs
-        </Link>
-        <Link className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" to="/admin/settings">
-          ⚙️ Settings
-        </Link>
-      </div>
+      ) : null}
 
       {/* B) Main content grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -334,7 +177,11 @@ export default function SafeOwnerZoneHub() {
               <div className="text-lg font-semibold">Live Controls</div>
               <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Operational switches and emergency actions.</div>
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{canUseDangerActions ? 'Danger unlocked' : 'Danger locked'}</div>
+            {!canUseDangerActions ? (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Danger locked
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3">
@@ -376,23 +223,21 @@ export default function SafeOwnerZoneHub() {
             <button
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
               onClick={doSnapshot}
-              disabled={busy}
+              disabled={!canUseDangerActions || busy}
             >
               Snapshot
             </button>
             <button
               className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
-              onClick={() => setRollbackOpen(true)}
+              onClick={openRollback}
               disabled={!canUseDangerActions || busy}
-              title={!canUseDangerActions ? 'Unlock danger actions to use rollback' : ''}
             >
               Rollback
             </button>
             <button
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
-              onClick={() => setLockConfirmOpen(true)}
+              onClick={openEmergencyLockdown}
               disabled={!canUseDangerActions || busy}
-              title={!canUseDangerActions ? 'Unlock danger actions to use emergency lockdown' : ''}
             >
               Emergency Lockdown
             </button>
@@ -471,62 +316,32 @@ export default function SafeOwnerZoneHub() {
               No audit events.
             </div>
           ) : (
-            <div className="relative">
-              <div className="absolute left-3 top-0 h-full w-px bg-slate-200 dark:bg-slate-700" />
-              <div className="space-y-3">
-                {filteredTimeline.map((r, i) => {
-                  const when = r.ts ? new Date(r.ts).toLocaleString() : 'Awaiting backend';
-                  const actor = r.actorId ? `${r.actorId}${r.role ? ` (${r.role})` : ''}` : 'system';
-                  return (
-                    <div key={i} className="relative pl-9">
-                      <div className="absolute left-2 top-3 h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500" />
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                          <div className="text-sm font-semibold text-slate-900 dark:text-white">{r.type || 'event'}</div>
-                          <div className="text-xs text-slate-600 dark:text-slate-300">{when}</div>
+            <ul className="space-y-2">
+              {filteredTimeline.map((r, i) => {
+                const bucket = classifyAudit(r);
+                const icon = bucket === 'Security' ? '🛡️' : bucket === 'AI' ? '🤖' : bucket === 'Settings' ? '⚙️' : bucket === 'Revenue' ? '💰' : '🧾';
+                const actor = r.actorId ? `${r.actorId}${r.role ? ` (${r.role})` : ''}` : 'system';
+                return (
+                  <li key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div className="text-lg leading-none">{icon}</div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{r.type || 'event'}</div>
+                          <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">Actor: {actor}</div>
                         </div>
-                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">Actor: {actor}</div>
-                        {r.payload ? (
-                          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-                            {JSON.stringify(r.payload, null, 2)}
-                          </pre>
-                        ) : null}
                       </div>
+                      <div className="shrink-0 text-xs text-slate-600 dark:text-slate-300">{formatWhen(r.ts)}</div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
 
-        <div className="mt-4 flex items-center justify-between">
-          <Link className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400" to="/admin/safe-owner-zone/admin-oversight">
-            Open Admin Oversight
-          </Link>
-          <div className="text-xs text-slate-500 dark:text-slate-400">Showing {filteredTimeline.length} event(s)</div>
-        </div>
+        <div className="mt-4 text-xs text-slate-500 dark:text-slate-400">Showing {filteredTimeline.length} event(s)</div>
       </div>
-
-      <RollbackDialog open={rollbackOpen} onClose={() => setRollbackOpen(false)} />
-
-      <ConfirmDangerModal
-        open={lockConfirmOpen}
-        title="Emergency Lockdown"
-        description="This is a dangerous action. Type CONFIRM to trigger lockdown."
-        confirmLabel="CONFIRM"
-        requirePin={false}
-        confirmButtonText="Trigger Lockdown"
-        danger
-        onClose={() => setLockConfirmOpen(false)}
-        onConfirm={async () => {
-          if (!canUseDangerActions) return;
-          const r = await lockdown({ reason: 'Owner Control Center emergency lockdown', scope: 'site', pin });
-          (window as any).__LOCK_STATE__ = r.ok ? 'LOCKED' : (window as any).__LOCK_STATE__ || 'UNLOCKED';
-          if (r.ok) notify.ok('Lockdown enabled');
-          else notify.err('Lockdown failed', r.error);
-        }}
-      />
     </div>
   );
 }
