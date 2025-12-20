@@ -6,6 +6,7 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
 import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
+import { createSnapshot, getRecentAudit, listSnapshots } from '@/api/ownerZone';
 
 export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
 
@@ -62,7 +63,7 @@ function statusPillClass(status: OwnerZoneStatus) {
 
 export default function SafeOwnerZoneShell() {
   const notify = useNotify();
-  const { snapshot, lockdown, listSnapshots } = useFounderActions();
+  const { lockdown } = useFounderActions();
   const setOwnerMode = useOwnerKeyStore((s) => s.setMode);
   const ownerUnlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
 
@@ -84,8 +85,8 @@ export default function SafeOwnerZoneShell() {
       const results = await Promise.allSettled([
         settingsApi.getAdminSettings(),
         fetch('/api/system/health', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
-        fetch('/api/audit/recent?limit=30', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
-        listSnapshots().catch(() => null as any),
+        getRecentAudit(30).catch(() => null as any),
+        listSnapshots(20).catch(() => null as any),
       ]);
 
       if (!mounted) return;
@@ -103,7 +104,7 @@ export default function SafeOwnerZoneShell() {
       setAudit(Array.isArray((a as any)?.items) ? (a as any).items.slice(0, 30) : []);
 
       const snaps = results[3].status === 'fulfilled' ? results[3].value : null;
-      const items = Array.isArray((snaps as any)?.items) ? (snaps as any).items : [];
+      const items = Array.isArray((snaps as any)?.items) ? (snaps as any).items : Array.isArray(snaps) ? (snaps as any) : [];
       const latest = items[0] || null;
       const ts = latest?.ts || latest?.createdAt || latest?.created_at || latest?.time || latest?.at || null;
       setLastSnapshotAt(typeof ts === 'string' ? ts : null);
@@ -137,9 +138,10 @@ export default function SafeOwnerZoneShell() {
     if (!canUseDangerActions) return;
     setBusy(true);
     try {
-      const r: any = await snapshot('Owner Control Center snapshot');
-      if (r?.ok) notify.ok('Snapshot created', r.id);
-      else notify.err('Snapshot failed', r?.error || 'Unknown error');
+      const r: any = await createSnapshot({ label: 'Owner Control Center snapshot', reason: 'Safe Owner Zone manual snapshot' });
+      const id = r?.id || r?._id || r?.snapshotId;
+      if (id) notify.ok('Snapshot created', String(id));
+      else notify.ok('Snapshot created');
     } catch (e: any) {
       notify.err('Snapshot failed', e?.message || 'Unknown error');
     } finally {

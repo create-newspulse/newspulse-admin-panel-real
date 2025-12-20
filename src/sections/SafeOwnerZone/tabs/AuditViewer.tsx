@@ -1,9 +1,22 @@
 import { useEffect, useState } from 'react';
+import { getRecentAudit } from '@/api/ownerZone';
 
 export default function AuditViewer() {
   const [rows, setRows] = useState<any[]>([]);
   useEffect(() => {
-    fetch('/api/audit/recent').then(r => r.json()).then(d => setRows(d.items || []));
+    let mounted = true;
+    (async () => {
+      try {
+        const d: any = await getRecentAudit(30);
+        const items = Array.isArray(d?.items) ? d.items : Array.isArray(d) ? d : [];
+        if (mounted) setRows(items);
+      } catch {
+        if (mounted) setRows([]);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
   return (
     <div className="border rounded">

@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useFounderActions } from '../hooks/useFounderActions';
 import { useNotify } from '@/components/ui/toast-bridge';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
+import { listSnapshots, rollbackApply } from '@/api/ownerZone';
 
 export default function RollbackDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { listSnapshots, diffSnapshot, rollback } = useFounderActions();
   const notify = useNotify();
   const [snapshots, setSnaps] = useState<any[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -12,17 +11,22 @@ export default function RollbackDialog({ open, onClose }: { open: boolean; onClo
   const [confirmOpen, setConfirmOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
-    listSnapshots().then(r => setSnaps(r.items || []));
+    listSnapshots(20).then(r => setSnaps((r as any)?.items || []));
   }, [open]);
   async function onSelect(id: string) {
     setSelected(id);
-    const diff = await diffSnapshot(id);
-    setRows(diff.rows || []);
+    // This backend contract does not expose a snapshot diff preview.
+    // Keep the table empty so users can still apply rollbacks.
+    setRows([]);
   }
   async function confirm() {
     if (!selected) return;
-    const res = await rollback(selected, false);
-    if (res.ok) notify.ok('Rollback applied', selected); else notify.err('Rollback failed', res.error);
+    try {
+      await rollbackApply(selected);
+      notify.ok('Rollback applied', selected);
+    } catch (e: any) {
+      notify.err('Rollback failed', e?.message || 'Unknown error');
+    }
     onClose();
   }
   if (!open) return null;

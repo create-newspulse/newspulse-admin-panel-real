@@ -1,33 +1,23 @@
+import { useCallback, useMemo } from 'react';
+import { api, apiUrl } from '@/lib/http';
+import { getAuthToken } from '@/lib/adminApi';
+
 export function useFounderActions() {
-  async function parseResponse(r: Response) {
-    const ctype = r.headers.get('content-type') || '';
-    const isJson = ctype.includes('application/json');
-    if (!r.ok) {
-      // Try to read body for better diagnostics
-      const body = isJson ? await r.json().catch(() => undefined) : await r.text().catch(() => '');
-      const snippet = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body);
-      throw new Error(`HTTP ${r.status} ${r.statusText}${snippet ? ` — ${snippet}` : ''}`);
-    }
-    return isJson ? r.json() : r.text();
-  }
-
-  const post = (url: string, body: any) =>
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body)
-    }).then(parseResponse);
-
-  const get = (url: string) => fetch(url, { credentials: 'include' }).then(parseResponse);
+  const post = useCallback((url: string, body: any) => api(url, { method: 'POST', json: body }), []);
+  const get = useCallback((url: string) => api(url), []);
   const SECURITY_ENABLED = import.meta.env.VITE_SECURITY_SYSTEM_ENABLED !== 'false';
 
-  async function safeGetEscalation() {
+  const safeGetEscalation = useCallback(async () => {
     const path = '/api/alerts/settings';
     if (!SECURITY_ENABLED) return { levels: [], _stub: true };
     // Probe via HEAD first to avoid full GET if clearly absent.
     try {
-      const head = await fetch(path, { method: 'HEAD', credentials: 'include' });
+      const token = getAuthToken();
+      const head = await fetch(apiUrl(path), {
+        method: 'HEAD',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       if (!head.ok && head.status === 404) {
         console.warn('[useFounderActions] HEAD 404 escalation; stub');
         return { levels: [], _stub: true };
@@ -46,9 +36,9 @@ export function useFounderActions() {
       }
       throw err;
     }
-  }
+  }, [SECURITY_ENABLED, get]);
 
-  async function safeSaveEscalation(data: any) {
+  const safeSaveEscalation = useCallback(async (data: any) => {
     const path = '/api/alerts/settings';
     if (!SECURITY_ENABLED) {
       console.warn('[useFounderActions] escalation save skipped (security disabled)');
@@ -56,7 +46,12 @@ export function useFounderActions() {
     }
     // Probe before POST to suppress inevitable 404 POST.
     try {
-      const head = await fetch(path, { method: 'HEAD', credentials: 'include' });
+      const token = getAuthToken();
+      const head = await fetch(apiUrl(path), {
+        method: 'HEAD',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       if (!head.ok && head.status === 404) {
         console.warn('[useFounderActions] save HEAD 404; stub persist');
         return { ok: true, levels: data.levels || [], _stub: true };
@@ -74,17 +69,20 @@ export function useFounderActions() {
       }
       throw err;
     }
-  }
+  }, [SECURITY_ENABLED, post]);
 
-  return {
-    lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin?: string }) => post('/api/founder/lockdown', payload),
-    unlock: (pin: string) => post('/api/founder/unlock', { pin }),
-    snapshot: (note?: string) => post('/api/founder/snapshot', { note }),
-    rollback: (snapshotId: string, dryRun = true) => post('/api/founder/rollback', { snapshotId, dryRun }),
-    listSnapshots: () => get('/api/founder/snapshots'),
-    diffSnapshot: (id: string) => get(`/api/founder/snapshots/${id}/diff`),
-    getEscalation: () => safeGetEscalation(),
-    saveEscalation: (data: any) => safeSaveEscalation(data),
-    rotatePin: (oldPin: string, newPin: string) => post('/api/founder/pin/rotate', { oldPin, newPin }),
-  };
+  return useMemo(
+    () => ({
+      lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin?: string }) => post('/api/founder/lockdown', payload),
+      unlock: (pin: string) => post('/api/founder/unlock', { pin }),
+      snapshot: (note?: string) => post('/api/founder/snapshot', { note }),
+      rollback: (snapshotId: string, dryRun = true) => post('/api/founder/rollback', { snapshotId, dryRun }),
+      listSnapshots: () => get('/api/founder/snapshots'),
+      diffSnapshot: (id: string) => get(`/api/founder/snapshots/${id}/diff`),
+      getEscalation: () => safeGetEscalation(),
+      saveEscalation: (data: any) => safeSaveEscalation(data),
+      rotatePin: (oldPin: string, newPin: string) => post('/api/founder/pin/rotate', { oldPin, newPin }),
+    }),
+    [get, post, safeGetEscalation, safeSaveEscalation],
+  );
 }
