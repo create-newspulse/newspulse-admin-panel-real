@@ -6,7 +6,7 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
 import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
-import { createSnapshot, getRecentAudit, listSnapshots } from '@/api/ownerZone';
+import { createSnapshot, getRecentAudit, health, listSnapshots } from '@/api/ownerZone';
 
 export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
 
@@ -84,7 +84,7 @@ export default function SafeOwnerZoneShell() {
     (async () => {
       const results = await Promise.allSettled([
         settingsApi.getAdminSettings(),
-        fetch('/api/system/health', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)),
+        health().catch(() => null as any),
         getRecentAudit(30).catch(() => null as any),
         listSnapshots(20).catch(() => null as any),
       ]);
@@ -132,7 +132,7 @@ export default function SafeOwnerZoneShell() {
 
   const lastAuditAt = useMemo(() => (audit?.[0]?.ts ? audit[0].ts : null), [audit]);
 
-  const canUseDangerActions = isOwnerKeyUnlocked(ownerUnlockedUntilMs) && !busy;
+  const canUseDangerActions = isOwnerKeyUnlocked(ownerUnlockedUntilMs) && backendConnected && status === 'UNLOCKED' && !busy;
 
   async function doSnapshot() {
     if (!canUseDangerActions) return;

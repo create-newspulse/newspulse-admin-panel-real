@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api as apiLib } from '../../lib/api';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import { apiUrl } from '@/lib/apiBase';
 
 // Simple options
 const LANGUAGES = ['English', 'Hindi', 'Gujarati'];
@@ -36,8 +34,7 @@ export default function AIEngine(): JSX.Element {
     .catch(async () => {
       // Fallback POST if helper missing
       try {
-        const API_ORIGIN_FALLBACK = (import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '') || '/admin-api';
-        const endpoint = API_ORIGIN_FALLBACK === '/admin-api' ? `${API_ORIGIN_FALLBACK}/ai/engine/run` : `${API_ORIGIN_FALLBACK}/api/ai/engine/run`;
+        const endpoint = apiUrl('/api/ai/engine/run');
         const fr = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -79,7 +76,7 @@ export default function AIEngine(): JSX.Element {
 
   // Fetch current backend OpenAI model for display/hint
   useEffect(() => {
-    fetch(`${API_BASE}/system/ai-health`, { credentials: 'include' })
+    fetch(apiUrl('/api/system/ai-health'), { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         const m = (data && (data.model || data.selectedModel)) || '';

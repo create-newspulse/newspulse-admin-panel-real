@@ -5,15 +5,15 @@ export function joinPath(base: string, path: string) {
   return `${b}/${p}`;
 }
 
-// Canonical admin proxy base used across the app
-export const ADMIN_API_BASE = '/admin-api';
+// Canonical API base used across the app (Vite proxy)
+export const ADMIN_API_BASE = '/api';
 
 // Helper: build an admin API URL (expects `path` may start with '/api/...')
 export function adminApiUrl(path: string) {
   const raw = (path || '').toString().trim();
   const withLeadingSlash = raw.startsWith('/') ? raw : `/${raw}`;
-  // IMPORTANT: when using the '/admin-api' proxy base, do not include a leading
-  // '/api/' segment. The proxy already rewrites '/admin-api/*' -> backend '/api/*'.
+  // IMPORTANT: ADMIN_API_BASE already includes '/api'.
+  // Avoid creating '/api/api/...'
   const normalized = withLeadingSlash.replace(/^\/api\//, '/');
   return joinPath(ADMIN_API_BASE, normalized);
 }

@@ -1,13 +1,20 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Centralized Admin API base per spec:
-// Prefer explicit env vars; if unset, default to Render backend origin to avoid localhost errors.
-// Support both VITE_ADMIN_API_BASE and VITE_ADMIN_API_BASE_URL.
-const API_BASE_URL = (
-  (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() ||
-  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined)?.trim() ||
-  '/admin-api'
-);
+// Centralized API base per spec:
+// Prefer VITE_API_BASE_URL (no /api suffix). Fallback to older envs, then proxy.
+const envAny = import.meta.env as any;
+const rawBase = (
+  envAny.VITE_API_BASE_URL ||
+  envAny.VITE_BACKEND_URL ||
+  envAny.VITE_ADMIN_API_BASE_URL ||
+  envAny.VITE_API_URL ||
+  envAny.VITE_ADMIN_API_BASE ||
+  ''
+).toString().trim();
+const trimmed = rawBase.replace(/\/+$/, '');
+const API_BASE_URL = trimmed
+  ? (/\/api$/i.test(trimmed) ? trimmed : `${trimmed}/api`)
+  : '/api';
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -24,10 +31,10 @@ export interface ExtendedApi extends AxiosInstance {
 
 export const api: ExtendedApi = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: false,
+  withCredentials: true,
 }) as ExtendedApi;
 
-// Normalize path joins so base '/admin-api' works with callers using '/api/...'
+// Normalize path joins so callers can pass '/api/...'
 api.interceptors.request.use((cfg) => {
   try {
     const base = (cfg.baseURL || '').toString();

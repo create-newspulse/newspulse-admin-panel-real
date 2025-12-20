@@ -54,7 +54,7 @@ async function putAdminSettings(patch: Partial<SiteSettings>, audit?: { action?:
   let raw: any;
   // Update via single endpoint; do not auto-refetch via settings/load
   raw = await adminJson<any>('api/admin/settings', {
-    method: 'PUT',
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}) },
     body: JSON.stringify(patch || {}),
   });

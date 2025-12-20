@@ -12,10 +12,15 @@ export default defineConfig(({ mode }): UserConfig => {
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
-  // Prefer explicit dev proxy target, then existing fallbacks
-  const API_TARGET = stripSlash(env.VITE_ADMIN_API_TARGET) || rawAdminBase || '';
+  // Prefer explicit dev proxy target, then new base, then existing fallbacks
+  const API_TARGET =
+    stripSlash(env.VITE_ADMIN_API_TARGET) ||
+    stripSlash(env.VITE_API_BASE_URL) ||
+    stripSlash(env.VITE_BACKEND_URL) ||
+    rawAdminBase ||
+    'http://localhost:5000';
   // Explicit backend URL for dev proxy of /admin-api/* → backend
-  const BACKEND_URL = stripSlash(env.VITE_BACKEND_URL || '');
+  const BACKEND_URL = stripSlash(env.VITE_BACKEND_URL || env.VITE_API_BASE_URL || '');
   const API_WS   = stripSlash(env.VITE_API_WS)  || API_TARGET; // default WS -> same host if available
 
   const DEV_PORT = 5173;
@@ -61,7 +66,7 @@ export default defineConfig(({ mode }): UserConfig => {
       // Proxy all API + sockets to backend in dev
       proxy: {
         '/api': {
-          target: `${API_TARGET}`,
+          target: `${API_TARGET || 'http://localhost:5000'}`,
           changeOrigin: true,
           secure: false,
         },
@@ -77,11 +82,11 @@ export default defineConfig(({ mode }): UserConfig => {
         // - If backend routes are under '/api/admin/*', keep frontend path and add '/api' via Vercel or backend config.
         // For local dev we strip '/admin-api' to hit '/admin/*' directly.
         '/admin-api': {
-          target: BACKEND_URL || env.VITE_ADMIN_API_TARGET || API_TARGET,
+          target: BACKEND_URL || env.VITE_ADMIN_API_TARGET || API_TARGET || 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
-          // Remove the '/admin-api' prefix so '/admin-api/api/*' → '/api/*' at backend
-          rewrite: (path) => path.replace(/^\/admin-api/, ''),
+          // Rewrite '/admin-api/*' -> '/api/*' for compatibility during transition.
+          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
         },
         '/socket.io': {
           target: API_WS,

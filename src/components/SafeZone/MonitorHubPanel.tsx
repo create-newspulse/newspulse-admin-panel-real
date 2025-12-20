@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { useNotification } from '@context/NotificationContext';
 import api from '@lib/api';
 import { fetchJson } from '@lib/fetchJson';
+import { apiUrl } from '@/lib/apiBase';
 import {
   FaChartLine, FaTrafficLight, FaUserShield, FaMapMarkedAlt,
   FaRobot, FaShieldAlt, FaFileExport
@@ -146,9 +147,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const adminRoot = (import.meta.env.VITE_ADMIN_API_BASE as string | undefined)?.trim() || '/admin-api';
-      const BASE = adminRoot === '/admin-api' ? adminRoot : `${adminRoot}/api`;
-      const json = await fetchJson<{ enabled?: boolean }>(`${BASE}/system/daily-summary-toggle`, {
+      const json = await fetchJson<{ enabled?: boolean }>(apiUrl('/api/system/daily-summary-toggle'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ toggle: true }),

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiUrl } from "@/lib/apiBase";
 
 type SiteSettings = {
   showCategoryStrip: boolean;
@@ -56,9 +57,6 @@ const Toggle = ({ label, value, onChange }: { label: string; value: boolean; onC
 );
 
 export default function SiteControls() {
-  // Prefer Proxy Mode per project guide; fallback to direct VITE_API_URL
-  const direct = (import.meta as any).env?.VITE_API_URL as string | undefined;
-  const API_BASE = direct ? `${String(direct).replace(/\/?api\/?$/, "")}/api` : "/admin-api";
   const token = useMemo(() => (typeof window !== 'undefined' ? localStorage.getItem("token") || "" : ""), []);
 
   const [loading, setLoading] = useState(true);
@@ -72,7 +70,7 @@ export default function SiteControls() {
     try {
       const headers: HeadersInit = {};
       if (token) headers.Authorization = `Bearer ${token}` as any;
-      const res = await fetch(`${API_BASE}/site-settings/admin`, {
+      const res = await fetch(apiUrl('/api/site-settings/admin'), {
         headers,
         credentials: 'include',
       });
@@ -93,7 +91,7 @@ export default function SiteControls() {
     try {
       const headers: HeadersInit = { "Content-Type": "application/json" };
       if (token) (headers as any).Authorization = `Bearer ${token}`;
-      const res = await fetch(`${API_BASE}/site-settings/admin`, {
+      const res = await fetch(apiUrl('/api/site-settings/admin'), {
         method: "PUT",
         headers,
         credentials: 'include',

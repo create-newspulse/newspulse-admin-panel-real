@@ -138,8 +138,8 @@ const AIActivityLog: React.FC = () => {
             >Retry</button>
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400">
-            Tip: Ensure you are logged in via <a className="underline" href="/auth">/auth</a> and that the proxy <code>/admin-api</code> can reach your backend.
-            Quick check: <a className="underline" href="/admin-api/system/status" target="_blank" rel="noreferrer">/admin-api/system/status</a>
+            Tip: Ensure you are logged in via <a className="underline" href="/auth">/auth</a> and that the <code>/api</code> proxy can reach your backend.
+            Quick check: <a className="underline" href="/api/system/health" target="_blank" rel="noreferrer">/api/system/health</a>
           </div>
         </div>
       ) : data ? (

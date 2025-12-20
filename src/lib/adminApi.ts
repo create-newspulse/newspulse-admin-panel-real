@@ -1,15 +1,18 @@
 import axios from 'axios';
 
-// Standardize base URL: prefer explicit VITE_ADMIN_API_BASE_URL or VITE_API_URL.
-// Fallback to proxy '/admin-api' only when no direct base is provided.
+// Standardize base URL: prefer explicit VITE_API_BASE_URL (or legacy envs).
+// Fallback to proxy '/api' (Vite proxy) when no direct base is provided.
 const envAny = import.meta.env as any;
 const rawHost = (
+  envAny.VITE_API_BASE_URL ||
   envAny.VITE_ADMIN_API_BASE_URL ||
   envAny.VITE_ADMIN_API_URL ||
   envAny.VITE_API_URL ||
+  envAny.VITE_BACKEND_URL ||
   ''
 ).toString().trim();
-const baseHost = rawHost || '/admin-api';
+// Proxy mode (local dev): use '/api' so Vite proxy forwards to localhost:5000.
+const baseHost = rawHost || '/api';
 
 // If base ends with '/api', append '/admin'; otherwise append '/api/admin'
 const trimmed = baseHost.replace(/\/+$/, '');
@@ -75,10 +78,11 @@ adminApi.interceptors.response.use(
         try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
       }
     }
-    // 403 → surface Access Denied but do not logout
+    // 403 → treat as Owner Key required for Safe Owner Zone actions.
+    // (Do not redirect to Access Denied for Owner Key lock.)
     if (status === 403) {
-      try { (error as any).isForbidden = true; } catch {}
-      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:forbidden')); } catch {}
+      try { (error as any).isOwnerKeyRequired = true; } catch {}
+      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:ownerkey-required')); } catch {}
     }
     // Reduce spam: avoid logging route-not-found noise for monitor endpoints
     const suppress = (status === 404 && (/\/system\/monitor-hub$/.test(url) || /\/api\/admin\/me$/.test(url)));
@@ -101,10 +105,8 @@ if (import.meta.env.DEV) {
   });
 }
 
-// Resolve a path with awareness of proxy base. If using '/admin-api' remove leading '/api/'.
 // Resolve an API path relative to the chosen base.
-// For proxy base '/admin-api' we strip a leading '/api/' segment so rewrite matches.
-// For direct base we prepend the full origin.
+// Avoid duplicated '/api/api' and tolerate callers passing '/api/...'.
 export function resolveAdminPath(p: string): string {
   const clean = p.startsWith('/') ? p : `/${p}`;
   const normalized = clean.replace(/^\/api\//, '/').replace(/^\/admin\//, '/');
@@ -115,8 +117,7 @@ export function resolveAdminPath(p: string): string {
 try { console.info('[adminApi] base resolved =', adminRoot); } catch {}
 
 // OTP Password Reset helpers (backend exposes /api/auth/otp/*)
-// New unified OTP helpers using resolveAdminPath so proxy base works.
-// Helper to build OTP paths relative to chosen base without duplicating '/admin-api'
+// Helper to build OTP paths relative to chosen base.
 function otpEndpoint(segment: string) {
   // If the direct origin includes '/api', avoid duplicating it
   if (/\/api$/.test(adminRoot)) return `/auth/otp/${segment}`;

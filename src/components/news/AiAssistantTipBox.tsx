@@ -1,4 +1,5 @@
 import React from 'react';
+import { apiUrl } from '@/lib/apiBase';
 
 // --- small helpers ---
 // Multilingual slugify: keep English letters, digits, Hindi (Devanagari) and Gujarati characters.
@@ -45,8 +46,7 @@ async function tryAiSuggest(payload: {
   language: 'en' | 'hi' | 'gu';
 }) {
   try {
-    // Use admin API base; aligns with backend /admin-api/assist/suggest
-    const res = await fetch('/admin-api/assist/suggest', {
+    const res = await fetch(apiUrl('/api/assist/suggest'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

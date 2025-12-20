@@ -11,6 +11,7 @@ import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
 import { fetchJson } from '@lib/fetchJson';
 import { adminRoot, resolveAdminPath } from '@lib/adminApi';
+import { apiUrl } from '@/lib/apiBase';
 
 // api client from src/lib/api.ts (default export = axios instance)
 import { adminApi } from '@lib/adminApi';
@@ -41,9 +42,6 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [debugExpanded, setDebugExpanded] = useState(false);
-
-  // Build base aware of proxy usage. If adminRoot is '/admin-api' we do not append '/api'.
-  const API_BASE = adminRoot.startsWith('/admin-api') ? adminRoot : `${adminRoot}/api`;
 
   const articles = useMemo(
     () => [
@@ -123,9 +121,7 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        // Build health endpoint with duplication-safe resolver
-        const healthPath = resolveAdminPath('/system/health');
-        const json = await fetchJson(healthPath);
+        const json = await fetchJson(apiUrl('/api/system/health'));
         setAiCommand(json);
       } catch (err: any) {
         console.error('❌ AI Command API Error:', err?.message || err);
@@ -135,7 +131,7 @@ const Dashboard = () => {
 
     fetchStats();
     fetchAICommand();
-  }, [API_BASE, t]);
+  }, [t]);
 
   const langCode = (i18n.language?.split('-')[0] || 'en') as 'en' | 'hi' | 'gu';
   // Feature flag: disable the yellow scrolling ticker by default.
@@ -190,7 +186,7 @@ const Dashboard = () => {
 
             {SHOW_TICKER && (
               <section>
-                <LiveTicker apiUrl={`${API_BASE}/news-ticker`} position="top" />
+                <LiveTicker apiUrl={apiUrl('/api/news-ticker')} position="top" />
               </section>
             )}
 

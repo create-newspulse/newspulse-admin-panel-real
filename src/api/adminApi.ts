@@ -78,10 +78,10 @@ if (!interceptorsAttached) {
 						try { window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
 					}
 				} else if (status === 403) {
-					// Do not force logout; surface toast and emit forbidden event so router can show Access Denied
-					try { toast.error('You do not have permission to perform this action.'); } catch {}
-					try { (error as any).isForbidden = true; } catch {}
-					try { window.dispatchEvent(new CustomEvent('np:forbidden')); } catch {}
+					// Owner Key locked should not redirect to Access Denied
+					try { toast.error('Owner Key required'); } catch {}
+					try { (error as any).isOwnerKeyRequired = true; } catch {}
+					try { window.dispatchEvent(new CustomEvent('np:ownerkey-required')); } catch {}
 				}
 			} catch {}
 			return Promise.reject(error);

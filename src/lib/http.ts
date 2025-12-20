@@ -1,3 +1,5 @@
+import { apiUrl as buildApiUrl } from '@/lib/apiBase';
+
 export class ApiError extends Error {
   status: number;
   url: string;
@@ -11,16 +13,6 @@ export class ApiError extends Error {
     this.body = opts.body;
   }
 }
-
-const BACKEND_ORIGIN = (
-  // Single canonical config (requested): VITE_BACKEND_URL (no /api suffix)
-  import.meta.env.VITE_BACKEND_URL ||
-  // Back-compat
-  import.meta.env.VITE_BACKEND_ORIGIN ||
-  ''
-)
-  .toString()
-  .replace(/\/+$/, '');
 
 import { getAuthToken } from '@/lib/adminApi';
 
@@ -74,12 +66,6 @@ export function clearOwnerUnlockToken() {
   }
 }
 
-function joinUrl(origin: string, path: string) {
-  const o = origin.replace(/\/+$/, '');
-  const p = path.startsWith('/') ? path : `/${path}`;
-  return `${o}${p}`;
-}
-
 function normalizeApiPath(input: string) {
   let p = input.startsWith('/') ? input : `/${input}`;
   // Collapse known double-prefix mistakes.
@@ -90,11 +76,8 @@ function normalizeApiPath(input: string) {
 }
 
 export function apiUrl(path: string): string {
-  if (!BACKEND_ORIGIN) {
-    throw new Error('VITE_BACKEND_URL is not set. Set it to your backend origin (no /api suffix).');
-  }
   const apiPath = normalizeApiPath(path);
-  return joinUrl(BACKEND_ORIGIN, apiPath);
+  return buildApiUrl(apiPath);
 }
 
 async function readErrorBody(res: Response) {
@@ -131,10 +114,6 @@ export type ApiOptions = RequestInit & {
 };
 
 export async function api<T = any>(path: string, init: ApiOptions = {}): Promise<T> {
-  if (!BACKEND_ORIGIN) {
-    throw new Error('VITE_BACKEND_URL is not set. Set it to your backend origin (no /api suffix).');
-  }
-
   const url = apiUrl(path);
 
   const headers = new Headers(init.headers || undefined);
@@ -161,9 +140,32 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
     credentials: init.credentials ?? 'include',
   });
 
+  // Required global behaviors
+  try {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('np_admin_token');
+        localStorage.removeItem('np_admin_access_token');
+        localStorage.removeItem('newsPulseAdminAuth');
+      } catch {}
+      window.dispatchEvent(new CustomEvent('np:logout'));
+    }
+    if (res.status === 403 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('np:ownerkey-required'));
+    }
+    if ((res.status === 503 || res.status === 423) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('np:lockdown'));
+    }
+  } catch {}
+
   if (!res.ok) {
     const errBody = await readErrorBody(res);
-    const msg = toErrorMessage(errBody, `HTTP ${res.status} ${res.statusText}`);
+    let msg = toErrorMessage(errBody, `HTTP ${res.status} ${res.statusText}`);
+    // Dev-only: replace noisy "Route not found" with an actionable backend-missing hint.
+    if (import.meta.env.DEV && res.status === 404) {
+      msg = `Backend API missing: ${normalizeApiPath(path)}`;
+    }
     throw new ApiError(msg, { status: res.status, url, body: errBody });
   }
 

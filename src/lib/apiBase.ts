@@ -1,19 +1,27 @@
-// Centralized API URL builder for proxy vs direct modes
-import { ADMIN_API_BASE, adminApiUrl as adminJoin } from '@/lib/url';
+// Single source of truth for backend base per spec.
+// - Production: set VITE_API_BASE_URL to your backend origin (no /api suffix)
+// - Local dev: default is http://localhost:5000, but you may set VITE_USE_PROXY=true
+//   to use Vite's /api proxy (so requests are made to /api/*).
 const envAny = import.meta.env as any;
-const USE_PROXY = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true';
-const ORIGIN = ((envAny.VITE_ADMIN_API_ORIGIN || '') as string).replace(/\/+$/, ''); // no /api suffix
 
-// apiUrl builds a full URL given a canonical path that begins with '/api/...'
-// - Proxy mode: '/api/x' -> '/admin-api/x' (proxy already rewrites to backend '/api/*')
-// - Direct mode: '<origin>/api/x'
+export const API_BASE = (envAny.VITE_API_BASE_URL || 'http://localhost:5000').toString().trim().replace(/\/+$/, '');
+const USE_PROXY = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true' && import.meta.env.DEV;
+
+function normalizeApiPath(path: string): string {
+	let p = path.startsWith('/') ? path : `/${path}`;
+	// Collapse known double-prefix mistakes.
+	p = p.replace(/^\/api\/api\//, '/api/');
+	if (p === '/api' || p.startsWith('/api/')) return p;
+	return `/api${p.replace(/^\/+/, '/')}`;
+}
+
+// apiUrl builds a URL given a path that may or may not include '/api'.
+// - Proxy mode: returns a relative '/api/..' URL (Vite proxy handles forwarding)
+// - Direct mode: returns '${API_BASE}/api/..'
 export function apiUrl(path: string): string {
-	const p = path.startsWith('/') ? path : `/${path}`;
-	if (USE_PROXY || !ORIGIN) {
-		// Strip '/api/' so we don't generate '/admin-api/api/*' (double '/api').
-		return adminJoin(p.replace(/^\/api\//, '/'));
-	}
-	return `${ORIGIN}${p}`;
+	const p = normalizeApiPath(path);
+	if (USE_PROXY) return p;
+	return `${API_BASE}${p}`;
 }
 
 // Convenience constants

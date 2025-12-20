@@ -60,18 +60,34 @@ export default function OwnerBar() {
     return p.startsWith('/admin/safe-owner-zone') || p.startsWith('/safe-owner-zone') || p.startsWith('/safeownerzone');
   }, [pathname]);
 
-  if (mode !== 'LOCKDOWN') return null;
+  if (mode === 'NORMAL') return null;
+
+  const bannerClass =
+    mode === 'LOCKDOWN'
+      ? 'sticky top-0 z-50 w-full bg-red-600 text-white'
+      : 'sticky top-0 z-50 w-full bg-amber-500 text-black';
 
   return (
     <>
-      {!isSafeOwnerZoneRoute ? <div className="np-lockdown-overlay" aria-hidden="true" /> : null}
-      <div className="np-lockdown-banner" role="status" aria-live="polite">
+      {mode === 'LOCKDOWN' && !isSafeOwnerZoneRoute ? <div className="np-lockdown-overlay" aria-hidden="true" /> : null}
+      <div className={bannerClass} role="status" aria-live="polite">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2 md:px-6">
           <div className="font-semibold">
-            🔒 LOCKDOWN ACTIVE — Actions are disabled.{' '}
-            <Link className="underline" to="/admin/safe-owner-zone">
-              Go to Safe Owner Zone.
-            </Link>
+            {mode === 'LOCKDOWN' ? (
+              <>
+                🔒 LOCKDOWN ACTIVE — Actions are disabled.{' '}
+                <Link className="underline" to="/admin/safe-owner-zone">
+                  Go to Safe Owner Zone.
+                </Link>
+              </>
+            ) : (
+              <>
+                🟡 READ-ONLY MODE — Write actions are disabled.{' '}
+                <Link className="underline" to="/admin/safe-owner-zone">
+                  Review in Safe Owner Zone.
+                </Link>
+              </>
+            )}
           </div>
           <div className="text-sm opacity-90">Owner: {unlocked ? `Unlocked (${formatMmSs(remainingMs)})` : 'Locked'}</div>
         </div>

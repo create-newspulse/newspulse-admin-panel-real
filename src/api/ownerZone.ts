@@ -54,7 +54,7 @@ export async function getAdminSettings(): Promise<any> {
 
 export async function putAdminSettings(patch: any): Promise<any> {
   return api('/api/admin/settings', {
-    method: 'PUT',
+    method: 'PATCH',
     json: patch || {},
     ownerUnlockToken: getOwnerUnlockToken(),
   });
@@ -208,7 +208,7 @@ export async function listSnapshots(limit = 20): Promise<{ items: SnapshotItem[]
 }
 
 export async function rollbackApply(snapshotId: string): Promise<any> {
-  return api('/api/admin/system/snapshots/rollback', {
+  return api('/api/admin/system/rollback', {
     method: 'POST',
     json: { snapshotId },
     ownerUnlockToken: getOwnerUnlockToken(),

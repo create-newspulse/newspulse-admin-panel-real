@@ -1,4 +1,7 @@
-const ADMIN_API_BASE = "/admin-api";
+const envAny = import.meta.env as any;
+const API_BASE = (envAny.VITE_API_BASE_URL || envAny.VITE_BACKEND_URL || envAny.VITE_API_URL || '').toString().trim().replace(/\/+$/, '');
+// Prefer direct backend base when available; fallback to local dev proxy base.
+const ADMIN_API_BASE = API_BASE ? `${API_BASE}/api` : '/api';
 
 export const join = (...parts: string[]) =>
   parts
@@ -8,10 +11,13 @@ export const join = (...parts: string[]) =>
 
 export async function adminFetch(path: string, init?: RequestInit) {
   const raw = (path ?? "").toString().trim();
-  // Normalize: for proxy base '/admin-api', strip a leading 'api/' segment.
-  // The proxy already rewrites '/admin-api/*' -> backend '/api/*'.
-  const normalizedPath = raw.replace(/^\/+/, "").replace(/^api\//, "");
-  const url = `/${join(ADMIN_API_BASE, normalizedPath)}`;
+  // Normalize: if base already includes '/api', strip a leading 'api/' so we don't generate '/api/api/*'.
+  const baseHasApi = /\/api$/i.test(ADMIN_API_BASE);
+  const normalizedPath = raw.replace(/^\/+/, "");
+  const finalPath = baseHasApi ? normalizedPath.replace(/^api\//i, '') : normalizedPath;
+  const url = ADMIN_API_BASE.startsWith('http')
+    ? `${ADMIN_API_BASE.replace(/\/+$/, '')}/${finalPath.replace(/^\/+/, '')}`
+    : `/${join(ADMIN_API_BASE, finalPath)}`;
   if (import.meta.env.DEV) console.log("[adminFetch]", url);
   const res = await fetch(url, {
     credentials: "include",
@@ -32,7 +38,9 @@ export async function adminFetch(path: string, init?: RequestInit) {
       } catch {}
       window.dispatchEvent(new CustomEvent('np:logout'));
     } else if (res.status === 403 && typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('np:forbidden'));
+      window.dispatchEvent(new CustomEvent('np:ownerkey-required'));
+    } else if ((res.status === 503 || res.status === 423) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('np:lockdown'));
     }
   } catch {}
   return res;
