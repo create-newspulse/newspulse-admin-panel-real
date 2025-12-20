@@ -126,3 +126,14 @@ html.dark .ai-debug-box {
   background: rgba(2,6,23,0.5); /* slate-900/50 */
   color: #e5e7eb;               /* gray-200 */
 }
+
+/* 🔒 Lockdown banner + optional interaction blocker */
+@layer components {
+  .np-lockdown-banner {
+    @apply sticky top-0 z-50 w-full bg-red-600 text-white;
+  }
+
+  .np-lockdown-overlay {
+    @apply fixed inset-0 z-40 cursor-not-allowed;
+  }
+}

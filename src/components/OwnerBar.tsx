@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import settingsApi from '@/lib/settingsApi';
 import { getOwnerKeyRemainingMs, isOwnerKeyUnlocked, useOwnerKeyStore, type OwnerMode } from '@/lib/ownerKeyStore';
 
@@ -18,6 +19,7 @@ function deriveModeFromSettings(settings: any): OwnerMode {
 }
 
 export default function OwnerBar() {
+  const { pathname } = useLocation();
   const mode = useOwnerKeyStore((s) => s.mode);
   const setMode = useOwnerKeyStore((s) => s.setMode);
   const unlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
@@ -53,20 +55,27 @@ export default function OwnerBar() {
   const remainingMs = useMemo(() => getOwnerKeyRemainingMs(unlockedUntilMs, now), [unlockedUntilMs, now]);
   const unlocked = useMemo(() => isOwnerKeyUnlocked(unlockedUntilMs, now), [unlockedUntilMs, now]);
 
+  const isSafeOwnerZoneRoute = useMemo(() => {
+    const p = (pathname || '').toLowerCase();
+    return p.startsWith('/admin/safe-owner-zone') || p.startsWith('/safe-owner-zone') || p.startsWith('/safeownerzone');
+  }, [pathname]);
+
+  if (mode !== 'LOCKDOWN') return null;
+
   return (
-    <div className="border-b border-slate-200 bg-white/95 px-4 py-2 text-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 md:px-6">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Mode:</span>
-          <span className="font-semibold text-slate-900 dark:text-white">{mode}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Owner:</span>
-          <span className="font-semibold text-slate-900 dark:text-white">
-            {unlocked ? `Unlocked (${formatMmSs(remainingMs)})` : 'Locked'}
-          </span>
+    <>
+      {!isSafeOwnerZoneRoute ? <div className="np-lockdown-overlay" aria-hidden="true" /> : null}
+      <div className="np-lockdown-banner" role="status" aria-live="polite">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2 md:px-6">
+          <div className="font-semibold">
+            🔒 LOCKDOWN ACTIVE — Actions are disabled.{' '}
+            <Link className="underline" to="/admin/safe-owner-zone">
+              Go to Safe Owner Zone.
+            </Link>
+          </div>
+          <div className="text-sm opacity-90">Owner: {unlocked ? `Unlocked (${formatMmSs(remainingMs)})` : 'Locked'}</div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
