@@ -4,30 +4,50 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 const r = (p) => fileURLToPath(new URL(p, import.meta.url));
 const stripSlash = (u) => (u ? u.replace(/\/+$/, '') : u);
+const hasPlaceholders = (s) => /[<>]/.test(String(s || ''));
+const isValidAbsoluteUrl = (u) => {
+    const s = String(u || '').trim();
+    if (!/^https?:\/\//i.test(s))
+        return false;
+    try {
+        // eslint-disable-next-line no-new
+        new URL(s);
+        return true;
+    }
+    catch {
+        return false;
+    }
+};
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
-    const rawApi = stripSlash(env.VITE_API_URL);
-    // If VITE_API_URL is provided, always prefer it (even if it's localhost)
-    // Otherwise, in dev default to localhost:3002; in prod, to our secure proxy path
-    const API_HTTP = rawApi || (mode === 'development' ? 'http://localhost:3002' : '/admin-api');
-    const API_WS = stripSlash(env.VITE_API_WS) || API_HTTP; // default WS -> same host
+    // IMPORTANT:
+    // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
+    // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
+    //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
+    const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_URL || env.VITE_ADMIN_API_ORIGIN || '');
+    const API_TARGET = (!hasPlaceholders(rawCandidate) && isValidAbsoluteUrl(rawCandidate))
+        ? rawCandidate
+        : 'http://localhost:5000';
+    // IMPORTANT: proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
+    const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
+    const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN;
     return {
         plugins: [react()],
         envPrefix: 'VITE_',
         resolve: {
             alias: {
-                '@': r('./src'),
-                '@components': r('./src/components'),
-                '@pages': r('./src/pages'),
-                '@lib': r('./src/lib'),
-                '@context': r('./src/context'),
-                '@hooks': r('./src/hooks'),
-                '@assets': r('./src/assets'),
-                '@styles': r('./src/styles'),
-                '@utils': r('./src/utils'),
-                '@config': r('./src/config'),
-                '@types': r('./src/types'),
+                '@': '/src',
+                '@components': '/src/components',
+                '@pages': '/src/pages',
+                '@lib': '/src/lib',
+                '@context': '/src/context',
+                '@hooks': '/src/hooks',
+                '@assets': '/src/assets',
+                '@styles': '/src/styles',
+                '@utils': '/src/utils',
+                '@config': '/src/config',
+                '@types': '/src/types',
             },
         },
         server: {
@@ -39,16 +59,16 @@ export default defineConfig(({ mode }) => {
             cors: true,
             // Proxy all API + sockets to backend in dev
             proxy: {
-                // Production-like proxy: /admin-api/* -> backend /api/*
-                // Mimics Vercel proxy behavior for local dev
+                // DEV contract: frontend calls go through '/admin-api/*'.
                 '/admin-api': {
-                    target: env.ADMIN_BACKEND_URL || 'https://newspulse-backend-real.onrender.com',
+                    target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
-                    rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
+                    // Strip only the '/admin-api' prefix; callers include '/api' themselves via apiBase.
+                    rewrite: (p) => p.replace(/^\/admin-api/, ''),
                 },
                 '/api': {
-                    target: API_HTTP,
+                    target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
                     // keep path as-is (no rewrite) so /api/* hits backend /api/*
@@ -76,7 +96,6 @@ export default defineConfig(({ mode }) => {
             },
         },
         define: {
-            'import.meta.env.VITE_API_URL': JSON.stringify(API_HTTP),
             'import.meta.env.VITE_API_WS': JSON.stringify(API_WS),
             'import.meta.env.VITE_SITE_NAME': JSON.stringify(env.VITE_SITE_NAME ?? ''),
         },

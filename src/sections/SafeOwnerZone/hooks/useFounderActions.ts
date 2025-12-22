@@ -8,7 +8,7 @@ export function useFounderActions() {
   const SECURITY_ENABLED = import.meta.env.VITE_SECURITY_SYSTEM_ENABLED !== 'false';
 
   const safeGetEscalation = useCallback(async () => {
-    const path = '/api/alerts/settings';
+    const path = '/alerts/settings';
     if (!SECURITY_ENABLED) return { levels: [], _stub: true };
     // Probe via HEAD first to avoid full GET if clearly absent.
     try {
@@ -39,7 +39,7 @@ export function useFounderActions() {
   }, [SECURITY_ENABLED, get]);
 
   const safeSaveEscalation = useCallback(async (data: any) => {
-    const path = '/api/alerts/settings';
+    const path = '/alerts/settings';
     if (!SECURITY_ENABLED) {
       console.warn('[useFounderActions] escalation save skipped (security disabled)');
       return { ok: true, levels: data.levels || [], _stub: true };
@@ -73,15 +73,15 @@ export function useFounderActions() {
 
   return useMemo(
     () => ({
-      lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin?: string }) => post('/api/founder/lockdown', payload),
-      unlock: (pin: string) => post('/api/founder/unlock', { pin }),
-      snapshot: (note?: string) => post('/api/founder/snapshot', { note }),
-      rollback: (snapshotId: string, dryRun = true) => post('/api/founder/rollback', { snapshotId, dryRun }),
-      listSnapshots: () => get('/api/founder/snapshots'),
-      diffSnapshot: (id: string) => get(`/api/founder/snapshots/${id}/diff`),
+      lockdown: (payload: { reason: string; scope: 'site' | 'admin' | 'publishing'; pin?: string }) => post('/founder/lockdown', payload),
+      unlock: (pin: string) => post('/founder/unlock', { pin }),
+      snapshot: (note?: string) => post('/founder/snapshot', { note }),
+      rollback: (snapshotId: string, dryRun = true) => post('/founder/rollback', { snapshotId, dryRun }),
+      listSnapshots: () => get('/founder/snapshots'),
+      diffSnapshot: (id: string) => get(`/founder/snapshots/${id}/diff`),
       getEscalation: () => safeGetEscalation(),
       saveEscalation: (data: any) => safeSaveEscalation(data),
-      rotatePin: (oldPin: string, newPin: string) => post('/api/founder/pin/rotate', { oldPin, newPin }),
+      rotatePin: (oldPin: string, newPin: string) => post('/founder/pin/rotate', { oldPin, newPin }),
     }),
     [get, post, safeGetEscalation, safeSaveEscalation],
   );

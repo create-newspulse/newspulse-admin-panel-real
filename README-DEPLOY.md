@@ -3,12 +3,9 @@ Deployment guide - Admin Panel (frontend on Vercel, backend on Render)
 This README explains the recommended deployment: frontend hosted on Vercel, backend (Express) hosted on Render (or Railway/Fly). It includes the exact environment variables you must set and quick verification steps.
 
 Quick setup (2025 update)
-- Proxy mode (recommended): leave `VITE_API_URL` unset in Vercel. The app calls `/admin-api/*` which Vercel rewrites to your backend (see `vercel.json`). This avoids CORS entirely.
-- Proxy envs: set `ADMIN_BACKEND_URL` in Vercel to your backend origin (e.g., `https://newspulse-backend-real.onrender.com`). Optionally set `ADMIN_JWT_SECRET`/`JWT_SECRET` if your backend issues JWTs; if omitted, the proxy accepts presence of cookie/Bearer for session (soft mode).
-- Direct mode (optional): set ONE of
-  - `VITE_ADMIN_API_BASE_URL=https://<backend-root>` (no trailing `/api`)
-  - `VITE_API_ROOT=https://<backend-root>` (no trailing `/api`)
-  - `VITE_API_URL=https://<backend-root>` (legacy; trailing `/api` is stripped if present)
+- Development fallback: if `VITE_API_URL` is unset or invalid, the frontend uses the `/admin-api` proxy (see `vite.config.ts`).
+- Production (Vercel): set `VITE_API_URL` to your real backend origin (Render URL, NO trailing `/api`). If it is missing or invalid, the UI will show a toast error.
+- Optional proxy envs (only needed if you still use `/admin-api/*` on Vercel): set `ADMIN_BACKEND_URL` in Vercel to your backend origin (e.g., `https://newspulse-backend-real.onrender.com`).
 - Important: `.env.production.local` is intentionally blank in the repo so builds don’t force localhost. Do not reintroduce localhost values there.
 - If using direct mode, ensure backend CORS allows your Vercel preview and production domains. Our backend has pattern-based CORS that already admits `*.vercel.app` and your custom domain.
 
@@ -29,9 +26,9 @@ Quick setup (2025 update)
 
 2) Configure Vercel (frontend)
 - In Vercel Dashboard for this project -> Settings -> Environment Variables, add:
-  - ADMIN_BACKEND_URL = https://<your-backend-origin>   (used by `/api/admin-proxy/*`)
+  - VITE_API_URL      = https://<your-backend-origin>   (NO trailing `/api`)
+  - ADMIN_BACKEND_URL = https://<your-backend-origin>   (optional; used by `/admin-api/*` serverless proxy)
   - ADMIN_JWT_SECRET  = <optional-if-backend-issues-jwt> (leave blank for cookie-only backends)
-  - VITE_API_URL      = (leave unset in proxy mode)
 - Set these for both Preview and Production environments.
 
 3) CORS and credentials

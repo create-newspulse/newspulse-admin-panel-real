@@ -5,13 +5,16 @@ const Breadcrumbs = () => {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
 
+  // For Settings, keep breadcrumbs minimal: Home > Settings Center only.
+  const isSettingsArea = location.pathname === "/admin/settings" || location.pathname.startsWith("/admin/settings/");
+
   // Friendly labels for specific segments (applies to any position)
   const SEGMENT_LABELS: Record<string, string> = {
     admin: "Admin",
     safeownerzone: "Safe Owner Zone",
     'safe-owner-zone': 'Safe Owner Zone',
     founder: 'Founder Command',
-    'security-lockdown': 'Security & Lockdown',
+    'security-lockdown': 'Security Center',
     compliance: 'Compliance',
     'ai-control': 'AI Control',
     vaults: 'Vaults',
@@ -31,9 +34,25 @@ const Breadcrumbs = () => {
   // e.g., distinguish Admin Security vs Founder Security
   const PATH_LABELS: Record<string, string> = {
     "/admin/security": "Zero-Trust Security",
-    "/safeownerzone/security": "Security & Lockdown",
-    "/admin/safe-owner-zone/security-lockdown": "Security & Lockdown",
+    "/safeownerzone/security": "Security Center",
+    "/admin/safe-owner-zone/security-lockdown": "Security Center",
     "/community/reporter": "Community Reporter Queue",
+    "/broadcast-center": "Broadcast Center",
+    "/admin/broadcast-center": "Broadcast Center",
+
+    // Settings Center – mode + section friendly labels
+    "/admin/settings/admin-panel": "Admin Panel Settings",
+    "/admin/settings/public-site": "Public Site Settings",
+    "/admin/settings/admin-panel/team": "Team Management",
+    "/admin/settings/admin-panel/security": "Security",
+    "/admin/settings/admin-panel/audit": "Audit Logs",
+    "/admin/settings/admin-panel/preview": "Preview",
+    "/admin/settings/public-site/homepage": "Homepage Modules",
+    "/admin/settings/public-site/tickers": "Tickers",
+    "/admin/settings/public-site/live-tv": "Live TV",
+    "/admin/settings/public-site/footer": "Footer",
+    "/admin/settings/public-site/language-theme": "Language & Theme",
+    "/admin/settings/public-site/preview": "Preview",
   };
 
   const formatLabel = (segment: string, path: string) => {
@@ -58,7 +77,13 @@ const Breadcrumbs = () => {
             🏠 Home
           </Link>
         </li>
-        {(() => {
+        {isSettingsArea ? (
+          <li className="flex items-center gap-1">
+            <FaChevronRight className="text-gray-400 text-xs" />
+            <span className="font-semibold text-gray-800 dark:text-white">Settings Center</span>
+          </li>
+        ) : (
+          (() => {
           // Build renderable entries allowing us to skip dynamic IDs for known routes
           const entries: { key: string; path: string; label: string; isLast: boolean }[] = [];
           const cleaned: Array<{ seg: string; idx: number }> = [];
@@ -123,7 +148,8 @@ const Breadcrumbs = () => {
               )}
             </li>
           ));
-        })()}
+          })()
+        )}
       </ol>
     </nav>
   );

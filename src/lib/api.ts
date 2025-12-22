@@ -1,20 +1,81 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Centralized API base per spec:
-// Prefer VITE_API_BASE_URL (no /api suffix). Fallback to older envs, then proxy.
+// Centralized API base selection:
+// - Proxy mode (preferred): use same-origin '/admin-api/api' and let Vite/Vercel proxy forward to backend.
+// - Direct mode (fallback): set VITE_API_URL to a valid backend origin (no /api suffix).
 const envAny = import.meta.env as any;
-const rawBase = (
-  envAny.VITE_API_BASE_URL ||
-  envAny.VITE_BACKEND_URL ||
-  envAny.VITE_ADMIN_API_BASE_URL ||
-  envAny.VITE_API_URL ||
-  envAny.VITE_ADMIN_API_BASE ||
-  ''
-).toString().trim();
+const rawBase = (envAny.VITE_API_URL || '').toString().trim();
 const trimmed = rawBase.replace(/\/+$/, '');
-const API_BASE_URL = trimmed
-  ? (/\/api$/i.test(trimmed) ? trimmed : `${trimmed}/api`)
-  : '/api';
+
+let configWarnedOnce = false;
+
+function isValidAbsoluteUrl(u: string): boolean {
+  if (!/^https?:\/\//i.test(u)) return false;
+  try {
+    // eslint-disable-next-line no-new
+    new URL(u);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function emitApiConfigErrorOnce(message: string) {
+  if (configWarnedOnce) return;
+  configWarnedOnce = true;
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('np:api-config-error', { detail: { message } }));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function resolveBaseUrl(base: string) {
+  // DEV contract: always go through the local proxy.
+  if (import.meta.env.DEV) return '/admin-api/api';
+
+  const t0 = (base || '').toString().trim();
+  let t = (t0 === 'undefined' || t0 === 'null' ? '' : t0).replace(/\/+$/, '');
+
+  const useProxy = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true' && import.meta.env.DEV;
+  // (kept for back-compat; DEV returns early above)
+  if (useProxy) return '/admin-api/api';
+
+  const hasPlaceholders = /[<>]/.test(t);
+  const hasSuffixApi = /\/api$/i.test(t);
+  const withoutApi = hasSuffixApi ? t.replace(/\/api$/i, '') : t;
+  const ok = !!withoutApi && !hasPlaceholders && isValidAbsoluteUrl(withoutApi);
+
+  if (ok) return `${withoutApi}/api`;
+
+  // (DEV returns early above)
+
+  // If direct base is missing/invalid (or placeholder), fall back to proxy mode.
+  // This matches the recommended deployment mode (omit VITE_API_URL; use /admin-api proxy).
+  if (t) {
+    emitApiConfigErrorOnce(
+      `Invalid API base URL (falling back to proxy). Fix VITE_API_URL. Got: ${t}`
+    );
+  }
+  return '/admin-api/api';
+}
+
+function absolutizeIfRelativeBase(maybeRelative: string) {
+  const s = (maybeRelative || '').toString();
+  // Axios in the browser uses URL parsing; relative base URLs can throw "Invalid URL".
+  if (/^https?:\/\//i.test(s)) return s;
+  if (!s.startsWith('/')) return s;
+  try {
+    if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+      return `${window.location.origin}${s}`;
+    }
+  } catch {}
+  return s;
+}
+
+const API_BASE_URL = absolutizeIfRelativeBase(resolveBaseUrl(trimmed));
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -34,15 +95,40 @@ export const api: ExtendedApi = axios.create({
   withCredentials: true,
 }) as ExtendedApi;
 
+let missingUrlWarned = false;
+
 // Normalize path joins so callers can pass '/api/...'
 api.interceptors.request.use((cfg) => {
   try {
+    // Fail fast if a caller accidentally invokes axios without a URL.
+    // This otherwise surfaces as: "Failed to construct 'URL': Invalid URL" with (no-url).
+    if (cfg.url == null || (typeof cfg.url === 'string' && cfg.url.trim() === '')) {
+      if (import.meta.env.DEV && !missingUrlWarned) {
+        missingUrlWarned = true;
+        try {
+          const err = new Error('[api] Missing request url');
+          console.error('[api] Missing request url (first occurrence)', {
+            method: cfg.method,
+            baseURL: cfg.baseURL || api.defaults.baseURL,
+          }, err);
+        } catch {}
+      }
+      return Promise.reject(new Error('[api] Missing request url'));
+    }
+
+    // Axios browser adapter can throw "Failed to construct 'URL'" if baseURL is relative.
+    // Ensure baseURL becomes absolute at request time (even when relying on instance defaults).
+    const base0 = (cfg.baseURL || api.defaults.baseURL || '').toString();
+    if (base0.startsWith('/')) {
+      try {
+        if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+          cfg.baseURL = `${window.location.origin}${base0}`;
+        }
+      } catch {}
+    }
+
     const base = (cfg.baseURL || '').toString();
     let url = (cfg.url || '').toString();
-    if (/\/admin-api$/.test(base) && /^\/api\//.test(url)) {
-      url = url.replace(/^\/api/, '');
-      cfg.url = url;
-    }
     // Avoid accidental double '/api/api/...'
     if (/\/api$/.test(base) && /^\/api\//.test(url)) {
       url = url.replace(/^\/api\//, '');
@@ -110,15 +196,26 @@ if (import.meta.env.DEV) {
     },
     (err) => {
       const r = err?.response;
+      const cfg = err?.config;
+      const status = r?.status;
+      const url = (cfg?.url || r?.config?.url || '').toString();
+      const baseURL = (cfg?.baseURL || r?.config?.baseURL || api.defaults.baseURL || '').toString();
       const ct = (r?.headers?.['content-type'] || '').toString();
+      const code = (err as any)?.code;
+      const message = (err as any)?.message;
       // Suppress logging for silent probes (HEAD 404 expected for optional routes)
       if ((err as any)?.config?.skipErrorLog) {
         return Promise.reject(err);
       }
-      const previewPromise = r?.data && typeof r.data === 'string' ? Promise.resolve(r.data) : (r?.data ? Promise.resolve(JSON.stringify(r.data).slice(0,200)) : Promise.resolve(''));
-      previewPromise.then(preview => {
+      const previewPromise = r
+        ? (r?.data && typeof r.data === 'string'
+          ? Promise.resolve(r.data)
+          : (r?.data ? Promise.resolve(JSON.stringify(r.data).slice(0, 200)) : Promise.resolve('')))
+        : Promise.resolve(message || String(code || 'Network error'));
+
+      previewPromise.then((preview) => {
         try {
-          console.error('[api:err]', r?.status, r?.config?.url, ct, 'preview:', String(preview).slice(0,120));
+          console.error('[api:err]', status ?? 'NO_RESPONSE', baseURL || '(no-baseURL)', url || '(no-url)', code || '', ct || '', 'preview:', String(preview).slice(0, 200));
         } catch {}
       }).catch(() => {});
       if (/text\/html/i.test(ct)) {
@@ -156,7 +253,7 @@ api.monitorHub = async () => {
 
 // Unified settings loader with stub & 404 suppression.
 export async function safeSettingsLoad(opts?: { skipProbe?: boolean }) {
-  const path = '/api/settings/load';
+  const path = '/settings/load';
   // If security system disabled globally, skip network entirely.
   if (import.meta.env.VITE_SECURITY_SYSTEM_ENABLED === 'false') {
     return { ok: true, lockdown: false, _stub: true };
@@ -188,7 +285,7 @@ export async function safeSettingsLoad(opts?: { skipProbe?: boolean }) {
 // Provides shape: { success:true, data:{ totalPolls, totalVotes, topPoll:{ question, total } } }
 // Normalizes legacy forms if present.
 export async function pollsLiveStats() {
-  const paths = ['/api/polls/live-stats'];
+  const paths = ['/polls/live-stats'];
   let lastErr: any = null;
   for (const p of paths) {
     try {
@@ -221,8 +318,6 @@ export async function pollsLiveStats() {
 // Normalizes minimal shape expected by RevenuePanel.
 api.revenue = async () => {
   const candidates = [
-    '/api/revenue/summary',
-    '/api/revenue',
     '/revenue/summary',
     '/revenue'
   ];
@@ -259,8 +354,6 @@ api.revenueExportPdfPath = () => {
   if (override) return api.defaults.baseURL + override.replace(/^\//,'/');
   // Provide a deterministic primary path; backend should implement one of these.
   const candidates = [
-    '/api/revenue/export/pdf',
-    '/api/revenue/export',
     '/revenue/export/pdf',
     '/revenue/export'
   ];

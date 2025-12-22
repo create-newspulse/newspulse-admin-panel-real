@@ -23,14 +23,6 @@ export interface Article {
   scheduledAt?: string;
 }
 
-interface ApiResponse {
-  ok: boolean;
-  items?: Article[];
-  total?: number;
-  article?: Article;
-  message?: string;
-}
-
 export interface ListResponse {
   // Canonical shape used by UI tables
   rows: Article[];
@@ -40,6 +32,49 @@ export interface ListResponse {
 }
 
 const ADMIN_ARTICLES_PATH = '/articles';
+
+function normalizeListResponse(payload: any, opts: { requestedPage: number; limit: number }): ListResponse {
+  const rows: Article[] = Array.isArray(payload?.data)
+    ? payload.data
+    : (Array.isArray(payload?.items)
+      ? payload.items
+      : (Array.isArray(payload?.rows)
+        ? payload.rows
+        : (Array.isArray(payload?.articles)
+          ? payload.articles
+          : [])));
+
+  const total: number = typeof payload?.total === 'number'
+    ? payload.total
+    : (typeof payload?.count === 'number'
+      ? payload.count
+      : (typeof payload?.totalCount === 'number'
+        ? payload.totalCount
+        : rows.length));
+
+  const page = typeof payload?.page === 'number' ? payload.page : opts.requestedPage;
+  const pagesFromPayload = typeof payload?.pages === 'number' ? payload.pages : undefined;
+
+  const paginationSeemsMissing =
+    payload?.page == null
+    && payload?.pages == null
+    && payload?.total == null
+    && payload?.count == null
+    && payload?.limit == null;
+
+  const rowsForPage = (paginationSeemsMissing && rows.length > opts.limit)
+    ? rows.slice((opts.requestedPage - 1) * opts.limit, (opts.requestedPage - 1) * opts.limit + opts.limit)
+    : rows;
+
+  const pages = pagesFromPayload ?? Math.max(1, Math.ceil(total / opts.limit));
+
+  return {
+    rows: rowsForPage,
+    total,
+    page,
+    pages,
+  };
+}
 
 // --- Core list & actions ---
 export async function listArticles(params: {
@@ -53,26 +88,18 @@ export async function listArticles(params: {
   limit?: number;
   sort?: string;
 }): Promise<ListResponse> {
-  // Translate frontend param `status: 'all'` to explicit include list (exclude deleted)
-  const query: Record<string, any> = { ...params };
-  if (query.status === 'all') {
-    // Explicitly exclude deleted from the All view by requesting only active-like statuses
-    query.status = ['draft', 'scheduled', 'published', 'archived'].join(',');
-  }
-  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
-  const payload = res.data as any;
-  const rows: Article[] = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.items) ? payload.items : []);
-  const total: number = typeof payload?.total === 'number' ? payload.total : rows.length;
   const limit = params.limit || 20;
-  return {
-    rows,
-    total,
-    page: params.page || 1,
-    pages: Math.ceil(total / limit),
-  };
+  const requestedPage = params.page || 1;
+
+  const query: Record<string, any> = { ...params };
+  // Contract: All view should not force legacy status lists; omit status filter.
+  if (query.status === 'all') delete query.status;
+
+  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
+  return normalizeListResponse(res.data, { requestedPage, limit });
 }
 export async function getArticle(id: string): Promise<Article> {
-  const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${id}`);
+  const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`);
   const raw = res.data as any;
   const ok = raw?.ok === true || raw?.success === true || !!raw?.article || !!raw?.data;
   const article = (raw?.article)
@@ -84,91 +111,58 @@ export async function getArticle(id: string): Promise<Article> {
   return article as Article;
 }
 export async function archiveArticle(id: string) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/archive`);
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'archived' });
   return res.data;
 }
 export async function restoreArticle(id: string) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/restore`);
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'draft' });
   return res.data;
 }
 export async function deleteArticle(id: string) {
-  const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`);
+  // Soft delete in UI: mark as deleted (keeps data recoverable)
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'deleted' });
   return res.data;
 }
 
 // --- Control tower helpers ---
 export async function updateArticleStatus(id: string, status: ArticleStatus) {
-  // Prefer dedicated status route if backend supports it; fallback to generic update
-  try {
-    const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/status`, { status });
-    return res.data as Article;
-  } catch (err: any) {
-    if (err?.response?.status === 404) {
-      const res2 = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status });
-      return res2.data as Article;
-    }
-    throw err;
-  }
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status });
+  return res.data as Article;
 }
 
 export async function scheduleArticle(id: string, publishAt: string) {
-  // Prefer dedicated schedule route; fallback to generic update with status
-  try {
-    const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}/schedule`, { publishAt });
-    return res.data as Article;
-  } catch (err: any) {
-    if (err?.response?.status === 404) {
-      const res2 = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status: 'scheduled', publishAt });
-      return res2.data as Article;
-    }
-    throw err;
-  }
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'scheduled', publishAt });
+  return res.data as Article;
 }
 
 export async function unscheduleArticle(id: string) {
   // Clear schedule and revert to draft
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${id}`, { status: 'draft', publishAt: null, scheduledAt: null });
+  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'draft', publishAt: null, scheduledAt: null });
   return res.data as Article;
 }
 
 export async function deleteArticleSoft(id: string) {
-  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`);
+  await deleteArticle(id);
 }
 
 export async function deleteArticleHard(id: string) {
-  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${id}`, { params: { hard: true } });
+  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
 }
 
 // New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
-  // Try explicit hard-delete endpoints first to match backend Part A
-  const candidates = [
-    `${ADMIN_ARTICLES_PATH}/${id}/hard-delete`,
-    `${ADMIN_ARTICLES_PATH}/${id}/hard`,
-  ];
-  let lastErr: any = null;
-  for (const path of candidates) {
-    try {
-      const res = await apiClient.delete(path);
-      const ok = res?.data?.ok === true || res?.data?.success === true || res.status === 200 || res.status === 204;
-      if (!ok) throw new Error('Hard delete failed');
-      return;
-    } catch (e: any) {
-      const status = e?.response?.status;
-      lastErr = e;
-      if (status && status !== 404 && status !== 405) {
-        throw e; // real error other than not implemented
-      }
-      // otherwise try next candidate
-    }
-  }
-  // Legacy fallback: query param variant
+  // Contract path: use DELETE /articles/:id, optionally with hard=true.
+  // Try hard=true first; fall back to plain delete.
   try {
     await deleteArticleHard(id);
     return;
   } catch (e: any) {
-    throw lastErr || e;
+    const status = e?.response?.status;
+    if (status && status !== 404 && status !== 405) throw e;
   }
+  const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`);
+  const ok = res?.data?.ok === true || res?.data?.success === true || res.status === 200 || res.status === 204;
+  if (!ok) throw new Error('Hard delete failed');
 }
 
 // Optional extra helpers (create/update/meta) if needed by other screens
@@ -189,10 +183,20 @@ export async function createCommunityArticle(data: Partial<Article>) {
   return createArticle(payload);
 }
 export async function updateArticle(id: string, data: Partial<Article>) {
-  const res = await apiClient.put(`${ADMIN_ARTICLES_PATH}/${id}`, data);
+  const res = await apiClient.put(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, data);
   return res.data;
 }
 export async function metaCounts(): Promise<{ total: number }> {
-  const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/meta`);
-  return res.data;
+  // Use the stable /articles list contract to compute counts without relying on /articles/meta.
+  const [published, drafts] = await Promise.all([
+    listArticles({ status: 'published', page: 1, limit: 1 }),
+    listArticles({ status: 'draft', page: 1, limit: 1 }),
+  ]);
+  // Keep shape compatible with callers expecting { published, drafts, flagged }
+  return {
+    ...(published ? { published: published.total } : {}),
+    ...(drafts ? { drafts: drafts.total } : {}),
+    flagged: 0,
+    total: (published?.total || 0) + (drafts?.total || 0),
+  } as any;
 }

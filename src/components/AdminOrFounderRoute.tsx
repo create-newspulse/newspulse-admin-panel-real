@@ -23,7 +23,8 @@ const AdminOrFounderRoute: React.FC<Props> = ({ children }) => {
     return <Navigate to={dest} state={{ from: location }} replace />;
   }
 
-  if (!(user.role === 'admin' || user.role === 'founder')) {
+  const role = (user.role || '').toLowerCase();
+  if (!(role === 'admin' || role === 'founder')) {
     return <Navigate to="/unauthorized" state={{ from: location }} replace />;
   }
 

@@ -29,10 +29,10 @@ const InspirationHubControl: React.FC = () => {
 
   // Socket for real-time changes (use REST origin)
   useEffect(() => {
-    const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
     let s: Socket | null = null;
     try {
-      s = io(API_ORIGIN, { path: '/socket.io', transports: ['websocket'] });
+      // Use same-origin; Vite proxies '/socket.io' to backend in local dev.
+      s = io({ path: '/socket.io', transports: ['websocket'] });
       s.on('connect', () => console.log('🧩 socket connected for live-content'));
       s.on('live-content-updated', (p: any) => {
         console.log('📡 live-content-updated', p);

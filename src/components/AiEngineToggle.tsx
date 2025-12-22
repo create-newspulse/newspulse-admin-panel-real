@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiUrl } from '@/lib/apiBase';
 
 export type AiEngine = "gpt" | "gemini";
 
@@ -21,7 +22,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
     setLoading(true);
     setError(null);
 
-    fetch('/api/ai/engines', { credentials: 'include' })
+    fetch(apiUrl('/ai/engines'), { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) throw new Error('API error: ' + res.status);
         const ct = res.headers.get('content-type') || '';
@@ -56,7 +57,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
         setLoading(false);
       });
     // Also fetch current OpenAI model for display if available
-    fetch('/api/system/ai-health', { credentials: 'include' })
+    fetch(apiUrl('/system/ai-health'), { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const m = d && (d.model || d.selectedModel);

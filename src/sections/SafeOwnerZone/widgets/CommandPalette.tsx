@@ -26,7 +26,7 @@ export default function CommandPalette() {
   }, []);
 
   const items: Item[] = useMemo(() => [
-    { id: 'nav:security', title: 'Open → Security & Lockdown', run: () => navigate('/safeownerzone/security') },
+    { id: 'nav:security', title: 'Open → Security Center', run: () => navigate('/admin/safe-owner-zone/security-lockdown') },
     { id: 'nav:compliance', title: 'Open → Compliance & Policy', run: () => navigate('/safeownerzone/compliance') },
     { id: 'nav:ai', title: 'Open → AI Control', run: () => navigate('/safeownerzone/ai') },
     { id: 'nav:ownerkey', title: 'Manage Owner Key → Safe Owner Zone', run: () => navigate('/admin/safe-owner-zone') },

@@ -36,7 +36,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Consider cookie-session success (no token) as authenticated if we have user
   // Auth considered valid if we have a token or a resolved user
   const isAuthenticated = !!token || !!user;
-  const isFounder = (user?.role || '').toLowerCase() === 'founder';
+  const role = (user?.role || '').toLowerCase();
+  const isFounder = role === 'founder';
+
+  // Dev-only logging to debug role-gating issues
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.log('auth user role:', user?.role);
+    }
+  }, [user?.role]);
 
   // Resolve relative to admin base; avoid double '/admin' in path
   // Direct/base: <origin>/api/admin/login ; Proxy: /admin-api/admin/login
@@ -203,8 +212,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const restoreAttemptedRef = useRef(false);
 
   const restoreSession = useCallback(async () => {
-    // Skip if already restoring or already attempted with a fully authenticated state
-    const hasFullAuth = !!token || (user && user.role);
+    // Skip if already restoring or already attempted with a fully hydrated user profile.
+    // NOTE: A token alone is NOT enough for role-gated routes; we must fetch /me to get role.
+    const hasFullAuth = !!(user && String(user.role || '').trim());
     if (isRestoring || restoreAttemptedRef.current || hasFullAuth) return;
     restoreAttemptedRef.current = true;
     setIsRestoring(true);

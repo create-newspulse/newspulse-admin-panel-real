@@ -6,7 +6,8 @@ import { leftNav, type Role } from "@/config/nav";
 
 export default function AdminNavbar() {
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const role = ((user?.role || "viewer").toLowerCase() as Role);
 
   const handleLogout = () => {
     const confirm =
@@ -36,7 +37,7 @@ export default function AdminNavbar() {
       </div>
 
       <div className="flex flex-wrap gap-4 items-center">
-        {leftNav('admin' as Role).filter(i => !i.hidden).slice(0,5).map(item => (
+        {leftNav(role).filter(i => !i.hidden).slice(0,5).map(item => (
           <NavLink
             key={item.key}
             to={item.path}

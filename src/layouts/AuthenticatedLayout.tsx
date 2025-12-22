@@ -8,13 +8,13 @@ interface AuthenticatedLayoutProps {
 }
 
 const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, requiredRoles }) => {
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, isReady, isRestoring, restoreSession, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (isLoading) return;
+    if (!isReady || isRestoring || isLoading) return;
 
     if (!isAuthenticated) {
       const p = location.pathname || '';
@@ -23,16 +23,28 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
       return;
     }
 
-    if (requiredRoles && user?.role && !requiredRoles.includes(user.role)) {
+    const role = String(user?.role || '').toLowerCase();
+    const allowed = (requiredRoles || []).map((r) => String(r || '').toLowerCase());
+    if (requiredRoles && role && !allowed.includes(role)) {
       navigate('/unauthorized', { replace: true });
     }
   }, [isLoading, isAuthenticated, user, requiredRoles, navigate, location.pathname]);
+
+  // If authenticated but missing role, attempt restore (once per mount) so role-gated layouts don't misfire.
+  useEffect(() => {
+    if (!isReady || isRestoring || isLoading) return;
+    if (isAuthenticated && user && !user.role) {
+      try {
+        restoreSession();
+      } catch {}
+    }
+  }, [isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
 
   const toggleSidebar = useCallback(() => {
     setMobileSidebarOpen((prev) => !prev);
   }, []);
 
-  if (isLoading) {
+  if (!isReady || isRestoring || isLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen bg-gray-100 dark:bg-gray-900">
         <p className="text-gray-600 dark:text-gray-300 text-lg">Checking access and loading...</p>
@@ -40,7 +52,9 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
     );
   }
 
-  if (!isAuthenticated || (requiredRoles && user?.role && !requiredRoles.includes(user.role))) {
+  const role = String(user?.role || '').toLowerCase();
+  const allowed = (requiredRoles || []).map((r) => String(r || '').toLowerCase());
+  if (!isAuthenticated || (requiredRoles && role && !allowed.includes(role))) {
     return null;
   }
 

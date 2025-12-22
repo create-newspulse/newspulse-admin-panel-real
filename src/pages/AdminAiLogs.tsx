@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import { fetchJson } from '@/lib/fetchJson';
 // import { useAuth } from '../context/AuthContext'; // Optional if roles are implemented
 
 interface AiLog {
@@ -27,21 +25,13 @@ const AdminAiLogs: React.FC = () => {
 
   const fetchLogs = () => {
     setLoading(true);
-    fetch(`${API_BASE}/ai/logs/all`, { credentials: 'include' })
-      .then(async (res) => {
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !ct.includes('application/json')) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
-        }
-        return res.json();
+    fetchJson<{ logs?: AiLog[] }>('/ai/logs/all')
+      .then((data) => {
+        const list = data?.logs || [];
+        setLogs(list);
+        setFilteredLogs(list);
       })
-      .then(data => {
-        setLogs(data.logs || []);
-        setFilteredLogs(data.logs || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {

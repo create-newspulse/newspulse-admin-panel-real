@@ -7,6 +7,7 @@ import App from "./App.tsx";
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { ErrorBoundary as SystemErrorBoundary } from './components/system/ErrorBoundary';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster, toast } from 'react-hot-toast';
 import "./index.css";
 import { runNavAudit } from '@/dev/navAudit';
 
@@ -26,6 +27,20 @@ initDomPurify();
 // Install guard to surface HTML-as-JS parse failures clearly
 import { installHtmlImportGuard } from './lib/guardHtmlImport';
 installHtmlImportGuard();
+
+// Surface API base misconfiguration as a visible toast in production.
+if (import.meta.env.PROD) {
+  try {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('np:api-config-error', (ev: any) => {
+        const msg = ev?.detail?.message || 'Backend is not configured. Please set VITE_API_URL.';
+        toast.error(msg);
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
 
 // Debug env detection for API base on boot (useful on Vercel)
 console.log(
@@ -97,6 +112,7 @@ createRoot(rootEl).render(
     <SystemErrorBoundary>
       <Suspense fallback={<div style={{ padding:16 }}>Loading…</div>}>
         <ErrorBoundary title="Application error">
+          <Toaster position="top-right" richColors />
           <App />
         </ErrorBoundary>
       </Suspense>

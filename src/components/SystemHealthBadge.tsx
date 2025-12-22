@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-// Build health URL from admin API base, stripping a trailing /api once
-import { adminApi } from '@/lib/adminApi';
+import { apiUrl } from '@/lib/apiBase';
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
@@ -84,17 +83,23 @@ export default function SystemHealthBadge(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await adminApi.get('/system/health');
+        const url = apiUrl('/system/health');
+        const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const r = await fetch(url, { credentials: 'include' });
+        const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         const ct = r.headers.get('content-type') || '';
+        const latencyMs = Math.max(0, Math.round(t1 - t0));
+
         if (!/application\/json/i.test(ct)) {
           const text = await r.text().catch(() => '');
           if (!isMounted) return;
-          setInfo({ success: false, status: r.status, backend: { nonJson: true, text } });
+          setInfo({ success: false, status: r.status, latencyMs, backend: { nonJson: true, text } });
           return;
         }
-        const json = (await r.data) as HealthPayload;
+
+        const json = (await r.json().catch(() => ({}))) as HealthPayload;
         if (!isMounted) return;
-        setInfo(json);
+        setInfo({ ...json, status: json.status ?? r.status, latencyMs: json.latencyMs ?? latencyMs, success: json.success ?? (r.ok ? true : false) });
         setError(null);
       } catch (e: any) {
         if (!isMounted) return;
@@ -122,6 +127,8 @@ export default function SystemHealthBadge(): JSX.Element {
   // When we detect waking, try a direct no-cors warm-up to the backend origin from the browser.
   useEffect(() => {
     if (!waking) return;
+    // Local dev uses the Vite proxy; the Vercel-only '/api/system/backend-origin' helper is not available.
+    if (import.meta.env.DEV) return;
     let cancelled = false;
     (async () => {
       try {
@@ -130,9 +137,10 @@ export default function SystemHealthBadge(): JSX.Element {
         if (!origin) return;
         // Fire-and-forget warm-up; no-cors avoids CORS failure, we don't need the body.
         if (!cancelled) {
+          const base = /\/api$/i.test(origin) ? origin : `${origin}/api`;
           fetch(origin, { mode: 'no-cors' }).catch(() => {});
           fetch(`${origin}/api/health`, { mode: 'no-cors' }).catch(() => {});
-          fetch(`${origin}/api/system/health`, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${base}/system/health`, { mode: 'no-cors' }).catch(() => {});
         }
       } catch {}
     })();

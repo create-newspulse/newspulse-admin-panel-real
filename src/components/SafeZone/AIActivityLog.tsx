@@ -139,7 +139,7 @@ const AIActivityLog: React.FC = () => {
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-400">
             Tip: Ensure you are logged in via <a className="underline" href="/auth">/auth</a> and that the <code>/api</code> proxy can reach your backend.
-            Quick check: <a className="underline" href="/api/system/health" target="_blank" rel="noreferrer">/api/system/health</a>
+            Quick check: <a className="underline" href="/system/health" target="_blank" rel="noreferrer">/system/health</a>
           </div>
         </div>
       ) : data ? (

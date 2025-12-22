@@ -374,7 +374,7 @@ export default function SafeOwnerZoneHub() {
           <div className="mt-4 text-xs text-slate-500 dark:text-slate-400">
             {health?.proxied === false
               ? 'ADMIN_BACKEND_URL not configured for proxy health.'
-              : 'Health is derived from /api/system/health.'}
+              : 'Health is derived from /system/health.'}
           </div>
         </div>
       </div>

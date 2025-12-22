@@ -57,22 +57,41 @@ You can drop your own screenshots into the `docs/img/` folder using the file nam
 
 ## Backend
 
-- Admin UI uses `https://newspulse-backend-real.onrender.com` for all admin APIs (both locally and on Vercel).
-- Set `VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com` in your local `.env.local`.
-- The `admin-backend/` folder is legacy and can be removed later.
+This repo is designed to behave the same locally and on Vercel:
+
+- In the browser, the frontend calls the proxy base `/admin-api/*`.
+- On Vercel, the serverless proxy forwards `/admin-api/*` to `ADMIN_BACKEND_URL`.
+- Locally, Vite proxies `/admin-api/*` to your chosen backend target (defaults to `http://localhost:5000`).
+
+Avoid shipping a hardcoded Render URL in the frontend. Use env vars instead.
 
 ## Local Development
 
+1) Install
+
 ```
-cd admin
-cp .env.example .env.local  # if relevant
-set VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com
 npm install
-npm run dev
-# then open http://localhost:5173/admin/login
 ```
 
-- Do NOT run the legacy backend in `admin-backend/`.
+2) Configure
+
+- Preferred (proxy mode; matches Vercel): leave `VITE_ADMIN_API_ORIGIN` empty and run a backend locally.
+- Optional (direct mode): set `VITE_ADMIN_API_ORIGIN` to a valid backend origin (no `/api` suffix).
+
+Example `.env.local`:
+
+```
+VITE_ADMIN_API_ORIGIN=http://localhost:5000
+VITE_ADMIN_API_PROXY_BASE=/admin-api
+```
+
+3) Run
+
+```
+npm run dev:full
+```
+
+Open: `http://localhost:5173`
 
 ### Manage News Module
 
@@ -118,6 +137,13 @@ Sample requests: see `requests/articles.http`.
 - Panel Guide moved to private docs; route removed.
 
 Safe Owner Zone now supports tabs via the `?tab=` query param: `overview`, `settings`, `ai`, `security`, `analytics`.
+
+## Quick verification checklist
+
+- `/admin/articles` -> list loads
+- `/broadcast-center` -> breaking/live lists load; Add + Save work
+- `/admin/settings/admin-panel/team` -> staff list loads (or shows the friendly "endpoint missing" state)
+- `/safe-owner` -> snapshots/audit/passkey calls no longer 404
 Editorial Workflow Engine supports internal tabs via `?tab=`: `queue`, `push-history`, `schedules`, `automation`, `logs`.
 
 ## Deploying the backend on Render (blueprint)

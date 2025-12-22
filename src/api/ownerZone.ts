@@ -30,18 +30,18 @@ export type SystemState = {
 
 // Owner key
 export async function getOwnerKeyStatus(): Promise<OwnerKeyStatus> {
-  return api<OwnerKeyStatus>('/api/owner/key/status');
+  return api<OwnerKeyStatus>('/owner/key/status');
 }
 
 export async function unlockOwnerKey(pin: string): Promise<OwnerKeyStatus> {
-  return api<OwnerKeyStatus>('/api/owner/key/unlock', {
+  return api<OwnerKeyStatus>('/owner/key/unlock', {
     method: 'POST',
     json: { pin },
   });
 }
 
 export async function lockOwnerKey(): Promise<{ ok?: boolean } & Record<string, any>> {
-  return api('/api/owner/key/lock', {
+  return api('/owner/key/lock', {
     method: 'POST',
     ownerUnlockToken: getOwnerUnlockToken(),
   });
@@ -49,11 +49,11 @@ export async function lockOwnerKey(): Promise<{ ok?: boolean } & Record<string, 
 
 // Admin settings (dangerous: requires owner unlock)
 export async function getAdminSettings(): Promise<any> {
-  return api('/api/admin/settings');
+  return api('/admin/settings');
 }
 
 export async function putAdminSettings(patch: any): Promise<any> {
-  return api('/api/admin/settings', {
+  return api('/admin/settings', {
     method: 'PATCH',
     json: patch || {},
     ownerUnlockToken: getOwnerUnlockToken(),
@@ -61,11 +61,11 @@ export async function putAdminSettings(patch: any): Promise<any> {
 }
 
 export async function getSystemState(): Promise<SystemState> {
-  return api<SystemState>('/api/admin/system/state');
+  return api<SystemState>('/admin/system/state');
 }
 
 export async function updateSystemState(payload: Partial<SystemState>): Promise<SystemState> {
-  return api<SystemState>('/api/admin/system/state', {
+  return api<SystemState>('/admin/system/state', {
     method: 'PUT',
     json: payload || {},
     ownerUnlockToken: getOwnerUnlockToken(),
@@ -73,25 +73,25 @@ export async function updateSystemState(payload: Partial<SystemState>): Promise<
 }
 
 export async function lockdown(): Promise<any> {
-  return api('/api/admin/system/lockdown', {
+  return api('/admin/system/lockdown', {
     method: 'POST',
     ownerUnlockToken: getOwnerUnlockToken(),
   });
 }
 
 export async function reactivate(): Promise<any> {
-  return api('/api/admin/system/reactivate', {
+  return api('/admin/system/reactivate', {
     method: 'POST',
     ownerUnlockToken: getOwnerUnlockToken(),
   });
 }
 
 export async function health(): Promise<any> {
-  return api('/api/system/health');
+  return api('/system/health');
 }
 
 export async function getRecentAudit(limit = 30): Promise<any> {
-  return api(`/api/audit/recent?limit=${encodeURIComponent(String(limit))}`);
+  return api(`/audit/recent?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export type SnapshotItem = {
@@ -193,7 +193,7 @@ function normalizeDeploy(raw: any): DeployEventItem {
 }
 
 export async function createSnapshot(payload: { label?: string; reason?: string }): Promise<SnapshotItem> {
-  const raw: any = await api('/api/admin/system/snapshots', {
+  const raw: any = await api('/admin/system/snapshots', {
     method: 'POST',
     json: { label: payload?.label, reason: payload?.reason },
     ownerUnlockToken: getOwnerUnlockToken(),
@@ -202,13 +202,13 @@ export async function createSnapshot(payload: { label?: string; reason?: string 
 }
 
 export async function listSnapshots(limit = 20): Promise<{ items: SnapshotItem[] } | SnapshotItem[]> {
-  const raw: any = await api(`/api/admin/system/snapshots?limit=${encodeURIComponent(String(limit))}`);
+  const raw: any = await api(`/admin/system/snapshots?limit=${encodeURIComponent(String(limit))}`);
   const items = Array.isArray(raw?.items) ? raw.items.map(normalizeSnapshot) : Array.isArray(raw) ? raw.map(normalizeSnapshot) : [];
   return { items };
 }
 
 export async function rollbackApply(snapshotId: string): Promise<any> {
-  return api('/api/admin/system/rollback', {
+  return api('/admin/system/rollback', {
     method: 'POST',
     json: { snapshotId },
     ownerUnlockToken: getOwnerUnlockToken(),

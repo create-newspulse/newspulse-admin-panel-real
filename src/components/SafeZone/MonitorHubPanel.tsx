@@ -147,7 +147,7 @@ const MonitorHubPanel: React.FC = () => {
   // 📧 Toggle Email Summary Setting
   const toggleEmailSummary = async () => {
     try {
-      const json = await fetchJson<{ enabled?: boolean }>(apiUrl('/api/system/daily-summary-toggle'), {
+      const json = await fetchJson<{ enabled?: boolean }>(apiUrl('/system/daily-summary-toggle'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ toggle: true }),

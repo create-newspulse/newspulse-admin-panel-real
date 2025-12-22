@@ -1,4 +1,5 @@
 import { apiUrl as buildApiUrl } from '@/lib/apiBase';
+import { toast } from 'react-hot-toast';
 
 export class ApiError extends Error {
   status: number;
@@ -68,16 +69,39 @@ export function clearOwnerUnlockToken() {
 
 function normalizeApiPath(input: string) {
   let p = input.startsWith('/') ? input : `/${input}`;
+  // Callers should pass paths like '/articles' not '/api/articles'.
+  // Tolerate legacy call sites by stripping a single leading '/api'.
+  if (p === '/api') return '/';
+  if (p.startsWith('/api/')) p = p.replace(/^\/api\//, '/');
   // Collapse known double-prefix mistakes.
-  p = p.replace(/^\/api\/api\//, '/api/');
-  p = p.replace(/^\/api\/admin\/api\//, '/api/admin/');
-  if (p === '/api' || p.startsWith('/api/')) return p;
-  return `/api${p.replace(/^\/+/, '/')}`;
+  p = p.replace(/^\/api\/api\//, '/');
+  p = p.replace(/^\/api\/admin\/api\//, '/admin/');
+  return p;
 }
 
 export function apiUrl(path: string): string {
-  const apiPath = normalizeApiPath(path);
-  return buildApiUrl(apiPath);
+  // apiBase.apiUrl already prepends API_BASE (which ends with '/api')
+  // so this must be a path WITHOUT '/api'.
+  const cleaned = normalizeApiPath(path);
+  return buildApiUrl(cleaned);
+}
+
+// Throttle backend-missing toasts (by path) to avoid UI spam.
+const routeMissingToastAt: Record<string, number> = {};
+const ROUTE_MISSING_TOAST_TTL_MS = 10_000;
+
+function maybeToastBackendRouteMissing(path: string, message: string) {
+  try {
+    if (!/route not found/i.test(message || '')) return;
+    const normalized = normalizeApiPath(path);
+    const now = Date.now();
+    const last = routeMissingToastAt[normalized] || 0;
+    if (now - last < ROUTE_MISSING_TOAST_TTL_MS) return;
+    routeMissingToastAt[normalized] = now;
+    toast.error(`Backend route missing: ${normalized}`);
+  } catch {
+    // ignore
+  }
 }
 
 async function readErrorBody(res: Response) {
@@ -162,9 +186,20 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
   if (!res.ok) {
     const errBody = await readErrorBody(res);
     let msg = toErrorMessage(errBody, `HTTP ${res.status} ${res.statusText}`);
-    // Dev-only: replace noisy "Route not found" with an actionable backend-missing hint.
-    if (import.meta.env.DEV && res.status === 404) {
-      msg = `Backend API missing: ${normalizeApiPath(path)}`;
+    if (res.status === 404) {
+      // If backend returns its standard 404 "Route not found" message, surface a clean toast.
+      maybeToastBackendRouteMissing(path, msg);
+      if (import.meta.env.DEV && /route not found/i.test(msg || '')) {
+        try {
+          console.error('[api] Backend route missing', {
+            path: normalizeApiPath(path),
+            url,
+            status: res.status,
+          });
+        } catch {
+          // ignore
+        }
+      }
     }
     throw new ApiError(msg, { status: res.status, url, body: errBody });
   }

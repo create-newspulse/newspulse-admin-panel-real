@@ -70,7 +70,7 @@ export default function SiteControls() {
     try {
       const headers: HeadersInit = {};
       if (token) headers.Authorization = `Bearer ${token}` as any;
-      const res = await fetch(apiUrl('/api/site-settings/admin'), {
+      const res = await fetch(apiUrl('/site-settings/admin'), {
         headers,
         credentials: 'include',
       });
@@ -91,7 +91,7 @@ export default function SiteControls() {
     try {
       const headers: HeadersInit = { "Content-Type": "application/json" };
       if (token) (headers as any).Authorization = `Bearer ${token}`;
-      const res = await fetch(apiUrl('/api/site-settings/admin'), {
+      const res = await fetch(apiUrl('/site-settings/admin'), {
         method: "PUT",
         headers,
         credentials: 'include',

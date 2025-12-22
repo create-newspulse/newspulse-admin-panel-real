@@ -49,8 +49,7 @@ function deriveStatus(data: HealthEnvelope): HealthStatus {
   }
 }
 
-// Unified health endpoint using API_BASE helper.
-import { adminApi } from '@/lib/adminApi';
+import { apiUrl } from '@/lib/apiBase';
 
 export default function SystemHealthPanel(): JSX.Element {
   const [env, setEnv] = useState<HealthEnvelope | null>(null);
@@ -68,16 +67,22 @@ export default function SystemHealthPanel(): JSX.Element {
 
     const pull = async () => {
       try {
-        const r = await adminApi.get('/system/health');
-        const ct = r.headers['content-type'] || '';
+        const url = apiUrl('/system/health');
+        const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const r = await fetch(url, { credentials: 'include' });
+        const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const ct = r.headers.get('content-type') || '';
+        const latencyMs = Math.max(0, Math.round(t1 - t0));
+
         if (!/application\/json/i.test(ct)) {
           const txt = await r.text().catch(() => '');
-          if (mounted) setEnv({ success: false, status: r.status, contentType: ct, backend: { nonJson: true, text: txt } });
+          if (mounted) setEnv({ success: false, status: r.status, contentType: ct, latencyMs, backend: { nonJson: true, text: txt } });
           return;
         }
-        const json = r.data as HealthEnvelope;
+
+        const json = (await r.json().catch(() => ({}))) as HealthEnvelope;
         if (mounted) {
-          setEnv(json);
+          setEnv({ ...json, status: json.status ?? r.status, contentType: json.contentType ?? ct, latencyMs: json.latencyMs ?? latencyMs, success: json.success ?? (r.ok ? true : false) });
           setError(null);
         }
       } catch (e: any) {
@@ -115,6 +120,8 @@ export default function SystemHealthPanel(): JSX.Element {
   // When waking, trigger a no-cors warm-up to backend origin to accelerate wake from the browser.
   useEffect(() => {
     if (!waking) return;
+    // Local dev uses the Vite proxy; the Vercel-only '/api/system/backend-origin' helper is not available.
+    if (import.meta.env.DEV) return;
     let cancelled = false;
     (async () => {
       try {
@@ -122,9 +129,10 @@ export default function SystemHealthPanel(): JSX.Element {
         const origin: string | null = meta?.origin || null;
         if (!origin) return;
         if (!cancelled) {
+          const base = /\/api$/i.test(origin) ? origin : `${origin}/api`;
           fetch(origin, { mode: 'no-cors' }).catch(() => {});
           fetch(`${origin}/api/health`, { mode: 'no-cors' }).catch(() => {});
-          fetch(`${origin}/api/system/health`, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${base}/system/health`, { mode: 'no-cors' }).catch(() => {});
         }
       } catch {}
     })();

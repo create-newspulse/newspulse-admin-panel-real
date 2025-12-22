@@ -10,7 +10,7 @@
     },
     {
       "source": "/admin-api/:path*",
-      "destination": "https://<YOUR_RENDER_BACKEND_URL>/:path*"
+      "destination": "/api/admin-proxy/:path*"
     },
     {
       "source": "/(.*)",

@@ -21,9 +21,14 @@ export const OwnerModules = [
   },
   {
     id: 'security',
-    title: 'Security & Lockdown',
+    title: 'Zero-Trust Security Center',
     tabs: [
-  { id: 'overview', label: 'Overview', component: lazyComp(() => import('../../components/SafeZone/ThreatDashboard')) },
+  { id: 'dashboard', label: 'Dashboard', component: lazyComp(() => import('../../components/SafeZone/ThreatDashboard')) },
+  { id: 'audit-trail', label: 'Audit Trail', component: lazyComp(() => import('./tabs/AuditViewer')) },
+  { id: 'sessions', label: 'Sessions', component: lazyComp(() => import('./tabs/SessionsPanel')) },
+  { id: 'rbac', label: 'RBAC', component: lazyComp(() => import('./tabs/RbacPanel')) },
+  { id: 'passkeys', label: 'Passkeys', component: lazyComp(() => import('./tabs/PasskeysPanel')) },
+  { id: 'rate-limiting', label: 'Rate Limiting', component: lazyComp(() => import('./tabs/RateLimitingPanel')) },
   { id: 'alerts', label: 'Smart Alerts', component: lazyComp(() => import('../../components/SafeZone/SmartAlertSystem')) },
   { id: 'escalation', label: 'Escalation', component: lazyComp(() => import('./tabs/EscalationSettings')) },
   { id: 'incidents', label: 'Incidents', component: lazyComp(() => import('../../components/SafeZone/IncidentResponseModule')) },

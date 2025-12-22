@@ -89,19 +89,19 @@ import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 import Denied from '@pages/Denied';
 // Settings Center (admin)
-import SettingsLayout from '@pages/admin/settings/SettingsLayout';
-import SettingsHome from '@pages/admin/settings/SettingsHome';
-import FrontendUiSettings from '@pages/admin/settings/FrontendUiSettings';
-import NavigationSettings from '@pages/admin/settings/NavigationSettings';
-import PublishingSettings from '@pages/admin/settings/PublishingSettings';
-import AIModulesSettings from '@pages/admin/settings/AIModulesSettings';
-import VoiceLanguagesSettings from '@pages/admin/settings/VoiceLanguagesSettings';
-import CommunitySettings from '@pages/admin/settings/CommunitySettings';
-import MonetizationSettings from '@pages/admin/settings/MonetizationSettings';
-import IntegrationsSettings from '@pages/admin/settings/IntegrationsSettings';
-import SecuritySettings from '@pages/admin/settings/SecuritySettings';
-import BackupsSettings from '@pages/admin/settings/BackupsSettings';
-import AuditLogsSettings from '@pages/admin/settings/AuditLogsSettings';
+import SettingsCenterLayout from '@pages/admin/settings/SettingsCenterLayout';
+import AdminPanelSettingsLayout from '@pages/admin/settings/AdminPanelSettingsLayout';
+import PublicSiteSettingsLayout from '@pages/admin/settings/PublicSiteSettingsLayout';
+import TeamManagement from '@pages/admin/settings/admin-panel/TeamManagement';
+import SecurityAdmin from '@pages/admin/settings/admin-panel/SecurityAdmin';
+import AuditLogsView from '@pages/admin/settings/admin-panel/AuditLogsView';
+import AdminPreview from '@pages/admin/settings/admin-panel/AdminPreview';
+import HomepageModulesSettings from '@pages/admin/settings/public-site/HomepageModulesSettings';
+import TickersSettings from '@pages/admin/settings/public-site/TickersSettings';
+import LiveTvSettings from '@pages/admin/settings/public-site/LiveTvSettings';
+import FooterSettings from '@pages/admin/settings/public-site/FooterSettings';
+import LanguageThemeSettings from '@pages/admin/settings/public-site/LanguageThemeSettings';
+import PublicPreview from '@pages/admin/settings/public-site/PublicPreview';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
 import SimpleLogin from '@pages/auth/SimpleLogin';
@@ -109,6 +109,7 @@ import { RequireRole } from '@/routes/guards';
 import SafeOwnerZoneShell from '@/pages/admin/safe-owner-zone/SafeOwnerZoneShell';
 import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
 import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
+import BroadcastCenter from '@pages/admin/BroadcastCenter';
 
 function LegacySafeOwnerZoneRedirect() {
   const { module } = useParams();
@@ -197,6 +198,11 @@ function App() {
               <Route path="/admin/manage" element={<Navigate to="/admin/articles" replace />} />
               {/* Draft Desk */}
               <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
+
+              {/* 📡 Broadcast Center (Founder-only) */}
+              <Route path="/broadcast-center" element={<RequireRole allow={['founder']}><BroadcastCenter /></RequireRole>} />
+              <Route path="/admin/broadcast-center" element={<Navigate to="/broadcast-center" replace />} />
+
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               {/* New canonical community reporter queue route (founder/admin view) */}
@@ -231,20 +237,35 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
-              {/* Settings Center (layout + minimal routes) */}
-              <Route path="/admin/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>}>
-                <Route index element={<SettingsHome />} />
-                <Route path="frontend-ui" element={<FrontendUiSettings />} />
-                <Route path="navigation" element={<NavigationSettings />} />
-                <Route path="publishing" element={<PublishingSettings />} />
-                <Route path="ai-modules" element={<AIModulesSettings />} />
-                <Route path="voice-languages" element={<VoiceLanguagesSettings />} />
-                <Route path="community" element={<CommunitySettings />} />
-                <Route path="monetization" element={<MonetizationSettings />} />
-                <Route path="integrations" element={<IntegrationsSettings />} />
-                <Route path="security" element={<FounderRoute><SecuritySettings /></FounderRoute>} />
-                <Route path="backups" element={<FounderRoute><BackupsSettings /></FounderRoute>} />
-                <Route path="audit-logs" element={<AuditLogsSettings />} />
+              {/* Settings Center (two-mode) */}
+              <Route
+                path="/admin/settings"
+                element={
+                  <RequireRole allow={['founder', 'admin']}>
+                    <SettingsCenterLayout />
+                  </RequireRole>
+                }
+              >
+                <Route index element={<Navigate to="admin-panel" replace />} />
+
+                <Route path="admin-panel" element={<AdminPanelSettingsLayout />}>
+                  <Route index element={<Navigate to="team" replace />} />
+                  <Route path="team" element={<FounderRoute><TeamManagement /></FounderRoute>} />
+                  <Route path="security" element={<SecurityAdmin />} />
+                  <Route path="change-password" element={<ChangePassword />} />
+                  <Route path="audit" element={<AuditLogsView />} />
+                  <Route path="preview" element={<AdminPreview />} />
+                </Route>
+
+                <Route path="public-site" element={<PublicSiteSettingsLayout />}>
+                  <Route index element={<Navigate to="homepage" replace />} />
+                  <Route path="homepage" element={<HomepageModulesSettings />} />
+                  <Route path="tickers" element={<TickersSettings />} />
+                  <Route path="live-tv" element={<LiveTvSettings />} />
+                  <Route path="footer" element={<FooterSettings />} />
+                  <Route path="language-theme" element={<LanguageThemeSettings />} />
+                  <Route path="preview" element={<PublicPreview />} />
+                </Route>
               </Route>
               {/* Redirect /founder → /founder/feature-toggles */}
               <Route path="/founder" element={<Navigate to="/founder/feature-toggles" replace />} />

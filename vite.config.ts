@@ -5,23 +5,32 @@ import { fileURLToPath, URL } from 'node:url';
 
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
+const hasPlaceholders = (s?: string) => /[<>]/.test(String(s || ''));
+const isValidAbsoluteUrl = (u?: string) => {
+  const s = String(u || '').trim();
+  if (!/^https?:\/\//i.test(s)) return false;
+  try { new URL(s); return true; } catch { return false; }
+};
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
-  const rawAdminBase = stripSlash(env.VITE_ADMIN_API_BASE_URL || env.VITE_API_ROOT || env.VITE_API_URL);
-  // Prefer explicit dev proxy target, then new base, then existing fallbacks
-  const API_TARGET =
-    stripSlash(env.VITE_ADMIN_API_TARGET) ||
-    stripSlash(env.VITE_API_BASE_URL) ||
-    stripSlash(env.VITE_BACKEND_URL) ||
-    rawAdminBase ||
-    'http://localhost:5000';
-  // Explicit backend URL for dev proxy of /admin-api/* → backend
-  const BACKEND_URL = stripSlash(env.VITE_BACKEND_URL || env.VITE_API_BASE_URL || '');
-  const API_WS   = stripSlash(env.VITE_API_WS)  || API_TARGET; // default WS -> same host if available
+  // IMPORTANT:
+  // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
+  // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
+  //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
+  // Use a dedicated variable for proxy targeting.
+  const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_URL || env.VITE_ADMIN_API_ORIGIN || '');
+  const API_TARGET = (!hasPlaceholders(rawCandidate) && isValidAbsoluteUrl(rawCandidate))
+    ? rawCandidate
+    : 'http://localhost:5000';
+  // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
+  // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
+  const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
+  const BACKEND_URL = BACKEND_ORIGIN;
+  const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN; // default WS -> same host if available
 
   const DEV_PORT = 5173;
   // Dev diagnostic: show current admin API proxy target
@@ -32,7 +41,7 @@ export default defineConfig(({ mode }): UserConfig => {
       console.log('[vite] Dev proxy BACKEND_URL:', BACKEND_URL);
     }
     if (API_TARGET && /\/api\/?$/.test(API_TARGET)) {
-      console.warn('[vite] Note: Target ends with /api; proxy will strip /admin-api/api to avoid double prefix.');
+      console.warn('[vite] Note: Target ends with /api; using origin for proxy:', BACKEND_ORIGIN);
     }
   }
   return {
@@ -41,18 +50,20 @@ export default defineConfig(({ mode }): UserConfig => {
 
     resolve: {
       alias: {
-        '@': r('./src'),
-        '@components': r('./src/components'),
-        '@pages': r('./src/pages'),
-        '@lib': r('./src/lib'),
-        '@context': r('./src/context'),
-        '@hooks': r('./src/hooks'),
-        '@assets': r('./src/assets'),
-        '@styles': r('./src/styles'),
-        '@utils': r('./src/utils'),
-        '@config': r('./src/config'),
-        '@types': r('./src/types'),
-        '@features': r('./src/features'),
+        // IMPORTANT (Windows + Vite dev): use root-relative aliases to prevent
+        // duplicate module instances (e.g. /@fs/... vs /src/...) which can break React Context.
+        '@': '/src',
+        '@components': '/src/components',
+        '@pages': '/src/pages',
+        '@lib': '/src/lib',
+        '@context': '/src/context',
+        '@hooks': '/src/hooks',
+        '@assets': '/src/assets',
+        '@styles': '/src/styles',
+        '@utils': '/src/utils',
+        '@config': '/src/config',
+        '@types': '/src/types',
+        '@features': '/src/features',
       },
     },
 
@@ -66,27 +77,24 @@ export default defineConfig(({ mode }): UserConfig => {
       // Proxy all API + sockets to backend in dev
       proxy: {
         '/api': {
-          target: `${API_TARGET || 'http://localhost:5000'}`,
+          target: `${BACKEND_ORIGIN || 'http://localhost:5000'}`,
           changeOrigin: true,
           secure: false,
         },
         // Support public settings in local dev (maps /settings/* -> /api/settings/*)
         '/settings': {
-          target: `${API_TARGET}`,
+          target: `${BACKEND_ORIGIN}`,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/settings/, '/api/settings'),
         },
-        // Proxy /admin-api/* -> backend. Rewrite strategy:
-        // - If backend routes are under '/admin/*', remove '/admin-api'
-        // - If backend routes are under '/api/admin/*', keep frontend path and add '/api' via Vercel or backend config.
-        // For local dev we strip '/admin-api' to hit '/admin/*' directly.
+        // Proxy /admin-api/* -> backend.
+        // DEV contract: frontend calls go through '/admin-api/*'.
         '/admin-api': {
-          target: BACKEND_URL || env.VITE_ADMIN_API_TARGET || API_TARGET || 'http://localhost:5000',
+          target: BACKEND_URL || 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
-          // Rewrite '/admin-api/*' -> '/api/*' for compatibility during transition.
-          rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
+          rewrite: (p) => p.replace(/^\/admin-api/, ''),
         },
         '/socket.io': {
           target: API_WS,
@@ -112,8 +120,8 @@ export default defineConfig(({ mode }): UserConfig => {
     },
 
     define: {
-      'import.meta.env.VITE_ADMIN_API_BASE_URL': JSON.stringify(API_TARGET),
-      'import.meta.env.VITE_API_URL': JSON.stringify(API_TARGET),
+      // Do NOT override VITE_API_URL here; it must come from real env vars.
+      // We only define non-sensitive derived values.
       'import.meta.env.VITE_API_WS': JSON.stringify(API_WS),
       'import.meta.env.VITE_SITE_NAME': JSON.stringify(env.VITE_SITE_NAME ?? ''),
       'import.meta.env.VITE_USE_PROXY': JSON.stringify(useProxy),

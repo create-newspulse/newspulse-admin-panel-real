@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useEffect, useRef } from 'react';
 import { useAuth } from '@context/AuthContext';
 import type { Role } from '@/store/auth';
 
@@ -18,15 +18,35 @@ export function RequireAuth({ children }: PropsWithChildren) {
 
 export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role[] }>) {
   const location = useLocation();
-  const { isAuthenticated, user, isReady, isRestoring, restoreSession } = useAuth();
+  const { isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession } = useAuth();
+  const requestedRestoreRef = useRef(false);
+
+  // If authenticated but missing role (partial hydrate), try a restore once.
+  useEffect(() => {
+    if (!isReady || isRestoring || isLoading) return;
+    if (isAuthenticated && user && !user.role && !requestedRestoreRef.current) {
+      requestedRestoreRef.current = true;
+      try {
+        restoreSession();
+      } catch {}
+    }
+  }, [isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession]);
 
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
   }
 
-  // If authenticated but missing role (partial hydrate), try a restore once.
+  if (isLoading) {
+    return <div className="text-center mt-10">🔐 Checking access…</div>;
+  }
+
+  // Don't redirect while we are still trying to fetch the user's role.
   if (isAuthenticated && user && !user.role) {
-    try { restoreSession(); } catch {}
+    // If we already tried to restore and still have no role, treat as unauthorized.
+    if (requestedRestoreRef.current) {
+      return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    }
+    return <div className="text-center mt-10">🔐 Loading profile…</div>;
   }
 
   if (!isAuthenticated || !user) {

@@ -34,7 +34,7 @@ export default function AIEngine(): JSX.Element {
     .catch(async () => {
       // Fallback POST if helper missing
       try {
-        const endpoint = apiUrl('/api/ai/engine/run');
+        const endpoint = apiUrl('/ai/engine/run');
         const fr = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -76,7 +76,7 @@ export default function AIEngine(): JSX.Element {
 
   // Fetch current backend OpenAI model for display/hint
   useEffect(() => {
-    fetch(apiUrl('/api/system/ai-health'), { credentials: 'include' })
+    fetch(apiUrl('/system/ai-health'), { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         const m = (data && (data.model || data.selectedModel)) || '';

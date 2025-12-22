@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { FaTrash, FaDownload, FaComments } from 'react-icons/fa';
-import axios from 'axios';
 import apiClient from '@lib/api';
 import { useAITrainingInfo } from '@context/AITrainingInfoContext';
 
@@ -46,33 +45,12 @@ declare global {
   }
 }
 
-// ---------- Axios defaults (so cookies/auth work via proxy) ----------
-// Prefer the shared apiClient which already has baseURL, credentials, and Authorization set by AuthContext
-axios.defaults.withCredentials = true; // keep legacy callers safe
-
 // Small helper: safe JSON fetch using the shared apiClient (returns data or throws)
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
-const resolve = (url: string) => {
-  if (/^https?:\/\//i.test(url)) return url;
-  if (url.startsWith('/api/')) return `${API_ORIGIN}${url}`;
-  if (url.startsWith('/system/')) return `${API_BASE}${url}`; // normalize system root
-  return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
-};
 const get = async <T,>(path: string) => {
-  // Accept absolute URLs (legacy) and relative API paths
-  if (path.startsWith('http') || path.startsWith('/api/')) {
-    const res = await axios.get<T>(resolve(path), { withCredentials: true });
-    return res.data as T;
-  }
   const res = await apiClient.get<T>(path);
   return res.data as T;
 };
 const del = async (path: string) => {
-  if (path.startsWith('http') || path.startsWith('/api/')) {
-    await axios.delete(resolve(path), { withCredentials: true });
-    return;
-  }
   await apiClient.delete(path);
 };
 
@@ -159,8 +137,8 @@ export default function KiranOSPanel() {
     const loadStatus = async () => {
       try {
         const [thinkingRes, queueRes] = await Promise.all([
-          get<ThinkingFeedRes>('/api/system/thinking-feed'),
-          get<QueueRes>('/api/system/ai-queue'),
+          get<ThinkingFeedRes>('/system/thinking-feed'),
+          get<QueueRes>('/system/ai-queue'),
         ]);
 
         if (stopped) return;
@@ -203,7 +181,7 @@ export default function KiranOSPanel() {
     let stopped = false;
     const fetchAnalytics = async () => {
       try {
-  const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+  const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
         if (stopped) return;
 
         const topPattern =
@@ -238,7 +216,7 @@ export default function KiranOSPanel() {
   useEffect(() => {
     (async () => {
       try {
-  const data = await get<IntegrityScanRes>('/api/system/integrity-scan');
+  const data = await get<IntegrityScanRes>('/system/integrity-scan');
         setAiStats(data ?? null);
       } catch {
         setAiStats(null);
@@ -265,7 +243,7 @@ export default function KiranOSPanel() {
   // ---------- Logs fetch, clear, export ----------
   const fetchLogs = async () => {
     try {
-      const res = await get<{ logs?: CommandLog[] }>('/api/system/view-logs');
+      const res = await get<{ logs?: CommandLog[] }>('/system/view-logs');
       setLogs(Array.isArray(res?.logs) ? res.logs : []);
     } catch {
       alert('❌ Failed to fetch logs.');
@@ -275,7 +253,7 @@ export default function KiranOSPanel() {
   const clearLogs = async () => {
     if (!window.confirm('Are you sure you want to delete all logs?')) return;
     try {
-      await del('/api/system/clear-logs');
+      await del('/system/clear-logs');
       alert('🗑️ Logs cleared.');
       setLogs([]);
     } catch {
@@ -301,7 +279,7 @@ export default function KiranOSPanel() {
   // ---------- Diagnostics alert ----------
   const fetchDiagnostics = async () => {
     try {
-      const res = await get<DiagnosticsRes>('/api/system/ai-diagnostics');
+      const res = await get<DiagnosticsRes>('/system/ai-diagnostics');
       const top = res?.mostUsed ?? null;
       if (top) {
         alert(`📊 Top command: ${top[0]} (${top[1]} times)`);

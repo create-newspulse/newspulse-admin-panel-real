@@ -33,17 +33,19 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'👩‍💻' },
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
+  // Founder-only: homepage broadcast controls
+  { key:'broadcast-center', label:'Broadcast Center', path:'/broadcast-center', roles:['founder'], icon:'📡' },
   // Owner Control Center (single link; module navigation handled inside the pages)
   { key:'soz', label:'Safe Owner Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
   { key:'youth', label:'Youth Pulse', path:'/admin/youth-pulse', roles:['editor','admin','founder'], icon:'🌐' },
   // Right side utility items
   // Admin global security dashboard (Zero-Trust controls)
-  { key:'security', label:'Zero-Trust Security', path:'/admin/security', roles:['admin','founder'], icon:'🧱', rightSide:true },
-  { key:'lang', label:'Language', path:'#lang', roles:['viewer','editor','admin','founder','moderator'], icon:'🌐', rightSide:true },
+  { key:'security', label:'Zero-Trust Security', path:'/admin/security', roles:['admin','founder'], icon:'🧱', rightSide:true, hidden: true },
+  { key:'lang', label:'Language', path:'#lang', roles:['viewer','editor','admin','founder','moderator'], icon:'🌐', rightSide:true, hidden: true },
   { key:'dark', label:'Dark', path:'#dark', roles:['viewer','editor','admin','founder','moderator'], icon:'🌙', rightSide:true },
   { key:'logout', label:'Logout', path:'/logout', roles:['viewer','editor','admin','founder','moderator'], icon:'🚪', rightSide:true },
-  { key:'change-password', label:'Change Password', path:'/admin/change-password', roles:['editor','admin','founder','moderator'], icon:'🔑', rightSide:true },
+  { key:'change-password', label:'Change Password', path:'/admin/change-password', roles:['editor','admin','founder','moderator'], icon:'🔑', rightSide:true, hidden: true },
 ];
 
 export function filterNavForRole(role: Role) {

@@ -46,7 +46,7 @@ async function tryAiSuggest(payload: {
   language: 'en' | 'hi' | 'gu';
 }) {
   try {
-    const res = await fetch(apiUrl('/api/assist/suggest'), {
+    const res = await fetch(apiUrl('/assist/suggest'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

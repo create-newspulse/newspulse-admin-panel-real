@@ -1,24 +1,68 @@
 import axios from 'axios';
 
-// Standardize base URL: prefer explicit VITE_API_BASE_URL (or legacy envs).
-// Fallback to proxy '/api' (Vite proxy) when no direct base is provided.
+// Standardize base URL:
+// - Proxy mode (preferred): use same-origin '/admin-api' and let the proxy forward to backend.
+// - Direct mode: set VITE_API_URL to a valid backend origin (no /api suffix).
 const envAny = import.meta.env as any;
-const rawHost = (
-  envAny.VITE_API_BASE_URL ||
-  envAny.VITE_ADMIN_API_BASE_URL ||
-  envAny.VITE_ADMIN_API_URL ||
-  envAny.VITE_API_URL ||
-  envAny.VITE_BACKEND_URL ||
-  ''
-).toString().trim();
-// Proxy mode (local dev): use '/api' so Vite proxy forwards to localhost:5000.
-const baseHost = rawHost || '/api';
+const rawHost0 = (envAny.VITE_API_URL || '').toString().trim();
+let rawHost = (rawHost0 === 'undefined' || rawHost0 === 'null') ? '' : rawHost0;
 
-// If base ends with '/api', append '/admin'; otherwise append '/api/admin'
-const trimmed = baseHost.replace(/\/+$/, '');
-export const adminRoot = /\/api$/i.test(trimmed)
-  ? `${trimmed}/admin`
-  : `${trimmed}/api/admin`;
+const useProxy = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true' && import.meta.env.DEV;
+
+// (Kept minimal: this module now defaults to proxy mode when VITE_API_URL is unset.)
+
+function isValidAbsoluteUrl(u: string): boolean {
+  if (!/^https?:\/\//i.test(u)) return false;
+  try {
+    // eslint-disable-next-line no-new
+    new URL(u);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Reject placeholder values and invalid absolute URLs.
+if (/[<>]/.test(rawHost)) rawHost = '';
+if (rawHost) {
+  const hasApiSuffix = /\/api$/i.test(rawHost);
+  const withoutApi = hasApiSuffix ? rawHost.replace(/\/api$/i, '') : rawHost;
+  if (!isValidAbsoluteUrl(withoutApi)) rawHost = '';
+  else rawHost = withoutApi;
+}
+// Proxy mode (Vercel + local dev): use '/admin-api' and let proxy map to backend '/api/*'.
+function absolutizeIfRelativeBase(maybeRelative: string) {
+  const s = (maybeRelative || '').toString();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (!s.startsWith('/')) return s;
+  try {
+    if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+      return `${window.location.origin}${s}`;
+    }
+  } catch {}
+  return s;
+}
+
+let baseHost = rawHost ? rawHost : '';
+if (!baseHost) {
+  // Default to proxy mode in both DEV and PROD.
+  baseHost = '/admin-api';
+}
+
+// DEV: if explicitly using proxy, always use same-origin /admin-api.
+if (useProxy) baseHost = '/admin-api';
+
+const baseHostAbs = absolutizeIfRelativeBase(baseHost);
+
+// Base selection rules:
+// - If base is '/admin-api', route through the same DEV contract as other calls:
+//   '/admin-api/api/admin/*' (Vite proxy strips '/admin-api' and backend receives '/api/admin/*').
+// - If base ends with '/api', admin endpoints are under '{base}/admin/*'.
+// - Otherwise (origin without /api suffix), admin endpoints are under '{base}/api/admin/*'.
+const trimmed = baseHostAbs.replace(/\/+$/, '');
+export const adminRoot = /\/admin-api$/i.test(trimmed)
+  ? `${trimmed}/api/admin`
+  : (/\/api$/i.test(trimmed) ? `${trimmed}/admin` : `${trimmed}/api/admin`);
 
 export const ADMIN_API_BASE = adminRoot;
 export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
@@ -46,6 +90,16 @@ export function getAuthToken(): string | null {
 // Attach Authorization header from localStorage (JWT) for all requests
 adminApi.interceptors.request.use((config) => {
   try {
+    // Ensure absolute baseURL in browser (relative base URLs can trigger URL-constructor failures)
+    const base0 = (config.baseURL || adminApi.defaults.baseURL || '').toString();
+    if (base0.startsWith('/')) {
+      try {
+        if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+          config.baseURL = `${window.location.origin}${base0}`;
+        }
+      } catch {}
+    }
+
     const token = getAuthToken();
     if (token) {
       config.headers = config.headers || {};

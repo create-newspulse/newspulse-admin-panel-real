@@ -42,7 +42,7 @@ const LiveNewsPollsPanel = () => {
   const exportPDF = async () => {
     try {
       setIsExporting(true);
-      const res = await fetch(apiUrl('/api/polls/export-pdf'), { method: 'POST', credentials: 'include' });
+      const res = await fetch(apiUrl('/polls/export-pdf'), { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const ct = res.headers.get('content-type') || '';
       if (!/application\/(pdf|octet-stream)/i.test(ct)) {

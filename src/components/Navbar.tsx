@@ -2,7 +2,6 @@
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
-import LanguageDropdown from './LanguageDropdown';
 import { leftNav, rightNav } from '@/config/nav';
 
 export default function Navbar() {
@@ -58,8 +57,6 @@ export default function Navbar() {
                   >
                     {isDark ? '🌞 Light' : '🌙 Dark'}
                   </button>
-                ) : key === 'lang' ? (
-                  <LanguageDropdown key={key} />
                 ) : null
               ) : (
                 key === 'logout' ? (

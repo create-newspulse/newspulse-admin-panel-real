@@ -58,7 +58,7 @@ export default function EditNews() {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const res = await api.get(`/api/admin/articles/${id}`);
+        const res = await api.get(`/articles/${id}`);
         const data = res.data;
         const article = data?.article || data?.data || data;
         if (article && (article._id || article.id)) {
@@ -75,7 +75,7 @@ export default function EditNews() {
       } catch (err) {
         console.warn('Direct fetch failed, attempting fallback list lookup…');
         try {
-          const list = await api.get('/api/admin/articles');
+          const list = await api.get('/articles');
           const items = list.data?.articles || list.data?.items || list.data || [];
           const found = items.find((n: any) => (n._id || n.id) === id);
           if (found) {
@@ -144,7 +144,7 @@ export default function EditNews() {
     }
 
     try {
-      await api.put(`/api/admin/articles/${id}`, form);
+      await api.put(`/articles/${id}`, form);
 
       toast.success('✅ Article updated');
       navigate('/manage-news');

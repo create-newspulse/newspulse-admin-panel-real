@@ -1,9 +1,6 @@
 // src/pages/admin/Diagnostics.tsx
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import apiClient from '@lib/api';
 import { Line } from "react-chartjs-2";
 import "chart.js/auto";
 import { Link } from "react-router-dom";
@@ -27,8 +24,8 @@ export default function Diagnostics() {
   useEffect(() => {
     const fetchDiagnostics = async () => {
       try {
-  const res = await axios.get(`${API_BASE}/system/ai-diagnostics`, { withCredentials: true });
-        setData(res.data);
+        const res = await apiClient.get<DiagnosticsData>('/system/ai-diagnostics');
+        setData(res.data as any);
         setError(null);
         setLastRefresh(new Date().toLocaleTimeString());
       } catch (err) {

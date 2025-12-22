@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-console.log('🚀 Starting News Pulse Admin Panel (frontend only)...\n');
+console.log('🚀 Starting News Pulse Admin Panel (demo backend + frontend)...\n');
 
 // Check if MongoDB is running
 const checkMongoDB = () => {
@@ -31,6 +31,26 @@ const checkMongoDB = () => {
       resolve(false);
     }, 3000);
   });
+};
+
+// Start demo backend server
+const startBackend = () => {
+  console.log('🧩 Starting Demo Backend Server (admin-backend/demo-server.js)...');
+  const backend = spawn('npm', ['run', 'dev:demo'], {
+    cwd: path.join(__dirname, 'admin-backend'),
+    stdio: 'inherit',
+    shell: true,
+    env: {
+      ...process.env,
+      PORT: process.env.PORT || '5000',
+    },
+  });
+
+  backend.on('error', (err) => {
+    console.error('❌ Backend Error:', err.message);
+  });
+
+  return backend;
 };
 
 // Start frontend server
@@ -66,14 +86,28 @@ const main = async () => {
       console.log('✅ MongoDB is running\n');
     }
 
-    // Start frontend
+    // Start backend then frontend
+    const backendProcess = startBackend();
     const frontendProcess = startFrontend();
 
     // Handle process termination
     process.on('SIGINT', () => {
       console.log('\n🛑 Shutting down servers...');
+      try { backendProcess.kill(); } catch {}
       frontendProcess.kill();
       process.exit(0);
+    });
+
+    // If one of the child processes exits unexpectedly, exit so the developer sees it.
+    backendProcess.on('close', (code) => {
+      if (code && code !== 0) {
+        console.error(`❌ Demo backend exited with code ${code}`);
+      }
+    });
+    frontendProcess.on('close', (code) => {
+      if (code && code !== 0) {
+        console.error(`❌ Frontend exited with code ${code}`);
+      }
     });
 
   } catch (error) {

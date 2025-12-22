@@ -9,12 +9,9 @@ import ChartComponent from '@components/ChartComponent';
 import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
 import SystemHealthPanel from '@components/SystemHealthPanel';
-import { fetchJson } from '@lib/fetchJson';
-import { adminRoot, resolveAdminPath } from '@lib/adminApi';
+import { FetchJsonError, fetchJson } from '@lib/fetchJson';
 import { apiUrl } from '@/lib/apiBase';
-
-// api client from src/lib/api.ts (default export = axios instance)
-import { adminApi } from '@lib/adminApi';
+import toast from 'react-hot-toast';
 
 type DashboardStats = {
   total: number;
@@ -80,30 +77,23 @@ const Dashboard = () => {
       };
 
       try {
-        // Try multiple normalized paths to tolerate different mounts
-        const candidates = [
-          '/api/dashboard-stats',
-          '/dashboard-stats',
-          '/api/stats',
-          '/stats',
-          '/admin/stats',
-          '/api/admin/stats',
-        ];
+        // Stats endpoints are NOT admin endpoints; they live under '/api/*'.
+        // Use the public API base helper so DEV goes through '/admin-api/api/*'.
+        const candidates = ['/dashboard-stats', '/stats'];
         let loaded: DashboardStats | null = null;
+        let lastTried: string | null = null;
         for (const c of candidates) {
           try {
-            const p = resolveAdminPath(c);
-            const r = await adminApi.get(p);
-            const payload = r.data?.data ?? r.data;
-            loaded = normalize(payload);
+            lastTried = c;
+            const payload: any = await fetchJson(c);
+            loaded = normalize(payload?.data ?? payload);
             break;
           } catch (e: any) {
-            const s = e?.response?.status;
-            if (s && s !== 404) {
-              // Non-404 error: surface it
-              throw e;
-            }
-            continue;
+            // If endpoint missing (404), try next candidate; otherwise surface error.
+            if (e instanceof FetchJsonError && e.status === 404) continue;
+            const msg = String(e?.message || '');
+            if (/(^|\s)404(\s|$)/.test(msg) || /HTTP\s*404/i.test(msg)) continue;
+            throw e;
           }
         }
         if (loaded) {
@@ -112,7 +102,19 @@ const Dashboard = () => {
           throw new Error('No stats endpoint available');
         }
       } catch (err: any) {
-        console.error('❌ Dashboard API Error:', err?.message || err);
+        const status = err instanceof FetchJsonError ? err.status : undefined;
+        const method = err instanceof FetchJsonError ? err.method : 'GET';
+        const url = err instanceof FetchJsonError ? err.url : null;
+        const endpoint = url || '/admin-api/api/dashboard-stats';
+
+        console.error('❌ Dashboard API Error:', {
+          message: err?.message || String(err),
+          status,
+          endpoint,
+        });
+
+        const tag = status ? `HTTP ${status}` : 'Network error';
+        toast.error(`Dashboard stats failed (${tag}) ${method} ${endpoint}`);
         setError('Failed to load dashboard stats. Please ensure the backend server is running.');
       } finally {
         setLoading(false);
@@ -121,7 +123,7 @@ const Dashboard = () => {
 
     const fetchAICommand = async () => {
       try {
-        const json = await fetchJson(apiUrl('/api/system/health'));
+        const json = await fetchJson(apiUrl('/system/health'));
         setAiCommand(json);
       } catch (err: any) {
         console.error('❌ AI Command API Error:', err?.message || err);
@@ -186,7 +188,7 @@ const Dashboard = () => {
 
             {SHOW_TICKER && (
               <section>
-                <LiveTicker apiUrl={apiUrl('/api/news-ticker')} position="top" />
+                <LiveTicker apiUrl={apiUrl('/news-ticker')} position="top" />
               </section>
             )}
 

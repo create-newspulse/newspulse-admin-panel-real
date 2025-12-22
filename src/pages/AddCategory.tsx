@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import { api } from '@/lib/http';
 
 export default function CategoryManager() {
   const [categories, setCategories] = useState<string[]>([]);
@@ -9,20 +7,18 @@ export default function CategoryManager() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    fetch(`${API_BASE}/categories`)
-      .then(res => res.json())
-      .then(data => setCategories(data.categories || []));
+    api<{ categories?: string[] }>('/categories')
+      .then((data) => setCategories(data?.categories || []))
+      .catch(() => setCategories([]));
   }, []);
 
   const handleAdd = async () => {
     if (!newCategory) return;
     try {
-      const res = await fetch(`${API_BASE}/add-category`, {
+      const data: any = await api('/add-category', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newCategory }),
+        json: { name: newCategory },
       });
-      const data = await res.json();
       if (data.success) {
         setCategories([...categories, newCategory]);
         setNewCategory('');

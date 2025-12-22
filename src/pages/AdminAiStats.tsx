@@ -1,8 +1,6 @@
 // 📁 src/pages/AdminAiStats.tsx
 import React, { useEffect, useState, useRef } from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import { fetchJson } from '@/lib/fetchJson';
 import {
   PieChart,
   Pie,
@@ -41,13 +39,7 @@ const AdminAiStats: React.FC = () => {
 
     const fetchEngineStats = async () => {
       try {
-        const res = await fetch(`${API_BASE}/ai/logs/engine-stats`, { credentials: 'include' });
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !ct.includes('application/json')) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
-        }
-        const data = await res.json();
+        const data = await fetchJson<any>('/ai/logs/engine-stats');
         if (data.success && data.stats) {
           const converted: EngineStat[] = Object.entries(data.stats).map(
             ([engine, count]) => ({
@@ -64,13 +56,7 @@ const AdminAiStats: React.FC = () => {
 
     const fetchDailyStats = async () => {
       try {
-        const res = await fetch(`${API_BASE}/ai/logs/daily-stats`, { credentials: 'include' });
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !ct.includes('application/json')) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
-        }
-        const data = await res.json();
+        const data = await fetchJson<any>('/ai/logs/daily-stats');
         if (data.success && Array.isArray(data.data)) {
           setDailyData(data.data);
         }

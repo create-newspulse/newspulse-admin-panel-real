@@ -6,7 +6,7 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
 import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
-import { createSnapshot, getRecentAudit, health, listSnapshots } from '@/api/ownerZone';
+import { createSnapshot, getRecentAudit, health as ownerZoneHealth, listSnapshots } from '@/api/ownerZone';
 
 export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
 
@@ -32,7 +32,7 @@ type ModuleTab = { key: string; label: string; to: string; end?: boolean };
 const TABS: ModuleTab[] = [
   { key: 'hub', label: 'Hub', to: '/admin/safe-owner-zone', end: true },
   { key: 'founder', label: 'Founder', to: '/admin/safe-owner-zone/founder' },
-  { key: 'security', label: 'Security', to: '/admin/safe-owner-zone/security-lockdown' },
+  { key: 'security', label: 'Security Center', to: '/admin/safe-owner-zone/security-lockdown' },
   { key: 'compliance', label: 'Compliance', to: '/admin/safe-owner-zone/compliance' },
   { key: 'ai', label: 'AI', to: '/admin/safe-owner-zone/ai-control' },
   { key: 'vaults', label: 'Vaults', to: '/admin/safe-owner-zone/vaults' },
@@ -84,7 +84,7 @@ export default function SafeOwnerZoneShell() {
     (async () => {
       const results = await Promise.allSettled([
         settingsApi.getAdminSettings(),
-        health().catch(() => null as any),
+        ownerZoneHealth().catch(() => null as any),
         getRecentAudit(30).catch(() => null as any),
         listSnapshots(20).catch(() => null as any),
       ]);

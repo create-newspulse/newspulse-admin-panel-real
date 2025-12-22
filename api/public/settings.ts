@@ -16,11 +16,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const parsed = SiteSettingsSchema.safeParse(raw ?? {});
     const s = parsed.success ? parsed.data : defaultSiteSettings;
-    const safe = { ui: s.ui, navigation: s.navigation, voice: s.voice };
+    const safe = {
+      ui: s.ui,
+      navigation: s.navigation,
+      voice: s.voice,
+      homepage: s.homepage,
+      tickers: s.tickers,
+      liveTv: s.liveTv,
+      footer: s.footer,
+    };
     return res.status(200).json(safe);
   } catch {
     const s = defaultSiteSettings;
-    const safe = { ui: s.ui, navigation: s.navigation, voice: s.voice };
+    const safe = {
+      ui: s.ui,
+      navigation: s.navigation,
+      voice: s.voice,
+      homepage: s.homepage,
+      tickers: s.tickers,
+      liveTv: s.liveTv,
+      footer: s.footer,
+    };
     return res.status(200).json(safe);
   }
 }

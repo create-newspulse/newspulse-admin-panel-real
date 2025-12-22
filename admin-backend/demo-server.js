@@ -6,7 +6,7 @@ import cors from 'cors';
 import crypto from 'crypto';
 
 const app = express();
-const PORT = 3002;
+const PORT = Number(process.env.PORT) || 5000;
 
 // Middleware
 const DEV_ALLOWED_ORIGINS = [
@@ -63,6 +63,274 @@ const DEFAULT_SETTINGS = {
 };
 
 let SITE_SETTINGS = { ...DEFAULT_SETTINGS };
+
+// ===== Broadcast Center (demo storage) =====
+// Minimal in-memory implementation used by the admin UI.
+// Endpoints:
+// - GET/PUT /api/broadcast/settings
+// - GET/POST /api/broadcast/items
+// - PATCH/DELETE /api/broadcast/items/:id
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ===== Articles (demo storage) =====
+// Contract endpoints expected by the admin panel:
+// - GET /api/articles?page=&limit=&sort=&status=&q=&category=&language=&from=&to=
+// - GET /api/articles/:id
+// - PUT /api/articles/:id
+// - PATCH /api/articles/:id
+
+/** @type {Array<any>} */
+let ARTICLES = [];
+
+function seedArticlesOnce() {
+  if (ARTICLES.length) return;
+  const now = Date.now();
+  const mk = (i, overrides = {}) => {
+    const createdAt = new Date(now - i * 36e5).toISOString();
+    const updatedAt = createdAt;
+    const base = {
+      _id: crypto.randomUUID(),
+      title: `Demo Article ${i + 1}`,
+      slug: `demo-article-${i + 1}`,
+      summary: `This is a demo summary for article ${i + 1}.`,
+      content: `Demo content for article ${i + 1}.`,
+      category: ['National', 'International', 'Business', 'Sports'][i % 4],
+      language: ['en', 'hi', 'gu'][i % 3],
+      status: ['draft', 'published', 'scheduled', 'archived'][i % 4],
+      author: { name: ['Editor', 'Founder', 'Reporter'][i % 3] },
+      ptiCompliance: ['pending', 'compliant', 'rejected'][i % 3],
+      trustScore: Math.round(50 + Math.random() * 50),
+      createdAt,
+      updatedAt,
+      publishAt: null,
+      scheduledAt: null,
+    };
+    return { ...base, ...overrides };
+  };
+
+  ARTICLES = [
+    mk(0, { status: 'draft' }),
+    mk(1, { status: 'draft', source: 'community-reporter', origin: 'community-reporter', isCommunity: true }),
+    mk(2, { status: 'published' }),
+    mk(3, { status: 'scheduled', publishAt: new Date(now + 6 * 36e5).toISOString() }),
+    mk(4, { status: 'archived' }),
+  ];
+}
+
+function parseSort(sort) {
+  const s = String(sort || '-createdAt');
+  const desc = s.startsWith('-');
+  const field = desc ? s.slice(1) : s;
+  return { field, desc };
+}
+
+function clampInt(v, def, min, max) {
+  const n = Number.parseInt(String(v ?? ''), 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+
+function inDateRange(iso, from, to) {
+  const t = new Date(iso || '').getTime();
+  if (!Number.isFinite(t)) return true;
+  if (from) {
+    const f = new Date(from).getTime();
+    if (Number.isFinite(f) && t < f) return false;
+  }
+  if (to) {
+    const tt = new Date(to).getTime();
+    if (Number.isFinite(tt) && t > tt + 24 * 60 * 60 * 1000 - 1) return false;
+  }
+  return true;
+}
+
+app.get('/api/articles', (req, res) => {
+  seedArticlesOnce();
+
+  const page = clampInt(req.query?.page, 1, 1, 10_000);
+  const limit = clampInt(req.query?.limit, 20, 1, 500);
+  const status = (req.query?.status ? String(req.query.status).toLowerCase() : '').trim();
+  const q = (req.query?.q ? String(req.query.q).toLowerCase() : '').trim();
+  const category = (req.query?.category ? String(req.query.category) : '').trim();
+  const language = (req.query?.language ? String(req.query.language).toLowerCase() : '').trim();
+  const from = (req.query?.from ? String(req.query.from) : '').trim();
+  const to = (req.query?.to ? String(req.query.to) : '').trim();
+  const { field, desc } = parseSort(req.query?.sort);
+
+  let rows = ARTICLES.slice();
+
+  if (status) rows = rows.filter((a) => String(a.status || '').toLowerCase() === status);
+  if (category) {
+    const cats = category.split(',').map((x) => x.trim()).filter(Boolean);
+    if (cats.length) rows = rows.filter((a) => cats.includes(String(a.category || '')));
+  }
+  if (language) rows = rows.filter((a) => String(a.language || '').toLowerCase() === language);
+  if (q) rows = rows.filter((a) => String(a.title || '').toLowerCase().includes(q));
+  if (from || to) rows = rows.filter((a) => inDateRange(a.createdAt, from || null, to || null));
+
+  rows.sort((a, b) => {
+    const av = a?.[field];
+    const bv = b?.[field];
+    const at = field.toLowerCase().includes('at') ? new Date(av || 0).getTime() : av;
+    const bt = field.toLowerCase().includes('at') ? new Date(bv || 0).getTime() : bv;
+    if (at === bt) return 0;
+    if (at == null) return desc ? 1 : -1;
+    if (bt == null) return desc ? -1 : 1;
+    return (at > bt ? 1 : -1) * (desc ? -1 : 1);
+  });
+
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const start = (page - 1) * limit;
+  const paged = rows.slice(start, start + limit);
+
+  return res.json({ rows: paged, total, page, pages });
+});
+
+app.get('/api/articles/:id', (req, res) => {
+  seedArticlesOnce();
+  const id = String(req.params.id || '');
+  const found = ARTICLES.find((a) => String(a._id) === id);
+  if (!found) return res.status(404).json({ message: 'Route not found' });
+  return res.json({ ok: true, data: found });
+});
+
+app.put('/api/articles/:id', (req, res) => {
+  seedArticlesOnce();
+  const id = String(req.params.id || '');
+  const idx = ARTICLES.findIndex((a) => String(a._id) === id);
+  if (idx < 0) return res.status(404).json({ message: 'Route not found' });
+  const next = { ...ARTICLES[idx], ...(req.body || {}), updatedAt: nowIso() };
+  ARTICLES[idx] = next;
+  return res.json({ ok: true, data: next });
+});
+
+app.patch('/api/articles/:id', (req, res) => {
+  seedArticlesOnce();
+  const id = String(req.params.id || '');
+  const idx = ARTICLES.findIndex((a) => String(a._id) === id);
+  if (idx < 0) return res.status(404).json({ message: 'Route not found' });
+  const body = req.body || {};
+  const next = { ...ARTICLES[idx], ...body, updatedAt: nowIso() };
+  // basic schedule normalization
+  if (body?.status === 'scheduled' && body?.publishAt) {
+    next.scheduledAt = body.publishAt;
+  }
+  ARTICLES[idx] = next;
+  return res.json({ ok: true, data: next });
+});
+
+let BROADCAST_SETTINGS = {
+  breakingEnabled: true,
+  breakingMode: 'manual',
+  liveEnabled: true,
+  liveMode: 'manual',
+};
+
+/** @type {Array<{_id:string,type:'breaking'|'live',text:string,isLive:boolean,createdAt:string,expiresAt:string,language?:string,authorId?:string,updatedAt?:string}>} */
+let BROADCAST_ITEMS = [];
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function pruneBroadcastItems() {
+  const cutoff = Date.now() - DAY_MS;
+  BROADCAST_ITEMS = BROADCAST_ITEMS.filter((it) => {
+    const created = new Date(it.createdAt).getTime();
+    if (!Number.isFinite(created)) return false;
+    return created >= cutoff;
+  });
+}
+
+app.get('/api/broadcast/settings', (req, res) => {
+  return res.status(200).json(BROADCAST_SETTINGS);
+});
+
+app.put('/api/broadcast/settings', (req, res) => {
+  const body = req.body || {};
+  const next = {
+    breakingEnabled: typeof body.breakingEnabled === 'boolean' ? body.breakingEnabled : BROADCAST_SETTINGS.breakingEnabled,
+    breakingMode: body.breakingMode === 'auto' ? 'auto' : 'manual',
+    liveEnabled: typeof body.liveEnabled === 'boolean' ? body.liveEnabled : BROADCAST_SETTINGS.liveEnabled,
+    liveMode: body.liveMode === 'auto' ? 'auto' : 'manual',
+  };
+  BROADCAST_SETTINGS = next;
+  return res.status(200).json(BROADCAST_SETTINGS);
+});
+
+app.get('/api/broadcast/items', (req, res) => {
+  pruneBroadcastItems();
+  const type = String(req.query?.type || '').toLowerCase();
+  if (type !== 'breaking' && type !== 'live') {
+    return res.status(400).json({ error: 'Invalid type. Expected breaking|live' });
+  }
+  const out = BROADCAST_ITEMS
+    .filter((it) => it.type === type)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return res.status(200).json(out);
+});
+
+app.post('/api/broadcast/items', (req, res) => {
+  pruneBroadcastItems();
+  const body = req.body || {};
+  const type = String(body.type || '').toLowerCase();
+  const text = String(body.text || '').trim();
+  if (type !== 'breaking' && type !== 'live') {
+    return res.status(400).json({ error: 'Invalid type. Expected breaking|live' });
+  }
+  if (!text) {
+    return res.status(400).json({ error: 'Text is required' });
+  }
+  if (text.length > 160) {
+    return res.status(400).json({ error: 'Text too long (max 160)' });
+  }
+  const createdAt = nowIso();
+  const expiresAt = new Date(Date.now() + DAY_MS).toISOString();
+  const item = {
+    _id: crypto.randomBytes(12).toString('hex'),
+    type,
+    text,
+    isLive: true,
+    createdAt,
+    expiresAt,
+    language: body.language ? String(body.language) : undefined,
+    updatedAt: createdAt,
+  };
+  BROADCAST_ITEMS.push(item);
+  return res.status(201).json(item);
+});
+
+app.patch('/api/broadcast/items/:id', (req, res) => {
+  pruneBroadcastItems();
+  const id = String(req.params.id || '');
+  const idx = BROADCAST_ITEMS.findIndex((it) => it._id === id);
+  if (idx < 0) return res.status(404).json({ error: 'Not Found' });
+  const body = req.body || {};
+  const prev = BROADCAST_ITEMS[idx];
+  const next = { ...prev };
+  if (typeof body.text === 'string') {
+    const t = body.text.trim();
+    if (!t) return res.status(400).json({ error: 'Text is required' });
+    if (t.length > 160) return res.status(400).json({ error: 'Text too long (max 160)' });
+    next.text = t;
+  }
+  if (typeof body.isLive === 'boolean') {
+    next.isLive = body.isLive;
+  }
+  next.updatedAt = nowIso();
+  BROADCAST_ITEMS[idx] = next;
+  return res.status(200).json(next);
+});
+
+app.delete('/api/broadcast/items/:id', (req, res) => {
+  pruneBroadcastItems();
+  const id = String(req.params.id || '');
+  const before = BROADCAST_ITEMS.length;
+  BROADCAST_ITEMS = BROADCAST_ITEMS.filter((it) => it._id !== id);
+  if (BROADCAST_ITEMS.length === before) return res.status(404).json({ error: 'Not Found' });
+  return res.status(200).json({ ok: true });
+});
 
 app.get('/api/admin/settings', (req, res) => {
   try {
@@ -659,6 +927,11 @@ app.get('/api/system/health', (req, res) => {
     requestsPerMinute: 200 + Math.floor(Math.random() * 800),
     status: status
   });
+});
+
+app.get('/api/system/ai-health', (_req, res) => {
+  // Minimal contract endpoint used by admin UI health checks
+  res.json({ ok: true, status: 'ok', provider: 'demo', model: 'demo' });
 });
 
 app.get('/api/system/alerts', (req, res) => {

@@ -1,24 +1,14 @@
 // 📁 src/pages/AiLogs.tsx
 
 import { useEffect, useState } from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import { fetchJson } from '@/lib/fetchJson';
 
 export default function AiLogs() {
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/ai/logs`, { credentials: 'include' })
-      .then(async (res) => {
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok || !ct.includes('application/json')) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(`Expected JSON, got "${ct}". Body: ${txt.slice(0, 160)}`);
-        }
-        return res.json();
-      })
-      .then((data) => setLogs(data.logs || []))
+    fetchJson<{ logs?: any[] }>('/ai/logs')
+      .then((data) => setLogs(data?.logs || []))
       .catch(() => setLogs([]));
   }, []);
 
@@ -37,3 +27,4 @@ export default function AiLogs() {
     </div>
   );
 }
+

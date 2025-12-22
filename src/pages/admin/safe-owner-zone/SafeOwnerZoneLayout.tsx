@@ -5,7 +5,7 @@ type ModuleLink = { key: string; label: string; to: string; icon: string };
 
 const CONTROLS: ModuleLink[] = [
   { key: 'founder', label: 'Founder Command', to: '/admin/safe-owner-zone/founder', icon: '🎛️' },
-  { key: 'security-lockdown', label: 'Security & Lockdown', to: '/admin/safe-owner-zone/security-lockdown', icon: '🛡️' },
+  { key: 'security-lockdown', label: 'Security Center', to: '/admin/safe-owner-zone/security-lockdown', icon: '🛡️' },
   { key: 'compliance', label: 'Compliance', to: '/admin/safe-owner-zone/compliance', icon: '📜' },
   { key: 'ai-control', label: 'AI Control', to: '/admin/safe-owner-zone/ai-control', icon: '🤖' },
 ];

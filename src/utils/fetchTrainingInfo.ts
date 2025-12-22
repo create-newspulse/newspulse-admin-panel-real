@@ -17,7 +17,7 @@ interface TrainingInfo {
 
 export const fetchTrainingInfo = async (): Promise<TrainingInfo> => {
   try {
-    const url = apiUrl('/api/admin/system/ai-training-info');
+    const url = apiUrl('/admin/system/ai-training-info');
     if (import.meta.env.DEV) console.log('ADMIN API:', url);
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) {

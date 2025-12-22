@@ -14,6 +14,49 @@ export const SiteSettingsSchema = z.object({
     theme: z.enum(['light','dark','system']).default('system'),
     density: z.enum(['comfortable','compact']).default('comfortable'),
   }),
+
+  // Public site homepage modules
+  homepage: z.object({
+    modulesOrder: z.array(
+      z.enum([
+        'explore',
+        'categoryStrip',
+        'trending',
+        'liveUpdatesTicker',
+        'breakingTicker',
+        'quickTools',
+        'appPromo',
+        'footer',
+      ])
+    ).default([
+      'explore',
+      'categoryStrip',
+      'trending',
+      'liveUpdatesTicker',
+      'breakingTicker',
+      'quickTools',
+      'appPromo',
+      'footer',
+    ]),
+  }),
+
+  // Public site tickers
+  tickers: z.object({
+    liveSpeedSec: z.number().min(1).max(60).default(8),
+    breakingSpeedSec: z.number().min(1).max(60).default(6),
+  }),
+
+  // Public site Live TV embed
+  liveTv: z.object({
+    enabled: z.boolean().default(false),
+    embedUrl: z.string().url().or(z.literal('')).default(''),
+  }),
+
+  // Public site footer
+  footer: z.object({
+    text: z.string().default(''),
+  }),
+
   // Navigation
   navigation: z.object({
     enableTopNav: z.boolean().default(true),
