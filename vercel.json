@@ -5,12 +5,12 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/settings/public",
-      "destination": "https://newspulse-backend-real.onrender.com/api/settings/public"
+      "source": "/admin-api/:path*",
+      "destination": "https://newspulse-backend-real.onrender.com/:path*"
     },
     {
-      "source": "/admin-api/:path*",
-      "destination": "/api/admin-proxy/:path*"
+      "source": "/settings/public",
+      "destination": "https://newspulse-backend-real.onrender.com/api/settings/public"
     },
     {
       "source": "/(.*)",
