@@ -1,141 +1,178 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import StatsCards from '@components/StatsCards';
-import NewsCard from '@components/NewsCard';
 import LiveTicker from '@components/LiveTicker';
-import VoicePlayer from '@components/VoicePlayer';
 import ChartComponent from '@components/ChartComponent';
-import VoiceAndExplainer from '@components/VoiceAndExplainer';
 import SystemHealthBadge from '@components/SystemHealthBadge';
-import SystemHealthPanel from '@components/SystemHealthPanel';
-import { FetchJsonError, fetchJson } from '@lib/fetchJson';
 import { apiUrl } from '@/lib/apiBase';
-import toast from 'react-hot-toast';
+import api from '@/utils/api';
 
-type DashboardStats = {
-  total: number;
-  // When arrays are available we keep them, but we also compute numeric totals for cards.
-  byCategory: { _id: string | null; count: number }[];
-  byLanguage: { _id: string | null; count: number }[];
-  categoriesTotal: number;
-  languagesTotal: number;
-  recent: {
-    _id: string;
-    title: string;
-    trendingScore: number;
-    isTrending?: boolean;
-    isTopPick?: boolean;
-    createdAt: string | null;
-  }[];
-  aiLogs: number;
-  activeUsers: number;
+type AdminStats = {
+  totalNews: number;
+  categoriesCount: number;
+  languagesCount: number;
+  activeUsersCount: number;
+  aiLogsCount: number;
 };
+
+type BackendDashboardStatsPayload = {
+  totalNews: number;
+  categories: number;
+  languages: number;
+  activeUsers: number;
+  aiLogs: number;
+  preLaunch?: boolean;
+  message?: string;
+};
+
+type BackendDashboardStatsResponse =
+  | BackendDashboardStatsPayload
+  | { ok?: boolean; success?: boolean; status?: number; message?: string; data?: BackendDashboardStatsPayload };
+
+function normalizeDashboardStats(raw: any): BackendDashboardStatsPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const payload = (raw && typeof raw === 'object' && 'data' in raw && (raw as any).data) ? (raw as any).data : raw;
+  if (!payload || typeof payload !== 'object') return null;
+
+  // New shape (preferred)
+  const hasNewKeys = ['totalNews', 'categories', 'languages', 'activeUsers', 'aiLogs'].every((k) => k in (payload as any));
+  if (hasNewKeys) {
+    return {
+      totalNews: Number((payload as any).totalNews ?? 0),
+      categories: Number((payload as any).categories ?? 0),
+      languages: Number((payload as any).languages ?? 0),
+      activeUsers: Number((payload as any).activeUsers ?? 0),
+      aiLogs: Number((payload as any).aiLogs ?? 0),
+      preLaunch: (payload as any).preLaunch,
+      message: (payload as any).message,
+    };
+  }
+
+  // Old-ish variants we still support
+  // - { totalNews, totalCategories, totalLanguages, activeUsers, aiLogs }
+  // - { totals: { news, categories, languages, activeUsers }, aiLogs }
+  // - { totals: { news, categories, languages, users }, aiLogs, activeUsers }
+  const totals = (payload as any).totals;
+  const derived = {
+    totalNews: Number((payload as any).totalNews ?? totals?.news ?? totals?.totalNews ?? 0),
+    categories: Number((payload as any).categories ?? (payload as any).totalCategories ?? totals?.categories ?? 0),
+    languages: Number((payload as any).languages ?? (payload as any).totalLanguages ?? totals?.languages ?? 0),
+    activeUsers: Number((payload as any).activeUsers ?? totals?.activeUsers ?? totals?.users ?? 0),
+    aiLogs: Number((payload as any).aiLogs ?? 0),
+  };
+
+  const looksValid = Object.values(derived).every((n) => typeof n === 'number' && !Number.isNaN(n));
+  if (!looksValid) return null;
+  return derived;
+}
 
 const Dashboard = () => {
   const { t, i18n } = useTranslation();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [aiCommand, setAiCommand] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [debugExpanded, setDebugExpanded] = useState(false);
-
-  const articles = useMemo(
-    () => [
-      { _id: '1', title: t('aiSummaryTitle'), summary: t('aiSummaryBody') },
-      { _id: '2', title: t('topNewsTitle'), summary: t('topNewsBody') },
-    ],
-    [t]
-  );
+  const navigate = useNavigate();
+  const didLoadOnce = useRef(false);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'disabled'>('loading');
+  const [statsState, setStatsState] = useState<'loading' | 'ready' | 'disabled'>('loading');
+  const [statsErrorText, setStatsErrorText] = useState<string | undefined>(undefined);
+  const [banner, setBanner] = useState<null | { type: 'error' | 'forbidden' | 'expired'; title: string; subtitle?: string }>(null);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      setLoading(true);
-      setError(null);
+    let cancelled = false;
 
-      // normalize payload into your DashboardStats shape
-      const normalize = (raw: any): DashboardStats => {
-        const totals = raw?.totals || {};
-        const byCategory = Array.isArray(raw?.byCategory) ? raw.byCategory : [];
-        const byLanguage = Array.isArray(raw?.byLanguage) ? raw.byLanguage : [];
-        const categoriesTotal = Number(
-          totals.categories ?? raw?.categories ?? (Array.isArray(byCategory) ? byCategory.length : 0)
-        );
-        const languagesTotal = Number(
-          totals.languages ?? raw?.languages ?? (Array.isArray(byLanguage) ? byLanguage.length : 0)
-        );
-        return {
-          total: Number(raw?.total ?? totals.news ?? 0),
-          byCategory,
-          byLanguage,
-          categoriesTotal,
-          languagesTotal,
-          recent: Array.isArray(raw?.recent) ? raw.recent : [],
-          aiLogs: Number(raw?.aiLogs ?? totals.aiLogs ?? 0),
-          activeUsers: Number(raw?.activeUsers ?? totals.users ?? 0),
-        };
-      };
+    // React 18 StrictMode in dev intentionally runs effects twice.
+    // Prevent duplicate stats fetches per mount.
+    if (didLoadOnce.current) return;
+    didLoadOnce.current = true;
+
+    async function load() {
+      setState('loading');
+      setStatsState('loading');
+      setStatsErrorText(undefined);
+      setBanner(null);
+      setStats(null);
 
       try {
-        // Stats endpoints are NOT admin endpoints; they live under '/api/*'.
-        // Use the public API base helper so DEV goes through '/admin-api/api/*'.
-        const candidates = ['/dashboard-stats', '/stats'];
-        let loaded: DashboardStats | null = null;
-        let lastTried: string | null = null;
-        for (const c of candidates) {
-          try {
-            lastTried = c;
-            const payload: any = await fetchJson(c);
-            loaded = normalize(payload?.data ?? payload);
-            break;
-          } catch (e: any) {
-            // If endpoint missing (404), try next candidate; otherwise surface error.
-            if (e instanceof FetchJsonError && e.status === 404) continue;
-            const msg = String(e?.message || '');
-            if (/(^|\s)404(\s|$)/.test(msg) || /HTTP\s*404/i.test(msg)) continue;
-            throw e;
-          }
-        }
-        if (loaded) {
-          setStats(loaded);
-        } else {
-          throw new Error('No stats endpoint available');
-        }
-      } catch (err: any) {
-        const status = err instanceof FetchJsonError ? err.status : undefined;
-        const method = err instanceof FetchJsonError ? err.method : 'GET';
-        const url = err instanceof FetchJsonError ? err.url : null;
-        const endpoint = url || '/admin-api/api/dashboard-stats';
+        const res = await api.get<BackendDashboardStatsResponse>('/admin/stats');
+        const raw = (res?.data || {}) as BackendDashboardStatsResponse;
+        const payload = normalizeDashboardStats(raw);
 
-        console.error('❌ Dashboard API Error:', {
-          message: err?.message || String(err),
-          status,
-          endpoint,
+        if (!payload) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[Dashboard] Unexpected stats response shape:', raw);
+          }
+          throw new Error('unexpected-stats-shape');
+        }
+
+        const normalized: AdminStats = {
+          totalNews: Number(payload.totalNews ?? 0),
+          categoriesCount: Number(payload.categories ?? 0),
+          languagesCount: Number(payload.languages ?? 0),
+          activeUsersCount: Number(payload.activeUsers ?? 0),
+          aiLogsCount: Number(payload.aiLogs ?? 0),
+        };
+
+        if (cancelled) return;
+        setStats(normalized);
+        setStatsState('ready');
+        setState('ready');
+      } catch (err: any) {
+        if (cancelled) return;
+        const status = err?.response?.status as number | undefined;
+
+        if (status === 401) {
+          setBanner({
+            type: 'expired',
+            title: 'Session expired',
+            subtitle: 'Please log in again.',
+          });
+          setState('disabled');
+          setStatsState('disabled');
+          setStatsErrorText('Failed to load stats');
+          // Let global interceptors clear auth, but also redirect here for correctness.
+          try {
+            navigate('/admin/login', { replace: true });
+          } catch {}
+          return;
+        }
+
+        if (status === 403) {
+          setBanner({
+            type: 'forbidden',
+            title: 'Access denied',
+            subtitle: 'Your account does not have permission to view these stats.',
+          });
+          setState('disabled');
+          setStatsState('disabled');
+          setStatsErrorText('Failed to load stats');
+          return;
+        }
+
+        // Non-auth failures: keep the dashboard usable, but show stats as unavailable.
+        const isNetworkLike = !status || status >= 500;
+        setBanner({
+          type: 'error',
+          title: isNetworkLike
+            ? 'Backend unreachable. Check API URL / CORS / Render status.'
+            : 'Failed to load dashboard stats.',
+          subtitle: isNetworkLike ? undefined : `Request failed (HTTP ${status}).`,
         });
 
-        const tag = status ? `HTTP ${status}` : 'Network error';
-        toast.error(`Dashboard stats failed (${tag}) ${method} ${endpoint}`);
-        setError('Failed to load dashboard stats. Please ensure the backend server is running.');
-      } finally {
-        setLoading(false);
+        setState('disabled');
+        setStatsState('disabled');
+        setStatsErrorText('Failed to load stats');
       }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
     };
+  }, [navigate, t]);
 
-    const fetchAICommand = async () => {
-      try {
-        const json = await fetchJson(apiUrl('/system/health'));
-        setAiCommand(json);
-      } catch (err: any) {
-        console.error('❌ AI Command API Error:', err?.message || err);
-        setAiCommand({ _nonJson: true, contentType: 'unknown', preview: String(err?.message || 'Unknown error') });
-      }
-    };
-
-    fetchStats();
-    fetchAICommand();
-  }, [t]);
-
-  const langCode = (i18n.language?.split('-')[0] || 'en') as 'en' | 'hi' | 'gu';
   // Feature flag: disable the yellow scrolling ticker by default.
   // Enable by setting VITE_SHOW_TICKER=true at build time.
   const SHOW_TICKER = (import.meta.env.VITE_SHOW_TICKER === 'true');
@@ -146,109 +183,104 @@ const Dashboard = () => {
         <header
           className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
         >
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-800 dark:text-white">
-            📊 {t('dashboard')}
-          </h1>
+          <div className="space-y-3">
+            <h1 className="text-4xl font-extrabold tracking-tight text-slate-800 dark:text-white">Admin Dashboard</h1>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/add')}
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Add News
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/admin/articles')}
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Manage News
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/admin/drafts')}
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Draft Desk
+              </button>
+            </div>
+          </div>
           <div className="mt-1 sm:mt-0">
             <SystemHealthBadge />
           </div>
   </header>
 
-        {loading && (
-          <div className="text-center text-gray-500 dark:text-gray-400">
-            ⏳ {t('loadingDashboard')}
+        {banner?.type === 'error' ? (
+          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-5">
+            <div className="text-lg font-semibold text-red-800 dark:text-red-200">{banner.title}</div>
+            {banner.subtitle ? (
+              <div className="mt-1 text-sm text-red-700/90 dark:text-red-200/80">{banner.subtitle}</div>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {error && (
-          <div className="text-center text-red-600 font-medium">
-            ❌ {error}
+        {banner?.type === 'forbidden' ? (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-5">
+            <div className="text-lg font-semibold text-amber-900 dark:text-amber-200">{banner.title}</div>
+            {banner.subtitle ? (
+              <div className="mt-1 text-sm text-amber-800/90 dark:text-amber-200/80">{banner.subtitle}</div>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {stats && (
+        {banner?.type === 'expired' ? (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-5">
+            <div className="text-lg font-semibold text-amber-900 dark:text-amber-200">{banner.title}</div>
+            {banner.subtitle ? (
+              <div className="mt-1 text-sm text-amber-800/90 dark:text-amber-200/80">{banner.subtitle}</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <section>
+          <StatsCards
+            state={statsState}
+            errorText={statsErrorText}
+            values={
+              stats
+                ? {
+                    totalNews: stats.totalNews,
+                    categoriesCount: stats.categoriesCount,
+                    languagesCount: stats.languagesCount,
+                    activeUsersCount: stats.activeUsersCount,
+                    aiLogsCount: stats.aiLogsCount,
+                  }
+                : undefined
+            }
+          />
+        </section>
+
+        {state === 'ready' ? (
           <>
-            <section>
-              <StatsCards
-                totalNews={stats.total}
-                categoryCount={stats.categoriesTotal}
-                languageCount={stats.languagesTotal}
-                activeUsers={stats.activeUsers}
-                aiLogs={stats.aiLogs}
-              />
-            </section>
 
-            <section>
-              <ChartComponent />
-            </section>
-
-            <section>
-              <SystemHealthPanel />
-            </section>
+            <ChartComponent />
 
             {SHOW_TICKER && (
               <section>
                 <LiveTicker apiUrl={apiUrl('/news-ticker')} position="top" />
               </section>
             )}
-
-            <section>
-              <VoiceAndExplainer text={t('aiSummaryBody')} />
-              <VoicePlayer text={t('topNewsBody')} language={langCode} />
-            </section>
           </>
-        )}
+        ) : null}
 
-        <section aria-labelledby="ai-insights">
-          <h2
-            id="ai-insights"
-            className="text-2xl font-semibold text-slate-700 dark:text-slate-100 mb-6 flex items-center gap-2"
-          >
-            🧠 {t('weeklyAiInsights')}
+        <section aria-labelledby="ai-insights" className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
+          <h2 id="ai-insights" className="text-2xl font-semibold text-slate-700 dark:text-slate-100 mb-2">
+            AI Insights
           </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {articles.map((article) => (
-              <NewsCard key={article._id} article={article} />
-            ))}
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            AI insights will appear after launch when real analytics are available.
           </div>
-
-          {aiCommand && (
-            <div className="mt-10 p-4 bg-slate-100 dark:bg-slate-700 rounded">
-              <h2 className="text-lg font-semibold">🔐 AI Command Debug</h2>
-              {aiCommand._nonJson ? (
-                <div className="text-xs text-red-200/90 bg-red-700/30 border border-red-400/40 rounded p-3 mt-2">
-                  <p className="mb-2 font-medium">Non-JSON response from /system/ai-command</p>
-                  <p className="mb-2">content-type: <code>{aiCommand.contentType}</code></p>
-                  <pre className="ai-debug-box text-[11px]">
-                    {debugExpanded ? aiCommand.preview : String(aiCommand.preview ?? '').slice(0, 300) + (String(aiCommand.preview ?? '').length > 300 ? '…' : '')}
-                  </pre>
-                  <button
-                    className="mt-2 inline-flex items-center px-3 py-1 rounded bg-slate-800 text-white text-xs hover:bg-slate-900 disabled:opacity-60"
-                    onClick={() => setDebugExpanded((v) => !v)}
-                  >
-                    {debugExpanded ? 'Show Less' : 'Show More'}
-                  </button>
-                  <p className="mt-2 opacity-80">Tip: ensure this endpoint returns application/json in production; if unauthorized, the backend should return 401 with a JSON body.</p>
-                </div>
-              ) : (
-                <div>
-                  <pre className="ai-debug-box text-sm">
-                    {debugExpanded
-                      ? JSON.stringify(aiCommand, null, 2)
-                      : JSON.stringify(aiCommand, null, 2).slice(0, 600) + (JSON.stringify(aiCommand, null, 2).length > 600 ? '…' : '')}
-                  </pre>
-                  <button
-                    className="mt-2 inline-flex items-center px-3 py-1 rounded bg-slate-800 text-white text-xs hover:bg-slate-900 disabled:opacity-60"
-                    onClick={() => setDebugExpanded((v) => !v)}
-                  >
-                    {debugExpanded ? 'Show Less' : 'Show More'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-  </section>
+        </section>
       </div>
     </main>
   );
