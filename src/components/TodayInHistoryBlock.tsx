@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface HistoryEntry {
   year: string;
@@ -10,11 +10,14 @@ const TodayInHistoryBlock: React.FC = () => {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
 
   useEffect(() => {
-    axios.get(`${import.meta.env.VITE_API_URL}/today-history`)
-      .then(res => {
-        if (res.data.success) setEntries(res.data.data);
-      })
-      .catch(err => console.error('❌ Failed to load history:', err));
+    (async () => {
+      try {
+        const res = await adminJson<any>('/today-history', { method: 'GET' });
+        if (res?.success) setEntries(res.data);
+      } catch (err) {
+        console.error('❌ Failed to load history:', err);
+      }
+    })();
   }, []);
 
   if (!entries.length) return null;

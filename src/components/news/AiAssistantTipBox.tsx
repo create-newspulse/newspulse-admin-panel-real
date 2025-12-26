@@ -1,5 +1,7 @@
 import React from 'react';
-import { apiUrl } from '@/lib/apiBase';
+import { adminFetch, adminJson } from '@/lib/http/adminFetch';
+
+const ENABLE_AI_MODE_LOGGING = import.meta.env.VITE_LOG_AI_MODE === 'true';
 
 // --- small helpers ---
 // Multilingual slugify: keep English letters, digits, Hindi (Devanagari) and Gujarati characters.
@@ -46,16 +48,48 @@ async function tryAiSuggest(payload: {
   language: 'en' | 'hi' | 'gu';
 }) {
   try {
-    const res = await fetch(apiUrl('/assist/suggest'), {
+    const data = await adminJson<any>('/assist/suggest', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'include',
-    });
-    if (!res.ok) throw new Error('no ai');
-    return await res.json(); // {title, slug, summary, tips: string[]}
+      json: payload,
+    }); // {title, slug, summary, tips: string[]}
+    // Defensive: backend might return non-JSON/shape mismatch; treat as failure.
+    const ok =
+      data &&
+      typeof data === 'object' &&
+      typeof data.title === 'string' &&
+      typeof data.slug === 'string' &&
+      typeof data.summary === 'string' &&
+      (Array.isArray(data.tips) || typeof data.tips === 'undefined');
+    if (!ok) return null;
+    return data;
   } catch {
     return null;
+  }
+}
+
+async function tryLogAiMode(evt: {
+  feature: 'assist_suggest';
+  mode: 'ai' | 'offline';
+  success: boolean;
+  error: string | null;
+  ts: string;
+}) {
+  if (!ENABLE_AI_MODE_LOGGING) return;
+  try {
+    const res = await adminFetch('/system/ai-diagnostics/ai-trainer/log', {
+      method: 'POST',
+      json: {
+        // Keep compatibility with existing diagnostics endpoint convention.
+        command: evt.feature,
+        result: `${evt.mode}:${evt.success ? 'ok' : 'fail'}`,
+        pattern: 'ai-assistant-tip-box',
+        // Provide richer structured payload too (backend can ignore if unknown).
+        ...evt,
+      },
+    });
+    if (!res.ok) return;
+  } catch {
+    // best-effort logging only
   }
 }
 
@@ -84,14 +118,32 @@ export default function AiAssistantTipBox({
   onApplySummary,
 }: Props) {
   const [busy, setBusy] = React.useState(false);
+  const [mode, setMode] = React.useState<'idle' | 'ai' | 'offline'>('idle');
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [lastGeneratedAt, setLastGeneratedAt] = React.useState<Date | null>(null);
   const [suggest, setSuggest] = React.useState<{
     title: string; slug: string; summary: string; tips: string[];
   } | null>(null);
 
   const generate = async () => {
     setBusy(true);
+    setMode('idle');
+    setErrorMessage(null);
     const ai = await tryAiSuggest({ title, content, language });
-    if (ai) { setSuggest(ai); setBusy(false); return; }
+    if (ai) {
+      setSuggest(ai);
+      setMode('ai');
+      setLastGeneratedAt(new Date());
+      void tryLogAiMode({
+        feature: 'assist_suggest',
+        mode: 'ai',
+        success: true,
+        error: null,
+        ts: new Date().toISOString(),
+      });
+      setBusy(false);
+      return;
+    }
 
     // Fallback local heuristics
     const baseTitle = title?.trim();
@@ -109,7 +161,17 @@ export default function AiAssistantTipBox({
     if (!title) tips.push('Generated headline from first sentence.');
     if ((summary || '').length < 40) tips.push('Try adding a 2-line intro for better CTR.');
     if (!/https?:\/\//.test(content)) tips.push('Consider adding a source link for trust.');
-  setSuggest({ title: normalizedTitle, slug, summary, tips });
+    setSuggest({ title: normalizedTitle, slug, summary, tips });
+    setMode('offline');
+    setErrorMessage('AI service unavailable — using offline suggestions.');
+    setLastGeneratedAt(new Date());
+    void tryLogAiMode({
+      feature: 'assist_suggest',
+      mode: 'offline',
+      success: false,
+      error: 'ai_unavailable',
+      ts: new Date().toISOString(),
+    });
     setBusy(false);
   };
 
@@ -117,14 +179,21 @@ export default function AiAssistantTipBox({
     <div className="rounded-xl border bg-white/70 dark:bg-slate-900/40 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="font-semibold">🤖 AI Assistant Tip Box</div>
-        <button
-          onClick={generate}
-          disabled={busy}
-          className="px-3 py-1.5 rounded-lg bg-slate-800 text-white disabled:opacity-50"
-          title="Generate suggestions"
-        >
-          {busy ? 'Thinking…' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          {mode !== 'idle' && (
+            <div className="text-xs text-slate-500">
+              Mode: <span className="font-medium">{mode === 'ai' ? 'AI' : 'Offline'}</span>
+            </div>
+          )}
+          <button
+            onClick={generate}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 text-white disabled:opacity-50"
+            title="Generate suggestions"
+          >
+            {busy ? 'Thinking…' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {!suggest && (
@@ -136,6 +205,14 @@ export default function AiAssistantTipBox({
 
       {suggest && (
         <div className="space-y-3">
+          {(mode === 'offline' || errorMessage) && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-sm">
+              <div className="font-medium">{errorMessage || 'AI service unavailable — using offline suggestions.'}</div>
+            </div>
+          )}
+          {lastGeneratedAt && (
+            <div className="text-xs text-slate-500">Generated just now</div>
+          )}
           <div>
             <div className="text-xs text-slate-500 mb-1">Suggested Title</div>
             <div className="rounded-lg border p-2 bg-white dark:bg-slate-900">{suggest.title || '—'}</div>

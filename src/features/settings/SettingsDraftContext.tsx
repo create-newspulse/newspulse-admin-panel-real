@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import type { SiteSettings } from '@/types/siteSettings';
-import { DEFAULT_SETTINGS } from '@/types/siteSettings';
+import { DEFAULT_SETTINGS, SiteSettingsSchema } from '@/types/siteSettings';
 import settingsApi from '@/lib/settingsApi';
 import { deepMerge } from '@/features/settings/deepMerge';
+import apiClient from '@/lib/api';
 
 type Status = 'idle' | 'loading' | 'ready' | 'saving' | 'publishing' | 'error';
 
@@ -103,7 +104,27 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
     setStatus('publishing');
     setError(null);
     try {
-      const next = await settingsApi.putAdminSettings(draft, { action: auditAction });
+      // Publish must go through the same axios client/base as dashboard/articles:
+      // browser -> /admin-api/api/admin/settings -> backend /api/admin/settings
+      const res = await apiClient.patch('/admin/settings', draft, {
+        headers: auditAction ? { 'X-Admin-Action': auditAction } : undefined,
+      });
+
+      let raw: any = res?.data;
+      if (raw && typeof raw === 'object' && raw.settings) raw = raw.settings;
+
+      // Accept both envelope { public, admin, version, updatedAt, updatedBy } and direct SiteSettings
+      if (raw && typeof raw === 'object' && (raw.public || raw.admin)) {
+        const merged = { ...(raw.public || {}), ...(raw.admin || {}) };
+        const meta = { version: raw.version, updatedAt: raw.updatedAt, updatedBy: raw.updatedBy };
+        const parsed = SiteSettingsSchema.safeParse({ ...merged, ...meta });
+        raw = parsed.success ? parsed.data : DEFAULT_SETTINGS;
+      } else {
+        const parsed = SiteSettingsSchema.safeParse(raw ?? {});
+        raw = parsed.success ? parsed.data : DEFAULT_SETTINGS;
+      }
+
+      const next = raw as SiteSettings;
       setBase(next);
       setDraft(next);
       try {

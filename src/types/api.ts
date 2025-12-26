@@ -66,6 +66,7 @@ export interface Article {
   slug?: string;
   summary?: string;
   content?: string; // aka body
+  imageUrl?: string;
   category?: string;
   language?: string;
   status?: 'draft' | 'scheduled' | 'published' | 'archived' | 'deleted';

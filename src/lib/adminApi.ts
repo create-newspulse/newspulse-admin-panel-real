@@ -1,181 +1,35 @@
-import axios from 'axios';
+import { api, apiUrl, adminApi, adminUrl, getAuthToken } from './api';
 
-// Standardize base URL:
-// - Proxy mode (preferred): use same-origin '/admin-api' and let the proxy forward to backend.
-// - Direct mode: set VITE_API_URL to a valid backend origin (no /api suffix).
-const envAny = import.meta.env as any;
-const rawHost0 = (envAny.VITE_API_URL || '').toString().trim();
-let rawHost = (rawHost0 === 'undefined' || rawHost0 === 'null') ? '' : rawHost0;
-
-const useProxy = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true' && import.meta.env.DEV;
-
-// (Kept minimal: this module now defaults to proxy mode when VITE_API_URL is unset.)
-
-function isValidAbsoluteUrl(u: string): boolean {
-  if (!/^https?:\/\//i.test(u)) return false;
-  try {
-    // eslint-disable-next-line no-new
-    new URL(u);
-    return true;
-  } catch {
-    return false;
-  }
+function stripTrailingSlashes(s: string) {
+  return (s || '').replace(/\/+$/, '');
 }
 
-// Reject placeholder values and invalid absolute URLs.
-if (/[<>]/.test(rawHost)) rawHost = '';
-if (rawHost) {
-  const hasApiSuffix = /\/api$/i.test(rawHost);
-  const withoutApi = hasApiSuffix ? rawHost.replace(/\/api$/i, '') : rawHost;
-  if (!isValidAbsoluteUrl(withoutApi)) rawHost = '';
-  else rawHost = withoutApi;
-}
-// Proxy mode (Vercel + local dev): use '/admin-api' and let proxy map to backend '/api/*'.
-function absolutizeIfRelativeBase(maybeRelative: string) {
-  const s = (maybeRelative || '').toString();
-  if (/^https?:\/\//i.test(s)) return s;
-  if (!s.startsWith('/')) return s;
-  try {
-    if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
-      return `${window.location.origin}${s}`;
-    }
-  } catch {}
-  return s;
-}
-
-let baseHost = rawHost ? rawHost : '';
-if (!baseHost) {
-  // Default to proxy mode in both DEV and PROD.
-  baseHost = '/admin-api';
-}
-
-// DEV: if explicitly using proxy, always use same-origin /admin-api.
-if (useProxy) baseHost = '/admin-api';
-
-const baseHostAbs = absolutizeIfRelativeBase(baseHost);
-
-// Base selection rules:
-// - If base is '/admin-api', route through the same DEV contract as other calls:
-//   '/admin-api/api/admin/*' (Vite proxy strips '/admin-api' and backend receives '/api/admin/*').
-// - If base ends with '/api', admin endpoints are under '{base}/admin/*'.
-// - Otherwise (origin without /api suffix), admin endpoints are under '{base}/api/admin/*'.
-const trimmed = baseHostAbs.replace(/\/+$/, '');
-export const adminRoot = /\/admin-api$/i.test(trimmed)
-  ? `${trimmed}/api/admin`
-  : (/\/api$/i.test(trimmed) ? `${trimmed}/admin` : `${trimmed}/api/admin`);
-
+// Preserve existing exports used across the app.
+export const adminRoot = stripTrailingSlashes(adminUrl('/'));
 export const ADMIN_API_BASE = adminRoot;
-export const adminApi = axios.create({ baseURL: adminRoot, withCredentials: true });
-
-// Unified token retrieval for reuse across components/utilities.
-// Order of precedence:
-// 1. newsPulseAdminAuth.accessToken (stored auth object)
-// 2. np_admin_access_token
-// 3. np_admin_token
-export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    // Prefer unified keys set by AuthContext/Login
-    const keys = ['np_admin_access_token', 'np_admin_token', 'adminToken'];
-    for (const k of keys) {
-      const val = localStorage.getItem(k);
-      if (val && String(val).trim().length > 0) return String(val);
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// Attach Authorization header from localStorage (JWT) for all requests
-adminApi.interceptors.request.use((config) => {
-  try {
-    // Ensure absolute baseURL in browser (relative base URLs can trigger URL-constructor failures)
-    const base0 = (config.baseURL || adminApi.defaults.baseURL || '').toString();
-    if (base0.startsWith('/')) {
-      try {
-        if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
-          config.baseURL = `${window.location.origin}${base0}`;
-        }
-      } catch {}
-    }
-
-    const token = getAuthToken();
-    if (token) {
-      config.headers = config.headers || {};
-      (config.headers as any).Authorization = `Bearer ${token}`;
-    }
-  } catch {}
-  return config;
-});
-
-// Always log error responses in the requested format, then rethrow
-// Throttled / deduplicated error logging to avoid console flood
-adminApi.interceptors.response.use(
-  (res) => res,
-  (error) => {
-    const status = error?.response?.status;
-    const url = error?.config?.url || error?.response?.config?.url || '';
-    const ct = error?.response?.headers?.['content-type'];
-    // Clean 401 handling: clear token and redirect once to /admin/login
-    if (status === 401) {
-      // Skip auto-logout for Community Reporter Queue endpoint; let page show error banner
-      const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
-      if (!isCommunityQueue) {
-        try {
-          localStorage.removeItem('adminToken');
-          localStorage.removeItem('np_admin_token');
-          localStorage.removeItem('np_admin_access_token');
-          localStorage.removeItem('newsPulseAdminAuth');
-        } catch {}
-        try { console.warn('[adminApi] Session expired (401) – logging out'); } catch {}
-        try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
-      }
-    }
-    // 403 → treat as Owner Key required for Safe Owner Zone actions.
-    // (Do not redirect to Access Denied for Owner Key lock.)
-    if (status === 403) {
-      try { (error as any).isOwnerKeyRequired = true; } catch {}
-      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:ownerkey-required')); } catch {}
-    }
-    // Reduce spam: avoid logging route-not-found noise for monitor endpoints
-    const suppress = (status === 404 && (/\/system\/monitor-hub$/.test(url) || /\/api\/admin\/me$/.test(url)));
-    if (!suppress) {
-      try { console.error('[adminApi:err]', status, url, ct); } catch {}
-    }
-    return Promise.reject(error);
-  }
-);
-
-// Dev-only request/response success logging to aid debugging
-if (import.meta.env.DEV) {
-  adminApi.interceptors.request.use((cfg) => {
-    try { console.debug('[adminApi:req]', cfg.method?.toUpperCase(), cfg.baseURL ? cfg.baseURL + (cfg.url || '') : cfg.url); } catch {}
-    return cfg;
-  });
-  adminApi.interceptors.response.use((res) => {
-    try { console.debug('[adminApi:res]', res.status, res.config.url, res.headers['content-type']); } catch {}
-    return res;
-  });
-}
+export { adminApi, getAuthToken };
 
 // Resolve an API path relative to the chosen base.
-// Avoid duplicated '/api/api' and tolerate callers passing '/api/...'.
+// Accepts legacy forms like '/api/admin/...' and normalizes to '/admin/...'.
 export function resolveAdminPath(p: string): string {
-  const clean = p.startsWith('/') ? p : `/${p}`;
-  const normalized = clean.replace(/^\/api\//, '/').replace(/^\/admin\//, '/');
-  return `${adminRoot}${normalized}`;
+  const s0 = (p || '').toString().trim();
+  if (!s0) return adminUrl('/');
+  if (/^https?:\/\//i.test(s0)) return s0;
+
+  let clean = s0.startsWith('/') ? s0 : `/${s0}`;
+
+  // Normalize legacy '/api/admin/*' -> '/admin/*'
+  if (clean === '/api/admin') clean = '/admin';
+  if (clean.startsWith('/api/admin/')) clean = clean.replace(/^\/api\/admin\//, '/admin/');
+  if (clean.startsWith('/admin/')) return adminUrl(clean);
+  // If a caller accidentally provides '/api/*', keep it on the public API base.
+  if (clean.startsWith('/api/')) return apiUrl(clean);
+  return adminUrl(clean);
 }
 
-// Diagnostic (dev + prod) to confirm chosen base.
-try { console.info('[adminApi] base resolved =', adminRoot); } catch {}
-
 // OTP Password Reset helpers (backend exposes /api/auth/otp/*)
-// Helper to build OTP paths relative to chosen base.
 function otpEndpoint(segment: string) {
-  // If the direct origin includes '/api', avoid duplicating it
-  if (/\/api$/.test(adminRoot)) return `/auth/otp/${segment}`;
-  return `/api/auth/otp/${segment}`;
+  return `/auth/otp/${segment}`;
 }
 
 // Structured OTP request: always returns an object with success flag
@@ -188,7 +42,7 @@ export interface OtpRequestResult {
 export async function requestPasswordResetOtp(email: string): Promise<OtpRequestResult> {
   const path = otpEndpoint('request');
   try {
-    const res = await adminApi.post(path, { email });
+    const res = await api.post(path, { email });
     const data = res.data || {};
     const success = data.success === true || data.ok === true;
     const message = data.message || (success ? 'OTP sent to your email.' : 'Failed to send OTP email');
@@ -204,17 +58,17 @@ export async function requestPasswordResetOtp(email: string): Promise<OtpRequest
 
 export async function verifyPasswordOtp(email: string, otp: string) {
   const path = otpEndpoint('verify');
-  return (await adminApi.post(path, { email, otp })).data;
+  return (await api.post(path, { email, otp })).data;
 }
 
 export async function resetPasswordWithOtp(email: string, otp: string, password: string) {
   const path = otpEndpoint('reset');
-  return (await adminApi.post(path, { email, code: otp, newPassword: password })).data;
+  return (await api.post(path, { email, code: otp, newPassword: password })).data;
 }
 
 export async function resetPasswordWithToken(email: string, resetToken: string, password: string) {
   const path = otpEndpoint('reset');
-  return (await adminApi.post(path, { email, resetToken, newPassword: password })).data;
+  return (await api.post(path, { email, resetToken, newPassword: password })).data;
 }
 
 // Unified admin login with automatic path fallback

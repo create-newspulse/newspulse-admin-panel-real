@@ -1,6 +1,7 @@
 // 📁 src/pages/SendNotification.tsx
 
 import { useState } from 'react';
+import { adminJson } from '@/lib/http/adminFetch';
 
 export default function SendNotification() {
   const [title, setTitle] = useState('');
@@ -14,14 +15,11 @@ export default function SendNotification() {
     }
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/notifications/send`, {
+      const data = await adminJson<any>('/notifications/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, body }),
+        json: { title, body },
       });
-
-      const data = await res.json();
-      setStatus(data.message);
+      setStatus(data?.message);
     } catch (err) {
       console.error(err);
       setStatus('❌ Failed to send notification');

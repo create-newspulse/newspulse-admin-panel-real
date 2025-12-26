@@ -250,15 +250,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [token, user, isRestoring]);
 
-  // Trigger restore after hydration if we only have a partial user and no token
+  // Trigger restore after hydration if we are missing profile/role (token alone is not enough for role-gated routes)
   useEffect(() => {
-    if (isReady) {
-      const partialUser = user && !user.role; // role often needed for founder gating
-      if (!token || partialUser) {
-        restoreSession();
-      }
+    if (!isReady) return;
+    const missingProfileOrRole = !user || !String(user.role || '').trim();
+    if (missingProfileOrRole) {
+      restoreSession();
     }
-  }, [isReady, token, user, restoreSession]);
+  }, [isReady, user, restoreSession]);
 
   const value: AuthContextValue = {
     user,

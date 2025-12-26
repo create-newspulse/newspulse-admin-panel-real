@@ -4,9 +4,18 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import multer from 'multer';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
+
+// Demo media upload (in-memory)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+  },
+});
 
 // Middleware
 const DEV_ALLOWED_ORIGINS = [
@@ -385,8 +394,14 @@ if (ENABLE_SECURITY_ROUTES) {
 // ===== OPENAI VISION FOR ALT-TEXT =====
 let openaiClient = null;
 try {
-  const { default: client } = await import('./ai/openaiClient.js');
-  openaiClient = client;
+  // Prefer local path (repo has admin-backend/openaiClient.js). Fallback to legacy folder.
+  try {
+    const { default: client } = await import('./openaiClient.js');
+    openaiClient = client;
+  } catch {
+    const { default: client } = await import('./ai/openaiClient.js');
+    openaiClient = client;
+  }
   console.log('✅ OpenAI client loaded');
 } catch (error) {
   console.log('⚠️  OpenAI client not available:', error.message);
@@ -483,30 +498,74 @@ app.get('/api/uploads/signed-url', (req, res) => {
 });
 
 // GET: Media list (stub for Media Library)
+let DEMO_MEDIA_ITEMS = [
+  {
+    id: 'demo-1',
+    filename: 'climate-summit-2025.jpg',
+    url: 'https://via.placeholder.com/800x600/3498db/fff?text=Climate+Summit',
+    uploadedAt: new Date().toISOString(),
+    size: 245678,
+    type: 'image/jpeg',
+    alt: 'World leaders at Climate Summit 2025'
+  },
+  {
+    id: 'demo-2',
+    filename: 'tech-innovation.jpg',
+    url: 'https://via.placeholder.com/800x600/e74c3c/fff?text=Tech+Innovation',
+    uploadedAt: new Date(Date.now() - 86400000).toISOString(),
+    size: 189234,
+    type: 'image/jpeg',
+    alt: 'Latest tech innovations showcase'
+  }
+];
+
 app.get('/api/vault/list', (req, res) => {
   res.json({
     success: true,
-    items: [
-      {
-        id: 'demo-1',
-        filename: 'climate-summit-2025.jpg',
-        url: 'https://via.placeholder.com/800x600/3498db/fff?text=Climate+Summit',
-        uploadedAt: new Date().toISOString(),
-        size: 245678,
-        type: 'image/jpeg',
-        alt: 'World leaders at Climate Summit 2025'
-      },
-      {
-        id: 'demo-2',
-        filename: 'tech-innovation.jpg',
-        url: 'https://via.placeholder.com/800x600/e74c3c/fff?text=Tech+Innovation',
-        uploadedAt: new Date(Date.now() - 86400000).toISOString(),
-        size: 189234,
-        type: 'image/jpeg',
-        alt: 'Latest tech innovations showcase'
-      }
-    ]
+    items: DEMO_MEDIA_ITEMS,
   });
+});
+
+// Legacy list route used by some UIs
+app.get('/api/uploads', (req, res) => {
+  res.json({
+    success: true,
+    items: DEMO_MEDIA_ITEMS,
+  });
+});
+
+// Media capability detection (used by CoverImagePicker + Media Library)
+app.get('/api/media/status', (req, res) => {
+  // Demo backend always reports enabled so local UX matches Vercel.
+  res.json({
+    success: true,
+    uploadEnabled: true,
+    storage: { provider: 'demo' },
+  });
+});
+
+// Media upload (multipart/form-data, field name: file)
+app.post('/api/media/upload', upload.single('file'), (req, res) => {
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ success: false, message: 'Missing file' });
+  }
+  const id = crypto.randomUUID();
+  const filename = file.originalname || `upload-${id}.jpg`;
+  // Return a usable image URL without persisting bytes (demo)
+  const url = `https://via.placeholder.com/1200x630/111827/ffffff?text=${encodeURIComponent(filename)}`;
+
+  const item = {
+    id,
+    filename,
+    url,
+    uploadedAt: new Date().toISOString(),
+    size: file.size,
+    type: file.mimetype,
+    alt: null,
+  };
+  DEMO_MEDIA_ITEMS = [item, ...DEMO_MEDIA_ITEMS];
+  return res.json({ success: true, url, item });
 });
 
 // ===== MOUNT OPTIONAL FEATURE ROUTES (if loaded) =====

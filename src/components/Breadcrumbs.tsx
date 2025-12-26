@@ -26,6 +26,7 @@ const Breadcrumbs = () => {
     articles: 'Manage News',
     news: 'Manage News',
     'manage-news': 'Manage News',
+    ads: 'Ads Manager',
     community: 'Community',
     reporter: 'Community Reporter Queue',
   };

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { safeSettingsLoad } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
+import { adminJson } from '@/lib/http/adminFetch';
 
 const PollEditor = () => {
   const [question, setQuestion] = useState({ en: '', hi: '', gu: '' });
@@ -58,11 +59,10 @@ const PollEditor = () => {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/poll-question`, {
+      const data = await adminJson<any>('/ai/poll-question', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        json: {},
       });
-      const data = await res.json();
       if (data.question && data.options) {
         setQuestion(data.question);
         setOptions(data.options);
@@ -89,12 +89,10 @@ const PollEditor = () => {
 
     setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/polls/create`, {
+      const data = await adminJson<any>('/polls/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, options }),
+        json: { question, options },
       });
-      const data = await res.json();
       if (data.success) {
         toast.success('✅ Poll created');
         setQuestion({ en: '', hi: '', gu: '' });

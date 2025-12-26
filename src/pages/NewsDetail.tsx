@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { trackAnalytics } from '../lib/trackAnalytics';
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface Article {
   _id: string;
@@ -19,8 +20,7 @@ export default function NewsDetail() {
   useEffect(() => {
     const fetchArticle = async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/news/${id}`);
-        const data = await res.json();
+        const data = await adminJson<any>(`/news/${id}`, { method: 'GET' });
         if (data.success && data.data) {
           setArticle(data.data);
         }

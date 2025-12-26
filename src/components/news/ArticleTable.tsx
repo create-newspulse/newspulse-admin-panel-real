@@ -21,9 +21,14 @@ import { ScheduleDialog } from './ScheduleDialog';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 
 import type { ManageNewsParams } from '@/types/api';
-interface Props { params: ManageNewsParams; onSelectIds?: (ids: string[]) => void; onPageChange?: (page: number) => void; }
+interface Props {
+  params: ManageNewsParams;
+  onSelectIds?: (ids: string[]) => void;
+  onPageChange?: (page: number) => void;
+  highlightId?: string;
+}
 
-export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange }) => {
+export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange, highlightId }) => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -170,15 +175,43 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const [scheduleTarget, setScheduleTarget] = React.useState<Article | null>(null);
 
+  // derive table rows and total from the query result (safe during loading)
+  const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
+  const total: number = (data as any)?.total ?? rawRows.length;
+
+  // UX requirement: Deleted items must NOT appear in the "All" tab.
+  // They should only appear when status === 'deleted'.
+  const rows: Article[] = React.useMemo(() => {
+    const view = (params.status ?? 'all') as any;
+    if (view === 'all') return rawRows.filter((r) => (r.status ?? 'draft') !== 'deleted');
+    return rawRows;
+  }, [rawRows, params.status]);
+
+  const [didScrollHighlight, setDidScrollHighlight] = React.useState(false);
+  React.useEffect(() => {
+    // allow new highlight ids to re-trigger scroll
+    setDidScrollHighlight(false);
+  }, [highlightId]);
+
+  React.useEffect(() => {
+    if (!highlightId) return;
+    if (didScrollHighlight) return;
+    const existsOnPage = (rows as Article[]).some((r) => r._id === highlightId);
+    if (!existsOnPage) return;
+    // small delay so table renders
+    window.setTimeout(() => {
+      const el = document.getElementById(`article-row-${highlightId}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+    setDidScrollHighlight(true);
+  }, [didScrollHighlight, highlightId, rows]);
+
   React.useEffect(()=>{ onSelectIds?.(selected); },[selected]);
   if (isLoading) return <div className="animate-pulse text-slate-500">Loading articles…</div>;
   if (error) {
     const n = normalizeError(error, 'Error loading articles');
     return <div className="text-red-600">{n.message}</div>;
   }
-  // derive table rows and total from the query result
-  const rows = data?.rows ?? data?.data ?? [];
-  const total = data?.total ?? rows.length;
 
   const page = data?.page || 1;
   const pages = data?.pages || 1;
@@ -210,8 +243,14 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
           const ptiColors: Record<'compliant'|'pending'|'rejected', string> = { compliant: 'bg-green-600', pending: 'bg-amber-600', rejected: 'bg-red-600' };
           const pti = (r.ptiCompliance ?? 'pending') as 'compliant'|'pending'|'rejected';
           const ptiBadge = ptiColors[pti];
+
+          const isHighlighted = !!highlightId && r._id === highlightId;
           return (
-            <tr key={r._id} className="border-t hover:bg-slate-50">
+            <tr
+              key={r._id}
+              id={`article-row-${r._id}`}
+              className={`border-t hover:bg-slate-50 ${isHighlighted ? 'bg-amber-50' : ''}`}
+            >
               <td className="p-2"><input type="checkbox" checked={selected.includes(r._id)} onChange={()=> setSelected(s=> s.includes(r._id)? s.filter(x=>x!==r._id): [...s, r._id])} /></td>
               <td className="p-2">
                 <div className="font-medium flex items-center gap-2">

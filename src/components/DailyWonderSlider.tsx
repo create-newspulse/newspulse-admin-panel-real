@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import Slider from "react-slick";
-import axios from "axios";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
 import { speak } from "../lib/voicePlayer";
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface Wonder {
   quote: string;
@@ -22,17 +22,19 @@ const DailyWonderSlider: React.FC = () => {
   const [bgAudio, setBgAudio] = useState<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    axios
-      .get(`${import.meta.env.VITE_API_URL}/daily-wonder`)
-      .then((res) => {
-        const fetched = res.data.data;
-        if (res.data.success) {
+    (async () => {
+      try {
+        const res = await adminJson<any>('/daily-wonder', { method: 'GET' });
+        const fetched = res?.data;
+        if (res?.success) {
           setWonders(Array.isArray(fetched) ? fetched : [fetched]);
         } else {
           console.warn("⚠️ API responded without success flag.");
         }
-      })
-      .catch((err) => console.error("❌ Failed to load wonders:", err));
+      } catch (err) {
+        console.error("❌ Failed to load wonders:", err);
+      }
+    })();
   }, []);
 
   const playNarration = (text: string, lang: "en" | "hi" | "gu") => {

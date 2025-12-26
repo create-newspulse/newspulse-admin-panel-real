@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'react-hot-toast';
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface VoiceProps {
   text: string;
@@ -18,12 +19,10 @@ const VoiceAndExplainer: React.FC<VoiceProps> = ({ text }) => {
   const fetchSummary = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/explain`, {
+      const data = await adminJson<any>('/ai/explain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: text }),
+        json: { content: text },
       });
-      const data = await res.json();
       setSummary(data.summary || 'No summary returned.');
     } catch (err) {
       toast.error('Failed to fetch explanation');

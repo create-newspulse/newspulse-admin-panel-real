@@ -1,6 +1,6 @@
 // 📁 src/utils/pushPreview.ts
 
-import axios from 'axios';
+import { adminJson } from '@/lib/http/adminFetch';
 
 /**
  * Fetches a formatted push preview for a headline and category.
@@ -13,12 +13,11 @@ export const getPushPreview = async (
   category: string
 ): Promise<string> => {
   try {
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/alerts/preview`, {
-      headline,
-      category,
+    const data = await adminJson<any>('/alerts/preview', {
+      method: 'POST',
+      json: { headline, category },
     });
-
-    return response.data.preview || '';
+    return data?.preview || '';
   } catch (error) {
     console.error('❌ Failed to fetch push preview:', error);
     return '⚠️ Preview unavailable';

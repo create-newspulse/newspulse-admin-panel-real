@@ -1,8 +1,8 @@
 // 📁 src/services/authService.ts
-import axios from 'axios';
-const API = import.meta.env.VITE_API_URL;
+import { adminApi } from '../lib/adminApi';
+
 export const login = async (email, password) => {
-    return axios.post(`${API}/admin/login`, {
+    return adminApi.post('/login', {
         email,
         password,
     });

@@ -1,4 +1,4 @@
-import { apiUrl } from './apiBase';
+import { apiUrl, adminUrl } from './api';
 
 export type FetchJsonOptions = RequestInit & {
   timeoutMs?: number;
@@ -31,15 +31,10 @@ export async function fetchJson<T = any>(url: string, options: FetchJsonOptions 
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const normalize = (u: string) => {
     if (/^https?:\/\//i.test(u)) return u;
-    // If the caller already passed a fully-resolved proxy URL (e.g. '/admin-api/api/...'),
-    // do not re-resolve it, or we can create '/admin-api/api/admin-api/api/...'.
-    if (u.startsWith('/admin-api/api/')) return u;
-    if (u.startsWith('/__np_missing_api_base__')) return u;
-
-    // Otherwise, use apiBase as the single source of truth.
-    // This tolerates callers passing '/api/*' (it strips '/api') and ensures
-    // DEV paths route via '/admin-api/api/*'.
-    return apiUrl(u);
+    const clean = u.startsWith('/') ? u : `/${u}`;
+    if (clean.startsWith('/admin/')) return adminUrl(clean);
+    // Default to public API base.
+    return apiUrl(clean);
   };
   try {
     const finalUrl = normalize(url);
@@ -76,7 +71,7 @@ export async function fetchJson<T = any>(url: string, options: FetchJsonOptions 
     if (!/application\/json/i.test(ct)) {
       const txt = await res.text().catch(() => '');
       const advisory = /text\/html/i.test(ct)
-        ? 'Likely hitting SPA fallback (HTML) instead of backend. Check VITE_ADMIN_API_BASE_URL or vercel.json rewrite.'
+        ? 'Likely hitting SPA fallback (HTML) instead of backend. Check VITE_API_URL or vercel.json rewrites.'
         : 'Unexpected non-JSON response.';
       const err = new FetchJsonError(`Unexpected content-type: ${ct || 'unknown'}. ${advisory} Preview: ${txt.slice(0, 200)}`);
       err.status = res.status;

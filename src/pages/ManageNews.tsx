@@ -1,7 +1,7 @@
 // newspulse-admin-panel-real-main/src/pages/ManageNews.tsx
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArticleTable } from '@/components/news/ArticleTable';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
@@ -38,6 +38,30 @@ export default function ManageNews() {
   const { publishEnabled, override, setOverride, envDefault } = usePublishFlag();
   const { isFounder } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const highlightId = React.useMemo(() => {
+    try {
+      const sp = new URLSearchParams(location.search);
+      return sp.get('highlight');
+    } catch {
+      return null;
+    }
+  }, [location.search]);
+
+  React.useEffect(() => {
+    try {
+      const sp = new URLSearchParams(location.search);
+      const statusFromUrl = sp.get('status');
+      if (statusFromUrl && STATUS_TABS.some(t => t.value === statusFromUrl)) {
+        setParams(p => ({
+          ...p,
+          status: statusFromUrl as any,
+          page: 1,
+        }));
+      }
+    } catch {}
+  }, [location.search]);
 
   // Workflow transition (mirrors legacy doTransition)
   const doTransition = async (id: string, action: ArticleWorkflowAction) => {
@@ -125,6 +149,7 @@ export default function ManageNews() {
         onPageChange={p =>
           setParams(prev => ({ ...prev, page: Math.max(1, p) }))
         }
+        highlightId={highlightId || undefined}
       />
 
       {/* Bulk actions */}

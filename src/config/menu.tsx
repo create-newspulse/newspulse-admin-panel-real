@@ -37,7 +37,7 @@ export const MENU: Item[] = [
   { key:'compliance', label:'Compliance', path:'/panel/admin/compliance', icon:ShieldCheckIcon, roles:['founder','admin'], section:'admin', badgeKey:'complianceIssues' },
   { key:'operations', label:'Operations', path:'/panel/admin/operations', icon:WrenchIcon, roles:['founder','admin'], section:'admin' },
   { key:'editorialMedia', label:'Editorial & Media', path:'/panel/admin/editorial-media', icon:GlobeAltIcon, roles:['founder','admin'], section:'admin' },
-  { key:'workflow', label:'Workflow', path:'/panel/admin/workflow', icon:KeyIcon, roles:['founder','admin'], section:'admin' },
+  // Review Queue moved under Safe Owner Zone → Advanced Controls
 
   // Employee
   { key:'employeeAdd', label:'Add News (Restricted)', path:'/panel/employee/news/new', icon:BoltIcon, roles:['employee','admin','founder'], section:'employee' },

@@ -44,6 +44,11 @@ const ChartComponent: React.FC<{ isDark?: boolean }> = ({ isDark = false }) => {
     ],
   };
 
+  const hasChartData = Array.isArray(chartData) && chartData.length > 0 && chartData.some((v) => Number(v) > 0);
+
+  // Production polish: if there's no real data, don't render a large empty chart section.
+  if (!loading && !error && !hasChartData) return null;
+
   const options: ChartOptions<'pie'> = {
     responsive: true,
     maintainAspectRatio: false,

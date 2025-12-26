@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import apiClient from '../../lib/api';
+import apiClient from '@/lib/api';
+import { getMediaStatus } from '@/lib/api/media';
 
 type MediaItem = {
   id: string;
@@ -15,17 +16,25 @@ export default function MediaLibrary(): JSX.Element {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadEnabled, setUploadEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     fetchMedia();
+    void (async () => {
+      const status = await getMediaStatus(apiClient);
+      setUploadEnabled(status.uploadEnabled);
+    })();
   }, []);
 
   async function fetchMedia() {
     setLoading(true);
     try {
-      // try vault list first (backend route exists), fallback to uploads
-  // Adjusted to explicit /api prefix for direct backend origin usage.
-  const res = await apiClient.get('/api/vault/list').catch(() => apiClient.get('/api/uploads'));
+      // Media Library is not a Founder/Vault feature. Always use non-vault endpoints.
+      const res = await apiClient.get('/uploads', {
+        // @ts-expect-error custom flag consumed by api.ts interceptor
+        skipErrorLog: true,
+      });
+
       const data = res?.data?.items || res?.data || [];
       // normalize
       const normalized: MediaItem[] = (Array.isArray(data) ? data : []).map((m: any) => ({
@@ -39,26 +48,55 @@ export default function MediaLibrary(): JSX.Element {
       }));
       setItems(normalized);
     } catch (err) {
-      console.error('Failed to fetch media:', err);
+      // Avoid excessive console spam; apiClient already logs with status & preview.
+      console.error('Failed to fetch media');
     } finally {
       setLoading(false);
     }
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (uploadEnabled !== true) {
+      (e.target as HTMLInputElement).value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
-      // backend uploads route expects form-data (there's an /api/uploads route)
-      const res = await apiClient.post('/api/uploads', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      let res: any;
+      try {
+        res = await apiClient.post('/media/upload', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          // @ts-expect-error custom flag consumed by api.ts interceptor
+          skipErrorLog: true,
+        });
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const msg = String(err?.response?.data?.message || '').toLowerCase();
+        const notFound = status === 404 || msg.includes('route not found');
+        if (!notFound) throw err;
+
+        // Legacy backend contract: POST /api/uploads/cover
+        res = await apiClient.post('/uploads/cover', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          // @ts-expect-error custom flag
+          skipErrorLog: true,
+        });
+      }
+
+      const raw = res?.data;
+      const uploadedUrl =
+        raw?.url ||
+        raw?.data?.url ||
+        raw?.secure_url ||
+        raw?.data?.secure_url;
+
       // optimistic refresh
       await fetchMedia();
-      if (res?.data?.success) alert('Upload succeeded');
+      if (uploadedUrl || raw?.success) alert('Upload succeeded');
     } catch (err) {
       console.error('Upload error:', err);
       alert('Upload failed — check console');
@@ -102,10 +140,20 @@ export default function MediaLibrary(): JSX.Element {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Media Library</h2>
         <div className="flex items-center gap-3">
-          <label className="bg-blue-600 text-white px-3 py-1 rounded cursor-pointer">
+          <label
+            className={`bg-blue-600 text-white px-3 py-1 rounded ${uploadEnabled === true ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
+            title={
+              uploadEnabled === null
+                ? 'Checking upload availability…'
+                : uploadEnabled
+                  ? undefined
+                  : 'Upload not configured'
+            }
+          >
             {uploading ? 'Uploading…' : 'Upload'}
-            <input type="file" onChange={handleUpload} className="hidden" />
+            <input type="file" onChange={handleUpload} className="hidden" disabled={uploadEnabled !== true || uploading} />
           </label>
+          {uploadEnabled === false && <div className="text-xs text-slate-600">Upload not configured</div>}
           <button onClick={fetchMedia} className="px-3 py-1 rounded bg-slate-200 text-sm">Refresh</button>
         </div>
       </div>

@@ -54,7 +54,8 @@ import { apiUrl } from '@/lib/apiBase';
 export default function SystemHealthPanel(): JSX.Element {
   const [env, setEnv] = useState<HealthEnvelope | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<boolean>(false);
+  const [showDetails, setShowDetails] = useState<boolean>(false);
+  const [showRaw, setShowRaw] = useState<boolean>(false);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [refreshTick, setRefreshTick] = useState<number>(0);
 
@@ -112,6 +113,12 @@ export default function SystemHealthPanel(): JSX.Element {
   const activeUsers = num(b.activeUsers);
   const rpm = num(b.requestsPerMinute ?? b.rpm);
   const uptime = (b.uptime || b.uptimeMs || b.uptimeSeconds || '') as string | number;
+  const hasUptime = Boolean(uptime);
+
+  // If the user collapses details, also collapse the raw payload.
+  useEffect(() => {
+    if (!showDetails) setShowRaw(false);
+  }, [showDetails]);
   const waking = useMemo(() => {
     const d = env || {} as HealthEnvelope;
     return d?.proxied && d?.success === false && typeof d?.status !== 'number' && typeof d?.latencyMs !== 'number';
@@ -144,7 +151,6 @@ export default function SystemHealthPanel(): JSX.Element {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xl font-semibold">🩺 System Health</h3>
         <div className="flex items-center gap-2">
-          <span className={`px-2 py-1 text-xs rounded ${statusChip[status]}`}>{status.toUpperCase()}</span>
           <span className="text-xs text-slate-500 dark:text-slate-400">Latency: {latency}</span>
           <button
             className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -153,9 +159,9 @@ export default function SystemHealthPanel(): JSX.Element {
           >{autoRefresh ? 'Pause' : 'Resume'}</button>
           <button
             className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-          >{expanded ? 'Hide Raw' : 'Show Raw'}</button>
+            onClick={() => setShowDetails((v) => !v)}
+            aria-expanded={showDetails}
+          >{showDetails ? 'Hide Details' : 'View Details'}</button>
         </div>
       </div>
 
@@ -172,56 +178,84 @@ export default function SystemHealthPanel(): JSX.Element {
         </div>
       )}
 
-      <div className="grid md:grid-cols-3 gap-4">
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">CPU</div>
-          <div className="text-2xl font-bold">{cpu !== null ? `${cpu.toFixed(1)}%` : '—'}</div>
-          <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
-            <div className={`h-2 rounded ${cpu !== null ? (cpu > 80 ? 'bg-red-500' : cpu > 60 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-slate-400'}`} style={{ width: `${Math.max(0, Math.min(100, cpu ?? 0))}%` }} />
+      {showDetails ? (
+        <div className="mt-4 space-y-4">
+          <div className="grid md:grid-cols-3 gap-4">
+            {hasUptime ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">Uptime</div>
+                <div className="text-xl font-semibold">{uptime}</div>
+                <div className="text-xs text-slate-500 mt-1">Target: {env?.target || '—'}</div>
+                <div className="mt-2">
+                  <span className={`inline-flex px-2 py-1 text-xs rounded ${statusChip[status]}`}>{status.toUpperCase()}</span>
+                </div>
+              </div>
+            ) : null}
+
+            {cpu !== null ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">CPU</div>
+                <div className="text-2xl font-bold">{`${cpu.toFixed(1)}%`}</div>
+                <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
+                  <div className={`h-2 rounded ${cpu > 80 ? 'bg-red-500' : cpu > 60 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.max(0, Math.min(100, cpu))}%` }} />
+                </div>
+              </div>
+            ) : null}
+
+            {mem !== null ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">Memory</div>
+                <div className="text-2xl font-bold">{`${mem.toFixed(1)}%`}</div>
+                <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
+                  <div className={`h-2 rounded ${mem > 85 ? 'bg-red-500' : mem > 75 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.max(0, Math.min(100, mem))}%` }} />
+                </div>
+              </div>
+            ) : null}
+
+            {storage !== null ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">Storage</div>
+                <div className="text-2xl font-bold">{`${storage.toFixed(1)}%`}</div>
+                <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
+                  <div className={`h-2 rounded ${storage > 90 ? 'bg-red-500' : storage > 75 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.max(0, Math.min(100, storage))}%` }} />
+                </div>
+              </div>
+            ) : null}
+
+            {activeUsers !== null ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">Active Users</div>
+                <div className="text-2xl font-bold">{activeUsers}</div>
+              </div>
+            ) : null}
+
+            {rpm !== null ? (
+              <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-500 mb-1">Requests / min</div>
+                <div className="text-2xl font-bold">{rpm}</div>
+              </div>
+            ) : null}
           </div>
-        </div>
 
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">Memory</div>
-          <div className="text-2xl font-bold">{mem !== null ? `${mem.toFixed(1)}%` : '—'}</div>
-          <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
-            <div className={`h-2 rounded ${mem !== null ? (mem > 85 ? 'bg-red-500' : mem > 75 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-slate-400'}`} style={{ width: `${Math.max(0, Math.min(100, mem ?? 0))}%` }} />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+              onClick={() => setShowRaw((v) => !v)}
+              aria-expanded={showRaw}
+            >
+              {showRaw ? 'Hide Raw' : 'Show Raw'}
+            </button>
           </div>
-        </div>
 
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">Storage</div>
-          <div className="text-2xl font-bold">{storage !== null ? `${storage.toFixed(1)}%` : '—'}</div>
-          <div className="mt-2 h-2 rounded bg-slate-200 dark:bg-slate-700">
-            <div className={`h-2 rounded ${storage !== null ? (storage > 90 ? 'bg-red-500' : storage > 75 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-slate-400'}`} style={{ width: `${Math.max(0, Math.min(100, storage ?? 0))}%` }} />
-          </div>
+          {showRaw ? (
+            <div>
+              <div className="text-xs text-slate-500 mb-1">Raw payload</div>
+              <pre className="ai-debug-box text-xs">{JSON.stringify(env, null, 2)}</pre>
+            </div>
+          ) : null}
         </div>
-
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">Uptime</div>
-          <div className="text-xl font-semibold">{uptime || '—'}</div>
-          <div className="text-xs text-slate-500 mt-1">Target: {env?.target || '—'}</div>
-        </div>
-
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">Active Users</div>
-          <div className="text-2xl font-bold">{activeUsers !== null ? activeUsers : '—'}</div>
-        </div>
-
-        <div className="p-4 rounded-lg border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
-          <div className="text-xs text-slate-500 mb-1">Requests / min</div>
-          <div className="text-2xl font-bold">{rpm !== null ? rpm : '—'}</div>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="mt-4">
-          <div className="text-xs text-slate-500 mb-1">Raw payload</div>
-          <pre className="ai-debug-box text-xs">
-            {JSON.stringify(env, null, 2)}
-          </pre>
-        </div>
-      )}
+      ) : null}
     </section>
   );
 }

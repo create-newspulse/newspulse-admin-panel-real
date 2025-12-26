@@ -14,18 +14,18 @@ function Stop-ProcessOnPort([int]$port) {
     foreach ($line in $lines) {
         $parts = ($line -split "\s+" | Where-Object { $_ -ne "" })
         if ($parts.Length -ge 5) {
-            $pid = $parts[-1]
-            if ($pid -match "^\\d+$") { $pids += [int]$pid }
+            $procId = $parts[-1]
+            if ($procId -match "^\d+$") { $pids += [int]$procId }
         }
     }
 
     $pids = $pids | Sort-Object -Unique
-    foreach ($pid in $pids) {
+    foreach ($procId in $pids) {
         try {
-            Write-Host "Stopping process PID $pid on port $port..." -ForegroundColor Yellow
-            Stop-Process -Id $pid -Force -ErrorAction Stop
+            Write-Host "Stopping process PID $procId on port $port..." -ForegroundColor Yellow
+            Stop-Process -Id $procId -Force -ErrorAction Stop
         } catch {
-            Write-Host "Could not stop PID $pid on port ${port}: $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host "Could not stop PID $procId on port ${port}: $($_.Exception.Message)" -ForegroundColor DarkYellow
         }
     }
 }

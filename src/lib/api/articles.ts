@@ -11,12 +11,33 @@ export interface Article {
   slug?: string;
   summary?: string;
   content?: string;
+  imageUrl?: string;
+  // Some environments/public site use coverImageUrl instead of imageUrl.
+  coverImageUrl?: string;
+  // Canonical field requested by admin publish contract
+  coverImage?: string;
   category?: string;
   status?: ArticleStatus;
   author?: { name?: string };
   language?: string;
+  // Publishing metadata
+  publishedAt?: string;
+  // Back-compat for older environments
+  publishAt?: string;
   ptiCompliance?: string;
   trustScore?: number;
+  // Flags + metadata used by frontend filters
+  isBreaking?: boolean;
+  tags?: string[];
+  state?: string;
+  district?: string;
+  city?: string;
+  // Optional editorial workflow state (admin backend may enrich articles with this)
+  workflow?: {
+    stage?: string;
+    stageUpdatedAt?: string;
+    locked?: boolean;
+  };
   createdAt?: string;
   updatedAt?: string;
   publishAt?: string;
@@ -32,6 +53,27 @@ export interface ListResponse {
 }
 
 const ADMIN_ARTICLES_PATH = '/articles';
+// Legacy/admin backend shape (some environments expose only /api/admin/articles/* routes)
+const LEGACY_ADMIN_ARTICLES_PATH = '/admin/articles';
+
+async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
+  try {
+    const res = await apiClient.patch(url, payload);
+    return res.data as T;
+  } catch (e: any) {
+    const status = e?.response?.status;
+    // Some backends don't implement PATCH; fall back to PUT for status updates.
+    if (status && status !== 404 && status !== 405) throw e;
+  }
+  const res2 = await apiClient.put(url, payload);
+  return res2.data as T;
+}
+
+async function tryLegacyAdminAction(path: string) {
+  // path should be relative to /admin/articles
+  const res = await apiClient.patch(`${LEGACY_ADMIN_ARTICLES_PATH}${path}`);
+  return res.data;
+}
 
 function normalizeListResponse(payload: any, opts: { requestedPage: number; limit: number }): ListResponse {
   const rows: Article[] = Array.isArray(payload?.data)
@@ -111,34 +153,57 @@ export async function getArticle(id: string): Promise<Article> {
   return article as Article;
 }
 export async function archiveArticle(id: string) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'archived' });
-  return res.data;
+  const encoded = encodeURIComponent(id);
+  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  try {
+    return await patchThenPut(url, { status: 'archived' });
+  } catch (e: any) {
+    const status = e?.response?.status;
+    if (status && status !== 404 && status !== 405) throw e;
+  }
+  // Legacy fallback: PATCH /admin/articles/:id/archive
+  return tryLegacyAdminAction(`/${encoded}/archive`);
 }
 export async function restoreArticle(id: string) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'draft' });
-  return res.data;
+  const encoded = encodeURIComponent(id);
+  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  try {
+    return await patchThenPut(url, { status: 'draft' });
+  } catch (e: any) {
+    const status = e?.response?.status;
+    if (status && status !== 404 && status !== 405) throw e;
+  }
+  // Legacy fallback: PATCH /admin/articles/:id/restore
+  return tryLegacyAdminAction(`/${encoded}/restore`);
 }
 export async function deleteArticle(id: string) {
   // Soft delete in UI: mark as deleted (keeps data recoverable)
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'deleted' });
+  const encoded = encodeURIComponent(id);
+  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  try {
+    return await patchThenPut(url, { status: 'deleted' });
+  } catch (e: any) {
+    const status = e?.response?.status;
+    // If backend doesn't support status update on /articles/:id, fall back to legacy admin delete.
+    if (status && status !== 404 && status !== 405) throw e;
+  }
+  // Legacy fallback: DELETE /admin/articles/:id (soft delete in legacy admin backend)
+  const res = await apiClient.delete(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}`);
   return res.data;
 }
 
 // --- Control tower helpers ---
 export async function updateArticleStatus(id: string, status: ArticleStatus) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status });
-  return res.data as Article;
+  return patchThenPut<Article>(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status });
 }
 
 export async function scheduleArticle(id: string, publishAt: string) {
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'scheduled', publishAt });
-  return res.data as Article;
+  return patchThenPut<Article>(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'scheduled', publishAt });
 }
 
 export async function unscheduleArticle(id: string) {
   // Clear schedule and revert to draft
-  const res = await apiClient.patch(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'draft', publishAt: null, scheduledAt: null });
-  return res.data as Article;
+  return patchThenPut<Article>(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { status: 'draft', publishAt: null, scheduledAt: null });
 }
 
 export async function deleteArticleSoft(id: string) {

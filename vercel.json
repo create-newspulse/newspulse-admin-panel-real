@@ -6,7 +6,15 @@
   "rewrites": [
     {
       "source": "/admin-api/:path*",
-      "destination": "https://newspulse-backend-real.onrender.com/:path*"
+      "destination": "/api/admin-proxy/:path*"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://newspulse-backend-real.onrender.com/api/:path*"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "https://newspulse-backend-real.onrender.com/api/admin/:path*"
     },
     {
       "source": "/settings/public",

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-type ModuleLink = { key: string; label: string; to: string; icon: string };
+type ModuleLink = { key: string; label: string; desc?: string; to: string; icon: string };
 
 const CONTROLS: ModuleLink[] = [
   { key: 'founder', label: 'Founder Command', to: '/admin/safe-owner-zone/founder', icon: '🎛️' },
@@ -15,6 +15,10 @@ const SYSTEM: ModuleLink[] = [
   { key: 'operations', label: 'Operations', to: '/admin/safe-owner-zone/operations', icon: '📈' },
   { key: 'revenue', label: 'Revenue', to: '/admin/safe-owner-zone/revenue', icon: '💰' },
   { key: 'admin-oversight', label: 'Admin Oversight', to: '/admin/safe-owner-zone/admin-oversight', icon: '🪪' },
+];
+
+const ADVANCED_CONTROLS: ModuleLink[] = [
+  { key: 'review-queue', label: 'Review Queue', desc: 'Approvals • PTI • Legal • Founder', to: '/admin/review-queue', icon: '🧭' },
 ];
 
 function ModuleNav({ items, onNavigate }: { items: ModuleLink[]; onNavigate?: () => void }) {
@@ -33,8 +37,15 @@ function ModuleNav({ items, onNavigate }: { items: ModuleLink[]; onNavigate?: ()
             }`
           }
         >
-          <span className="mr-2">{m.icon}</span>
-          {m.label}
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5">{m.icon}</span>
+            <div className="min-w-0">
+              <div className="truncate">{m.label}</div>
+              {m.desc ? (
+                <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{m.desc}</div>
+              ) : null}
+            </div>
+          </div>
         </NavLink>
       ))}
     </div>
@@ -98,6 +109,11 @@ export default function SafeOwnerZoneLayout() {
         <div className="mt-4">
           <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Controls</div>
           <ModuleNav items={CONTROLS} onNavigate={closeOnNavigate} />
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Advanced Controls</div>
+          <ModuleNav items={ADVANCED_CONTROLS} onNavigate={closeOnNavigate} />
         </div>
 
         <div className="mt-4">

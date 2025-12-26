@@ -47,8 +47,12 @@ export default function AdminPanelSettingsLayout() {
             toast.success('Draft saved');
           }}
           onPublish={async () => {
-            await publish('publish-admin-panel-settings');
-            toast.success('Published');
+            try {
+              await publish('publish-admin-panel-settings');
+              toast.success('Published');
+            } catch (e: any) {
+              toast.error(e?.message || 'Publish failed');
+            }
           }}
         />
       )}

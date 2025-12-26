@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface Poll {
   _id: string;
@@ -28,11 +29,14 @@ const PollCard = () => {
   }, []);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/polls/latest`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setPoll(data.poll);
-      });
+    (async () => {
+      try {
+        const data = await adminJson<any>('/polls/latest', { method: 'GET' });
+        if (data?.success) setPoll(data.poll);
+      } catch {
+        // ignore
+      }
+    })();
   }, []);
 
   const getQuestion = () => {
@@ -56,13 +60,10 @@ const PollCard = () => {
   const handleVote = async () => {
     if (!poll || selected === null) return;
 
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/polls/vote`, {
+    const data = await adminJson<any>('/polls/vote', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pollId: poll._id, optionIndex: selected }),
+      json: { pollId: poll._id, optionIndex: selected },
     });
-
-    const data = await res.json();
     if (data.success) {
       setPoll(data.poll); // returns updated votes
       setVoted(true);

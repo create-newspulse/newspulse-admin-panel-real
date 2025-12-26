@@ -1,5 +1,5 @@
 import { SiteSettingsSchema, type SiteSettings, DEFAULT_SETTINGS } from '@/types/siteSettings';
-import { adminJson } from '@/lib/adminApiClient';
+import { adminJson } from '@/lib/http/adminFetch';
 
 // Public settings shape (subset safe for frontend)
 export type PublicSettings = Record<string, any>;
@@ -36,7 +36,7 @@ async function json<T>(res: Response): Promise<T> {
 async function getAdminSettings(): Promise<SiteSettings> {
   let raw: any;
   // Single endpoint only; no automatic fallback chain to settings/load
-  raw = await adminJson<any>('api/admin/settings', { cache: 'no-store' });
+  raw = await adminJson<any>('/admin/settings', { cache: 'no-store' });
   if (raw && typeof raw === 'object' && raw.settings) raw = raw.settings;
 
   // Accept both envelope { public, admin, version, updatedAt, updatedBy } and direct SiteSettings
@@ -53,7 +53,7 @@ async function getAdminSettings(): Promise<SiteSettings> {
 async function putAdminSettings(patch: Partial<SiteSettings>, audit?: { action?: string }): Promise<SiteSettings> {
   let raw: any;
   // Update via single endpoint; do not auto-refetch via settings/load
-  raw = await adminJson<any>('api/admin/settings', {
+  raw = await adminJson<any>('/admin/settings', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}) },
     body: JSON.stringify(patch || {}),

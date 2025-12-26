@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const testMongoDB = async () => {
   try {

@@ -31,6 +31,7 @@ import AddNews from '@pages/AddNews';
 import EditNews from '@pages/EditNews'; // legacy editor (kept for backward compatibility)
 import ArticleEditPage from '@pages/ArticleEditPage';
 import ManageNews from '@pages/ManageNews';
+import AdsManager from '@pages/AdsManager';
 import AddCategory from '@pages/AddCategory';
 import LanguageSettings from '@pages/owner/LanguageSettings';
 import PushHistory from '@pages/PushHistory';
@@ -110,6 +111,8 @@ import SafeOwnerZoneShell from '@/pages/admin/safe-owner-zone/SafeOwnerZoneShell
 import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
 import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
 import BroadcastCenter from '@pages/admin/BroadcastCenter';
+import AdminUsersPage from '@pages/AdminUsersPage';
+import AiLogsPage from '@pages/AiLogsPage';
 
 function LegacySafeOwnerZoneRedirect() {
   const { module } = useParams();
@@ -129,7 +132,7 @@ function LegacySafeOwnerZoneRedirect() {
 }
 
 function App() {
-  console.log('Router loaded: main admin router');
+  if (import.meta.env.DEV) console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
@@ -196,6 +199,9 @@ function App() {
               <Route path="/admin/manage-news" element={<Navigate to="/admin/articles" replace />} />
               <Route path="/admin/news" element={<Navigate to="/admin/articles" replace />} />
               <Route path="/admin/manage" element={<Navigate to="/admin/articles" replace />} />
+
+              {/* Ads Manager */}
+              <Route path="/admin/ads" element={<ProtectedRoute><LockCheckWrapper><AdsManager /></LockCheckWrapper></ProtectedRoute>} />
               {/* Draft Desk */}
               <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
 
@@ -237,13 +243,38 @@ function App() {
 
               {/* 🛡️ Founder-Only Routes */}
               <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+
+              {/* Admin tools (Founder/Admin only) */}
+              <Route
+                path="/admin/users"
+                element={
+                  <RequireRole allow={['founder', 'admin']}>
+                    <AdminUsersPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/ai-logs"
+                element={
+                  <RequireRole allow={['founder', 'admin']}>
+                    <AiLogsPage />
+                  </RequireRole>
+                }
+              />
+
+              {/* Legacy/mismatched paths: keep working (avoid 404s) */}
+              <Route path="/admin-users" element={<Navigate to="/admin/users" replace />} />
+              <Route path="/ai-logs" element={<Navigate to="/admin/ai-logs" replace />} />
+              <Route path="/admin-ai-logs" element={<Navigate to="/admin/ai-logs" replace />} />
+              <Route path="/admin-dashboard" element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="/admin-settings" element={<Navigate to="/admin/settings" replace />} />
               {/* Settings Center (two-mode) */}
               <Route
                 path="/admin/settings"
                 element={
-                  <RequireRole allow={['founder', 'admin']}>
+                  <FounderRoute>
                     <SettingsCenterLayout />
-                  </RequireRole>
+                  </FounderRoute>
                 }
               >
                 <Route index element={<Navigate to="admin-panel" replace />} />
@@ -316,7 +347,8 @@ function App() {
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />
-              <Route path="/admin/workflow" element={<ProtectedRoute><EditorialWorkflowEngine /></ProtectedRoute>} />
+              <Route path="/admin/review-queue" element={<ProtectedRoute><EditorialWorkflowEngine /></ProtectedRoute>} />
+              <Route path="/admin/workflow" element={<Navigate to="/admin/review-queue" replace />} />
               <Route path="/admin/media-library" element={<ProtectedRoute><MediaLibrary /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><AnalyticsDashboard /></ProtectedRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />

@@ -168,7 +168,7 @@ export default function HomepageModulesSettings() {
         <div className="mt-1 text-sm text-slate-600">Toggle modules and control section ordering.</div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div id="categories" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-base font-semibold">Modules</div>

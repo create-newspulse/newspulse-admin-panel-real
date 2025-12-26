@@ -1,81 +1,152 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Centralized API base selection:
-// - Proxy mode (preferred): use same-origin '/admin-api/api' and let Vite/Vercel proxy forward to backend.
-// - Direct mode (fallback): set VITE_API_URL to a valid backend origin (no /api suffix).
+// Single source of truth:
+// - Preferred/proxy mode: use VITE_ADMIN_API_ORIGIN or VITE_ADMIN_API_URL (absolute),
+//   otherwise fall back to VITE_ADMIN_API_PROXY_BASE (relative, default '/admin-api').
+// - Legacy/direct mode: VITE_API_URL (absolute or relative) still works.
+// - Public endpoints resolve under:  <base>/api/*
+// - Admin endpoints in this codebase are also routed under /api/* (e.g. /api/admin/*).
 const envAny = import.meta.env as any;
-const rawBase = (envAny.VITE_API_URL || '').toString().trim();
-const trimmed = rawBase.replace(/\/+$/, '');
 
-let configWarnedOnce = false;
+function stripTrailingSlashes(s: string) {
+  return (s || '').replace(/\/+$/, '');
+}
 
-function isValidAbsoluteUrl(u: string): boolean {
-  if (!/^https?:\/\//i.test(u)) return false;
+function normalizeLeadingSlash(p: string) {
+  const s = (p || '').toString();
+  return s.startsWith('/') ? s : `/${s}`;
+}
+
+function isAbsoluteHttpUrl(u: string): boolean {
+  return /^https?:\/\//i.test(u);
+}
+
+function looksLikePlaceholder(u: string): boolean {
+  const s = (u || '').toString();
+  // Common placeholder patterns used in docs/examples
+  return /[<>]/.test(s) || /\bexample\.com\b/i.test(s) || /replace_me|change_me|your-?backend/i.test(s);
+}
+
+function isValidApiBase(u: string): boolean {
+  const s = (u || '').toString().trim();
+  if (!s) return false;
+  // Allow relative proxy bases like '/admin-api'
+  if (s.startsWith('/')) return true;
+  if (!isAbsoluteHttpUrl(s)) return false;
+  if (looksLikePlaceholder(s)) return false;
   try {
+    // Ensure it parses as a URL
     // eslint-disable-next-line no-new
-    new URL(u);
+    new URL(s);
     return true;
   } catch {
     return false;
   }
 }
 
-function emitApiConfigErrorOnce(message: string) {
-  if (configWarnedOnce) return;
-  configWarnedOnce = true;
-  try {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('np:api-config-error', { detail: { message } }));
-    }
-  } catch {
-    // ignore
-  }
+export function getApiBase(): string {
+  const useProxy = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true';
+
+  // 1) Preferred: explicit admin API origin (absolute).
+  // Example: https://<backend>.onrender.com
+  const adminOriginRaw = (
+    envAny.VITE_ADMIN_API_ORIGIN
+    || envAny.VITE_ADMIN_API_URL
+    || envAny.VITE_ADMIN_API_BASE_URL
+    || ''
+  ).toString().trim();
+  const adminOrigin = stripTrailingSlashes(adminOriginRaw).replace(/\/api$/i, '');
+  // If proxy mode is explicitly enabled, always route through the proxy contract
+  // to avoid stale direct URLs causing local-only failures.
+  if (!useProxy && adminOrigin && isValidApiBase(adminOrigin)) return adminOrigin;
+
+  // Proxy base (relative). Example: /admin-api
+  const proxyBaseRaw = (envAny.VITE_ADMIN_API_PROXY_BASE || '').toString().trim();
+  const proxyBase = stripTrailingSlashes(proxyBaseRaw);
+  if (useProxy) return proxyBase || '/admin-api';
+
+  // 2) Legacy: generic API URL (absolute or relative).
+  // If set, the app talks directly to that backend (ensure CORS).
+  const legacyRaw = (envAny.VITE_API_URL || '').toString().trim();
+  const legacyBase = stripTrailingSlashes(legacyRaw).replace(/\/api$/i, '');
+  if (legacyBase && isValidApiBase(legacyBase)) return legacyBase;
+
+  if (proxyBase) return proxyBase;
+
+  // Default: run through the Vercel/Vite proxy contract.
+  // This keeps local dev + production aligned (frontend calls /admin-api/*, proxy forwards to backend /api/*).
+  return '/admin-api';
 }
 
-function resolveBaseUrl(base: string) {
-  // DEV contract: always go through the local proxy.
-  if (import.meta.env.DEV) return '/admin-api/api';
-
-  const t0 = (base || '').toString().trim();
-  let t = (t0 === 'undefined' || t0 === 'null' ? '' : t0).replace(/\/+$/, '');
-
-  const useProxy = String(envAny.VITE_USE_PROXY || '').toLowerCase() === 'true' && import.meta.env.DEV;
-  // (kept for back-compat; DEV returns early above)
-  if (useProxy) return '/admin-api/api';
-
-  const hasPlaceholders = /[<>]/.test(t);
-  const hasSuffixApi = /\/api$/i.test(t);
-  const withoutApi = hasSuffixApi ? t.replace(/\/api$/i, '') : t;
-  const ok = !!withoutApi && !hasPlaceholders && isValidAbsoluteUrl(withoutApi);
-
-  if (ok) return `${withoutApi}/api`;
-
-  // (DEV returns early above)
-
-  // If direct base is missing/invalid (or placeholder), fall back to proxy mode.
-  // This matches the recommended deployment mode (omit VITE_API_URL; use /admin-api proxy).
-  if (t) {
-    emitApiConfigErrorOnce(
-      `Invalid API base URL (falling back to proxy). Fix VITE_API_URL. Got: ${t}`
-    );
+function absolutizeForAxios(base: string): string {
+  const b = (base || '').toString().trim();
+  if (!b) {
+    // If caller uses relative URLs, axios still needs an absolute base in browsers.
+    try {
+      if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+        return window.location.origin;
+      }
+    } catch {}
+    return '';
   }
-  return '/admin-api/api';
-}
-
-function absolutizeIfRelativeBase(maybeRelative: string) {
-  const s = (maybeRelative || '').toString();
-  // Axios in the browser uses URL parsing; relative base URLs can throw "Invalid URL".
-  if (/^https?:\/\//i.test(s)) return s;
-  if (!s.startsWith('/')) return s;
+  if (isAbsoluteHttpUrl(b)) return b;
+  // Treat non-absolute values as path prefixes under current origin.
+  const p = b.startsWith('/') ? b : `/${b}`;
   try {
     if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
-      return `${window.location.origin}${s}`;
+      return `${window.location.origin}${p}`;
     }
   } catch {}
-  return s;
+  return p;
 }
 
-const API_BASE_URL = absolutizeIfRelativeBase(resolveBaseUrl(trimmed));
+function joinBase(base: string, path: string) {
+  const b = stripTrailingSlashes(base);
+  const p = normalizeLeadingSlash(path);
+  return b ? `${b}${p}` : p;
+}
+
+export function apiUrl(path: string): string {
+  const p0 = normalizeLeadingSlash(path);
+  const p = p0.startsWith('/api/') ? p0 : `/api${p0}`;
+  return joinBase(getApiBase(), p.replace(/^\/api\/api\//, '/api/'));
+}
+
+export function adminUrl(path: string): string {
+  const base = getApiBase();
+  const proxyMode = !isAbsoluteHttpUrl(base);
+  const p0 = normalizeLeadingSlash(path);
+
+  // Accept callers passing either '/admin/*' or '/api/admin/*' or a bare segment like '/me'.
+  let rest = p0;
+  if (rest === '/api/admin') rest = '/';
+  if (rest.startsWith('/api/admin/')) rest = rest.replace(/^\/api\/admin\//, '/');
+  if (rest === '/admin') rest = '/';
+  if (rest.startsWith('/admin/')) rest = rest.replace(/^\/admin\//, '/');
+  if (!rest.startsWith('/')) rest = `/${rest}`;
+
+  const prefix = proxyMode ? '/admin' : '/api/admin';
+  const joined = `${prefix}${rest}`.replace(/^\/api\/admin\/api\/admin\//, '/api/admin/');
+  return joinBase(base, joined.replace(/\/\/+$/, ''));
+}
+
+// Unified token retrieval.
+// Order of precedence:
+// 1) np_admin_access_token
+// 2) np_admin_token
+// 3) adminToken
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    for (const key of ['np_admin_access_token', 'np_admin_token', 'adminToken', 'np_token']) {
+      const val = localStorage.getItem(key);
+      if (val && String(val).trim()) return String(val).replace(/^Bearer\s+/i, '');
+    }
+  } catch {}
+  return null;
+}
+
+const AXIOS_BASE = absolutizeForAxios(getApiBase());
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -91,9 +162,15 @@ export interface ExtendedApi extends AxiosInstance {
 }
 
 export const api: ExtendedApi = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: AXIOS_BASE,
   withCredentials: true,
 }) as ExtendedApi;
+
+export const ADMIN_API_BASE = adminUrl('/').replace(/\/+$/, '');
+export const adminApi = axios.create({
+  baseURL: absolutizeForAxios(getApiBase()),
+  withCredentials: true,
+});
 
 let missingUrlWarned = false;
 
@@ -127,16 +204,108 @@ api.interceptors.request.use((cfg) => {
       } catch {}
     }
 
-    const base = (cfg.baseURL || '').toString();
-    let url = (cfg.url || '').toString();
-    // Avoid accidental double '/api/api/...'
-    if (/\/api$/.test(base) && /^\/api\//.test(url)) {
-      url = url.replace(/^\/api\//, '');
-      cfg.url = `/${url}`;
+    let url = (cfg.url || '').toString().trim();
+
+    // If url is absolute (http/https), do not rewrite.
+    if (/^https?:\/\//i.test(url)) {
+      return cfg;
     }
+
+    // Ensure leading slash for relative paths.
+    if (url && !url.startsWith('/')) url = `/${url}`;
+
+    // Enforce contract: everything goes under /api/*.
+    if (url && url !== '/api' && !url.startsWith('/api/')) {
+      url = `/api${url}`;
+    }
+
+    // Collapse double-prefix mistakes.
+    url = url.replace(/^\/api\/api\//, '/api/');
+
+    cfg.url = url;
   } catch {}
   return cfg;
 });
+
+// Admin axios instance:
+// - Resolves relative paths under /admin/*
+// - Always attaches bearer token when present
+adminApi.interceptors.request.use((cfg) => {
+  try {
+    const token = getAuthToken();
+    if (token) {
+      cfg.headers = cfg.headers || {};
+      (cfg.headers as any).Authorization = `Bearer ${token}`;
+    }
+
+    // Proxy mode uses:   /admin-api/admin/*  (proxy forwards to backend /api/admin/*)
+    // Direct mode uses:  <origin>/api/admin/*
+    const base = getApiBase();
+    const proxyMode = !isAbsoluteHttpUrl(base);
+    const prefix = proxyMode ? '/admin/' : '/api/admin/';
+
+    let url = (cfg.url || '').toString().trim();
+    if (!url) return cfg;
+    if (isAbsoluteHttpUrl(url)) return cfg;
+    if (!url.startsWith('/')) url = `/${url}`;
+
+    // Normalize whichever prefix the caller provided into the correct mode.
+    if (proxyMode) {
+      // '/api/admin/*' -> '/admin/*' for proxy
+      if (url === '/api/admin') url = '/admin';
+      if (url.startsWith('/api/admin/')) url = url.replace(/^\/api\/admin\//, '/admin/');
+      if (!url.startsWith('/admin/')) url = `/admin${url}`;
+      url = url.replace(/^\/admin\/admin\//, '/admin/');
+    } else {
+      // '/admin/*' -> '/api/admin/*' for direct backend
+      if (url === '/admin') url = '/api/admin';
+      if (url.startsWith('/admin/')) url = url.replace(/^\/admin\//, '/api/admin/');
+      if (!url.startsWith('/api/admin/')) url = `/api/admin${url}`;
+      url = url.replace(/^\/api\/admin\/api\/admin\//, '/api/admin/');
+    }
+
+    // Final sanity collapse
+    url = url.replace(/\/+$/, '');
+    cfg.url = url;
+  } catch {}
+  return cfg;
+});
+
+// Admin response handling (keeps existing app behavior):
+// - 401: clear stored tokens and emit 'np:logout'
+// - 403: mark owner-key required and emit 'np:ownerkey-required'
+adminApi.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const status = error?.response?.status;
+    const url = error?.config?.url || error?.response?.config?.url || '';
+
+    if (status === 401) {
+      const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
+      if (!isCommunityQueue) {
+        try {
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('np_admin_token');
+          localStorage.removeItem('np_admin_access_token');
+          localStorage.removeItem('newsPulseAdminAuth');
+          localStorage.removeItem('np_token');
+        } catch {}
+        try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
+      }
+    }
+
+    if (status === 403) {
+      try { (error as any).isOwnerKeyRequired = true; } catch {}
+      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:ownerkey-required')); } catch {}
+    }
+
+    if (import.meta.env.DEV) {
+      try { console.error('[adminApi:err]', status, url, error?.response?.headers?.['content-type']); } catch {}
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // Stub legacy helpers to avoid undefined method errors; components can feature-detect responses.
 api.systemHealth = async () => ({ ok: true, status: 'unknown' });
@@ -177,50 +346,41 @@ async function probeRoute(path: string): Promise<boolean> {
   return inFlightProbes[path];
 }
 
-// Dev request/response logging
+// Dev-only logging for FAILED requests (helps catch wrong base URLs / proxy misses)
 if (import.meta.env.DEV) {
-  api.interceptors.request.use((cfg) => {
-    try {
-      console.debug('[api:req]', cfg.method?.toUpperCase(), cfg.baseURL ? cfg.baseURL + (cfg.url || '') : cfg.url);
-    } catch {}
-    return cfg;
-  });
   api.interceptors.response.use(
-    (res) => {
-      const ct = (res.headers['content-type'] || '').toString();
-      try { console.debug('[api:res]', res.status, res.config.url, ct); } catch {}
-      if (!/application\/json/i.test(ct)) {
-        console.error('⚠ Non-JSON API response. Likely HTML or text. BaseURL or rewrite may be misconfigured.', ct);
-      }
-      return res;
-    },
+    (res) => res,
     (err) => {
-      const r = err?.response;
-      const cfg = err?.config;
-      const status = r?.status;
-      const url = (cfg?.url || r?.config?.url || '').toString();
-      const baseURL = (cfg?.baseURL || r?.config?.baseURL || api.defaults.baseURL || '').toString();
-      const ct = (r?.headers?.['content-type'] || '').toString();
-      const code = (err as any)?.code;
-      const message = (err as any)?.message;
       // Suppress logging for silent probes (HEAD 404 expected for optional routes)
       if ((err as any)?.config?.skipErrorLog) {
         return Promise.reject(err);
       }
-      const previewPromise = r
-        ? (r?.data && typeof r.data === 'string'
-          ? Promise.resolve(r.data)
-          : (r?.data ? Promise.resolve(JSON.stringify(r.data).slice(0, 200)) : Promise.resolve('')))
-        : Promise.resolve(message || String(code || 'Network error'));
 
-      previewPromise.then((preview) => {
-        try {
-          console.error('[api:err]', status ?? 'NO_RESPONSE', baseURL || '(no-baseURL)', url || '(no-url)', code || '', ct || '', 'preview:', String(preview).slice(0, 200));
-        } catch {}
-      }).catch(() => {});
-      if (/text\/html/i.test(ct)) {
-        console.error('❌ HTML instead of JSON. Admin API returned a page (404 or SPA). Check VITE_ADMIN_API_BASE_URL or vercel rewrites.');
+      const r = err?.response;
+      const cfg = err?.config;
+      const status = r?.status;
+      const method = String(cfg?.method || '').toUpperCase();
+      const url = (cfg?.url || r?.config?.url || '').toString();
+      const baseURL = (cfg?.baseURL || r?.config?.baseURL || api.defaults.baseURL || '').toString();
+      const ct = (r?.headers?.['content-type'] || '').toString();
+      const code = (err as any)?.code;
+
+      // Best-effort resolved URL for quick diagnosis
+      let full = '';
+      try {
+        full = baseURL ? new URL(url, baseURL).toString() : url;
+      } catch {
+        full = `${baseURL || ''}${url || ''}`;
       }
+
+      try {
+        console.error('[api:err]', status ?? 'NO_RESPONSE', method || '(no-method)', full || '(no-url)', code || '', ct || '');
+      } catch {}
+
+      if (/text\/html/i.test(ct)) {
+        console.error('[api:err] Received HTML. Proxy/base URL likely misconfigured.');
+      }
+
       return Promise.reject(err);
     }
   );
@@ -229,9 +389,6 @@ if (import.meta.env.DEV) {
 // Dashboard / Monitor Hub stats helper
 // Tries modern path first then legacy fallback, normalizes shape.
 api.monitorHub = async () => {
-  // Use authenticated admin client for system monitor (backend path: /api/system/monitor-hub)
-  // Avoid double slashes; adminApi handles Authorization header.
-  const { adminApi } = await import('./adminApi');
   try {
     const res = await adminApi.get('/system/monitor-hub');
     const raw = res.data || {};
@@ -364,14 +521,16 @@ api.revenueExportPdfPath = () => {
 export function setAuthToken(token: string | null) {
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    adminApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     try { localStorage.setItem('np_token', token); } catch {}
   } else {
     delete api.defaults.headers.common['Authorization'];
+    delete adminApi.defaults.headers.common['Authorization'];
     try { localStorage.removeItem('np_token'); } catch {}
   }
 }
 
 // Dev visibility of resolved base
-try { console.info('[api] baseURL resolved =', API_BASE_URL); } catch {}
+try { console.info('[api] VITE_API_URL =', getApiBase()); } catch {}
 
 export default api;

@@ -32,6 +32,15 @@ export default defineConfig(({ mode }): UserConfig => {
   const BACKEND_URL = BACKEND_ORIGIN;
   const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN; // default WS -> same host if available
 
+  // Keep /admin-api proxy target consistent with the primary backend origin.
+  // (Historically some setups used VITE_BACKEND_URL; keep it as a fallback only.)
+  const ADMIN_API_PROXY_TARGET = stripSlash(
+    BACKEND_ORIGIN
+    || env.VITE_BACKEND_URL
+    || process.env.VITE_BACKEND_URL
+    || ''
+  ) || 'http://localhost:5000';
+
   const DEV_PORT = 5173;
   // Dev diagnostic: show current admin API proxy target
   if (mode === 'development') {
@@ -40,6 +49,7 @@ export default defineConfig(({ mode }): UserConfig => {
     if (BACKEND_URL) {
       console.log('[vite] Dev proxy BACKEND_URL:', BACKEND_URL);
     }
+    console.log('[vite] Dev proxy /admin-api target:', ADMIN_API_PROXY_TARGET);
     if (API_TARGET && /\/api\/?$/.test(API_TARGET)) {
       console.warn('[vite] Note: Target ends with /api; using origin for proxy:', BACKEND_ORIGIN);
     }
@@ -90,11 +100,18 @@ export default defineConfig(({ mode }): UserConfig => {
         },
         // Proxy /admin-api/* -> backend.
         // DEV contract: frontend calls go through '/admin-api/*'.
+        // Requested behavior:
+        //   server.proxy['/admin-api'] = {
+        //     target: process.env.VITE_BACKEND_URL || 'http://localhost:8080',
+        //     changeOrigin: true,
+        //     secure: false,
+        //     rewrite: (path) => path.replace(/^\/admin-api/, '')
+        //   }
         '/admin-api': {
-          target: BACKEND_URL || 'http://localhost:5000',
+          target: ADMIN_API_PROXY_TARGET,
           changeOrigin: true,
           secure: false,
-          rewrite: (p) => p.replace(/^\/admin-api/, ''),
+          rewrite: (path) => path.replace(/^\/admin-api/, ''),
         },
         '/socket.io': {
           target: API_WS,

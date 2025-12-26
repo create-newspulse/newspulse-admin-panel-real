@@ -1,10 +1,11 @@
 // 📁 src/lib/trackAnalytics.ts
+import { adminFetch } from './http/adminFetch';
+
 export const trackAnalytics = async (page, articleId) => {
     try {
-        await fetch(`${import.meta.env.VITE_API_URL}/analytics/track`, {
+        await adminFetch('/analytics/track', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ page, articleId }),
+            json: { page, articleId },
         });
     }
     catch (error) {

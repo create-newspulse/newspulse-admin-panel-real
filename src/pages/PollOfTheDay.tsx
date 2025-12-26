@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLockdownCheck } from '@hooks/useLockdownCheck';
 import { safeSettingsLoad } from '@lib/api';
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface Poll {
   _id: string;
@@ -42,16 +43,16 @@ const PollOfTheDay = () => {
 
   // 📥 Load latest poll
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/polls/latest`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setPoll(data.poll);
-        setLoading(false);
-      })
-      .catch((err) => {
+    (async () => {
+      try {
+        const data = await adminJson<any>('/polls/latest', { method: 'GET' });
+        if (data?.success) setPoll(data.poll);
+      } catch (err) {
         console.error('Failed to load poll', err);
+      } finally {
         setLoading(false);
-      });
+      }
+    })();
   }, []);
 
   const getQuestion = () => {
@@ -71,12 +72,10 @@ const PollOfTheDay = () => {
   const handleVote = async () => {
     if (poll && selected !== null) {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/polls/vote`, {
+        const data = await adminJson<any>('/polls/vote', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pollId: poll._id, optionIndex: selected }),
+          json: { pollId: poll._id, optionIndex: selected },
         });
-        const data = await res.json();
         if (data.success) {
           setPoll(data.poll);
           setVoted(true);

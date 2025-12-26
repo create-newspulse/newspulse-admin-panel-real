@@ -10,8 +10,9 @@ type FounderRouteProps = {
 
 const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   const location = useLocation();
-  const { isFounder, isAuthenticated, isLoading, isReady, isRestoring, restoreSession } = useAuth();
+  const { user, isFounder, isAuthenticated, isLoading, isReady, isRestoring, restoreSession } = useAuth();
   const triedRestore = useRef(false);
+  const requestedRoleRestoreRef = useRef(false);
 
   // 🛡️ SECURE: Environment-controlled demo access
   const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
@@ -49,12 +50,30 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
       restoreSession();
     }
   }, [isReady, isAuthenticated, restoreSession]);
+
+  // If we have a token/session but are missing role info, restore once before deciding.
+  useEffect(() => {
+    if (!isReady || isRestoring || isLoading) return;
+    const missingRole = isAuthenticated && (!user || !user.role);
+    if (missingRole && !requestedRoleRestoreRef.current) {
+      requestedRoleRestoreRef.current = true;
+      restoreSession();
+    }
+  }, [isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
   
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
   }
   if (isLoading) {
     return <div className="text-center mt-10">🔐 Checking founder access…</div>;
+  }
+
+  // Don't redirect while we are still trying to fetch role/profile.
+  if (isAuthenticated && (!user || !user.role)) {
+    if (requestedRoleRestoreRef.current) {
+      return <Navigate to="/admin/login" replace state={{ from: location }} />;
+    }
+    return <div className="text-center mt-10">🔐 Loading profile…</div>;
   }
 
   // ✅ Proper authentication check OR controlled demo access

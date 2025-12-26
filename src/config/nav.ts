@@ -23,7 +23,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'community-reporter', label:'Community Reporter Queue', path:'/community/reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   // Founder preview – Community Reporter self-service workspace
   { key:'reporter-portal', label:'Reporter Portal', path:'/community/reporter-portal', roles:['admin','founder'], icon:'👥' },
-  { key:'workflow', label:'Workflow', path:'/admin/workflow', roles:['editor','admin','founder'], icon:'⚙️' },
   { key:'livetv', label:'Live TV', path:'/admin/live', roles:['editor','admin','founder'], icon:'🎥' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠' },
   { key:'aira', label:'AIRA', path:'/admin/aira', roles:['admin','founder'], icon:'🧍‍♀️' },
@@ -31,6 +30,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'media', label:'Media', path:'/admin/media-library', roles:['editor','admin','founder'], icon:'📸' },
   { key:'seo', label:'SEO', path:'/admin/seo', roles:['admin','founder'], icon:'🔍' },
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'👩‍💻' },
+  { key:'ads', label:'Ads Manager', path:'/admin/ads', roles:['editor','admin','founder'], icon:'📣' },
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Founder-only: homepage broadcast controls

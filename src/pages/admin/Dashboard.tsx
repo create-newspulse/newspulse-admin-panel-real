@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import StatsCards from '@components/StatsCards';
@@ -17,62 +16,8 @@ type AdminStats = {
   aiLogsCount: number;
 };
 
-type BackendDashboardStatsPayload = {
-  totalNews: number;
-  categories: number;
-  languages: number;
-  activeUsers: number;
-  aiLogs: number;
-  preLaunch?: boolean;
-  message?: string;
-};
-
-type BackendDashboardStatsResponse =
-  | BackendDashboardStatsPayload
-  | { ok?: boolean; success?: boolean; status?: number; message?: string; data?: BackendDashboardStatsPayload };
-
-function normalizeDashboardStats(raw: any): BackendDashboardStatsPayload | null {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const payload = (raw && typeof raw === 'object' && 'data' in raw && (raw as any).data) ? (raw as any).data : raw;
-  if (!payload || typeof payload !== 'object') return null;
-
-  // New shape (preferred)
-  const hasNewKeys = ['totalNews', 'categories', 'languages', 'activeUsers', 'aiLogs'].every((k) => k in (payload as any));
-  if (hasNewKeys) {
-    return {
-      totalNews: Number((payload as any).totalNews ?? 0),
-      categories: Number((payload as any).categories ?? 0),
-      languages: Number((payload as any).languages ?? 0),
-      activeUsers: Number((payload as any).activeUsers ?? 0),
-      aiLogs: Number((payload as any).aiLogs ?? 0),
-      preLaunch: (payload as any).preLaunch,
-      message: (payload as any).message,
-    };
-  }
-
-  // Old-ish variants we still support
-  // - { totalNews, totalCategories, totalLanguages, activeUsers, aiLogs }
-  // - { totals: { news, categories, languages, activeUsers }, aiLogs }
-  // - { totals: { news, categories, languages, users }, aiLogs, activeUsers }
-  const totals = (payload as any).totals;
-  const derived = {
-    totalNews: Number((payload as any).totalNews ?? totals?.news ?? totals?.totalNews ?? 0),
-    categories: Number((payload as any).categories ?? (payload as any).totalCategories ?? totals?.categories ?? 0),
-    languages: Number((payload as any).languages ?? (payload as any).totalLanguages ?? totals?.languages ?? 0),
-    activeUsers: Number((payload as any).activeUsers ?? totals?.activeUsers ?? totals?.users ?? 0),
-    aiLogs: Number((payload as any).aiLogs ?? 0),
-  };
-
-  const looksValid = Object.values(derived).every((n) => typeof n === 'number' && !Number.isNaN(n));
-  if (!looksValid) return null;
-  return derived;
-}
-
 const Dashboard = () => {
-  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const didLoadOnce = useRef(false);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'disabled'>('loading');
   const [statsState, setStatsState] = useState<'loading' | 'ready' | 'disabled'>('loading');
@@ -82,11 +27,6 @@ const Dashboard = () => {
   useEffect(() => {
     let cancelled = false;
 
-    // React 18 StrictMode in dev intentionally runs effects twice.
-    // Prevent duplicate stats fetches per mount.
-    if (didLoadOnce.current) return;
-    didLoadOnce.current = true;
-
     async function load() {
       setState('loading');
       setStatsState('loading');
@@ -95,24 +35,16 @@ const Dashboard = () => {
       setStats(null);
 
       try {
-        const res = await api.get<BackendDashboardStatsResponse>('/admin/stats');
-        const raw = (res?.data || {}) as BackendDashboardStatsResponse;
-        const payload = normalizeDashboardStats(raw);
-
-        if (!payload) {
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn('[Dashboard] Unexpected stats response shape:', raw);
-          }
-          throw new Error('unexpected-stats-shape');
-        }
+        const res = await api.get('/admin/stats', { timeout: 12000 });
+        // Backend wraps as { data: { ...counters } }. Some deployments may return the payload directly.
+        const payload = (res as any)?.data?.data ?? (res as any)?.data ?? {};
 
         const normalized: AdminStats = {
-          totalNews: Number(payload.totalNews ?? 0),
-          categoriesCount: Number(payload.categories ?? 0),
-          languagesCount: Number(payload.languages ?? 0),
-          activeUsersCount: Number(payload.activeUsers ?? 0),
-          aiLogsCount: Number(payload.aiLogs ?? 0),
+          totalNews: Number((payload as any)?.totalNews ?? 0),
+          categoriesCount: Number((payload as any)?.categories ?? 0),
+          languagesCount: Number((payload as any)?.languages ?? 0),
+          activeUsersCount: Number((payload as any)?.activeUsers ?? 0),
+          aiLogsCount: Number((payload as any)?.aiLogs ?? 0),
         };
 
         if (cancelled) return;
@@ -171,7 +103,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [navigate, t]);
+  }, [navigate]);
 
   // Feature flag: disable the yellow scrolling ticker by default.
   // Enable by setting VITE_SHOW_TICKER=true at build time.

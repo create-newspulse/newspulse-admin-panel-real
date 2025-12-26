@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useNotify } from '@/components/ui/toast-bridge';
 import type { OwnerZoneShellContext } from './SafeOwnerZoneShell';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
@@ -276,6 +277,29 @@ export default function SafeOwnerZoneHub() {
 
       {/* B) Main content grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Advanced Controls */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div>
+            <div className="text-lg font-semibold">Advanced Controls</div>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Specialized admin tooling.</div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <Link
+              to="/admin/review-queue"
+              className="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-white">Review Queue</div>
+                  <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">Approvals • PTI • Legal • Founder</div>
+                </div>
+                <div className="shrink-0 text-lg leading-none">🧭</div>
+              </div>
+            </Link>
+          </div>
+        </div>
+
         {/* Live Controls */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center justify-between">

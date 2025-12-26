@@ -45,8 +45,12 @@ export default function PublicSiteSettingsLayout() {
           toast.success('Draft saved');
         }}
         onPublish={async () => {
-          await publish('publish-public-site-settings');
-          toast.success('Published');
+          try {
+            await publish('publish-public-site-settings');
+            toast.success('Published');
+          } catch (e: any) {
+            toast.error(e?.message || 'Publish failed');
+          }
         }}
       />
     </div>

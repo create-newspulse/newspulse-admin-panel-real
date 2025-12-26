@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import { adminJson } from '@/lib/http/adminFetch';
 
 interface Quote {
   text: string;
@@ -18,9 +18,9 @@ const DailyQuoteBlock: React.FC = () => {
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/daily-quote`);
-        if (res.data.success) {
-          setQuote(res.data.data);
+        const data = await adminJson<any>('/daily-quote', { method: 'GET' });
+        if (data?.success) {
+          setQuote(data.data);
         } else {
           setQuote(fallbackQuote);
         }
