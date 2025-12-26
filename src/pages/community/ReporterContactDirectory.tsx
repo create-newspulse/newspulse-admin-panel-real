@@ -4,8 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Copy as CopyIcon } from 'lucide-react';
 import { useNotify } from '@/components/ui/toast-bridge';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
-import type { ReporterContact } from '@/lib/api/reporterDirectory.ts';
-import { adminApi, resolveAdminPath } from '@/lib/adminApi';
+import { listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
 import { useAuth } from '@/context/AuthContext.tsx';
 import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
@@ -80,10 +79,7 @@ export default function ReporterContactDirectory() {
       status: statusFilter, activity: activityFilter, hasNotes: hasNotesOnly, searchQuery, refreshTick
     }],
     queryFn: async () => {
-      const res = await adminApi.get(resolveAdminPath('/admin/community/reporter-contacts'), {
-        params: { page: 1, limit: 200 },
-      });
-      return res.data;
+      return await listReporterContacts({ page: 1, limit: 200 });
     },
   });
   const reporters: ReporterContact[] = (data?.items as ReporterContact[]) ?? (data?.rows as ReporterContact[]) ?? [];
@@ -696,7 +692,7 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
       {activeState && activeState !== 'All states' && (
         <div className="mt-2 pl-2 border-t pt-2">
           <p className="text-xs font-medium text-slate-500 mb-1">Cities in {activeState}</p>
-          {cityGroups.length === 0 && <p className="text-xs text-slate-500">No cities found.</p>}
+                            navigate(`/community/reporter?${qs.toString()}`);
           <div className="space-y-1">
             {cityGroups.map(cg => (
               <button
@@ -1011,8 +1007,12 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                           onClick={(e) => {
                             e.stopPropagation();
                             const qs = new URLSearchParams();
-                            if (id) qs.set('reporterId', String(id));
-                            navigate(`/community/reporter-queue?${qs.toString()}`);
+                            const key = String(rc.email || rc.phone || id || '').trim();
+                            const name = String(rc.name || '').trim();
+                            if (key) qs.set('reporterKey', key);
+                            if (rc.email) qs.set('email', String(rc.email));
+                            if (name) qs.set('name', name);
+                            navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
                           }}
                           className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
                         >

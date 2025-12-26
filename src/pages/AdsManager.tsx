@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 
 import { adminApi } from '@/lib/api';
 
-type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE';
+type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE';
 
 type SponsorAd = {
   id: string;
@@ -20,9 +20,7 @@ type SponsorAd = {
   createdAt?: string | null;
 };
 
-type AdSlotV2 = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'ARTICLE_INLINE';
-
-const SLOT_OPTIONS: Array<AdSlotV2 | AdSlot> = [
+const SLOT_OPTIONS: AdSlot[] = [
   'HOME_728x90',
   'HOME_RIGHT_300x250',
   'ARTICLE_INLINE',
@@ -66,6 +64,22 @@ function fromDatetimeLocalValue(value: string): string | null {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
+}
+
+function parseBool(value: any): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const s = value.trim().toLowerCase();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    if (s === '1') return true;
+    if (s === '0') return false;
+    if (s === 'on' || s === 'enabled' || s === 'yes') return true;
+    if (s === 'off' || s === 'disabled' || s === 'no') return false;
+  }
+  // Default to false for unknown/undefined shapes to avoid accidental "stuck ON".
+  return false;
 }
 
 type AdFormState = {
@@ -112,6 +126,20 @@ function normalizeAd(raw: any): SponsorAd {
 export default function AdsManager() {
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
   const [loading, setLoading] = React.useState(false);
+
+  type PlacementKey = 'HOME_728x90' | 'HOME_RIGHT_300x250';
+  type PlacementState = Record<PlacementKey, boolean>;
+
+  const [slotEnabled, setSlotEnabled] = React.useState<PlacementState>({
+    HOME_728x90: false,
+    HOME_RIGHT_300x250: false,
+  });
+
+  const [settingsLoading, setSettingsLoading] = React.useState(true);
+  const [placementSaving, setPlacementSaving] = React.useState<Record<PlacementKey, boolean>>({
+    HOME_728x90: false,
+    HOME_RIGHT_300x250: false,
+  });
 
   const [slotFilter, setSlotFilter] = React.useState<AdSlot | 'ALL'>('ALL');
   const [activeOnly, setActiveOnly] = React.useState(false);
@@ -182,9 +210,70 @@ export default function AdsManager() {
     }
   }, [slotFilter, activeOnly]);
 
+  const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
+    const res = await adminApi.get('/admin/ad-settings');
+    const raw = res?.data;
+    const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || {}) as any;
+    return {
+      HOME_728x90: parseBool(enabledRaw.HOME_728x90),
+      HOME_RIGHT_300x250: parseBool(enabledRaw.HOME_RIGHT_300x250),
+    };
+  }, []);
+
+  const updateAdSettings = React.useCallback(async (next: PlacementState): Promise<PlacementState> => {
+    const res = await adminApi.put('/admin/ad-settings', { slotEnabled: next });
+    const raw = res?.data;
+    const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || null) as any;
+    if (!enabledRaw) return next;
+    return {
+      HOME_728x90: parseBool(enabledRaw.HOME_728x90),
+      HOME_RIGHT_300x250: parseBool(enabledRaw.HOME_RIGHT_300x250),
+    };
+  }, []);
+
+  const loadSettings = React.useCallback(async () => {
+    // IMPORTANT: do not overwrite local state while a save is in progress.
+    if (placementSaving.HOME_728x90 || placementSaving.HOME_RIGHT_300x250) return;
+    setSettingsLoading(true);
+    try {
+      setSlotEnabled(await fetchAdSettings());
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to load ad placements');
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, [fetchAdSettings, placementSaving.HOME_728x90, placementSaving.HOME_RIGHT_300x250]);
+
   React.useEffect(() => {
     void fetchAds();
   }, [fetchAds]);
+
+  // IMPORTANT: load settings only once on mount.
+  // Do NOT include slotEnabled in deps (would overwrite user toggles).
+  React.useEffect(() => {
+    void loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const togglePlacement = async (key: PlacementKey) => {
+    const prev = slotEnabled;
+    const next: PlacementState = { ...slotEnabled, [key]: !slotEnabled[key] };
+
+    // Optimistic UI
+    setSlotEnabled(next);
+    setPlacementSaving((s) => ({ ...s, [key]: true }));
+
+    try {
+      const saved = await updateAdSettings(next);
+      setSlotEnabled(saved);
+      toast.success('Saved');
+    } catch (err: any) {
+      setSlotEnabled(prev);
+      toast.error(err?.response?.data?.message || err?.message || 'Save failed');
+    } finally {
+      setPlacementSaving((s) => ({ ...s, [key]: false }));
+    }
+  };
 
   const filteredAds = React.useMemo(() => {
     let list = ads;
@@ -343,6 +432,55 @@ export default function AdsManager() {
 
         <div className="text-xs text-slate-500">
           Showing <span className="font-medium">{filteredAds.length}</span>
+        </div>
+      </div>
+
+      {/* Ad Placements */}
+      <div className="border rounded p-4 bg-white dark:bg-slate-900">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Ad Placements</h2>
+          <button
+            type="button"
+            onClick={() => void loadSettings()}
+            className="px-3 py-1 rounded border text-sm"
+            disabled={settingsLoading}
+          >
+            {settingsLoading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">Home Banner 728×90</div>
+              <div className="text-xs text-slate-500 font-mono">HOME_728x90</div>
+            </div>
+            <button
+              type="button"
+              disabled={settingsLoading || placementSaving.HOME_728x90}
+              onClick={() => void togglePlacement('HOME_728x90')}
+              className={`px-3 py-1 rounded text-xs border min-w-[84px] ${placementSaving.HOME_728x90 ? 'cursor-not-allowed opacity-80' : ''} ${slotEnabled.HOME_728x90 ? 'bg-green-600 text-white border-green-600' : 'bg-slate-200 text-slate-700 border-slate-300'}`}
+              title="Toggle placement"
+            >
+              {placementSaving.HOME_728x90 ? 'Saving…' : (slotEnabled.HOME_728x90 ? 'ON' : 'OFF')}
+            </button>
+          </div>
+
+          <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">Home Right Rail 300×250</div>
+              <div className="text-xs text-slate-500 font-mono">HOME_RIGHT_300x250</div>
+            </div>
+            <button
+              type="button"
+              disabled={settingsLoading || placementSaving.HOME_RIGHT_300x250}
+              onClick={() => void togglePlacement('HOME_RIGHT_300x250')}
+              className={`px-3 py-1 rounded text-xs border min-w-[84px] ${placementSaving.HOME_RIGHT_300x250 ? 'cursor-not-allowed opacity-80' : ''} ${slotEnabled.HOME_RIGHT_300x250 ? 'bg-green-600 text-white border-green-600' : 'bg-slate-200 text-slate-700 border-slate-300'}`}
+              title="Toggle placement"
+            >
+              {placementSaving.HOME_RIGHT_300x250 ? 'Saving…' : (slotEnabled.HOME_RIGHT_300x250 ? 'ON' : 'OFF')}
+            </button>
+          </div>
         </div>
       </div>
 

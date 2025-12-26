@@ -15,6 +15,7 @@ import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
 import { Star } from 'lucide-react';
+import { listReporterContacts as listReporterContactsDirectory } from '@/lib/api/reporterDirectory';
 
 /*
  * Community Reporter Queue (admin)
@@ -55,6 +56,69 @@ export default function CommunityReporterPage(){
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSubmission, setProfileSubmission] = useState<CommunitySubmission | null>(null);
 
+  const contactsIndexRef = useRef<Map<string, string>>(new Map());
+  const contactsLoadedRef = useRef(false);
+  const contactsLoadPromiseRef = useRef<Promise<Map<string, string>> | null>(null);
+
+  function normalizePhone(p?: string | null): string {
+    const digits = String(p || '').replace(/\D/g, '');
+    if (!digits) return '';
+    // Prefer last 10 digits for matching, but keep full when shorter.
+    return digits.length > 10 ? digits.slice(-10) : digits;
+  }
+
+  async function ensureContactsIndexLoaded(): Promise<Map<string, string>> {
+    if (contactsLoadedRef.current) return contactsIndexRef.current;
+    if (contactsLoadPromiseRef.current) return contactsLoadPromiseRef.current;
+
+    contactsLoadPromiseRef.current = (async () => {
+      try {
+        const res = await listReporterContactsDirectory({ page: 1, limit: 500 } as any);
+        const rows = (res as any)?.rows ?? (res as any)?.items ?? [];
+        const idx = new Map<string, string>();
+        for (const r of rows) {
+          const name = String((r as any)?.name || '').trim();
+          if (!name) continue;
+          const email = String((r as any)?.email || '').trim().toLowerCase();
+          const phone = normalizePhone((r as any)?.phone);
+          if (email) idx.set(`e:${email}`, name);
+          if (phone) idx.set(`p:${phone}`, name);
+          const id = String((r as any)?.id || (r as any)?._id || (r as any)?.reporterKey || '').trim();
+          if (id) idx.set(`id:${id}`, name);
+        }
+        contactsIndexRef.current = idx;
+        contactsLoadedRef.current = true;
+        return idx;
+      } catch {
+        // Optional enrichment only; never block the queue.
+        contactsLoadedRef.current = true;
+        contactsIndexRef.current = new Map();
+        return contactsIndexRef.current;
+      } finally {
+        contactsLoadPromiseRef.current = null;
+      }
+    })();
+
+    return contactsLoadPromiseRef.current;
+  }
+
+  async function enrichReporterNamesIfPossible(list: CommunitySubmission[]): Promise<CommunitySubmission[]> {
+    const needs = list.some(s => !s.reporterName && (!!s.email || !!s.contactEmail || !!s.contactPhone || !!s.contactName || !!s.name || !!s.userName));
+    if (!needs) return list;
+
+    const idx = await ensureContactsIndexLoaded();
+    if (!idx.size) return list;
+
+    return list.map((s) => {
+      if (s.reporterName) return s;
+      const email = String((s.email || s.contactEmail || '')).trim().toLowerCase();
+      const phone = normalizePhone((s as any).phone || s.contactPhone);
+      const id = String((s as any).reporterKey || (s as any).userId || '').trim();
+      const name = (email && idx.get(`e:${email}`)) || (phone && idx.get(`p:${phone}`)) || (id && idx.get(`id:${id}`)) || '';
+      return name ? { ...s, reporterName: name } : s;
+    });
+  }
+
   // Helper to map raw API submission to strict Phase-1 CommunitySubmission type
   function norm(val: any, prefer?: 'city'|'state'|'country'): string {
     if (val == null) return '';
@@ -77,7 +141,17 @@ export default function CommunityReporterPage(){
       const s = String(raw.status || 'pending').toLowerCase();
       return (s === 'pending' || s === 'approved' || s === 'rejected' || s === 'trash') ? s : 'pending';
     })() as CommunitySubmission['status'];
-    const reporterName = (raw.userName || raw.name || '').trim() || undefined;
+    const reporterName = (
+      raw.userName
+      || raw.name
+      || (raw as any).contactName
+      || (raw as any).reporterName
+      || (raw as any).reporter?.name
+      || (raw as any).reporter?.userName
+      || (raw as any).user?.name
+      || (raw as any).user?.userName
+      || ''
+    ).trim() || undefined;
     // Age extraction (number if possible)
     const ageRaw: any = (raw as any).age ?? (raw as any).reporterAge ?? undefined;
     const ageNum = typeof ageRaw === 'number' ? ageRaw : (typeof ageRaw === 'string' ? Number(ageRaw) : undefined);
@@ -157,7 +231,9 @@ export default function CommunityReporterPage(){
           aiPickOnly,
         });
         const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-        setSubmissions(list.map(mapRaw));
+        const mapped = list.map(mapRaw);
+        const enriched = await enrichReporterNamesIfPossible(mapped);
+        setSubmissions(enriched);
       } catch (e:any) {
         const n = normalizeError(e, 'Failed to load submissions.');
         setError(n.authExpired ? 'Session expired. Please login again.' : n.message);
@@ -182,7 +258,9 @@ export default function CommunityReporterPage(){
       });
       debug('[CommunityReporterPage] refresh raw', raw);
       const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-      setSubmissions(list.map(mapRaw));
+      const mapped = list.map(mapRaw);
+      const enriched = await enrichReporterNamesIfPossible(mapped);
+      setSubmissions(enriched);
     } catch(e:any) {
       const n = normalizeError(e, 'Failed to load submissions.');
       setError(n.authExpired ? 'Session expired. Please login again.' : n.message);

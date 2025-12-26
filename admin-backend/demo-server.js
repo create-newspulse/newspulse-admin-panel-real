@@ -37,6 +37,99 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ===== Demo Auth (minimal) =====
+// The admin frontend expects these endpoints:
+// - POST /api/admin/login -> { ok:true, token, user }
+// - GET  /api/admin/me    -> { ok:true, user }
+// This demo server uses an in-memory token map.
+
+/** @type {Map<string, any>} */
+const DEMO_SESSIONS = new Map();
+
+function parseCookieHeader(header) {
+  const out = {};
+  if (!header || typeof header !== 'string') return out;
+  const parts = header.split(';');
+  for (const p of parts) {
+    const idx = p.indexOf('=');
+    if (idx <= 0) continue;
+    const k = p.slice(0, idx).trim();
+    const v = p.slice(idx + 1).trim();
+    if (!k) continue;
+    out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+function extractToken(req) {
+  const auth = req.headers?.authorization;
+  if (typeof auth === 'string' && auth.trim()) {
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (m && m[1]) return m[1].trim();
+    return auth.trim();
+  }
+  const cookies = parseCookieHeader(req.headers?.cookie);
+  const c = cookies.np_admin || cookies.np_admin_token || cookies.np_token;
+  if (typeof c === 'string' && c.trim()) return c.trim();
+  return null;
+}
+
+function makeDemoUser(email) {
+  const role = (process.env.DEMO_ADMIN_ROLE || 'founder').toString().trim() || 'founder';
+  const name = (process.env.DEMO_ADMIN_NAME || 'Demo Admin').toString().trim() || 'Demo Admin';
+  return {
+    id: crypto.randomUUID(),
+    _id: crypto.randomUUID(),
+    email,
+    name,
+    role,
+  };
+}
+
+app.post('/api/admin/login', (req, res) => {
+  const body = req.body || {};
+  const email = String(body.email || '').trim();
+  const password = String(body.password || '').trim();
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, message: 'email and password are required' });
+  }
+
+  // Optional hard check: set DEMO_ADMIN_PASSWORD to enforce a local password.
+  const requiredPassword = (process.env.DEMO_ADMIN_PASSWORD || '').toString();
+  if (requiredPassword && password !== requiredPassword) {
+    return res.status(401).json({ ok: false, message: 'Invalid email or password' });
+  }
+
+  const user = makeDemoUser(email);
+  const token = crypto.randomBytes(24).toString('hex');
+  DEMO_SESSIONS.set(token, { user, createdAt: Date.now() });
+
+  // Also set a cookie so /me works even if the client relies on withCredentials.
+  try {
+    res.cookie('np_admin', token, { httpOnly: true, sameSite: 'lax', secure: false, path: '/' });
+  } catch {}
+
+  return res.status(200).json({ ok: true, token, user });
+});
+
+app.get('/api/admin/me', (req, res) => {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ ok: false, message: 'Unauthorized' });
+
+  const sess = DEMO_SESSIONS.get(token);
+  if (!sess || !sess.user) return res.status(401).json({ ok: false, message: 'Unauthorized' });
+  return res.status(200).json({ ok: true, user: sess.user });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const token = extractToken(req);
+  if (token) DEMO_SESSIONS.delete(token);
+  try {
+    res.clearCookie('np_admin', { path: '/' });
+  } catch {}
+  return res.status(200).json({ ok: true });
+});
+
 // Request logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
@@ -92,6 +185,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 let ARTICLES = [];
 
 function seedArticlesOnce() {
+  // IMPORTANT: Do not show fake stories unless explicitly requested.
+  // This prevents local dev from accidentally looking "correct" while using demo data.
+  const shouldSeed = String(process.env.DEMO_SEED_ARTICLES || '').toLowerCase() === 'true';
+  if (!shouldSeed) return;
   if (ARTICLES.length) return;
   const now = Date.now();
   const mk = (i, overrides = {}) => {
@@ -153,18 +250,27 @@ function inDateRange(iso, from, to) {
   return true;
 }
 
-app.get('/api/articles', (req, res) => {
-  seedArticlesOnce();
+function nowIso() {
+  return new Date().toISOString();
+}
 
-  const page = clampInt(req.query?.page, 1, 1, 10_000);
-  const limit = clampInt(req.query?.limit, 20, 1, 500);
-  const status = (req.query?.status ? String(req.query.status).toLowerCase() : '').trim();
-  const q = (req.query?.q ? String(req.query.q).toLowerCase() : '').trim();
-  const category = (req.query?.category ? String(req.query.category) : '').trim();
-  const language = (req.query?.language ? String(req.query.language).toLowerCase() : '').trim();
-  const from = (req.query?.from ? String(req.query.from) : '').trim();
-  const to = (req.query?.to ? String(req.query.to) : '').trim();
-  const { field, desc } = parseSort(req.query?.sort);
+function getArticleListQuery(req) {
+  return {
+    page: clampInt(req.query?.page, 1, 1, 10_000),
+    limit: clampInt(req.query?.limit, 20, 1, 500),
+    status: (req.query?.status ? String(req.query.status).toLowerCase() : '').trim(),
+    q: (req.query?.q ? String(req.query.q).toLowerCase() : '').trim(),
+    category: (req.query?.category ? String(req.query.category) : '').trim(),
+    language: (req.query?.language ? String(req.query.language).toLowerCase() : '').trim(),
+    from: (req.query?.from ? String(req.query.from) : '').trim(),
+    to: (req.query?.to ? String(req.query.to) : '').trim(),
+    sort: parseSort(req.query?.sort),
+  };
+}
+
+function listArticlesCore(query) {
+  const { page, limit, status, q, category, language, from, to, sort } = query;
+  const { field, desc } = sort;
 
   let rows = ARTICLES.slice();
 
@@ -193,18 +299,24 @@ app.get('/api/articles', (req, res) => {
   const start = (page - 1) * limit;
   const paged = rows.slice(start, start + limit);
 
-  return res.json({ rows: paged, total, page, pages });
-});
+  return { rows: paged, total, page, pages };
+}
 
-app.get('/api/articles/:id', (req, res) => {
+function handleListArticles(req, res) {
+  seedArticlesOnce();
+  const q = getArticleListQuery(req);
+  return res.json(listArticlesCore(q));
+}
+
+function handleGetArticle(req, res) {
   seedArticlesOnce();
   const id = String(req.params.id || '');
   const found = ARTICLES.find((a) => String(a._id) === id);
   if (!found) return res.status(404).json({ message: 'Route not found' });
   return res.json({ ok: true, data: found });
-});
+}
 
-app.put('/api/articles/:id', (req, res) => {
+function handlePutArticle(req, res) {
   seedArticlesOnce();
   const id = String(req.params.id || '');
   const idx = ARTICLES.findIndex((a) => String(a._id) === id);
@@ -212,9 +324,9 @@ app.put('/api/articles/:id', (req, res) => {
   const next = { ...ARTICLES[idx], ...(req.body || {}), updatedAt: nowIso() };
   ARTICLES[idx] = next;
   return res.json({ ok: true, data: next });
-});
+}
 
-app.patch('/api/articles/:id', (req, res) => {
+function handlePatchArticle(req, res) {
   seedArticlesOnce();
   const id = String(req.params.id || '');
   const idx = ARTICLES.findIndex((a) => String(a._id) === id);
@@ -227,7 +339,65 @@ app.patch('/api/articles/:id', (req, res) => {
   }
   ARTICLES[idx] = next;
   return res.json({ ok: true, data: next });
-});
+}
+
+function handleCreateAdminArticle(req, res) {
+  seedArticlesOnce();
+  const body = req.body || {};
+  const next = {
+    _id: crypto.randomUUID(),
+    title: String(body.title || 'Untitled').trim(),
+    slug: String(body.slug || '').trim() || `draft-${Math.random().toString(16).slice(2, 10)}`,
+    summary: String(body.summary || '').trim(),
+    content: String(body.content || ''),
+    category: body.category || 'regional',
+    language: body.language || 'en',
+    status: body.status || 'draft',
+    author: body.author || { name: 'Editor' },
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    ...body,
+  };
+  ARTICLES.unshift(next);
+  return res.status(201).json({ ok: true, data: next });
+}
+
+function handleDeleteAdminArticle(req, res) {
+  seedArticlesOnce();
+  const id = String(req.params.id || '');
+  const hard = String(req.query?.hard || '').toLowerCase() === 'true' || req.query?.hard === true;
+  const idx = ARTICLES.findIndex((a) => String(a._id) === id);
+  if (idx < 0) return res.status(404).json({ message: 'Route not found' });
+  if (hard) {
+    ARTICLES.splice(idx, 1);
+    return res.status(204).send();
+  }
+  ARTICLES[idx] = { ...ARTICLES[idx], status: 'deleted', updatedAt: nowIso() };
+  return res.json({ ok: true, data: ARTICLES[idx] });
+}
+
+app.get('/api/articles', handleListArticles);
+
+app.get('/api/articles/:id', handleGetArticle);
+
+// --- Admin Articles API (alias) ---
+// Production admin panel expects: /api/admin/articles* for Draft/Scheduled/etc.
+// In the demo backend, we alias these routes to the same in-memory ARTICLES store.
+app.get('/api/admin/articles', handleListArticles);
+
+app.get('/api/admin/articles/:id', handleGetArticle);
+
+app.post('/api/admin/articles', handleCreateAdminArticle);
+
+app.put('/api/admin/articles/:id', handlePutArticle);
+
+app.patch('/api/admin/articles/:id', handlePatchArticle);
+
+app.delete('/api/admin/articles/:id', handleDeleteAdminArticle);
+
+app.put('/api/articles/:id', handlePutArticle);
+
+app.patch('/api/articles/:id', handlePatchArticle);
 
 let BROADCAST_SETTINGS = {
   breakingEnabled: true,
@@ -238,10 +408,6 @@ let BROADCAST_SETTINGS = {
 
 /** @type {Array<{_id:string,type:'breaking'|'live',text:string,isLive:boolean,createdAt:string,expiresAt:string,language?:string,authorId?:string,updatedAt?:string}>} */
 let BROADCAST_ITEMS = [];
-
-function nowIso() {
-  return new Date().toISOString();
-}
 
 function pruneBroadcastItems() {
   const cutoff = Date.now() - DAY_MS;
@@ -366,6 +532,361 @@ app.put('/api/admin/settings', (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: 'Invalid payload' });
   }
+});
+
+// ===== Ads Manager (demo storage) =====
+// Contract endpoints expected by the admin panel:
+// - GET /api/admin/ad-settings -> { ok:true, slotEnabled:{ HOME_728x90:boolean, HOME_RIGHT_300x250:boolean } }
+// - PUT /api/admin/ad-settings -> same shape
+// - GET /api/admin/ads
+// - POST /api/admin/ads
+// - PUT /api/admin/ads/:id
+// - PATCH /api/admin/ads/:id/toggle
+// - DELETE /api/admin/ads/:id
+
+const DEFAULT_AD_SETTINGS = {
+  slotEnabled: {
+    HOME_728x90: false,
+    HOME_RIGHT_300x250: false,
+  },
+};
+
+let AD_SETTINGS = { ...DEFAULT_AD_SETTINGS };
+
+/** @type {Array<any>} */
+let ADS = [];
+
+function boolish(v, fallback = false) {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'true' || s === '1' || s === 'on' || s === 'enabled' || s === 'yes') return true;
+    if (s === 'false' || s === '0' || s === 'off' || s === 'disabled' || s === 'no') return false;
+  }
+  return fallback;
+}
+
+function normIso(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+app.get('/api/admin/ad-settings', (_req, res) => {
+  return res.status(200).json({ ok: true, slotEnabled: { ...AD_SETTINGS.slotEnabled } });
+});
+
+app.put('/api/admin/ad-settings', (req, res) => {
+  const body = req.body || {};
+  const raw = body.slotEnabled || {};
+
+  AD_SETTINGS = {
+    ...AD_SETTINGS,
+    slotEnabled: {
+      ...AD_SETTINGS.slotEnabled,
+      HOME_728x90: boolish(raw.HOME_728x90, AD_SETTINGS.slotEnabled.HOME_728x90),
+      HOME_RIGHT_300x250: boolish(raw.HOME_RIGHT_300x250, AD_SETTINGS.slotEnabled.HOME_RIGHT_300x250),
+    },
+  };
+
+  console.log('[audit] update-ad-settings', AD_SETTINGS.slotEnabled);
+  return res.status(200).json({ ok: true, slotEnabled: { ...AD_SETTINGS.slotEnabled } });
+});
+
+app.get('/api/admin/ads', (req, res) => {
+  const slot = (req.query?.slot ? String(req.query.slot) : '').trim();
+  const active = (req.query?.active ? String(req.query.active).toLowerCase() : '').trim();
+
+  let rows = ADS.slice();
+  if (slot) rows = rows.filter((a) => String(a.slot || '') === slot);
+  if (active === 'true') rows = rows.filter((a) => Boolean(a.isActive));
+
+  return res.status(200).json({ ok: true, ads: rows });
+});
+
+app.post('/api/admin/ads', (req, res) => {
+  const body = req.body || {};
+  const slot = String(body.slot || '').trim();
+  const imageUrl = String(body.imageUrl || body.image_url || '').trim();
+  if (!slot) return res.status(400).json({ message: 'slot is required' });
+  if (!imageUrl) return res.status(400).json({ message: 'imageUrl is required' });
+
+  const now = nowIso();
+  const item = {
+    _id: crypto.randomUUID(),
+    slot,
+    title: typeof body.title === 'string' ? body.title : null,
+    imageUrl,
+    targetUrl: typeof body.targetUrl === 'string' ? body.targetUrl : (typeof body.target_url === 'string' ? body.target_url : null),
+    clickable: boolish(body.clickable, true),
+    priority: Number.isFinite(Number(body.priority)) ? Number(body.priority) : 0,
+    startAt: normIso(body.startAt || body.start_at),
+    endAt: normIso(body.endAt || body.end_at),
+    isActive: boolish(body.isActive ?? body.active, true),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  ADS.push(item);
+  return res.status(201).json({ ok: true, ad: item });
+});
+
+app.put('/api/admin/ads/:id', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  const idx = ADS.findIndex((a) => String(a._id) === id);
+  if (idx < 0) return res.status(404).json({ message: 'Not Found' });
+  const body = req.body || {};
+
+  const prev = ADS[idx];
+  const next = {
+    ...prev,
+    slot: typeof body.slot === 'string' ? body.slot : prev.slot,
+    title: (typeof body.title === 'string' ? body.title : prev.title),
+    imageUrl: (typeof body.imageUrl === 'string' ? body.imageUrl : (typeof body.image_url === 'string' ? body.image_url : prev.imageUrl)),
+    targetUrl: (typeof body.targetUrl === 'string' ? body.targetUrl : (typeof body.target_url === 'string' ? body.target_url : prev.targetUrl)),
+    clickable: (typeof body.clickable === 'boolean' ? body.clickable : prev.clickable),
+    priority: Number.isFinite(Number(body.priority)) ? Number(body.priority) : prev.priority,
+    startAt: (body.startAt || body.start_at) ? normIso(body.startAt || body.start_at) : prev.startAt,
+    endAt: (body.endAt || body.end_at) ? normIso(body.endAt || body.end_at) : prev.endAt,
+    isActive: (typeof body.isActive !== 'undefined' || typeof body.active !== 'undefined') ? boolish(body.isActive ?? body.active, prev.isActive) : prev.isActive,
+    updatedAt: nowIso(),
+  };
+
+  ADS[idx] = next;
+  return res.status(200).json({ ok: true, ad: next });
+});
+
+app.patch('/api/admin/ads/:id/toggle', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  const idx = ADS.findIndex((a) => String(a._id) === id);
+  if (idx < 0) return res.status(404).json({ message: 'Not Found' });
+  const body = req.body || {};
+
+  const prev = ADS[idx];
+  const desired = (typeof body.isActive === 'boolean') ? body.isActive : (typeof body.active === 'boolean' ? body.active : !Boolean(prev.isActive));
+  const next = { ...prev, isActive: Boolean(desired), updatedAt: nowIso() };
+  ADS[idx] = next;
+  return res.status(200).json({ ok: true, ad: next });
+});
+
+app.delete('/api/admin/ads/:id', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  const before = ADS.length;
+  ADS = ADS.filter((a) => String(a._id) !== id);
+  if (ADS.length === before) return res.status(404).json({ message: 'Not Found' });
+  return res.status(200).json({ ok: true });
+});
+
+// ===== Community Reporter (demo storage) =====
+// Endpoints expected by the admin UI:
+// - GET  /api/admin/community-reporter/queue
+// - GET  /api/admin/community-reporter/submissions
+// - GET  /api/admin/community-reporter/submissions/:id
+// - POST /api/admin/community-reporter/submissions/:id/decision { decision:'approve'|'reject' }
+// - POST /api/admin/community-reporter/submissions/:id/restore
+// - POST /api/admin/community-reporter/submissions/:id/hard-delete
+// - GET  /api/admin/community/stats
+// - POST /api/admin/community-reporter/cleanup
+
+/** @type {Array<any>} */
+let COMMUNITY_SUBMISSIONS = [];
+
+function seedCommunitySubmissionsOnce() {
+  if (COMMUNITY_SUBMISSIONS.length) return;
+  const now = Date.now();
+  const mk = (i, overrides = {}) => {
+    const createdAt = new Date(now - i * 6 * 60 * 60 * 1000).toISOString();
+    const updatedAt = createdAt;
+    return {
+      _id: crypto.randomUUID(),
+      headline: `Community story #${i + 1}`,
+      body: `This is a demo community submission body for story #${i + 1}.`,
+      category: ['regional', 'national', 'international'][i % 3],
+      status: (i % 5 === 0) ? 'rejected' : 'pending',
+      priority: (i % 7 === 0) ? 'FOUNDER_REVIEW' : (i % 3 === 0) ? 'EDITOR_REVIEW' : 'LOW_PRIORITY',
+      // Reporter identity (THIS prevents “Unknown reporter” in the UI)
+      userName: ['Amit Patel', 'Neha Sharma', 'Ravi Singh', 'Priya Desai'][i % 4],
+      email: ['amit@example.com', 'neha@example.com', 'ravi@example.com', 'priya@example.com'][i % 4],
+      city: ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot'][i % 4],
+      state: 'Gujarat',
+      country: 'India',
+      district: ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot'][i % 4],
+      contactName: ['Amit Patel', 'Neha Sharma', 'Ravi Singh', 'Priya Desai'][i % 4],
+      contactEmail: ['amit@example.com', 'neha@example.com', 'ravi@example.com', 'priya@example.com'][i % 4],
+      contactPhone: ['+91 90000 00001', '+91 90000 00002', '+91 90000 00003', '+91 90000 00004'][i % 4],
+      contactMethod: 'whatsapp',
+      contactOk: true,
+      futureContactOk: true,
+      // AI/risk fields used by the UI
+      riskScore: (i % 3 === 0) ? 72 : (i % 3 === 1) ? 45 : 18,
+      flags: (i % 4 === 0) ? ['policy:needs-review'] : [],
+      aiHighlighted: i % 6 === 0,
+      aiTrendingScore: i % 6 === 0 ? 10 : 0,
+      // Source chips
+      sourceType: 'community',
+      reporterVerificationLevel: 'community_default',
+      ethicsStrikes: i % 9 === 0 ? 1 : 0,
+      linkedArticleId: null,
+      createdAt,
+      updatedAt,
+      ...overrides,
+    };
+  };
+
+  COMMUNITY_SUBMISSIONS = [
+    mk(0, { status: 'pending', priority: 'FOUNDER_REVIEW', flags: ['policy:needs-review'], riskScore: 78, aiHighlighted: true, aiTrendingScore: 12 }),
+    mk(1, { status: 'pending', priority: 'EDITOR_REVIEW', riskScore: 35 }),
+    mk(2, { status: 'pending', priority: 'LOW_PRIORITY', riskScore: 12 }),
+    mk(3, { status: 'rejected', priority: 'LOW_PRIORITY', rejectReason: 'Incomplete details' }),
+    mk(4, { status: 'pending', priority: 'EDITOR_REVIEW', riskScore: 52 }),
+  ];
+}
+
+function riskTier(score) {
+  const n = typeof score === 'number' ? score : Number(score);
+  if (!Number.isFinite(n)) return 'LOW';
+  if (n >= 70) return 'HIGH';
+  if (n >= 40) return 'MEDIUM';
+  return 'LOW';
+}
+
+function filterCommunityList(query) {
+  seedCommunitySubmissionsOnce();
+  let rows = COMMUNITY_SUBMISSIONS.slice();
+  const status = (query?.status ? String(query.status).toLowerCase() : '').trim();
+  if (status) {
+    rows = rows.filter((s) => String(s.status || '').toLowerCase() === status);
+  }
+  const priority = (query?.priority ? String(query.priority).trim() : '').trim();
+  if (priority) rows = rows.filter((s) => String(s.priority || '') === priority);
+
+  const risk = (query?.risk ? String(query.risk).toUpperCase() : '').trim();
+  if (risk === 'FLAGGED') rows = rows.filter((s) => Array.isArray(s.flags) && s.flags.length > 0);
+  else if (risk === 'LOW' || risk === 'MEDIUM' || risk === 'HIGH') rows = rows.filter((s) => riskTier(s.riskScore) === risk);
+
+  const source = (query?.source ? String(query.source).toLowerCase() : '').trim();
+  if (source === 'community') {
+    rows = rows.filter((s) => (s.sourceType !== 'journalist') || (s.reporterVerificationLevel !== 'verified'));
+  } else if (source === 'journalists') {
+    rows = rows.filter((s) => (s.sourceType === 'journalist') && (s.reporterVerificationLevel === 'verified'));
+  }
+
+  const aiPick = (query?.aiPick === true) || String(query?.aiPick || '').toLowerCase() === 'true';
+  if (aiPick) rows = rows.filter((s) => s.aiHighlighted === true || (typeof s.aiTrendingScore === 'number' && s.aiTrendingScore > 0));
+
+  // Newest first
+  rows.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return rows;
+}
+
+app.get('/api/admin/community-reporter/queue', (req, res) => {
+  const rows = filterCommunityList(req.query || {});
+  return res.status(200).json({ ok: true, submissions: rows });
+});
+
+app.get('/api/admin/community-reporter/submissions', (req, res) => {
+  const rows = filterCommunityList(req.query || {});
+  return res.status(200).json({ ok: true, submissions: rows, items: rows });
+});
+
+app.get('/api/admin/community-reporter/submissions/:id', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  const id = String(req.params.id || '').trim();
+  const s = COMMUNITY_SUBMISSIONS.find((x) => String(x._id) === id);
+  if (!s) return res.status(404).json({ ok: false, message: 'Not Found' });
+  return res.status(200).json({ ok: true, submission: s });
+});
+
+app.post('/api/admin/community-reporter/submissions/:id/decision', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  seedArticlesOnce();
+  const id = String(req.params.id || '').trim();
+  const idx = COMMUNITY_SUBMISSIONS.findIndex((x) => String(x._id) === id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+
+  const decision = String(req.body?.decision || '').toLowerCase();
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({ ok: false, message: 'decision must be approve|reject' });
+  }
+
+  const prev = COMMUNITY_SUBMISSIONS[idx];
+  const next = { ...prev, updatedAt: nowIso() };
+
+  let draftArticle = null;
+  if (decision === 'approve') {
+    next.status = 'approved';
+    // Create a draft article so the admin can see it under Manage News → Draft.
+    const article = {
+      _id: crypto.randomUUID(),
+      title: String(prev.headline || 'Community submission').trim(),
+      slug: `community-${String(prev._id).slice(0, 8)}`,
+      summary: String(prev.body || '').slice(0, 140),
+      content: String(prev.body || ''),
+      category: prev.category || 'regional',
+      language: 'en',
+      status: 'draft',
+      author: { name: prev.userName || prev.name || 'Community Reporter' },
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      source: 'community-reporter',
+      origin: 'community-reporter',
+      isCommunity: true,
+    };
+    ARTICLES.unshift(article);
+    next.linkedArticleId = article._id;
+    draftArticle = article;
+  } else {
+    next.status = 'rejected';
+    if (typeof req.body?.reason === 'string' && req.body.reason.trim()) {
+      next.rejectReason = req.body.reason.trim();
+    }
+  }
+
+  COMMUNITY_SUBMISSIONS[idx] = next;
+  return res.status(200).json({
+    ok: true,
+    action: decision,
+    submission: next,
+    draftArticle,
+  });
+});
+
+app.post('/api/admin/community-reporter/submissions/:id/restore', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  const id = String(req.params.id || '').trim();
+  const idx = COMMUNITY_SUBMISSIONS.findIndex((x) => String(x._id) === id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+  COMMUNITY_SUBMISSIONS[idx] = { ...COMMUNITY_SUBMISSIONS[idx], status: 'pending', updatedAt: nowIso() };
+  return res.status(200).json({ ok: true, submission: COMMUNITY_SUBMISSIONS[idx] });
+});
+
+app.post('/api/admin/community-reporter/submissions/:id/hard-delete', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  const id = String(req.params.id || '').trim();
+  const before = COMMUNITY_SUBMISSIONS.length;
+  COMMUNITY_SUBMISSIONS = COMMUNITY_SUBMISSIONS.filter((x) => String(x._id) !== id);
+  if (COMMUNITY_SUBMISSIONS.length === before) return res.status(404).json({ ok: false, message: 'Not Found' });
+  return res.status(200).json({ ok: true });
+});
+
+app.post('/api/admin/community-reporter/cleanup', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  // Demo cleanup: delete rejected low-priority older items.
+  const before = COMMUNITY_SUBMISSIONS.length;
+  COMMUNITY_SUBMISSIONS = COMMUNITY_SUBMISSIONS.filter((s) => !(String(s.status) === 'rejected' && String(s.priority) === 'LOW_PRIORITY'));
+  const deletedCount = before - COMMUNITY_SUBMISSIONS.length;
+  return res.status(200).json({ deletedCount });
+});
+
+app.get('/api/admin/community/stats', (req, res) => {
+  seedCommunitySubmissionsOnce();
+  const pendingCount = COMMUNITY_SUBMISSIONS.filter((s) => String(s.status) === 'pending').length;
+  const rejectedCount = COMMUNITY_SUBMISSIONS.filter((s) => String(s.status) === 'rejected').length;
+  const approvedCount = COMMUNITY_SUBMISSIONS.filter((s) => String(s.status) === 'approved').length;
+  const totalStories = COMMUNITY_SUBMISSIONS.length;
+  return res.status(200).json({ pendingCount, rejectedCount, approvedCount, totalStories });
 });
 
 // ===== OPTIONAL FEATURE ROUTES (guarded to avoid CJS/ESM boundary issues locally) =====

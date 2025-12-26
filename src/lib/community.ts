@@ -1,4 +1,4 @@
-import { adminApi } from '@/lib/adminApi';
+import { adminApi, resolveAdminPath } from '@/lib/adminApi';
 
 export interface ReporterAdminStory {
   id: string;
@@ -54,10 +54,50 @@ export async function listReporterStoriesByEmail(
 ): Promise<ReporterAdminStoryListResponse> {
   const cleanEmail = (email || '').trim();
   if (!cleanEmail) throw new Error('Email is required');
+
   const query = { ...(params || {}), email: cleanEmail } as Record<string, any>;
-  const { data } = await adminApi.get<ReporterAdminStoryListResponse>('/community/reporter-stories', {
-    params: query,
-  });
-  if (!data?.ok) throw new Error('Failed to load reporter stories');
-  return data;
+  // Some backends use different param names.
+  query.reporterKey = query.reporterKey || cleanEmail;
+  if (query.q && !query.search) query.search = query.q;
+
+  const candidatePaths = [
+    // Most common admin path (proxy mode => /admin-api/admin/...) 
+    resolveAdminPath('/admin/community/reporter-stories'),
+    // Legacy/non-admin public style (proxy mode => /admin-api/admin/community/... won't apply)
+    resolveAdminPath('/community/reporter-stories'),
+  ];
+
+  let lastErr: any = null;
+  for (const path of candidatePaths) {
+    try {
+      const { data } = await adminApi.get<any>(path, { params: query });
+      // Normalize multiple known shapes into ReporterAdminStoryListResponse
+      const items = (data?.items || data?.stories || data?.data?.items || data?.data?.stories) as any;
+      if (Array.isArray(items)) {
+        return {
+          ok: true,
+          items,
+          total: typeof data?.total === 'number' ? data.total : items.length,
+        };
+      }
+      if (data?.ok && Array.isArray(data?.items)) return data as ReporterAdminStoryListResponse;
+      lastErr = new Error('Unexpected response shape');
+      continue;
+    } catch (e: any) {
+      lastErr = e;
+      const status = e?.response?.status;
+      // Abort early on auth errors
+      if (status === 401 || status === 403) break;
+      continue;
+    }
+  }
+
+  // Final fallback: treat email as reporterKey and use the reporterKey-based endpoint.
+  try {
+    return await listReporterStoriesForAdmin(cleanEmail, params);
+  } catch (e: any) {
+    lastErr = e;
+  }
+
+  throw lastErr || new Error('Failed to load reporter stories');
 }

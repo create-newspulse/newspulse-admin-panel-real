@@ -179,13 +179,28 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
   const total: number = (data as any)?.total ?? rawRows.length;
 
+  const isSeededSample = React.useCallback((a: Article) => {
+    const title = String(a?.title || '').toLowerCase();
+    const authorName = String(a?.author?.name || '').toLowerCase();
+    const tags = Array.isArray((a as any)?.tags)
+      ? ((a as any).tags as any[]).map((t) => String(t || '').toLowerCase())
+      : [];
+
+    // Backend seed artifacts we never want to show in the admin list.
+    if (authorName === 'seeder') return true;
+    if (title.startsWith('sample article')) return true;
+    if (tags.includes('demo') && tags.includes('seed')) return true;
+    return false;
+  }, []);
+
   // UX requirement: Deleted items must NOT appear in the "All" tab.
   // They should only appear when status === 'deleted'.
   const rows: Article[] = React.useMemo(() => {
     const view = (params.status ?? 'all') as any;
-    if (view === 'all') return rawRows.filter((r) => (r.status ?? 'draft') !== 'deleted');
-    return rawRows;
-  }, [rawRows, params.status]);
+    const cleaned = rawRows.filter((r) => !isSeededSample(r));
+    if (view === 'all') return cleaned.filter((r) => (r.status ?? 'draft') !== 'deleted');
+    return cleaned;
+  }, [rawRows, params.status, isSeededSample]);
 
   const [didScrollHighlight, setDidScrollHighlight] = React.useState(false);
   React.useEffect(() => {

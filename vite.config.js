@@ -26,12 +26,28 @@ export default defineConfig(({ mode }) => {
     // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
     //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
     const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_URL || env.VITE_ADMIN_API_ORIGIN || '');
-    const API_TARGET = (!hasPlaceholders(rawCandidate) && isValidAbsoluteUrl(rawCandidate))
+    const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
+    const looksLocalhost = (() => {
+        const s = String(rawCandidate || '').toLowerCase();
+        return s.includes('localhost:') || s.includes('127.0.0.1:') || s.includes('0.0.0.0:');
+    })();
+    // Default to the real backend so local dev matches Vercel.
+    // Only use localhost targets when explicitly opted-in.
+    const API_TARGET = (!hasPlaceholders(rawCandidate)
+        && isValidAbsoluteUrl(rawCandidate)
+        && (!looksLocalhost || useLocalDemo))
         ? rawCandidate
-        : 'http://localhost:5000';
+        : 'https://newspulse-backend-real.onrender.com';
     // IMPORTANT: proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
     const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
     const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN;
+
+    if (mode === 'development') {
+        // eslint-disable-next-line no-console
+        console.log('[vite] Dev proxy target:', BACKEND_ORIGIN);
+        // eslint-disable-next-line no-console
+        console.log('[vite] Using localhost demo backend:', useLocalDemo);
+    }
     return {
         plugins: [react()],
         envPrefix: 'VITE_',
@@ -64,14 +80,24 @@ export default defineConfig(({ mode }) => {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
-                    // Strip only the '/admin-api' prefix; callers include '/api' themselves via apiBase.
-                    rewrite: (p) => p.replace(/^\/admin-api/, ''),
+                    // Map '/admin-api/*' -> backend '/api/*'
+                    // Example: /admin-api/admin/ad-settings -> /api/admin/ad-settings
+                    rewrite: (p) => {
+                        // Keep parity with the Vercel proxy which tolerates callers that already include '/api'.
+                        // Examples:
+                        // - /admin-api/articles        -> /api/articles
+                        // - /admin-api/api/articles    -> /api/articles
+                        const out = p.replace(/^\/admin-api/, '/api');
+                        return out.replace(/^\/api\/api\//, '/api/');
+                    },
                 },
                 '/api': {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
-                    // keep path as-is (no rewrite) so /api/* hits backend /api/*
+                    // keep path mostly as-is so /api/* hits backend /api/*
+                    // but collapse accidental double-prefixes: /api/api/* -> /api/*
+                    rewrite: (p) => p.replace(/^\/api\/api\//, '/api/'),
                 },
                 '/socket.io': {
                     target: API_WS,

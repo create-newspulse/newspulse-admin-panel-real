@@ -7,7 +7,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-console.log('🚀 Starting News Pulse Admin Panel (demo backend + frontend)...\n');
+const args = new Set(process.argv.slice(2));
+const useDemo = args.has('--demo');
+const REAL_BACKEND = process.env.NP_REAL_BACKEND || 'https://newspulse-backend-real.onrender.com';
+
+console.log(`🚀 Starting News Pulse Admin Panel (${useDemo ? 'demo backend + frontend' : 'real backend + frontend'})...\n`);
 
 // Check if MongoDB is running
 const checkMongoDB = () => {
@@ -33,8 +37,9 @@ const checkMongoDB = () => {
   });
 };
 
-// Start demo backend server
+// Start demo backend server (optional)
 const startBackend = () => {
+  if (!useDemo) return null;
   console.log('🧩 Starting Demo Backend Server (admin-backend/demo-server.js)...');
   const backend = spawn('npm', ['run', 'dev:demo'], {
     cwd: path.join(__dirname, 'admin-backend'),
@@ -56,10 +61,17 @@ const startBackend = () => {
 // Start frontend server
 const startFrontend = () => {
   console.log('🎨 Starting Frontend Server...');
+  const backendTarget = useDemo ? 'http://localhost:5000' : REAL_BACKEND;
   const frontend = spawn('npm', ['run', 'dev'], {
     cwd: __dirname,
     stdio: 'inherit',
-    shell: true
+    shell: true,
+    env: {
+      ...process.env,
+      VITE_ADMIN_API_TARGET: process.env.VITE_ADMIN_API_TARGET || backendTarget,
+      VITE_DEMO_MODE: 'false',
+      VITE_USE_MOCK: 'false',
+    }
   });
 
   frontend.on('error', (err) => {
@@ -86,24 +98,26 @@ const main = async () => {
       console.log('✅ MongoDB is running\n');
     }
 
-    // Start backend then frontend
+    // Start backend (optional) then frontend
     const backendProcess = startBackend();
     const frontendProcess = startFrontend();
 
     // Handle process termination
     process.on('SIGINT', () => {
       console.log('\n🛑 Shutting down servers...');
-      try { backendProcess.kill(); } catch {}
+      try { backendProcess && backendProcess.kill(); } catch {}
       frontendProcess.kill();
       process.exit(0);
     });
 
     // If one of the child processes exits unexpectedly, exit so the developer sees it.
-    backendProcess.on('close', (code) => {
-      if (code && code !== 0) {
-        console.error(`❌ Demo backend exited with code ${code}`);
-      }
-    });
+    if (backendProcess) {
+      backendProcess.on('close', (code) => {
+        if (code && code !== 0) {
+          console.error(`❌ Demo backend exited with code ${code}`);
+        }
+      });
+    }
     frontendProcess.on('close', (code) => {
       if (code && code !== 0) {
         console.error(`❌ Frontend exited with code ${code}`);

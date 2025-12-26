@@ -5,6 +5,10 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "NewsPulse Admin Panel - Server Startup" -ForegroundColor Green
 Write-Host "========================================`n" -ForegroundColor Cyan
 
+param(
+    [switch]$Demo
+)
+
 # Stop only the dev servers we own (avoid killing unrelated Node processes)
 function Stop-ProcessOnPort([int]$port) {
     $lines = netstat -ano | Select-String -Pattern (":${port}\s+.*LISTENING")
@@ -38,14 +42,24 @@ Start-Sleep -Seconds 2
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Start Demo Backend Server (Express on :5000)
-Write-Host "Starting Demo Backend Server (Express :5000)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ScriptDir\\admin-backend'; Write-Host 'Demo Backend Server (5000)' -ForegroundColor Green; npm run dev:demo"
-Start-Sleep -Seconds 3
+# Default: use the REAL backend (matches production data)
+$RealBackend = "https://newspulse-backend-real.onrender.com"
+
+if ($Demo) {
+    Write-Host "Starting Demo Backend Server (Express :5000) because -Demo was provided..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ScriptDir\admin-backend'; Write-Host 'Demo Backend Server (5000)' -ForegroundColor Green; npm run dev:demo"
+    Start-Sleep -Seconds 3
+} else {
+    Write-Host "Skipping demo backend (using real backend: $RealBackend)" -ForegroundColor Cyan
+}
 
 # Start Frontend Server (Vite on :5173)
 Write-Host "Starting Frontend Server (Vite)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ScriptDir'; Write-Host 'Frontend Server' -ForegroundColor Green; npm run dev"
+
+$target = $RealBackend
+if ($Demo) { $target = "http://localhost:5000" }
+
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$ScriptDir'; Write-Host 'Frontend Server' -ForegroundColor Green; `$env:VITE_ADMIN_API_TARGET='$target'; `$env:VITE_DEMO_MODE='false'; `$env:VITE_USE_MOCK='false'; npm run dev"
 Start-Sleep -Seconds 5
 
 # Verify servers are running
@@ -60,11 +74,15 @@ if ($frontend) {
     Write-Host "⏳ Frontend: Starting... (wait 10 seconds)" -ForegroundColor Yellow
 }
 
-$backend = netstat -ano | findstr ":5000.*LISTENING"
-if ($backend) {
-    Write-Host "✅ Backend: RUNNING (Demo backend :5000)" -ForegroundColor Green
+if ($Demo) {
+    $backend = netstat -ano | findstr ":5000.*LISTENING"
+    if ($backend) {
+        Write-Host "✅ Backend: RUNNING (Demo backend :5000)" -ForegroundColor Green
+    } else {
+        Write-Host "⏳ Backend: Starting... (wait 10 seconds)" -ForegroundColor Yellow
+    }
 } else {
-    Write-Host "⏳ Backend: Starting... (wait 10 seconds)" -ForegroundColor Yellow
+    Write-Host "✅ Backend: REAL (proxy target: $RealBackend)" -ForegroundColor Green
 }
 
 Write-Host "`nPowerShell windows have opened for the backend and frontend servers." -ForegroundColor Cyan

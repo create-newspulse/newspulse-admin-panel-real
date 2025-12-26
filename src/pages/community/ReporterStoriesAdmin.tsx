@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { listReporterStoriesByEmail } from '@/lib/community';
 import type { ReporterAdminStory } from '@/lib/community';
@@ -10,10 +10,6 @@ function useQueryParam(name: string) {
 
 export default function ReporterStoriesAdmin() {
   const location = useLocation();
-  function useQueryParam(name: string) {
-    const { search } = useLocation();
-    return useMemo(() => new URLSearchParams(search).get(name) || '', [search, name]);
-  }
   const reporterKeyFromQuery = useQueryParam('reporterKey');
   const emailFromQuery = useQueryParam('email');
   const reporterName = useQueryParam('name') || (location.state as any)?.reporterName || '';
@@ -21,7 +17,7 @@ export default function ReporterStoriesAdmin() {
   const inferredInitial = (emailFromQuery || reporterKeyFromQuery || reporterKeyFromState).trim();
 
   const [emailInput, setEmailInput] = useState<string>(inferredInitial);
-  const [activeEmail, setActiveEmail] = useState<string>('');
+  const [activeEmail, setActiveEmail] = useState<string>(inferredInitial);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchText, setSearchText] = useState('');
   const [stories, setStories] = useState<ReporterAdminStory[]>([]);
@@ -42,6 +38,13 @@ export default function ReporterStoriesAdmin() {
       setLoading(false);
     }
   }
+
+  // Auto-load when arriving from the directory (query/state pre-fills email)
+  useEffect(() => {
+    if (!activeEmail) return;
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEmail]);
 
       return (
         <div className="px-6 py-4 max-w-6xl mx-auto space-y-6">

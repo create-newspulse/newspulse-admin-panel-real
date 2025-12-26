@@ -131,6 +131,18 @@ function LegacySafeOwnerZoneRedirect() {
   return <Navigate to={slug ? `/admin/safe-owner-zone/${slug}` : '/admin/safe-owner-zone'} replace />;
 }
 
+function LegacyCommunityReporterQueueRedirect() {
+  const location = useLocation();
+  return <Navigate to={`/community/reporter${location.search || ''}`} replace />;
+}
+
+function LegacyCommunityReporterQueueDetailRedirect() {
+  const { id } = useParams();
+  const location = useLocation();
+  const safeId = encodeURIComponent(String(id || ''));
+  return <Navigate to={`/admin/community-reporter/${safeId}${location.search || ''}`} replace />;
+}
+
 function App() {
   if (import.meta.env.DEV) console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
@@ -213,6 +225,9 @@ function App() {
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               {/* New canonical community reporter queue route (founder/admin view) */}
               <Route path="/community/reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
+              {/* Legacy/typo route kept for backward compatibility */}
+              <Route path="/community/reporter-queue" element={<ProtectedRoute><LegacyCommunityReporterQueueRedirect /></ProtectedRoute>} />
+              <Route path="/community/reporter-queue/:id" element={<ProtectedRoute><LegacyCommunityReporterQueueDetailRedirect /></ProtectedRoute>} />
               {/* Community Hub root */}
               <Route path="/community" element={<ProtectedRoute><LockCheckWrapper><CommunityHome /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />

@@ -9,6 +9,11 @@
 .\start-servers.ps1
 ```
 
+To use the local demo backend instead of the real backend:
+```powershell
+.\start-servers.ps1 -Demo
+```
+
 **Option 2: Batch File**
 ```cmd
 start-servers.bat
@@ -18,7 +23,7 @@ start-servers.bat
 ```powershell
 # Terminal 1 - Backend
 cd admin-backend
-node demo-server.js
+npm run dev:demo
 
 # Terminal 2 - Frontend  
 npm run dev
@@ -34,7 +39,7 @@ Then open: **http://localhost:5173**
 
 #### Core Infrastructure
 - [x] Basic Dashboard with stats display
-- [x] Demo Server Backend (Express.js on port 3002)
+- [x] Demo Server Backend (Express.js on port 5000)
 - [x] Vite Frontend (React + TypeScript on port 5173)
 - [x] OpenAI Integration (Vision API ready)
 - [x] Socket.io for real-time updates
@@ -271,21 +276,18 @@ Then open: **http://localhost:5173**
 
 ### Environment Variables Needed
 ```bash
-# Frontend (.env)
-VITE_API_BASE=http://localhost:3002
-VITE_DEMO_MODE=false
-VITE_ENABLE_AI=true
-VITE_OPENAI_API_KEY=sk-...
+# Frontend (run-time env for dev)
+# Default/recommended: use real backend via Vite proxy (matches production data)
+VITE_ADMIN_API_TARGET=https://newspulse-backend-real.onrender.com
 
-# Backend (admin-backend/.env)
-PORT=3002
+# Optional: use local demo backend
+# VITE_ADMIN_API_TARGET=http://localhost:5000
+
+# Backend (admin-backend/.env) (only needed in -Demo mode)
+PORT=5000
 NODE_ENV=development
-DATABASE_URL=postgresql://user:pass@localhost:5432/newspulse
-REDIS_URL=redis://localhost:6379
-OPENAI_API_KEY=sk-...
-JWT_SECRET=...
-SESSION_SECRET=...
-CORS_ORIGIN=http://localhost:5173
+DEMO_ADMIN_PASSWORD=StrongLocalPassword
+# DEMO_SEED_ARTICLES=true   # optional: seed demo articles (disabled by default)
 ```
 
 ---
@@ -384,7 +386,7 @@ Current security gaps:
 
 For issues or questions:
 1. Check server logs in the PowerShell windows
-2. Verify both servers are running (ports 3002 and 5173)
+2. Verify both servers are running (ports 5000 and 5173 in -Demo mode)
 3. Clear browser cache (Ctrl+Shift+Delete)
 4. Restart servers using `start-servers.ps1`
 
