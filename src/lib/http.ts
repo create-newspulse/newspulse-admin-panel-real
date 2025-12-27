@@ -79,6 +79,12 @@ function normalizeApiPath(input: string) {
   return p;
 }
 
+function shouldLogoutOn401(path: string) {
+  const cleaned = normalizeApiPath(path);
+  const full = cleaned.startsWith('/api/') ? cleaned : `/api${cleaned}`;
+  return full === '/api/auth/me' || full.startsWith('/api/admin/');
+}
+
 export function apiUrl(path: string): string {
   // apiBase.apiUrl already prepends API_BASE (which ends with '/api')
   // so this must be a path WITHOUT '/api'.
@@ -166,7 +172,7 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
 
   // Required global behaviors
   try {
-    if (res.status === 401 && typeof window !== 'undefined') {
+    if (res.status === 401 && typeof window !== 'undefined' && shouldLogoutOn401(path)) {
       try {
         localStorage.removeItem('adminToken');
         localStorage.removeItem('np_admin_token');

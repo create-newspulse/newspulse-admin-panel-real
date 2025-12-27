@@ -177,6 +177,16 @@ let missingUrlWarned = false;
 // Normalize path joins so callers can pass '/api/...'
 api.interceptors.request.use((cfg) => {
   try {
+    // Attach bearer when available (covers protected endpoints called via `api`).
+    const token = getAuthToken();
+    if (token) {
+      cfg.headers = cfg.headers || {};
+      const h: any = cfg.headers as any;
+      if (!h.Authorization && !h.authorization) {
+        h.Authorization = `Bearer ${token}`;
+      }
+    }
+
     // Fail fast if a caller accidentally invokes axios without a URL.
     // This otherwise surfaces as: "Failed to construct 'URL': Invalid URL" with (no-url).
     if (cfg.url == null || (typeof cfg.url === 'string' && cfg.url.trim() === '')) {
@@ -226,6 +236,28 @@ api.interceptors.request.use((cfg) => {
   } catch {}
   return cfg;
 });
+
+function pathnameOf(u: unknown): string {
+  const s = (u ?? '').toString();
+  try {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return new URL(s, window.location.origin).pathname;
+    }
+  } catch {}
+  return s;
+}
+
+function shouldLogoutOn401(u: unknown): boolean {
+  const p = pathnameOf(u);
+  return (
+    p === '/api/auth/me'
+    || p.startsWith('/api/admin/')
+    || p === '/api/admin'
+    // proxy-mode adminApi paths
+    || p.startsWith('/admin/')
+    || p === '/admin'
+  );
+}
 
 // Admin axios instance:
 // - Resolves relative paths under /admin/*
@@ -282,7 +314,7 @@ adminApi.interceptors.response.use(
 
     if (status === 401) {
       const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
-      if (!isCommunityQueue) {
+      if (!isCommunityQueue && shouldLogoutOn401(url)) {
         try {
           localStorage.removeItem('adminToken');
           localStorage.removeItem('np_admin_token');

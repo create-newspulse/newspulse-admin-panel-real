@@ -16,13 +16,13 @@ Steps
    npm install
    ```
 
-3) Ensure local env points to the Render backend (already created for you):
+3) Ensure local env points to your backend:
 
    - Edit `admin/.env.local` if needed
    - It should contain:
 
      ```env
-     VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com
+   VITE_ADMIN_API_BASE_URL=https://your-backend-host.tld
      ```
 
 4) Start Vite dev server (strict on port 5173)

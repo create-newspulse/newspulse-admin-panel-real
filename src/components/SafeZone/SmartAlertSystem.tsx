@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react';
 const API_ORIGIN = (
   import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
   import.meta.env.VITE_API_URL?.toString() ||
-  'https://newspulse-backend-real.onrender.com'
+  ''
 ).replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationTriangle, FaEnvelope } from 'react-icons/fa';
 

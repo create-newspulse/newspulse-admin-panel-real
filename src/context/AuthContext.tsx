@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { setAuthToken } from '@/lib/api';
 import { adminApi } from '@/lib/adminApi';
 
@@ -22,6 +22,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,11 +83,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthToken(normalized);
         setTokenState(normalized);
         // Persist under both new and legacy keys so interceptors always find it
+        try { localStorage.setItem('np_token', normalized); } catch {}
         try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
         try { localStorage.setItem('np_admin_token', normalized); } catch {}
       } else {
         setAuthToken(null);
         setTokenState(null);
+        try { localStorage.removeItem('np_token'); } catch {}
         try { localStorage.removeItem('np_admin_token'); } catch {}
         try { localStorage.removeItem('np_admin_access_token'); } catch {}
       }
@@ -108,7 +111,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Persist minimal auth info
       try {
-        const persistPayload = { token: tokenVal, email: normalizedUser.email, role: normalizedUser.role, ts: Date.now() };
+        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: normalizedUser.role, ts: Date.now() };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
         if (import.meta.env.DEV) console.debug('[Auth] persistence write', persistPayload);
       } catch { /* ignore quota errors */ }
@@ -139,13 +142,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     try { localStorage.removeItem('np_admin_token'); } catch {}
+    try { localStorage.removeItem('np_admin_access_token'); } catch {}
+    try { localStorage.removeItem('np_token'); } catch {}
     if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage', { reason: reason || 'manual' });
-  }, []);
+    // Per spec: no hard reload redirects; keep /login public and don't redirect to itself.
+    if (location.pathname !== '/login') {
+      try { navigate('/login', { replace: true }); } catch {}
+    }
+  }, [location.pathname, navigate]);
 
   // Hydrate from localStorage once on mount
   useEffect(() => {
     if (import.meta.env.DEV) console.debug('[Auth] hydration start');
     try {
+      // Per spec: np_token is the canonical token key.
+      try {
+        const t = localStorage.getItem('np_token');
+        if (t && String(t).trim()) {
+          const normalized = String(t).replace(/^Bearer\s+/i, '');
+          setTokenState(normalized);
+          setAuthToken(normalized);
+        }
+      } catch {}
+
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw || '{}');
@@ -154,10 +173,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try { localStorage.removeItem(STORAGE_KEY); } catch {}
           if (import.meta.env.DEV) console.debug('[Auth] stored session expired');
         } else {
-          if (parsed.token) {
+          // Only use stored token if np_token was not present.
+          if (!localStorage.getItem('np_token') && parsed.token) {
             const normalized = String(parsed.token).replace(/^Bearer\s+/i, '');
             setTokenState(normalized);
             setAuthToken(normalized);
+            try { localStorage.setItem('np_token', normalized); } catch {}
             try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
             try { localStorage.setItem('np_admin_token', normalized); } catch {}
           }
@@ -169,7 +190,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Fallback: if no structured storage found, try legacy token keys
       if (!localStorage.getItem(STORAGE_KEY)) {
         try {
-          const legacy = localStorage.getItem('np_admin_access_token') || localStorage.getItem('np_admin_token');
+          const legacy = localStorage.getItem('np_token') || localStorage.getItem('np_admin_access_token') || localStorage.getItem('np_admin_token');
           if (legacy && String(legacy).trim()) {
             const normalized = String(legacy).replace(/^Bearer\s+/i, '');
             setTokenState(normalized);
@@ -185,11 +206,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Keep np_token in sync with in-memory token.
+  useEffect(() => {
+    if (!isReady) return;
+    try {
+      if (token && String(token).trim()) {
+        const normalized = String(token).replace(/^Bearer\s+/i, '');
+        try { localStorage.setItem('np_token', normalized); } catch {}
+        // Back-compat keys still used in some legacy modules.
+        try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
+        try { localStorage.setItem('np_admin_token', normalized); } catch {}
+        setAuthToken(normalized);
+      } else {
+        try { localStorage.removeItem('np_token'); } catch {}
+      }
+    } catch {}
+  }, [isReady, token]);
+
   // React to global logout/forbidden events emitted by interceptors
   useEffect(() => {
     function onLogout() {
+      // Clear local state + storage; then route to /login (unless already there)
       logout('401');
-      try { navigate('/admin/login', { replace: true }); } catch {}
     }
     function onForbidden() {
       // Only route if currently authenticated; otherwise let ProtectedRoute handle

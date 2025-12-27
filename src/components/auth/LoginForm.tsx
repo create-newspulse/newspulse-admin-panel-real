@@ -7,7 +7,7 @@ import { useAuth } from '@/store/auth';
 import { toast } from 'sonner';
 import OtpModal from './OtpModal';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
-// import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const Schema = z.object({
   email: z.string().email(),
@@ -21,7 +21,7 @@ export default function LoginForm() {
   const [showPw, setShowPw] = useState(false);
   const [otpOpen, setOtpOpen] = useState(false);
   const setAuth = useAuth(s => s.setAuth);
-  // const navigate = useNavigate();
+  const navigate = useNavigate();
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
@@ -33,10 +33,12 @@ export default function LoginForm() {
         // Normalize token: remove any leading 'Bearer ' prefix if backend already included it
         const normalizedToken = String(token).replace(/^Bearer\s+/i, '');
         setAuth(user, normalizedToken);
+        try { localStorage.setItem('np_token', normalizedToken); } catch {}
+        // Back-compat for older builds
         try { localStorage.setItem('np_admin_token', normalizedToken); } catch {}
         toast.success(`Welcome ${user.name} (${user.role})`);
         // Spec: route to admin dashboard
-        window.location.href = '/admin/dashboard';
+        navigate('/admin/dashboard', { replace: true });
       } else {
         throw { response: { status: 500, data: { message: 'Malformed login response' } } };
       }

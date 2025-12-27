@@ -1,7 +1,6 @@
 // pages/admin/CreateUser.tsx
 import React, { useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import api from '../../src/lib/api.js';
 
 const CreateUser = () => {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'editor' });
@@ -17,15 +16,8 @@ const CreateUser = () => {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/create-user`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
+      const res = await api.post('/api/create-user', form);
+      const data = res.data;
       setMessage(data.message || (data.success ? '✅ User created' : '❌ Failed'));
     } catch (err) {
       console.error('Error creating user:', err);

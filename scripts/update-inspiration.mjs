@@ -1,8 +1,15 @@
 import axios from 'axios';
 
+const apiBase = process.env.API_URL || process.env.SERVER_URL;
+
+if (!apiBase) {
+  console.error('[update-inspiration] Missing API_URL (or SERVER_URL) env var');
+  process.exit(1);
+}
+
 async function main() {
   try {
-    const res = await axios.post('http://localhost:5000/api/live-content/update', {
+    const res = await axios.post(`${apiBase.replace(/\/+$/, '')}/api/live-content/update`, {
       mode: 'inspiration',
       embedCode: '',
     }, { headers: { 'Content-Type': 'application/json' } });

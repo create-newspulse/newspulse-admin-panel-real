@@ -1,9 +1,6 @@
 // 📁 src/pages/SafeOwner/kiranos-dashboard.tsx
 
 import React from 'react';
-
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
 import { NavLink } from 'react-router-dom';
 import { FaRobot, FaChartPie, FaMagic, FaClipboardList } from 'react-icons/fa';
 import { GiArtificialHive } from 'react-icons/gi';
@@ -69,7 +66,7 @@ const KiranOSDashboard: React.FC = () => {
 
           {/* ⚙️ Raw Logs Link */}
           <a
-            href={`${API_BASE}/ai/logs/all`}
+            href={'/api/ai/logs/all'}
             target="_blank"
             className="bg-gray-100 hover:bg-gray-200 p-5 rounded-lg shadow flex items-center gap-4"
             rel="noreferrer"

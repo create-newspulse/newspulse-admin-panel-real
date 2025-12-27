@@ -1,5 +1,6 @@
 // src/utils/fetchTrainingInfo.ts
 import { apiUrl } from '@lib/apiBase';
+import { api } from '@/lib/api';
 
 interface TrainingInfo {
   lastTrained: string;
@@ -19,11 +20,8 @@ export const fetchTrainingInfo = async (): Promise<TrainingInfo> => {
   try {
     const url = apiUrl('/admin/system/ai-training-info');
     if (import.meta.env.DEV) console.log('ADMIN API:', url);
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const json = await res.json();
+    const res = await api.get('/admin/system/ai-training-info', { withCredentials: true });
+    const json = res.data;
     const data = json?.data;
     if (!json?.success || !data || !data.lastTrained) {
       console.warn('⚠️ AI training info missing or incomplete:', json);

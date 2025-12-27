@@ -6,9 +6,12 @@ echo ========================================
 setlocal
 
 REM Default: use REAL backend so local matches production data.
-REM Optional: set DEMO=1 to run the demo backend on localhost:5000.
+REM Optional: set DEMO=1 to run the demo backend locally.
 
-set REAL_BACKEND=https://newspulse-backend-real.onrender.com
+set REAL_BACKEND=%NP_REAL_BACKEND%
+if "%REAL_BACKEND%"=="" set REAL_BACKEND=https://your-backend-host.tld
+set DEMO_HOST=localhost
+set DEMO_PORT=5000
 
 echo Starting NewsPulse Admin Panel...
 echo.
@@ -17,7 +20,7 @@ if "%DEMO%"=="1" (
 	echo Starting Demo Backend Server...
 	start cmd /k "cd /d admin-backend && npm run dev:demo"
 	timeout /t 3 /nobreak >nul
-	set VITE_ADMIN_API_TARGET=http://localhost:5000
+	set VITE_ADMIN_API_TARGET=http://%DEMO_HOST%:%DEMO_PORT%
 ) else (
 	echo Skipping demo backend. Using real backend: %REAL_BACKEND%
 	set VITE_ADMIN_API_TARGET=%REAL_BACKEND%
@@ -33,7 +36,7 @@ echo.
 echo Servers started!
 echo Frontend: http://localhost:5173
 if "%DEMO%"=="1" (
-	echo Backend: http://localhost:5000
+	echo Backend: %VITE_ADMIN_API_TARGET%
 ) else (
 	echo Backend target: %VITE_ADMIN_API_TARGET%
 )

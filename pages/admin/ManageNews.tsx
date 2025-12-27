@@ -1,8 +1,7 @@
 // ✅ Updated: admin-backend/pages/admin/ManageNews.tsx with Filters, Preview, Pagination, Inline Editing
 import React, { useEffect, useState } from 'react';
 import AdminShell from '../../src/components/adminv2/AdminShell';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+import api from '../../src/lib/api.js';
 import AiAnchorPlayer from '../../src/components/AiAnchorPlayer';
 
 interface NewsItem {
@@ -33,8 +32,8 @@ const ManageNews: React.FC = () => {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-            const res = await fetch(`${API_BASE}/news/get-all-news/all`, { credentials: 'include' });
-        const data = await res.json();
+        const res = await api.get('/api/news/get-all-news/all');
+        const data = res.data;
         if (data.success && Array.isArray(data.news)) {
           setNews(data.news);
         } else {
@@ -67,14 +66,8 @@ const ManageNews: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this news item?')) return;
     try {
-          const res = await fetch(`${API_BASE}/articles/${id}`, {
-            method: 'DELETE',
-            credentials: 'include',
-            headers: {
-              'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
-            }
-          });
-      const result = await res.json();
+      const res = await api.delete(`/api/articles/${id}`);
+      const result = res.data;
       if (result.success) {
         setNews(news.filter(n => n._id !== id));
       } else {

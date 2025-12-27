@@ -14,6 +14,9 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   const triedRestore = useRef(false);
   const requestedRoleRestoreRef = useRef(false);
 
+  // Per spec: only protect /admin/* routes.
+  const isAdminArea = (location.pathname || '').startsWith('/admin');
+
   // 🛡️ SECURE: Environment-controlled demo access
   const demoModeEnv = import.meta.env.VITE_DEMO_MODE;
   const isVercelPreview = window.location.hostname.includes('vercel.app');
@@ -45,21 +48,27 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
 
   // Attempt session restore after hydration if not authenticated
   useEffect(() => {
+    if (!isAdminArea) return;
     if (isReady && !isAuthenticated && !triedRestore.current) {
       triedRestore.current = true;
       restoreSession();
     }
-  }, [isReady, isAuthenticated, restoreSession]);
+  }, [isAdminArea, isReady, isAuthenticated, restoreSession]);
 
   // If we have a token/session but are missing role info, restore once before deciding.
   useEffect(() => {
+    if (!isAdminArea) return;
     if (!isReady || isRestoring || isLoading) return;
     const missingRole = isAuthenticated && (!user || !user.role);
     if (missingRole && !requestedRoleRestoreRef.current) {
       requestedRoleRestoreRef.current = true;
       restoreSession();
     }
-  }, [isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
+  }, [isAdminArea, isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
+
+  if (!isAdminArea) {
+    return <>{children}</>;
+  }
   
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
@@ -71,7 +80,7 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   // Don't redirect while we are still trying to fetch role/profile.
   if (isAuthenticated && (!user || !user.role)) {
     if (requestedRoleRestoreRef.current) {
-      return <Navigate to="/admin/login" replace state={{ from: location }} />;
+      return <Navigate to="/login" replace state={{ from: location }} />;
     }
     return <div className="text-center mt-10">🔐 Loading profile…</div>;
   }
@@ -83,7 +92,7 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
 
   // 🚫 Redirect to admin login if not authenticated
   if (!isAuthenticated) {
-    return <Navigate to="/admin/login" replace state={{ from: location }} />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   // 🚫 Redirect to unauthorized if authenticated but not founder

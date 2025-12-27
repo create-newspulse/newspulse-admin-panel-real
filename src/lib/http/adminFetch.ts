@@ -91,7 +91,17 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
 
   // Align with existing global behaviors
   try {
-    if (res.status === 401 && typeof window !== 'undefined') {
+    const shouldLogout = (() => {
+      try {
+        const p = typeof window !== 'undefined' ? new URL(url, window.location.origin).pathname : url;
+        return p === '/api/auth/me' || p.startsWith('/api/admin/') || p.startsWith('/admin/');
+      } catch {
+        const s = (url || '').toString();
+        return s.includes('/api/auth/me') || s.includes('/api/admin/') || s.includes('/admin/');
+      }
+    })();
+
+    if (res.status === 401 && typeof window !== 'undefined' && shouldLogout) {
       try {
         localStorage.removeItem('adminToken');
         localStorage.removeItem('np_admin_token');

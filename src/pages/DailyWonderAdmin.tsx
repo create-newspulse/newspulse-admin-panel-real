@@ -1,11 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
-
-// Always use environment for API base!
-const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, '') ||
-  (typeof window !== 'undefined' && window.location.origin + '/api') ||
-  '/api';
+import api from '@/lib/api.js';
 
 const DailyWonderAdmin = () => {
   const [quote, setQuote] = useState('');
@@ -16,7 +10,7 @@ const DailyWonderAdmin = () => {
 
   const handleSubmit = async () => {
     try {
-      await axios.post(`${API_BASE}/daily-wonder`, {
+      await api.post('/api/daily-wonder', {
         quote,
         videoEmbedUrl,
         source,

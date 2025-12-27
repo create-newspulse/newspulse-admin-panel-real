@@ -7,7 +7,7 @@ const User = require('../../models/User');
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'newspulse-secret';
 
-// sanity check in browser: http://localhost:5000/api/admin/auth/ping
+// sanity check in browser: GET /api/admin/auth/ping
 router.get('/ping', (_req, res) => res.json({ ok: true, route: 'admin/auth', ts: new Date().toISOString() }));
 
 // ---- DB-backed login ----

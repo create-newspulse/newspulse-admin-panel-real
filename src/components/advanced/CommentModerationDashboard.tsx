@@ -1,10 +1,8 @@
 // 💬 Comment Moderation Dashboard with Shadow-ban & Auto-mod
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '@/lib/api.js';
 import { MessageSquare, CheckCircle, XCircle, Flag, Ban, TrendingDown, TrendingUp } from 'lucide-react';
 
-const HOST_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${HOST_BASE}/api`;
 
 export default function CommentModerationDashboard() {
   const [comments, setComments] = useState<any[]>([]);
@@ -20,8 +18,8 @@ export default function CommentModerationDashboard() {
     setLoading(true);
     try {
       const [commentsRes, statsRes] = await Promise.all([
-        axios.get(`${API_BASE}/moderation/comments${filter !== 'all' ? `?status=${filter}` : ''}`),
-        axios.get(`${API_BASE}/moderation/comments/stats`)
+        api.get(`/api/moderation/comments${filter !== 'all' ? `?status=${filter}` : ''}`),
+        api.get('/api/moderation/comments/stats')
       ]);
       setComments(commentsRes.data.comments || []);
       setStats(statsRes.data.stats || null);
@@ -34,7 +32,7 @@ export default function CommentModerationDashboard() {
 
   const moderateComment = async (id: string, action: string) => {
     try {
-      await axios.post(`${API_BASE}/moderation/comments/${id}/moderate`, { action, moderator: 'admin' });
+      await api.post(`/api/moderation/comments/${id}/moderate`, { action, moderator: 'admin' });
       loadData();
     } catch (error) {
       console.error('Failed to moderate comment:', error);
@@ -44,7 +42,7 @@ export default function CommentModerationDashboard() {
   const shadowBanUser = async (author: string) => {
     if (!confirm(`Shadow-ban user: ${author}?`)) return;
     try {
-      await axios.post(`${API_BASE}/moderation/comments/shadow-ban`, { author, reason: 'Manual shadow-ban from dashboard' });
+      await api.post('/api/moderation/comments/shadow-ban', { author, reason: 'Manual shadow-ban from dashboard' });
       alert(`User ${author} shadow-banned. Their future comments will be hidden from other users.`);
     } catch (error) {
       console.error('Failed to shadow-ban user:', error);

@@ -7,13 +7,18 @@ export function RequireAuth({ children }: PropsWithChildren) {
   const location = useLocation();
   const { isAuthenticated, user, isReady, isRestoring } = useAuth();
 
+  // Per spec: only protect /admin/* routes.
+  if (!(location.pathname || '').startsWith('/admin')) {
+    return <>{children}</>;
+  }
+
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
   }
 
   return isAuthenticated && user
     ? <>{children}</>
-    : <Navigate to="/admin/login" replace state={{ from: location }} />;
+    : <Navigate to="/login" replace state={{ from: location }} />;
 }
 
 export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role[] }>) {
@@ -21,8 +26,12 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
   const { isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession } = useAuth();
   const requestedRestoreRef = useRef(false);
 
+  // Per spec: only protect /admin/* routes.
+  const isAdminArea = (location.pathname || '').startsWith('/admin');
+
   // If authenticated but missing role (partial hydrate), try a restore once.
   useEffect(() => {
+    if (!isAdminArea) return;
     if (!isReady || isRestoring || isLoading) return;
     if (isAuthenticated && user && !user.role && !requestedRestoreRef.current) {
       requestedRestoreRef.current = true;
@@ -30,7 +39,11 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
         restoreSession();
       } catch {}
     }
-  }, [isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession]);
+  }, [isAdminArea, isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession]);
+
+  if (!isAdminArea) {
+    return <>{children}</>;
+  }
 
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
@@ -50,7 +63,7 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
   }
 
   if (!isAuthenticated || !user) {
-    return <Navigate to="/admin/login" replace state={{ from: location }} />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   const role = String(user.role || '').toLowerCase();

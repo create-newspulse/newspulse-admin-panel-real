@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiUrl } from "@/lib/apiBase";
+import { useEffect, useState } from "react";
+import api from "@/lib/api.js";
 
 type SiteSettings = {
   showCategoryStrip: boolean;
@@ -57,8 +57,6 @@ const Toggle = ({ label, value, onChange }: { label: string; value: boolean; onC
 );
 
 export default function SiteControls() {
-  const token = useMemo(() => (typeof window !== 'undefined' ? localStorage.getItem("token") || "" : ""), []);
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -68,14 +66,9 @@ export default function SiteControls() {
     setLoading(true);
     setMsg("");
     try {
-      const headers: HeadersInit = {};
-      if (token) headers.Authorization = `Bearer ${token}` as any;
-      const res = await fetch(apiUrl('/site-settings/admin'), {
-        headers,
-        credentials: 'include',
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.message || "Load failed");
+      const res = await api.get('/api/site-settings/admin', { withCredentials: true });
+      const data = res.data;
+      if (!data?.ok) throw new Error(data?.message || 'Load failed');
       setSettings(data.settings);
     } catch (e: any) {
       setMsg(e?.message || "Failed to load");
@@ -89,16 +82,9 @@ export default function SiteControls() {
     setSaving(true);
     setMsg("");
     try {
-      const headers: HeadersInit = { "Content-Type": "application/json" };
-      if (token) (headers as any).Authorization = `Bearer ${token}`;
-      const res = await fetch(apiUrl('/site-settings/admin'), {
-        method: "PUT",
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(settings),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.message || "Save failed");
+      const res = await api.put('/api/site-settings/admin', settings, { withCredentials: true });
+      const data = res.data;
+      if (!data?.ok) throw new Error(data?.message || 'Save failed');
       setSettings(data.settings);
       setMsg("Saved ✅");
     } catch (e: any) {

@@ -1,6 +1,7 @@
 ### Articles API quick tests
 
-@base = http://localhost:5000/api
+@backend_origin = https://your-backend-host.tld
+@base = {{backend_origin}}/api
 
 ### List first page
 GET {{base}}/articles?page=1&limit=5

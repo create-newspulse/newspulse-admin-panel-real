@@ -16,7 +16,7 @@ Local development login was failing with 404 errors while production login worke
 3. Serverless Proxy (admin/api/admin-proxy/[...path].js)
    - Receives path: 'admin/login'
    - Transforms to: ${ADMIN_BACKEND_URL}/api/admin/login
-   - Forwards request to: https://newspulse-backend-real.onrender.com/api/admin/login
+  - Forwards request to: https://your-backend-host.tld/api/admin/login
 4. Backend Route (render-backend-real/routes/adminAuth.js)
    - Mounted at: /api/admin
    - Endpoint: POST /login
@@ -27,7 +27,7 @@ Local development login was failing with 404 errors while production login worke
 ### Previous Local Dev Flow (Broken ❌)
 
 ```
-1. Frontend → POST https://newspulse-backend-real.onrender.com/api/admin/login
+1. Frontend → POST https://your-backend-host.tld/api/admin/login
 2. Direct call to backend (no proxy)
 3. Backend not deployed with /api/admin route → 404
 ```
@@ -57,7 +57,7 @@ VITE_API_BASE=
 VITE_API_WS=
 
 # Backend target for Vite proxy (not used by frontend directly)
-ADMIN_BACKEND_URL=https://newspulse-backend-real.onrender.com
+ADMIN_BACKEND_URL=https://your-backend-host.tld
 ```
 
 **Why:** Frontend now resolves `baseURL = '/admin-api'` instead of absolute backend URL, forcing all requests through Vite proxy.
@@ -68,7 +68,7 @@ proxy: {
   // Production-like proxy: /admin-api/* -> backend /api/*
   // Mimics Vercel proxy behavior for local dev
   '/admin-api': {
-    target: env.ADMIN_BACKEND_URL || 'https://newspulse-backend-real.onrender.com',
+    target: env.ADMIN_BACKEND_URL || 'https://your-backend-host.tld',
     changeOrigin: true,
     secure: false,
     rewrite: (path) => path.replace(/^\/admin-api/, '/api'),
@@ -90,7 +90,7 @@ proxy: {
 **Why:** 
 - Intercepts `/admin-api/*` requests
 - Rewrites path: `/admin-api/admin/login` → `/api/admin/login`
-- Forwards to backend: `https://newspulse-backend-real.onrender.com/api/admin/login`
+- Forwards to backend: `https://your-backend-host.tld/api/admin/login`
 
 #### 3. `src/lib/adminApi.ts` - Handle Relative Paths
 ```typescript
@@ -192,7 +192,7 @@ Status Code: 200 OK
 
 Terminal running `npm run dev` should show:
 ```
-[vite] /admin-api/admin/login → https://newspulse-backend-real.onrender.com/api/admin/login
+[vite] /admin-api/admin/login → https://your-backend-host.tld/api/admin/login
 ```
 
 ### 5. Check Token Storage
@@ -273,7 +273,7 @@ VITE_ADMIN_API_BASE_URL=/admin-api  # ← Must be relative path
 
 **NOT:**
 ```env
-VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com  # ❌ Bypasses proxy
+VITE_ADMIN_API_BASE_URL=https://your-backend-host.tld  # ❌ Bypasses proxy
 ```
 
 ---
@@ -331,7 +331,7 @@ VITE_ADMIN_API_BASE_URL=https://newspulse-backend-real.onrender.com  # ❌ Bypas
 ### Backend
 - `render-backend-real/server.js` - Express app setup, CORS config
 - `render-backend-real/routes/adminAuth.js` - Auth endpoints
-- Deployment: Render at `https://newspulse-backend-real.onrender.com`
+- Deployment: backend at `https://your-backend-host.tld`
 
 ---
 

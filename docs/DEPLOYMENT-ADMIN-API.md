@@ -1,82 +1,40 @@
-# NewsPulse Admin Panel Deployment (Unified API Configuration)
+# NewsPulse Admin Panel Deployment (Admin API)
 
-This document describes the current (simplified) way the admin frontend resolves its backend API base, plus recommended production setups.
+This document describes how the admin frontend should reach the backend API in production and local development.
 
-## Current Resolution Logic
-The file `lib/api.ts` computes:
+## Recommended: Proxy Mode (Vercel + local)
 
-```
-API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/,'')
-API_BASE   = `${API_ORIGIN}/api`
-```
+- Frontend calls relative paths under `/admin-api/*`.
+- Vercel serverless proxy forwards `/admin-api/*` → `${ADMIN_BACKEND_URL}/api/*`.
 
-Notes:
-* We no longer support or read `VITE_ADMIN_API_BASE_URL`, `VITE_API_ROOT`, or any `API_BASE_PATH` constant.
-* A relative `/admin-api` pattern was deprecated in favor of explicit absolute origin via `VITE_API_URL`.
-* All runtime code imports only the shared axios client (`api`) and optionally calls `setAuthToken(token)`; components derive endpoint paths from `API_BASE` when needed.
-
-## Recommended Production Setup (Direct)
-Set an absolute backend origin (example Render URL):
+Required (Vercel runtime env):
 ```
-VITE_API_URL=https://newspulse-backend-real.onrender.com
-```
-Requests resolve to:
-```
-GET https://newspulse-backend-real.onrender.com/api/dashboard-stats
-GET https://newspulse-backend-real.onrender.com/api/system/ai-training-info
-POST https://newspulse-backend-real.onrender.com/api/admin/login
+ADMIN_BACKEND_URL=https://your-backend-host.tld
+ADMIN_JWT_SECRET=replace_with_long_random_secret
 ```
 
-## Optional Legacy Proxy (Deprecated)
-If you still have historical Vercel rewrites using `/admin-api`, you may keep them, but the frontend no longer relies on a relative root. Prefer setting `VITE_API_URL` explicitly.
+Local development:
+- Set `ADMIN_BACKEND_URL` in your shell or `.env.local` (no trailing slash).
+- Run Vite; it proxies `/admin-api/*` to that target.
 
-## Local Development
-Default origin when `VITE_API_URL` is unset:
-```
-http://localhost:5000
-```
-Ensure backend listens on that port or set `VITE_API_URL` to match your local server.
+## Optional: Direct Mode
 
-## Removed Fallback Logic
-Previous retry behavior (`ADMIN_BACKEND_FALLBACK`) was eliminated. All requests now go directly to `API_BASE`. Failures surface immediately for clearer debugging.
+If you want the frontend to call the backend origin directly (you must handle CORS on the backend), set a build-time env var like:
 
-## Auth Endpoints
-Mounted on the backend at `/api/admin` and `/api/admin-auth`:
 ```
-POST {API_BASE}/admin/login
-POST {API_BASE}/admin/seed-founder
-GET  {API_BASE}/admin-auth/session   # magic-link / cookie session check
-POST {API_BASE}/admin-auth/logout
+VITE_API_URL=https://your-backend-host.tld
 ```
 
-## Required Environment Variables (Examples)
-Minimal Production:
-```
-NODE_ENV=production
-VITE_DEMO_MODE=false
-VITE_API_URL=https://newspulse-backend-real.onrender.com
-# (OPTIONAL) VITE_API_WS=wss://...  for websockets if needed
-```
+## Endpoint Paths
 
-## Do NOT Use Localhost in Production
-All hard-coded `http://localhost:5000` references for critical dashboard + auth flows are centralized; legacy pages may still show localhost in comments but are not used on Vercel.
+Backend endpoints are mounted under `/api/*`.
 
-## Verification Steps After Deploy
-1. Open DevTools → Network.
-2. Load dashboard – confirm 200 responses for:
-   - `GET ${API_BASE}/dashboard-stats`
-   - `GET ${API_BASE}/system/ai-training-info`
-3. Login: `POST ${API_BASE}/admin/login` returns 200 JSON with token.
-4. Logout: `POST ${API_BASE}/admin-auth/logout` returns 200.
-5. (Optional) Session check: `GET ${API_BASE}/admin-auth/session` returns current user context.
+Examples (path only):
+- `GET /api/system/health`
+- `GET /api/articles?page=1&limit=10`
+- `POST /api/admin/login`
 
-## Troubleshooting
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| 404 HTML "Cannot GET /api/..." | Custom domain points to wrong Vercel project | Reassign domain to project with rewrites |
-| 404 JSON { success:false } | Backend route not mounted or wrong path | Confirm backend mounts `/api/dashboard-stats` etc. |
-| CORS error | Backend `ALLOWED_ORIGINS` missing production domain | Add domain & redeploy backend |
-| Login loops to /admin/login | 401 due to founder not seeded | Run seed-founder via `/admin-api/admin/seed-founder` |
+## Verification
 
-## Summary
-The admin panel now uses a single environment-driven origin (`VITE_API_URL`) and derives `API_BASE = <origin>/api`. Legacy constants (`API_BASE_PATH`, multiple root env vars, fallback host logic) were removed for consistency and reduced complexity.
+1. Check proxy health: `GET /admin-api/system/health`.
+2. Load the admin UI and confirm requests are going to `/admin-api/*` (proxy mode) or directly to your backend origin (direct mode).

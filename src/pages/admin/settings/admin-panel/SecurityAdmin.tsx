@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@context/AuthContext';
+import api from '@/lib/api.js';
 
 type SessionInfo = { authenticated?: boolean; email?: string };
 
@@ -15,8 +16,8 @@ export default function SecurityAdmin() {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch('/api/admin-auth/session', { credentials: 'include' });
-        const data = await res.json();
+        const res = await api.get('/api/admin-auth/session', { withCredentials: true });
+        const data = res.data;
         if (!mounted) return;
         setSession(data);
       } catch {

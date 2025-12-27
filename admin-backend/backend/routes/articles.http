@@ -1,22 +1,25 @@
 ### Articles API Examples
 
-GET http://localhost:5000/api/articles?page=1&limit=5
+@backend_origin = https://your-backend-host.tld
+@base = {{backend_origin}}/api
+
+GET {{base}}/articles?page=1&limit=5
 Accept: application/json
 
 ### Search
-GET http://localhost:5000/api/articles?q=Sample&page=1&limit=5
+GET {{base}}/articles?q=Sample&page=1&limit=5
 Accept: application/json
 
 ### Meta Counts
-GET http://localhost:5000/api/articles/meta
+GET {{base}}/articles/meta
 Accept: application/json
 
 ### Get One (replace ID)
-GET http://localhost:5000/api/articles/{{ARTICLE_ID}}
+GET {{base}}/articles/{{ARTICLE_ID}}
 Accept: application/json
 
 ### Create (requires Bearer token)
-POST http://localhost:5000/api/articles
+POST {{base}}/articles
 Content-Type: application/json
 Authorization: Bearer {{TOKEN}}
 
@@ -31,13 +34,13 @@ Authorization: Bearer {{TOKEN}}
 }
 
 ### Archive
-PATCH http://localhost:5000/api/articles/{{ARTICLE_ID}}/archive
+PATCH {{base}}/articles/{{ARTICLE_ID}}/archive
 Authorization: Bearer {{TOKEN}}
 
 ### Restore
-PATCH http://localhost:5000/api/articles/{{ARTICLE_ID}}/restore
+PATCH {{base}}/articles/{{ARTICLE_ID}}/restore
 Authorization: Bearer {{TOKEN}}
 
 ### Soft Delete
-DELETE http://localhost:5000/api/articles/{{ARTICLE_ID}}
+DELETE {{base}}/articles/{{ARTICLE_ID}}
 Authorization: Bearer {{TOKEN}}

@@ -9,7 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const args = new Set(process.argv.slice(2));
 const useDemo = args.has('--demo');
-const REAL_BACKEND = process.env.NP_REAL_BACKEND || 'https://newspulse-backend-real.onrender.com';
+const REAL_BACKEND = process.env.NP_REAL_BACKEND || '';
+const DEMO_BACKEND = process.env.NP_DEMO_BACKEND || '';
 
 console.log(`🚀 Starting News Pulse Admin Panel (${useDemo ? 'demo backend + frontend' : 'real backend + frontend'})...\n`);
 
@@ -61,7 +62,12 @@ const startBackend = () => {
 // Start frontend server
 const startFrontend = () => {
   console.log('🎨 Starting Frontend Server...');
-  const backendTarget = useDemo ? 'http://localhost:5000' : REAL_BACKEND;
+  const backendTarget = useDemo ? DEMO_BACKEND : REAL_BACKEND;
+  if (!backendTarget) {
+    console.error('❌ Missing backend target. Set env var:');
+    console.error(useDemo ? '   NP_DEMO_BACKEND=<backend origin>' : '   NP_REAL_BACKEND=<backend origin>');
+    process.exit(1);
+  }
   const frontend = spawn('npm', ['run', 'dev'], {
     cwd: __dirname,
     stdio: 'inherit',

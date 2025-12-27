@@ -24,9 +24,12 @@ router.get('/', async (req, res) => {
     errors: [],
   };
 
+  const SERVER_URL = String(process.env.SERVER_URL || '').replace(/\/+$/, '');
+
   // 1️⃣ Check AI Training Status Endpoint
   try {
-    const resp = await axios.get('http://localhost:5000/api/system/ai-training-info');
+    if (!SERVER_URL) throw new Error('SERVER_URL not configured');
+    const resp = await axios.get(`${SERVER_URL}/api/system/ai-training-info`);
     if (resp.data && resp.data.success) {
       status.aiTraining = true;
     } else {
@@ -54,7 +57,8 @@ router.get('/', async (req, res) => {
 
   // 3️⃣ Check Thinking Feed Endpoint
   try {
-    const resp = await axios.get('http://localhost:5000/api/system/thinking-feed');
+    if (!SERVER_URL) throw new Error('SERVER_URL not configured');
+    const resp = await axios.get(`${SERVER_URL}/api/system/thinking-feed`);
     if (resp.data && resp.data.success) {
       status.thinkingFeedWorking = true;
     } else {

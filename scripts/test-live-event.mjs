@@ -1,8 +1,13 @@
 import { io } from 'socket.io-client';
 import axios from 'axios';
 
-const url = process.env.SOCKET_URL || 'http://localhost:5000';
+const url = process.env.SOCKET_URL;
 const timeoutMs = Number(process.env.TIMEOUT_MS || 10000);
+
+if (!url) {
+  console.error('[socket-test] Missing SOCKET_URL env var');
+  process.exit(1);
+}
 
 console.log('[socket-test] connecting to', url);
 

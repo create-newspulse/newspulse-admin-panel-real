@@ -19,21 +19,55 @@ export async function adminFetch(path: string, init?: RequestInit) {
     ? `${ADMIN_API_BASE.replace(/\/+$/, '')}/${finalPath.replace(/^\/+/, '')}`
     : `/${join(ADMIN_API_BASE, finalPath)}`;
   if (import.meta.env.DEV) console.log("[adminFetch]", url);
+
+  // Always attach the latest token (survives refresh) unless caller already set Authorization.
+  const authHeaders: Record<string, string> = {};
+  try {
+    const token = (typeof window !== 'undefined'
+      ? (localStorage.getItem('np_token') || localStorage.getItem('token') || localStorage.getItem('adminToken'))
+      : null);
+    if (token && String(token).trim()) {
+      authHeaders.Authorization = `Bearer ${String(token).replace(/^Bearer\s+/i, '')}`;
+    }
+  } catch {}
+
+  const mergedHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...authHeaders,
+    ...(init?.headers as any),
+  };
+
+  // Respect explicit Authorization provided by caller.
+  try {
+    const h: any = init?.headers as any;
+    if (h && (h.Authorization || h.authorization)) {
+      delete mergedHeaders.Authorization;
+    }
+  } catch {}
+
   const res = await fetch(url, {
     credentials: "include",
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
+    headers: mergedHeaders,
   });
   // Unified 401/403 handling for fetch calls
   try {
-    if (res.status === 401 && typeof window !== 'undefined') {
+    const shouldLogout = (() => {
+      try {
+        const p = typeof window !== 'undefined' ? new URL(url, window.location.origin).pathname : url;
+        return p === '/api/auth/me' || p.startsWith('/api/admin/') || p.startsWith('/admin/');
+      } catch {
+        const s = (url || '').toString();
+        return s.includes('/api/auth/me') || s.includes('/api/admin/') || s.includes('/admin/');
+      }
+    })();
+
+    if (res.status === 401 && typeof window !== 'undefined' && shouldLogout) {
       try {
         localStorage.removeItem('adminToken');
         localStorage.removeItem('np_admin_token');
         localStorage.removeItem('np_admin_access_token');
+        localStorage.removeItem('np_token');
         localStorage.removeItem('newsPulseAdminAuth');
       } catch {}
       window.dispatchEvent(new CustomEvent('np:logout'));

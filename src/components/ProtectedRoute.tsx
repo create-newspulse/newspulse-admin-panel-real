@@ -16,16 +16,24 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
   const location = useLocation();
   const requestedRoleRestoreRef = useRef(false);
 
+  // Per spec: only protect /admin/* routes (keep employee area behavior).
+  const p = location.pathname || '';
+  const isAdminArea = p.startsWith('/admin');
+  const isEmployeeArea = p.startsWith('/employee');
+  const isProtectedArea = isAdminArea || isEmployeeArea;
+
   // Attempt a one-time session restore if unauthenticated after hydration
   useEffect(() => {
+    if (!isProtectedArea) return;
     if (isReady && !isAuthenticated && !triedRestore.current) {
       triedRestore.current = true;
       restoreSession();
     }
-  }, [isReady, isAuthenticated, restoreSession]);
+  }, [isProtectedArea, isReady, isAuthenticated, restoreSession]);
 
   // If we need a role for this route and the user is authenticated but missing role, restore once.
   useEffect(() => {
+    if (!isProtectedArea) return;
     if (!role) return;
     if (!isReady || isRestoring || isLoading) return;
     if (isAuthenticated && user && !user.role && !requestedRoleRestoreRef.current) {
@@ -34,7 +42,11 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
         restoreSession();
       } catch {}
     }
-  }, [role, isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
+  }, [isProtectedArea, role, isReady, isRestoring, isLoading, isAuthenticated, user, restoreSession]);
+
+  if (!isProtectedArea) {
+    return <>{children}</>;
+  }
 
   if (!isReady || isRestoring) {
     return <div className="text-center mt-10">🔐 Restoring session…</div>;
@@ -44,9 +56,8 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
   }
 
   if (!isAuthenticated || !user) {
-    // ✅ Fix: redirect to correct login for area (admin vs employee)
-    const p = location.pathname || '';
-    const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+    // ✅ Per spec: /login is public and canonical; only /admin/* is protected.
+    const dest = p.startsWith('/employee') ? '/employee/login' : '/login';
     return <Navigate to={dest} state={{ from: location }} replace />;
   }
 

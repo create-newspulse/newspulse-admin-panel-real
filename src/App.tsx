@@ -148,7 +148,7 @@ function App() {
   const { isDark } = useDarkMode();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
-  const isAuthPage = ['/login','/admin/login','/employee/login'].includes(location.pathname);
+  const isAuthPage = ['/login', '/admin/login', '/employee/login'].includes(location.pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -377,13 +377,13 @@ function App() {
 
               {/* 🔐 Login + Fallback */}
               {/* Keep only one login system (NewsPulse React login) */}
-              <Route path="/auth" element={<Navigate to="/admin/login" replace />} />
-              <Route path="/auth/unified" element={<Navigate to="/admin/login" replace />} />
+              <Route path="/auth" element={<Navigate to="/login" replace />} />
+              <Route path="/auth/unified" element={<Navigate to="/login" replace />} />
               <Route path="/auth/simple" element={<SimpleLogin />} />
-              {/* Redirect generic /login to the React login */}
-              <Route path="/login" element={<Navigate to="/admin/login" replace />} />
-              {/* NewsPulse login */}
-              <Route path="/admin/login" element={<SimpleLogin />} />
+              {/* Canonical public login */}
+              <Route path="/login" element={<SimpleLogin />} />
+              {/* Back-compat alias */}
+              <Route path="/admin/login" element={<Navigate to="/login" replace />} />
               {/* Placeholder employee login redirect (no separate UI yet) */}
               <Route path="/employee/login" element={<SimpleLogin />} />
               <Route path="/denied" element={<Denied />} />

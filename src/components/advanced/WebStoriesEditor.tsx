@@ -1,14 +1,10 @@
 // 📱 AMP Web Stories Editor - Complete with Templates & Preview
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '@/lib/api.js';
 import {
   BookOpen, Plus, Edit, Trash2, Eye, Upload, Save, Layout,
   Image as ImageIcon, Type, Play, BarChart
 } from 'lucide-react';
-
-// Direct Render backend base (host only) + explicit /api prefix
-const HOST_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${HOST_BASE}/api`;
 
 type Story = {
   id: string;
@@ -55,8 +51,8 @@ export default function WebStoriesEditor() {
     setLoading(true);
     try {
       const [storiesRes, templatesRes] = await Promise.all([
-        axios.get(`${API_BASE}/web-stories`),
-        axios.get(`${API_BASE}/web-stories/templates/list`)
+        api.get('/api/web-stories'),
+        api.get('/api/web-stories/templates/list')
       ]);
       setStories(storiesRes.data.stories || []);
       setTemplates(templatesRes.data.templates || []);
@@ -72,7 +68,7 @@ export default function WebStoriesEditor() {
     if (!title) return;
 
     try {
-      const response = await axios.post(`${API_BASE}/web-stories`, {
+      const response = await api.post('/api/web-stories', {
         title,
         template: template.id,
         author: 'admin@newspulse.com'
@@ -90,7 +86,7 @@ export default function WebStoriesEditor() {
     if (!confirm('Delete this story?')) return;
 
     try {
-      await axios.delete(`${API_BASE}/web-stories/${id}`);
+      await api.delete(`/api/web-stories/${id}`);
       setStories(stories.filter(s => s.id !== id));
     } catch (error) {
       console.error('Failed to delete story:', error);
@@ -99,7 +95,7 @@ export default function WebStoriesEditor() {
 
   const publishStory = async (id: string) => {
     try {
-      const response = await axios.post(`${API_BASE}/web-stories/${id}/publish`);
+      const response = await api.post(`/api/web-stories/${id}/publish`);
       setStories(stories.map(s => s.id === id ? response.data.story : s));
       if (selectedStory?.id === id) setSelectedStory(response.data.story);
     } catch (error) {

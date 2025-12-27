@@ -61,7 +61,7 @@ This repo is designed to behave the same locally and on Vercel:
 
 - In the browser, the frontend calls the proxy base `/admin-api/*`.
 - On Vercel, the serverless proxy forwards `/admin-api/*` to `ADMIN_BACKEND_URL`.
-- Locally, Vite proxies `/admin-api/*` to your chosen backend target (defaults to `http://localhost:5000`).
+- Locally, Vite proxies `/admin-api/*` to your chosen backend target (set via env).
 
 Avoid shipping a hardcoded Render URL in the frontend. Use env vars instead.
 
@@ -81,7 +81,7 @@ npm install
 Example `.env.local`:
 
 ```
-VITE_ADMIN_API_ORIGIN=http://localhost:5000
+VITE_ADMIN_API_ORIGIN=https://your-backend-host.tld
 VITE_ADMIN_API_PROXY_BASE=/admin-api
 ```
 

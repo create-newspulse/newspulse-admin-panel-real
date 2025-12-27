@@ -278,10 +278,11 @@ Then open: **http://localhost:5173**
 ```bash
 # Frontend (run-time env for dev)
 # Default/recommended: use real backend via Vite proxy (matches production data)
-VITE_ADMIN_API_TARGET=https://newspulse-backend-real.onrender.com
+VITE_ADMIN_API_TARGET=https://your-backend-host.tld
+ 
 
 # Optional: use local demo backend
-# VITE_ADMIN_API_TARGET=http://localhost:5000
+# VITE_ADMIN_API_TARGET=https://your-local-backend-host.tld
 
 # Backend (admin-backend/.env) (only needed in -Demo mode)
 PORT=5000

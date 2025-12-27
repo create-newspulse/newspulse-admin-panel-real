@@ -1,6 +1,8 @@
 param(
-  [string]$BaseUrl = "https://newspulse-backend-real.onrender.com"
+  [string]$BaseUrl = $env:ADMIN_BACKEND_URL
 )
+
+if (-not $BaseUrl) { $BaseUrl = 'https://your-backend-host.tld' }
 
 function Invoke-Json {
   param(

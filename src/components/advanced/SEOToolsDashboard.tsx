@@ -1,10 +1,7 @@
 // 🔍 SEO Audit & Optimization Tools
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { Search, Link as LinkIcon, FileText, BarChart3, ExternalLink, Plus, Trash2, Play } from 'lucide-react';
-
-const HOST_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${HOST_BASE}/api`;
+import api from '@/lib/api.js';
 
 type Tab = 'audit' | 'redirects' | 'sitemap' | 'meta';
 
@@ -25,17 +22,17 @@ export default function SEOToolsDashboard() {
     try {
       switch (activeTab) {
         case 'audit':
-          const auditHistoryRes = await axios.get(`${API_BASE}/api/seo/audit/history?limit=1`);
+          const auditHistoryRes = await api.get('/api/seo/audit/history', { params: { limit: 1 } });
           if (auditHistoryRes.data.audits?.length > 0) {
             setAuditData(auditHistoryRes.data.audits[0]);
           }
           break;
         case 'redirects':
-          const redirectsRes = await axios.get(`${API_BASE}/seo/redirects`);
+          const redirectsRes = await api.get('/api/seo/redirects');
           setRedirects(redirectsRes.data.redirects || []);
           break;
         case 'sitemap':
-          const sitemapRes = await axios.get(`${API_BASE}/seo/sitemap`);
+          const sitemapRes = await api.get('/api/seo/sitemap');
           setSitemapConfig(sitemapRes.data.config || null);
           break;
       }
@@ -49,7 +46,7 @@ export default function SEOToolsDashboard() {
   const runAudit = async () => {
     setRunningAudit(true);
     try {
-      const response = await axios.post(`${API_BASE}/seo/audit`, {
+      const response = await api.post('/api/seo/audit', {
         url: 'https://newspulse.com',
         deep: false
       });
@@ -67,7 +64,7 @@ export default function SEOToolsDashboard() {
     if (!from || !to) return;
 
     try {
-      await axios.post(`${API_BASE}/seo/redirects`, { from, to, type: '301' });
+      await api.post('/api/seo/redirects', { from, to, type: '301' });
       loadData();
     } catch (error) {
       console.error('Failed to add redirect:', error);
@@ -77,7 +74,7 @@ export default function SEOToolsDashboard() {
   const deleteRedirect = async (id: string) => {
     if (!confirm('Delete this redirect?')) return;
     try {
-      await axios.delete(`${API_BASE}/seo/redirects/${id}`);
+      await api.delete(`/api/seo/redirects/${id}`);
       loadData();
     } catch (error) {
       console.error('Failed to delete redirect:', error);
@@ -86,7 +83,7 @@ export default function SEOToolsDashboard() {
 
   const generateSitemap = async () => {
     try {
-      const response = await axios.post(`${API_BASE}/seo/sitemap/generate`);
+      const response = await api.post('/api/seo/sitemap/generate');
       setSitemapConfig(response.data.config);
       alert('Sitemap generated successfully!');
     } catch (error) {

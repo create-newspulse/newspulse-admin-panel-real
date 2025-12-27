@@ -24,8 +24,8 @@ MONGODB_URI=mongodb://localhost:27017/newspulse
 OPENAI_API_KEY=your_openai_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 
-# Server URL
-SERVER_URL=http://localhost:5000
+# Server URL (set this to your backend origin)
+SERVER_URL=
 
 # Security
 JWT_SECRET=your_jwt_secret_here_change_this_in_production

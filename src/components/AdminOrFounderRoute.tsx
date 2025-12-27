@@ -12,6 +12,11 @@ const AdminOrFounderRoute: React.FC<Props> = ({ children }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
 
+  // Per spec: only protect /admin/* routes.
+  if (!(location.pathname || '').startsWith('/admin')) {
+    return <>{children}</>;
+  }
+
   if (isLoading) {
     return <div className="text-center mt-10">🔐 Checking access…</div>;
   }
@@ -19,7 +24,7 @@ const AdminOrFounderRoute: React.FC<Props> = ({ children }) => {
   if (!isAuthenticated || !user) {
     // ✅ Fix: redirect to correct login based on current area
     const p = location.pathname || '';
-    const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+    const dest = p.startsWith('/employee') ? '/employee/login' : '/login';
     return <Navigate to={dest} state={{ from: location }} replace />;
   }
 

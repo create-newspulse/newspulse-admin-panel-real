@@ -1,4 +1,23 @@
 "use client";
+
+// Minimal client wrapper to match the requested `api.post(...)->{ data }` shape
+// without depending on axios in the Next.js sub-app.
+const api = {
+  post: async (url: string, body?: any): Promise<{ data: any; status: number }> => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data?.error || data?.message || 'Request failed');
+      err.response = { status: res.status, data };
+      throw err;
+    }
+    return { data, status: res.status };
+  },
+};
 import { useEffect, useState } from 'react';
 import { PasskeyRegisterButton } from './components/PasskeyRegisterButton';
 import { PasskeySignInButton } from './components/PasskeySignInButton';
@@ -29,9 +48,8 @@ export default function AuthPage() {
     setMessage(null);
     try {
       schema.parse({ email, password, lane });
-      const res = await fetch('/api/auth/login', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ email, password, lane }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+      const res = await api.post('/api/auth/login', { email, password, lane });
+      const data = res.data;
       if (data.mfaRequired) {
         setMfaMode(data.mfaRequired.type);
         if (data.mfaRequired.type === 'passkey') setMessage('Passkey required – click button.');
@@ -39,7 +57,10 @@ export default function AuthPage() {
         else if (data.mfaRequired.type === 'email') setMessage('We sent a sign-in code to your email.');
         return;
       }
-      window.location.href = data.redirect || '/';
+      try {
+        if (data?.token) window.localStorage.setItem('np_token', String(data.token));
+      } catch {}
+      window.location.href = data.redirect || '/admin/dashboard';
     } catch (err:any) {
       setMessage(err.message || 'Login failed');
     }
@@ -51,6 +72,9 @@ export default function AuthPage() {
       const res = await fetch('/api/auth/mfa/totp/verify', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ code: totp }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'TOTP failed');
+      try {
+        if (data?.token) window.localStorage.setItem('np_token', String(data.token));
+      } catch {}
       window.location.href = data.redirect;
     } catch (e:any) { setMessage(e.message); }
   }
@@ -60,6 +84,9 @@ export default function AuthPage() {
       const res = await fetch('/api/auth/recovery/consume', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ code: recovery }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Recovery failed');
+      try {
+        if (data?.token) window.localStorage.setItem('np_token', String(data.token));
+      } catch {}
       window.location.href = data.redirect;
     } catch (e:any) { setMessage(e.message); }
   }
@@ -124,6 +151,9 @@ function EmailOtpBlock({ onBack }: { onBack: () => void }) {
     const res = await fetch('/api/auth/mfa/email/verify', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ code }) });
     const data = await res.json();
     if (!res.ok) { setMsg(data.error||'Invalid code'); return; }
+    try {
+      if (data?.token) window.localStorage.setItem('np_token', String(data.token));
+    } catch {}
     window.location.href = data.redirect;
   }
   async function resend() {

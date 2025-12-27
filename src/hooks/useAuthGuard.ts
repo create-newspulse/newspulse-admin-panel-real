@@ -6,10 +6,16 @@ export default function useAuthGuard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem('adminToken');
+    const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
+    // Never redirect while on login routes.
+    if (p === '/login' || p === '/admin/login' || p === '/employee/login') return;
+
+    // Per spec: only protect /admin/* routes.
+    if (!p.startsWith('/admin') && !p.startsWith('/employee')) return;
+
+    const token = localStorage.getItem('np_token') || localStorage.getItem('adminToken');
     if (!token) {
-      const p = (typeof window !== 'undefined' ? window.location.pathname : '') || '';
-      const dest = p.startsWith('/employee') ? '/employee/login' : '/admin/login';
+      const dest = p.startsWith('/employee') ? '/employee/login' : '/login';
       navigate(dest, { replace: true });
     }
   }, [navigate]);

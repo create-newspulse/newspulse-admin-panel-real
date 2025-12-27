@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { listReporterContacts, ReporterContactListResponse } from '@/lib/api/reporterDirectory';
+import api from '@/lib/api.js';
 import type { AreaType, ReporterBeat, ReporterContact, ReporterStatus } from './reporterDirectory.types';
 
 export interface UseReporterContactsParams {
@@ -62,26 +63,21 @@ export function useReporterDirectory(filters: ReporterDirectoryFilters) {
   return useQuery<ReporterDirectoryResponse, any>({
     queryKey: ['admin', 'reporter-directory', filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
+      const params: Record<string, string> = {};
       (Object.entries(filters) as [string, any][]).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== '') {
-          params.append(k, String(v));
-        }
+        if (v !== undefined && v !== null && v !== '') params[k] = String(v);
       });
 
-      const res = await fetch(`/api/admin/community/reporter-directory?${params.toString()}`, { credentials: 'include' });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        const err: any = new Error('Failed to load reporter directory');
-        try {
-          const body = JSON.parse(text);
-          if (body?.code === 'UNAUTHORIZED' || res.status === 401) {
-            err.isUnauthorized = true;
-          }
-        } catch {}
-        throw err;
+      try {
+        const res = await api.get('/api/admin/community/reporter-directory', { params });
+        return res.data;
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const body = err?.response?.data;
+        const e: any = new Error('Failed to load reporter directory');
+        if (status === 401 || body?.code === 'UNAUTHORIZED') e.isUnauthorized = true;
+        throw e;
       }
-      return res.json();
     },
     staleTime: 30_000,
   });

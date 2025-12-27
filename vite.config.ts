@@ -22,7 +22,14 @@ export default defineConfig(({ mode }): UserConfig => {
   // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
   //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
   // Use a dedicated variable for proxy targeting.
-  const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_URL || env.VITE_ADMIN_API_ORIGIN || '');
+  // Prefer dedicated proxy target; fall back to VITE_API_BASE_URL (used by the simple axios client).
+  const rawCandidate = stripSlash(
+    env.VITE_ADMIN_API_TARGET
+    || env.VITE_BACKEND_URL
+    || env.VITE_ADMIN_API_ORIGIN
+    || env.VITE_API_BASE_URL
+    || ''
+  );
   const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
   const looksLocalhost = (() => {
     const s = String(rawCandidate || '').toLowerCase();
@@ -32,8 +39,8 @@ export default defineConfig(({ mode }): UserConfig => {
     && isValidAbsoluteUrl(rawCandidate)
     && (!looksLocalhost || useLocalDemo))
     ? rawCandidate
-    // Default to the production backend in local dev so the UI matches Vercel.
-    : 'https://newspulse-backend-real.onrender.com';
+    // Safe dev default: local demo backend origin.
+    : 'http://localhost:5000';
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
@@ -47,11 +54,12 @@ export default defineConfig(({ mode }): UserConfig => {
     || env.VITE_BACKEND_URL
     || process.env.VITE_BACKEND_URL
     || ''
-  ) || 'http://localhost:5000';
+  ) || '';
 
   // If the dev proxy target is the Vercel admin host, DO NOT rewrite '/admin-api/*' to '/api/*'.
   // Production relies on Vercel rewrites for '/admin-api/*' -> serverless proxy.
   const ADMIN_PROXY_IS_VERCEL = (() => {
+    if (!ADMIN_API_PROXY_TARGET) return false;
     try {
       const host = new URL(ADMIN_API_PROXY_TARGET).hostname.toLowerCase();
       return host === 'admin.newspulse.co.in' || host.endsWith('.vercel.app');
@@ -73,6 +81,40 @@ export default defineConfig(({ mode }): UserConfig => {
       console.warn('[vite] Note: Target ends with /api; using origin for proxy:', BACKEND_ORIGIN);
     }
   }
+  const proxy: any = {};
+  if (BACKEND_ORIGIN) {
+    proxy['/api'] = {
+      target: `${BACKEND_ORIGIN}`,
+      changeOrigin: true,
+      secure: false,
+    };
+    // Support public settings in local dev (maps /settings/* -> /api/settings/*)
+    proxy['/settings'] = {
+      target: `${BACKEND_ORIGIN}`,
+      changeOrigin: true,
+      secure: false,
+      rewrite: (path: string) => path.replace(/^\/settings/, '/api/settings'),
+    };
+    proxy['/socket.io'] = {
+      target: API_WS,
+      ws: true,
+      changeOrigin: true,
+      secure: false,
+    };
+  }
+  if (ADMIN_API_PROXY_TARGET) {
+    proxy['/admin-api'] = {
+      target: ADMIN_API_PROXY_TARGET,
+      changeOrigin: true,
+      secure: false,
+      rewrite: (path: string) => {
+        if (ADMIN_PROXY_IS_VERCEL) return path;
+        if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '');
+        return path.replace(/^\/admin-api/, '/api');
+      },
+    };
+  }
+
   return {
     envPrefix: 'VITE_',
     base: '/',
@@ -105,49 +147,7 @@ export default defineConfig(({ mode }): UserConfig => {
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {
-        '/api': {
-          target: `${BACKEND_ORIGIN || 'http://localhost:5000'}`,
-          changeOrigin: true,
-          secure: false,
-        },
-        // Support public settings in local dev (maps /settings/* -> /api/settings/*)
-        '/settings': {
-          target: `${BACKEND_ORIGIN}`,
-          changeOrigin: true,
-          secure: false,
-          rewrite: (path) => path.replace(/^\/settings/, '/api/settings'),
-        },
-        // Proxy /admin-api/* -> backend.
-        // DEV contract: frontend calls go through '/admin-api/*'.
-        // Requested behavior:
-        //   server.proxy['/admin-api'] = {
-        //     target: process.env.VITE_BACKEND_URL || 'http://localhost:8080',
-        //     changeOrigin: true,
-        //     secure: false,
-        //     rewrite: (path) => path.replace(/^\/admin-api/, '')
-        //   }
-        '/admin-api': {
-          target: ADMIN_API_PROXY_TARGET,
-          changeOrigin: true,
-          secure: false,
-          // If targeting a backend origin directly, map '/admin-api/*' -> backend '/api/*'.
-          // If targeting the Vercel admin host, keep '/admin-api/*' unchanged (Vercel rewrite handles it).
-          rewrite: (path) => {
-            if (ADMIN_PROXY_IS_VERCEL) return path;
-            // Two contracts share the same prefix:
-            // - Public API calls:  /admin-api/api/*   (already includes /api)
-            // - Admin API calls:   /admin-api/admin/* (needs /api/admin)
-            // Avoid generating '/api/api/*' for the public path.
-            if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '');
-            return path.replace(/^\/admin-api/, '/api');
-          },
-        },
-        '/socket.io': {
-          target: API_WS,
-          ws: true,
-          changeOrigin: true,
-          secure: false,
-        },
+        ...proxy,
       },
       watch: {
         ignored: [

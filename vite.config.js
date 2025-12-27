@@ -25,19 +25,27 @@ export default defineConfig(({ mode }) => {
     // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
     // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
     //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
-    const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_URL || env.VITE_ADMIN_API_ORIGIN || '');
+    // Prefer dedicated proxy target; fall back to VITE_API_BASE_URL (used by the simple axios client).
+    const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET
+        || env.VITE_BACKEND_URL
+        || env.VITE_ADMIN_API_ORIGIN
+        || env.VITE_API_BASE_URL
+        || '');
     const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
     const looksLocalhost = (() => {
         const s = String(rawCandidate || '').toLowerCase();
         return s.includes('localhost:') || s.includes('127.0.0.1:') || s.includes('0.0.0.0:');
     })();
-    // Default to the real backend so local dev matches Vercel.
-    // Only use localhost targets when explicitly opted-in.
+    // Never default to placeholder hosts; they cause ENOTFOUND loops in dev.
+    // Order:
+    // 1) explicit env candidate (valid absolute URL)
+    // 2) local demo backend (when opted-in)
+    // 3) local demo backend as a safe default (ECONNREFUSED is clearer than ENOTFOUND)
     const API_TARGET = (!hasPlaceholders(rawCandidate)
         && isValidAbsoluteUrl(rawCandidate)
         && (!looksLocalhost || useLocalDemo))
         ? rawCandidate
-        : 'https://newspulse-backend-real.onrender.com';
+        : (useLocalDemo ? 'http://localhost:5000' : 'http://localhost:5000');
     // IMPORTANT: proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
     const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
     const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN;

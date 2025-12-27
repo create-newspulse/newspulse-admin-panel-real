@@ -6,7 +6,7 @@
 .PARAMETERS
   -Email <string>           Email to use (defaults to FOUNDER/ADMIN env vars)
   -Password <SecureString>  Secure password (fallback to env vars if omitted)
-  -ApiBase <string>         Base URL (default http://localhost:5000)
+  -ApiBase <string>         Base URL (defaults to NP_API_BASE env var)
 .EXAMPLE
   ./debug-login.ps1 -Email admin@newspulse.ai -Password (Read-Host -AsSecureString)
   ./debug-login.ps1   # uses env vars
@@ -14,7 +14,7 @@
 param(
   [string]$Email = $env:FOUNDER_EMAIL,
   [System.Security.SecureString]$Password = $null,
-  [string]$ApiBase = 'http://localhost:5000'
+  [string]$ApiBase = $env:NP_API_BASE
 )
 
 # Resolve Email fallback chain
@@ -33,6 +33,7 @@ if ($Password) {
 
 Write-Host "[debug-login] Using Email=$Email PasswordLength=$($PlainPassword.Length) ApiBase=$ApiBase" -ForegroundColor Cyan
 if (-not $Email -or -not $PlainPassword) { Write-Error 'Missing email or password (env not set and no params provided).'; exit 1 }
+if (-not $ApiBase) { Write-Error 'Missing ApiBase. Pass -ApiBase or set NP_API_BASE.'; exit 1 }
 
 $Body = @{ email = $Email; password = $PlainPassword } | ConvertTo-Json
 

@@ -1,9 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ADMIN_API_BASE } from '../lib/adminApi';
-
-const API_BASE = /\/api$/.test(ADMIN_API_BASE)
-  ? ADMIN_API_BASE
-  : `${ADMIN_API_BASE}/api`;
+import api from '@/lib/api.js';
 
 export interface AnchorSource {
   title: string;
@@ -79,17 +75,8 @@ export const AiAnchorPlayer: React.FC<Props> = ({ open, onClose, source }) => {
           category: source.category || '',
           language: source.language || 'en',
         };
-        const r = await fetch(`${API_BASE}/ai/tools/voice-script`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`,
-          },
-          credentials: 'include',
-          body: JSON.stringify(payload),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
+        const r = await api.post('/api/ai/tools/voice-script', payload, { withCredentials: true });
+        const data = r.data;
         const s = (data && (data.script || data.content || data.result)) || '';
         setScript(s || `Here is a brief update on: ${source.title}.`);
       } catch (e: any) {

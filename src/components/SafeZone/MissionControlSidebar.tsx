@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || 'https://newspulse-backend-real.onrender.com').replace(/\/+$/, '');
-const API_BASE = `${API_ORIGIN}/api`;
+const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '');
+const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaBrain, FaTrafficLight, FaMoneyBill, FaHeartbeat, FaTools,

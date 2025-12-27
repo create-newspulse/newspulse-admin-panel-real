@@ -9,18 +9,6 @@
       "destination": "/api/admin-proxy/:path*"
     },
     {
-      "source": "/api/:path*",
-      "destination": "https://newspulse-backend-real.onrender.com/api/:path*"
-    },
-    {
-      "source": "/admin/:path*",
-      "destination": "https://newspulse-backend-real.onrender.com/api/admin/:path*"
-    },
-    {
-      "source": "/settings/public",
-      "destination": "https://newspulse-backend-real.onrender.com/api/settings/public"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
