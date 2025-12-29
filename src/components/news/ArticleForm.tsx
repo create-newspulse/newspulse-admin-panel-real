@@ -154,6 +154,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
 
+  const countWords = (input: string): number => {
+    const raw = String(input || '');
+    if (!raw.trim()) return 0;
+
+    // Remove HTML tags (embeds/images/iframes), keep visible text.
+    const noHtml = raw.replace(/<[^>]*>/g, ' ');
+
+    // Remove common markdown image/link URL portions while keeping label text.
+    const keepMdLabel = noHtml
+      // ![alt](url) -> alt
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, ' $1 ')
+      // [label](url) -> label
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, ' $1 ');
+
+    const cleaned = keepMdLabel
+      .replace(/https?:\/\/\S+/g, ' ') // raw URLs
+      .replace(/[^\p{L}\p{N}]+/gu, ' ') // keep letters/numbers across languages
+      .trim();
+
+    if (!cleaned) return 0;
+    return cleaned.split(/\s+/).filter(Boolean).length;
+  };
+
   const handleContentPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imageFiles: File[] = [];
@@ -357,6 +380,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
     });
   };
+
+  const wordCount = useMemo(() => countWords(content), [content]);
 
   // Admin publish contract fields
   const [isBreaking, setIsBreaking] = useState(false);
@@ -1533,7 +1558,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">Content</label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="block text-sm font-medium">Content</label>
+                <div className="text-xs text-slate-600">Words: {wordCount}</div>
+              </div>
               <textarea
                 ref={contentTextareaRef}
                 value={content}
