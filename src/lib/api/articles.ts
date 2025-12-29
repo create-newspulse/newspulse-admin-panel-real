@@ -142,29 +142,38 @@ export async function listArticles(params: {
   // Contract: All view should not force legacy status lists; omit status filter.
   if (query.status === 'all') delete query.status;
 
-  // Prefer admin routes so Draft/Scheduled/etc are visible.
-  // Proxy mode:   GET /admin-api/admin/articles
-  // Direct mode:  GET <origin>/api/admin/articles
+  // Prefer the normal articles route first:
+  // Proxy mode:   GET /admin-api/articles  (proxy rewrites to backend /api/articles)
+  // Direct mode:  GET <origin>/api/articles
   try {
-    const res = await adminApi.get(ADMIN_ARTICLES_PATH, { params: query });
+    const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
     return normalizeListResponse(res.data, { requestedPage, limit });
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
 
-  // Fallback (legacy/demo): GET /api/articles
-  const res2 = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
+  // Fallback: some older backends expose admin-only articles routes.
+  // Proxy mode:   GET /admin-api/admin/articles
+  // Direct mode:  GET <origin>/api/admin/articles
+  const res2 = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
+    params: query,
+    // @ts-expect-error custom flag read by interceptor
+    skipErrorLog: true,
+  });
   return normalizeListResponse(res2.data, { requestedPage, limit });
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
   let raw: any;
   try {
-    const res = await adminApi.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
+    const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
     raw = res.data as any;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-    const res2 = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
+    const res2 = await adminApi.get(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}`, {
+      // @ts-expect-error custom flag read by interceptor
+      skipErrorLog: true,
+    });
     raw = res2.data as any;
   }
   const ok = raw?.ok === true || raw?.success === true || !!raw?.article || !!raw?.data;
@@ -180,39 +189,24 @@ export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
   try {
-    // Prefer admin route (draft visibility + permissions)
-    try {
-      const res = await adminApi.patch(url, { status: 'archived' });
-      return res.data;
-    } catch (e: any) {
-      if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-    }
-
     return await patchThenPut(url, { status: 'archived' });
   } catch (e: any) {
     const status = e?.response?.status;
     if (status && status !== 404 && status !== 405) throw e;
   }
-  // Legacy fallback: PATCH /admin/articles/:id/archive
+  // Legacy fallback: PATCH /api/admin/articles/:id/archive
   return tryLegacyAdminAction(`/${encoded}/archive`);
 }
 export async function restoreArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
   try {
-    try {
-      const res = await adminApi.patch(url, { status: 'draft' });
-      return res.data;
-    } catch (e: any) {
-      if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-    }
-
     return await patchThenPut(url, { status: 'draft' });
   } catch (e: any) {
     const status = e?.response?.status;
     if (status && status !== 404 && status !== 405) throw e;
   }
-  // Legacy fallback: PATCH /admin/articles/:id/restore
+  // Legacy fallback: PATCH /api/admin/articles/:id/restore
   return tryLegacyAdminAction(`/${encoded}/restore`);
 }
 export async function deleteArticle(id: string) {
@@ -220,21 +214,17 @@ export async function deleteArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
   try {
-    try {
-      const res = await adminApi.patch(url, { status: 'deleted' });
-      return res.data;
-    } catch (e: any) {
-      if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-    }
-
     return await patchThenPut(url, { status: 'deleted' });
   } catch (e: any) {
     const status = e?.response?.status;
     // If backend doesn't support status update on /articles/:id, fall back to legacy admin delete.
     if (status && status !== 404 && status !== 405) throw e;
   }
-  // Legacy fallback: DELETE /admin/articles/:id (soft delete in legacy admin backend)
-  const res = await adminApi.delete(`${ADMIN_ARTICLES_PATH}/${encoded}`);
+  // Legacy fallback: DELETE /api/admin/articles/:id
+  const res = await adminApi.delete(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}`, {
+    // @ts-expect-error custom flag read by interceptor
+    skipErrorLog: true,
+  });
   return res.data;
 }
 

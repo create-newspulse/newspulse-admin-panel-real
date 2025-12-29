@@ -87,56 +87,62 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     <div className="space-y-2">
       <div className="text-sm font-semibold">Cover Image</div>
 
-      {!hasPreview ? (
-        <div className="text-xs text-slate-600">No cover image</div>
-      ) : (
-        <div className="space-y-2">
-          <div className="w-full aspect-video rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
-            <img src={previewSrc} alt="Cover" className="w-full h-full object-cover" />
-          </div>
-
-          {fileMeta ? (
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0 space-y-2">
+          {!hasPreview ? (
+            <div className="text-xs text-slate-600">No cover image</div>
+          ) : fileMeta ? (
             <div className="text-xs text-slate-600">
-              <div className="font-medium text-slate-700">{fileMeta.name}</div>
+              <div className="font-medium text-slate-700 truncate">{fileMeta.name}</div>
               <div>{fileMeta.size}</div>
             </div>
           ) : url ? (
             <div className="text-xs text-slate-600">Current cover image</div>
           ) : null}
+
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn" onClick={pick}>
+              {hasPreview ? 'Replace' : 'Upload Image'}
+            </button>
+
+            {hasPreview && (
+              <button
+                type="button"
+                className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
+                onClick={() => {
+                  try {
+                    if (inputRef.current) inputRef.current.value = '';
+                  } catch {}
+                  onRemove();
+                }}
+              >
+                Remove
+              </button>
+            )}
+
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT_ATTR}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                onPickFile(f);
+              }}
+            />
+          </div>
         </div>
-      )}
 
-      <div className="flex items-center gap-2">
-        <button type="button" className="btn" onClick={pick}>
-          {hasPreview ? 'Replace' : 'Upload Image'}
-        </button>
-
-        {hasPreview && (
-          <button
-            type="button"
-            className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
-            onClick={() => {
-              try {
-                if (inputRef.current) inputRef.current.value = '';
-              } catch {}
-              onRemove();
-            }}
-          >
-            Remove
-          </button>
-        )}
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT_ATTR}
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            onPickFile(f);
-          }}
-        />
+        <div className="w-28 shrink-0">
+          <div className="w-full aspect-video rounded-md border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+            {hasPreview ? (
+              <img src={previewSrc} alt="Cover preview" className="w-full h-full object-cover" />
+            ) : (
+              <div className="text-[11px] text-slate-500">Preview</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

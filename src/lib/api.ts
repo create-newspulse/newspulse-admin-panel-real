@@ -138,10 +138,30 @@ export function adminUrl(path: string): string {
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    for (const key of ['np_admin_access_token', 'np_admin_token', 'adminToken', 'np_token']) {
+    // Priority order:
+    // 1) np_admin_access_token
+    // 2) np_admin_token
+    // 3) np_token
+    // 4) newsPulseAdminAuth JSON -> token
+    // 5) legacy adminToken
+    for (const key of ['np_admin_access_token', 'np_admin_token', 'np_token']) {
       const val = localStorage.getItem(key);
       if (val && String(val).trim()) return String(val).replace(/^Bearer\s+/i, '');
     }
+
+    // Back-compat: some builds store auth state as JSON.
+    const raw = localStorage.getItem('newsPulseAdminAuth');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const token = parsed?.token;
+        if (token && String(token).trim()) return String(token).replace(/^Bearer\s+/i, '');
+      } catch {}
+    }
+
+    // Back-compat: older key
+    const legacy = localStorage.getItem('adminToken');
+    if (legacy && String(legacy).trim()) return String(legacy).replace(/^Bearer\s+/i, '');
   } catch {}
   return null;
 }
@@ -332,7 +352,10 @@ adminApi.interceptors.response.use(
     }
 
     if (import.meta.env.DEV) {
-      try { console.error('[adminApi:err]', status, url, error?.response?.headers?.['content-type']); } catch {}
+      // Allow callers to suppress expected/handled errors (e.g., legacy fallback probes)
+      if (!(error as any)?.config?.skipErrorLog) {
+        try { console.error('[adminApi:err]', status, url, error?.response?.headers?.['content-type']); } catch {}
+      }
     }
 
     return Promise.reject(error);

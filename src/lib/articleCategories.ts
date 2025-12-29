@@ -42,7 +42,7 @@ export const ARTICLE_CATEGORY_LABELS: Record<ArticleCategoryKey, string> = {
   lifestyle: 'Lifestyle',
   glamour: 'Glamour',
   'web-stories': 'Web Stories',
-  'viral-videos': 'Viral Videos',
+  'viral-videos': 'Viral Video',
   editorial: 'Editorial',
   'youth-pulse': 'Youth Pulse',
   'inspiration-hub': 'Inspiration Hub',

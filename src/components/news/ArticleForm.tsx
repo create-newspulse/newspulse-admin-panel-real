@@ -19,9 +19,56 @@ import PreviewModal from '@/components/preview/PreviewModal';
 import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailability';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
-import Switch from '@/components/settings/Switch';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
+
+const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
+  { label: 'Ahmedabad', slug: 'ahmedabad' },
+  { label: 'Amreli', slug: 'amreli' },
+  { label: 'Anand', slug: 'anand' },
+  { label: 'Aravalli', slug: 'aravalli' },
+  { label: 'Banaskantha', slug: 'banaskantha' },
+  { label: 'Bharuch', slug: 'bharuch' },
+  { label: 'Bhavnagar', slug: 'bhavnagar' },
+  { label: 'Botad', slug: 'botad' },
+  { label: 'Chhota Udaipur', slug: 'chhota-udaipur' },
+  { label: 'Dahod', slug: 'dahod' },
+  { label: 'Dang', slug: 'dang' },
+  { label: 'Devbhoomi Dwarka', slug: 'devbhoomi-dwarka' },
+  { label: 'Gandhinagar', slug: 'gandhinagar' },
+  { label: 'Gir Somnath', slug: 'gir-somnath' },
+  { label: 'Jamnagar', slug: 'jamnagar' },
+  { label: 'Junagadh', slug: 'junagadh' },
+  { label: 'Kheda', slug: 'kheda' },
+  { label: 'Kutch', slug: 'kutch' },
+  { label: 'Mahisagar', slug: 'mahisagar' },
+  { label: 'Mehsana', slug: 'mehsana' },
+  { label: 'Morbi', slug: 'morbi' },
+  { label: 'Narmada', slug: 'narmada' },
+  { label: 'Navsari', slug: 'navsari' },
+  { label: 'Panchmahal', slug: 'panchmahal' },
+  { label: 'Patan', slug: 'patan' },
+  { label: 'Porbandar', slug: 'porbandar' },
+  { label: 'Rajkot', slug: 'rajkot' },
+  { label: 'Sabarkantha', slug: 'sabarkantha' },
+  { label: 'Surat', slug: 'surat' },
+  { label: 'Surendranagar', slug: 'surendranagar' },
+  { label: 'Tapi', slug: 'tapi' },
+  { label: 'Vadodara', slug: 'vadodara' },
+  { label: 'Valsad', slug: 'valsad' },
+];
+
+// Key cities (Mahanagarpalika / major metros)
+const GUJARAT_CITIES: ReadonlyArray<{ label: string; slug: string }> = [
+  { label: 'Ahmedabad', slug: 'ahmedabad' },
+  { label: 'Surat', slug: 'surat' },
+  { label: 'Vadodara', slug: 'vadodara' },
+  { label: 'Rajkot', slug: 'rajkot' },
+  { label: 'Bhavnagar', slug: 'bhavnagar' },
+  { label: 'Jamnagar', slug: 'jamnagar' },
+  { label: 'Junagadh', slug: 'junagadh' },
+  { label: 'Gandhinagar', slug: 'gandhinagar' },
+];
 
 interface ArticleFormProps {
   mode: 'create' | 'edit';
@@ -69,6 +116,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [summary, setSummary] = useState('');
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
+  const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
   const [language, setLanguage] = useState<string>('en');
@@ -91,6 +139,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const suggestCacheRef = useRef<Map<string, AssistSuggestV2Response>>(new Map());
   const { publishEnabled } = usePublishFlag();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [qualityToolsCollapsed, setQualityToolsCollapsed] = useState(false);
+  const [breakingControlsCollapsed, setBreakingControlsCollapsed] = useState(false);
+  const [locationTagsCollapsed, setLocationTagsCollapsed] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState<null | {
     viewUrl: string;
     slug: string;
@@ -103,8 +154,214 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
 
+  const handleContentPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageFiles: File[] = [];
+
+    for (const item of items) {
+      if (item.kind !== 'file') continue;
+      const f = item.getAsFile();
+      if (!f) continue;
+      if (String(f.type || '').startsWith('image/')) imageFiles.push(f);
+    }
+
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+
+    const target = e.currentTarget;
+    const base = target.value ?? '';
+    const start = typeof target.selectionStart === 'number' ? target.selectionStart : base.length;
+    const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
+
+    const tokens = imageFiles.map((_, idx) => `__np_clip_img_${Date.now()}_${idx}__`);
+    // Insert as HTML so preview can render it (sanitizer allows <img>).
+    const inserted = tokens
+      .map((t) => `\n\n<p><img src="${t}" alt="pasted-image" /></p>\n`)
+      .join('');
+
+    const nextValue = base.slice(0, start) + inserted + base.slice(end);
+    setContent(nextValue);
+
+    const nextCaret = start + inserted.length;
+    requestAnimationFrame(() => {
+      const el = contentTextareaRef.current;
+      if (!el) return;
+      try {
+        el.focus();
+        el.setSelectionRange(nextCaret, nextCaret);
+      } catch {
+        // ignore
+      }
+    });
+
+    const toastId = toast.loading(`Uploading ${imageFiles.length} image${imageFiles.length === 1 ? '' : 's'}...`);
+
+    void (async () => {
+      try {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const file = imageFiles[i];
+          const token = tokens[i];
+          const { url } = await uploadCoverImage(file);
+          setContent((curr) => String(curr || '').replace(token, url));
+        }
+        toast.success('Images pasted', { id: toastId });
+      } catch (err) {
+        toast.error(normalizeError(err), { id: toastId });
+        // If upload fails, remove unresolved tokens so content stays clean.
+        setContent((curr) => {
+          let cleaned = String(curr || '');
+          for (const t of tokens) cleaned = cleaned.replaceAll(t, '');
+          return cleaned;
+        });
+      }
+    })();
+  };
+
+  const handleContentPasteWithLinks = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // 1) Images: upload + insert markdown (existing behavior)
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageFiles: File[] = [];
+    for (const item of items) {
+      if (item.kind !== 'file') continue;
+      const f = item.getAsFile();
+      if (!f) continue;
+      if (String(f.type || '').startsWith('image/')) imageFiles.push(f);
+    }
+    if (imageFiles.length > 0) {
+      handleContentPaste(e);
+      return;
+    }
+
+    // 2) Links / Embeds
+    const rawText = String(e.clipboardData?.getData('text/plain') || '').trim();
+    if (!rawText) return;
+    // If clipboard contains multiple tokens/lines, keep default paste.
+    if (/\s/.test(rawText)) return;
+    if (!/^https?:\/\//i.test(rawText)) return;
+
+    let url: URL | null = null;
+    try {
+      url = new URL(rawText);
+    } catch {
+      url = null;
+    }
+    if (!url) return;
+
+    const escapeHtml = (s: string) =>
+      s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const getYoutubeId = (u: URL): string | null => {
+      const host = u.hostname.toLowerCase().replace(/^www\./, '');
+      const path = u.pathname || '';
+      if (host === 'youtu.be') {
+        const id = path.split('/').filter(Boolean)[0];
+        return id || null;
+      }
+      if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com') || host === 'm.youtube.com') {
+        if (path.startsWith('/watch')) return u.searchParams.get('v');
+        const m1 = path.match(/^\/(embed|shorts)\/([^/?#]+)/i);
+        if (m1?.[2]) return m1[2];
+      }
+      return null;
+    };
+
+    const getInstagramEmbedSrc = (u: URL): string | null => {
+      const host = u.hostname.toLowerCase().replace(/^www\./, '');
+      if (host !== 'instagram.com') return null;
+      const m = (u.pathname || '').match(/^\/(p|reel|tv)\/([^/?#]+)\/?/i);
+      if (!m?.[1] || !m?.[2]) return null;
+      return `https://www.instagram.com/${m[1]}/${m[2]}/embed`;
+    };
+
+    const getXEmbedSrc = (u: URL): string | null => {
+      const host = u.hostname.toLowerCase().replace(/^www\./, '');
+      if (!(host === 'x.com' || host === 'twitter.com')) return null;
+      // twitframe is a lightweight iframe wrapper for tweets
+      return `https://twitframe.com/show?url=${encodeURIComponent(u.toString())}`;
+    };
+
+    const el = e.currentTarget;
+    const base = el.value ?? '';
+    const start = typeof el.selectionStart === 'number' ? el.selectionStart : base.length;
+    const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : start;
+
+    // If text is selected, paste URL as <a href="...">selected</a>
+    if (start !== end) {
+      const selectedText = base.slice(start, end);
+      if (!selectedText.trim()) return;
+      e.preventDefault();
+      const replacement = `<a href="${escapeHtml(rawText)}">${escapeHtml(selectedText)}</a>`;
+      const nextValue = base.slice(0, start) + replacement + base.slice(end);
+      setContent(nextValue);
+
+      const nextCaret = start + replacement.length;
+      requestAnimationFrame(() => {
+        const node = contentTextareaRef.current;
+        if (!node) return;
+        try {
+          node.focus();
+          node.setSelectionRange(nextCaret, nextCaret);
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+
+    // No selection: only auto-embed when the cursor is on an empty line.
+    const lineStart = base.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const lineEnd = (() => {
+      const idx = base.indexOf('\n', start);
+      return idx === -1 ? base.length : idx;
+    })();
+    const currentLine = base.slice(lineStart, lineEnd);
+    if (currentLine.trim() !== '') return;
+
+    const ytId = getYoutubeId(url);
+    const ytEmbedSrc = ytId ? `https://www.youtube.com/embed/${ytId}` : null;
+    const igEmbedSrc = getInstagramEmbedSrc(url);
+    const xEmbedSrc = getXEmbedSrc(url);
+
+    const embedSrc = ytEmbedSrc || igEmbedSrc || xEmbedSrc;
+    if (!embedSrc) return;
+
+    e.preventDefault();
+
+    const height = ytEmbedSrc ? 315 : igEmbedSrc ? 560 : 600;
+    const allow = ytEmbedSrc
+      ? 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
+      : undefined;
+
+    const iframe = `<div><iframe src="${escapeHtml(embedSrc)}" width="100%" height="${height}" frameborder="0"${allow ? ` allow=\"${escapeHtml(allow)}\"` : ''} allowfullscreen></iframe></div>`;
+    const fallback = `<p><a href="${escapeHtml(rawText)}">${escapeHtml(rawText)}</a></p>`;
+    const inserted = `\n${iframe}\n${fallback}\n`;
+
+    const nextValue = base.slice(0, start) + inserted + base.slice(end);
+    setContent(nextValue);
+
+    const nextCaret = start + inserted.length;
+    requestAnimationFrame(() => {
+      const node = contentTextareaRef.current;
+      if (!node) return;
+      try {
+        node.focus();
+        node.setSelectionRange(nextCaret, nextCaret);
+      } catch {
+        // ignore
+      }
+    });
+  };
+
   // Admin publish contract fields
   const [isBreaking, setIsBreaking] = useState(false);
+  const previousCategoryBeforeBreakingRef = useRef<string>('');
+  const [locationSearch, setLocationSearch] = useState('');
   // ISO string (or empty). Set automatically when publishing if empty.
   const [publishedAt, setPublishedAt] = useState('');
   const [state, setState] = useState('');
@@ -304,6 +561,112 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return generateArticleSlug({ title: titleText, slug: current });
   }
 
+  function normalizeTagKey(t: string): string {
+    return String(t || '').trim().toLowerCase();
+  }
+
+  function dedupeTags(list: string[]): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of (Array.isArray(list) ? list : [])) {
+      const cleaned = String(raw || '').trim();
+      if (!cleaned) continue;
+      const key = normalizeTagKey(cleaned);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(cleaned);
+    }
+    return out;
+  }
+
+  function hasTag(tag: string): boolean {
+    const key = normalizeTagKey(tag);
+    return (tags || []).some((t) => normalizeTagKey(t) === key);
+  }
+
+  function ensureTag(tag: string) {
+    const t = String(tag || '').trim();
+    if (!t) return;
+    setTags((prev) => dedupeTags([...(Array.isArray(prev) ? prev : []), t]));
+  }
+
+  function removeTag(tag: string) {
+    const key = normalizeTagKey(tag);
+    setTags((prev) => (Array.isArray(prev) ? prev : []).filter((t) => normalizeTagKey(t) !== key));
+  }
+
+  function toggleTag(tag: string) {
+    if (hasTag(tag)) removeTag(tag);
+    else ensureTag(tag);
+  }
+
+  function setTagsSafe(next: string[]) {
+    setTags(dedupeTags(next));
+  }
+
+  const gujaratRegionalChecked = useMemo(() => {
+    return hasTag('state:gujarat') || hasTag('gujarat');
+  }, [tags]);
+
+  const breakingChecked = useMemo(() => {
+    return isBreaking || String(category || '').trim() === 'breaking' || hasTag('breaking');
+  }, [isBreaking, category, tags]);
+
+  function handleBreakingToggle(checked: boolean) {
+    setIsBreaking(checked);
+    if (checked) {
+      if (String(category || '').trim() !== 'breaking') {
+        previousCategoryBeforeBreakingRef.current = String(category || '').trim();
+        setCategory('breaking');
+      }
+      ensureTag('breaking');
+      return;
+    }
+
+    removeTag('breaking');
+    // Best-effort restore previous category if we auto-set it.
+    const prev = String(previousCategoryBeforeBreakingRef.current || '').trim();
+    if (String(category || '').trim() === 'breaking' && prev && prev !== 'breaking') {
+      setCategory(prev);
+    }
+  }
+
+  function handleGujaratToggle(checked: boolean) {
+    if (checked) {
+      ensureTag('state:gujarat');
+      return;
+    }
+    removeTag('state:gujarat');
+  }
+
+  const selectedDistrictSlugs = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of (tags || [])) {
+      const key = normalizeTagKey(t);
+      if (key.startsWith('district:')) set.add(key.slice('district:'.length));
+    }
+    return set;
+  }, [tags]);
+
+  const selectedCitySlugs = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of (tags || [])) {
+      const key = normalizeTagKey(t);
+      if (key.startsWith('city:')) set.add(key.slice('city:'.length));
+    }
+    return set;
+  }, [tags]);
+
+  const locationSearchKey = useMemo(() => String(locationSearch || '').trim().toLowerCase(), [locationSearch]);
+  const filteredDistricts = useMemo(() => {
+    if (!locationSearchKey) return GUJARAT_DISTRICTS;
+    return GUJARAT_DISTRICTS.filter((d) => d.label.toLowerCase().includes(locationSearchKey) || d.slug.includes(locationSearchKey));
+  }, [locationSearchKey]);
+  const filteredCities = useMemo(() => {
+    if (!locationSearchKey) return GUJARAT_CITIES;
+    return GUJARAT_CITIES.filter((c) => c.label.toLowerCase().includes(locationSearchKey) || c.slug.includes(locationSearchKey));
+  }, [locationSearchKey]);
+
   // populate from initialValues first (edit mode)
   useEffect(()=> {
     const src = (computedMode === 'edit') ? (initialValues || data) : null;
@@ -329,10 +692,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const incomingStatus = (((src as any).status as any) || 'draft') as 'draft'|'scheduled'|'published';
       setStatus(incomingStatus);
       originalStatusRef.current = incomingStatus;
-      setTags(Array.isArray((src as any).tags) ? (src as any).tags : []);
+      const incomingTags = Array.isArray((src as any).tags) ? (src as any).tags : [];
+      const normalizedTags = dedupeTags(incomingTags as any);
+      setTags(normalizedTags);
       setScheduledAt((src as any).scheduledAt ? new Date((src as any).scheduledAt).toISOString().slice(0,16) : '');
 
-      setIsBreaking(!!(src as any).isBreaking);
+      const incomingCategoryKey = String(categorySlug || '').trim();
+      const hasBreakingTag0 = (normalizedTags || []).some((t) => normalizeTagKey(t) === 'breaking');
+      setIsBreaking(!!(src as any).isBreaking || hasBreakingTag0 || incomingCategoryKey === 'breaking');
       const incomingPublishedAt = (src as any).publishedAt || (src as any).publishAt || '';
       setPublishedAt(incomingPublishedAt ? new Date(incomingPublishedAt).toISOString() : '');
       setState(String((src as any).state || ''));
@@ -1063,9 +1430,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   return (
     <form onSubmit={e=> { e.preventDefault(); void beginPublishFlow(); }} className="space-y-6 pb-28">
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:h-[calc(100vh-10rem)] md:overflow-hidden md:items-start">
         {/* LEFT: Main editor */}
-        <div className="md:col-span-8 space-y-4">
+        <div className="md:col-span-8 space-y-4 md:h-full md:overflow-auto md:pr-2">
           <div className="card p-4 space-y-4">
             <div>
               <label className="block text-sm font-medium">Title</label>
@@ -1142,6 +1509,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 </label>
               </div>
               <textarea value={summary} onChange={e=> setSummary(e.target.value)} rows={3} className="w-full border px-2 py-2 rounded" />
+              {breakingChecked && !summary.trim() && (
+                <div className="mt-1 text-[11px] text-amber-700">Summary is recommended for breaking stories (ticker previews look better).</div>
+              )}
               {suggestions && (
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
                   {(['neutral','impact','analytical'] as const).map(t => (
@@ -1165,8 +1535,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             <div>
               <label className="block text-sm font-medium">Content</label>
               <textarea
+                ref={contentTextareaRef}
                 value={content}
                 onChange={e=> setContent(e.target.value)}
+                onPaste={handleContentPasteWithLinks}
                 rows={14}
                 className="w-full border px-2 py-2 rounded font-mono min-h-[360px]"
                 placeholder="Write article content..."
@@ -1176,7 +1548,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         </div>
 
         {/* RIGHT: Sidebar */}
-        <aside className="md:col-span-4 space-y-3 md:sticky md:top-20 h-fit">
+        <aside className="md:col-span-4 space-y-3 md:h-full md:overflow-auto md:pr-2">
           <div className="card p-4">
             <div className="text-sm font-semibold mb-3">Publishing Settings</div>
             <div className="space-y-3">
@@ -1196,21 +1568,114 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-medium">Breaking</label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-slate-600">Mark as Breaking</span>
-                  <Switch checked={isBreaking} onCheckedChange={setIsBreaking} label="Mark as Breaking" />
+              <div className="pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="text-xs font-medium">Breaking Controls</div>
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-600 hover:text-slate-900 underline"
+                    onClick={() => setBreakingControlsCollapsed((v) => !v)}
+                  >
+                    {breakingControlsCollapsed ? 'Show' : 'Minimize'}
+                  </button>
                 </div>
+                {!breakingControlsCollapsed && (
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={breakingChecked}
+                        onChange={(e) => handleBreakingToggle(e.target.checked)}
+                      />
+                      <span>
+                        <span className="font-medium">Mark as Breaking</span>
+                        <span className="block text-[11px] text-slate-600">Sets category to Breaking and adds tag <span className="font-mono">breaking</span>.</span>
+                      </span>
+                    </label>
+
+                    <label className="flex items-start gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={gujaratRegionalChecked}
+                        onChange={(e) => handleGujaratToggle(e.target.checked)}
+                      />
+                      <span>
+                        <span className="font-medium">Gujarat Regional</span>
+                        <span className="block text-[11px] text-slate-600">Adds tag <span className="font-mono">state:gujarat</span>.</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 border-t border-slate-200">
-                <div className="text-xs font-medium mb-2">Location (optional)</div>
-                <div className="space-y-2">
-                  <input value={state} onChange={e=> setState(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="State" />
-                  <input value={district} onChange={e=> setDistrict(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="District" />
-                  <input value={city} onChange={e=> setCity(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="City" />
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="text-xs font-medium">Location Tags (Gujarat)</div>
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-600 hover:text-slate-900 underline"
+                    onClick={() => setLocationTagsCollapsed((v) => !v)}
+                  >
+                    {locationTagsCollapsed ? 'Show' : 'Minimize'}
+                  </button>
                 </div>
+                {!locationTagsCollapsed && (
+                  <>
+                    <input
+                      value={locationSearch}
+                      onChange={(e) => setLocationSearch(e.target.value)}
+                      className="w-full border px-2 py-2 rounded text-sm"
+                      placeholder="Search districts / cities…"
+                    />
+
+                    <div className="mt-2 text-[11px] text-slate-600">Districts</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {filteredDistricts.map((d) => {
+                        const tag = `district:${d.slug}`;
+                        const selected = selectedDistrictSlugs.has(d.slug);
+                        return (
+                          <button
+                            type="button"
+                            key={d.slug}
+                            onClick={() => toggleTag(tag)}
+                            className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
+                            title={tag}
+                          >
+                            {d.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-3 text-[11px] text-slate-600">Cities</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {filteredCities.map((c) => {
+                        const tag = `city:${c.slug}`;
+                        const selected = selectedCitySlugs.has(c.slug);
+                        return (
+                          <button
+                            type="button"
+                            key={c.slug}
+                            onClick={() => toggleTag(tag)}
+                            className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
+                            title={tag}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <details className="mt-3">
+                      <summary className="text-[11px] text-slate-600 cursor-pointer select-none">Other location fields (optional)</summary>
+                      <div className="mt-2 space-y-2">
+                        <input value={state} onChange={e=> setState(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="State" />
+                        <input value={district} onChange={e=> setDistrict(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="District" />
+                        <input value={city} onChange={e=> setCity(e.target.value)} className="w-full border px-2 py-2 rounded text-sm" placeholder="City" />
+                      </div>
+                    </details>
+                  </>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium">Language</label>
@@ -1240,7 +1705,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               )}
               <div>
                 <label className="block text-xs font-medium mb-1">Tags</label>
-                <TagInput value={tags} onChange={setTags} />
+                <TagInput value={tags} onChange={setTagsSafe} />
               </div>
 
               {/* Cover Image (Upload-only) */}
@@ -1273,8 +1738,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           </div>
 
           <div className="card p-4">
-            <div className="text-sm font-semibold mb-3">Quality Tools</div>
-            <Accordion items={accordionItems} />
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="text-sm font-semibold">Quality Tools</div>
+              <button
+                type="button"
+                className="text-xs text-slate-600 hover:text-slate-900 underline"
+                onClick={() => setQualityToolsCollapsed((v) => !v)}
+              >
+                {qualityToolsCollapsed ? 'Show' : 'Minimize'}
+              </button>
+            </div>
+            {!qualityToolsCollapsed && <Accordion items={accordionItems} />}
           </div>
         </aside>
       </div>

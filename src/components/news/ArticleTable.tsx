@@ -26,9 +26,11 @@ interface Props {
   onSelectIds?: (ids: string[]) => void;
   onPageChange?: (page: number) => void;
   highlightId?: string;
+  quickView?: 'all' | 'breaking' | 'gujarat-breaking';
+  onQuickViewCounts?: (counts: { all: number; breaking: number; gujaratBreaking: number }) => void;
 }
 
-export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange, highlightId }) => {
+export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange, highlightId, quickView = 'all', onQuickViewCounts }) => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -135,6 +137,10 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const mutateUnpublish = useMutation({
     mutationFn: (id: string) => updateArticleStatus(id, 'draft'),
     onSuccess: () => { toast.success('Unpublished'); },
+    onError: (err: any) => {
+      const n = normalizeError(err, 'Unpublish failed');
+      toast.error(n.message || 'Unpublish failed');
+    },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
   });
   const mutateSchedule = useMutation({
@@ -195,12 +201,55 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
 
   // UX requirement: Deleted items must NOT appear in the "All" tab.
   // They should only appear when status === 'deleted'.
-  const rows: Article[] = React.useMemo(() => {
+  const baseRows: Article[] = React.useMemo(() => {
     const view = (params.status ?? 'all') as any;
     const cleaned = rawRows.filter((r) => !isSeededSample(r));
     if (view === 'all') return cleaned.filter((r) => (r.status ?? 'draft') !== 'deleted');
     return cleaned;
   }, [rawRows, params.status, isSeededSample]);
+
+  function norm(s: any): string {
+    return String(s || '').trim().toLowerCase();
+  }
+
+  function getTags(a: Article): string[] {
+    const t = (a as any)?.tags;
+    return Array.isArray(t) ? t.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  }
+
+  function isBreakingStory(a: Article): boolean {
+    const cat = norm((a as any)?.category);
+    const tags = getTags(a).map((t) => norm(t));
+    return cat === 'breaking' || tags.includes('breaking');
+  }
+
+  function isGujaratBreakingStory(a: Article): boolean {
+    if (!isBreakingStory(a)) return false;
+    const tags = getTags(a).map((t) => norm(t));
+    return (
+      tags.includes('state:gujarat')
+      || tags.includes('gujarat')
+      || tags.some((t) => t.startsWith('district:'))
+      || tags.some((t) => t.startsWith('city:'))
+    );
+  }
+
+  const quickCounts = React.useMemo(() => {
+    const all = baseRows.length;
+    const breaking = baseRows.filter(isBreakingStory).length;
+    const gujaratBreaking = baseRows.filter(isGujaratBreakingStory).length;
+    return { all, breaking, gujaratBreaking };
+  }, [baseRows]);
+
+  React.useEffect(() => {
+    onQuickViewCounts?.(quickCounts);
+  }, [onQuickViewCounts, quickCounts]);
+
+  const rows: Article[] = React.useMemo(() => {
+    if (quickView === 'breaking') return baseRows.filter(isBreakingStory);
+    if (quickView === 'gujarat-breaking') return baseRows.filter(isGujaratBreakingStory);
+    return baseRows;
+  }, [baseRows, quickView]);
 
   const [didScrollHighlight, setDidScrollHighlight] = React.useState(false);
   React.useEffect(() => {
@@ -226,6 +275,15 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   if (error) {
     const n = normalizeError(error, 'Error loading articles');
     return <div className="text-red-600">{n.message}</div>;
+  }
+
+  if (!rows.length && (quickView === 'breaking' || quickView === 'gujarat-breaking')) {
+    return (
+      <div className="rounded border bg-white p-4 text-sm text-slate-700">
+        <div className="font-semibold">No breaking stories found.</div>
+        <div className="mt-1 text-xs text-slate-600">Create one from Add News → Mark as Breaking.</div>
+      </div>
+    );
   }
 
   const page = data?.page || 1;
@@ -272,6 +330,15 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
                   <span>{r.title}</span>
                   <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px]">{r.language?.toUpperCase()}</span>
                   <span className="px-1 py-0.5 rounded bg-sky-700 text-white text-[10px]">{r.category}</span>
+                  {(quickView === 'breaking' || quickView === 'gujarat-breaking') && isBreakingStory(r) && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px]">⚡ Breaking</span>
+                  )}
+                  {(quickView === 'breaking' || quickView === 'gujarat-breaking') && (() => {
+                    const tags = getTags(r).map((t) => norm(t));
+                    const hasLoc = tags.some((t) => t.startsWith('district:')) || tags.some((t) => t.startsWith('city:'));
+                    if (!hasLoc) return null;
+                    return <span className="px-1.5 py-0.5 rounded bg-slate-700 text-white text-[10px]">📍 district/city</span>;
+                  })()}
                 </div>
               </td>
               <td className="p-2"><span className={`px-2 py-0.5 rounded text-white ${badge}`}>{st}</span></td>

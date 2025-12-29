@@ -68,7 +68,6 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   })();
 
-  const DEV_PORT = 5173;
   // Dev diagnostic: show current admin API proxy target
   if (mode === 'development') {
     // eslint-disable-next-line no-console
@@ -140,10 +139,9 @@ export default defineConfig(({ mode }): UserConfig => {
 
       server: {
         host: true,
-        port: DEV_PORT,
         open: true,
-        // Keep the standard Vite port
-        strictPort: true,
+        // Prefer the standard Vite port, but don't crash if it's already used.
+        strictPort: false,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {

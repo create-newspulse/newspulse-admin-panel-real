@@ -76,10 +76,9 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             host: true,
-            port: 5173,
             open: true,
-            // Enforce fixed port for CORS allowlist compatibility
-            strictPort: true,
+            // Prefer 5173, but don't crash if it's already used.
+            strictPort: false,
             cors: true,
             // Proxy all API + sockets to backend in dev
             proxy: {
