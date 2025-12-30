@@ -50,7 +50,8 @@ export function getApiBase(): string {
   // 1) Preferred: explicit admin API origin (absolute).
   // Example: https://<backend>.onrender.com
   const adminOriginRaw = (
-    envAny.VITE_ADMIN_API_ORIGIN
+    envAny.VITE_API_ORIGIN
+    || envAny.VITE_ADMIN_API_ORIGIN
     || envAny.VITE_ADMIN_API_URL
     || envAny.VITE_ADMIN_API_BASE_URL
     || ''

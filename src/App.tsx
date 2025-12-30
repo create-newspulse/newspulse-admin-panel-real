@@ -103,6 +103,7 @@ import LiveTvSettings from '@pages/admin/settings/public-site/LiveTvSettings';
 import FooterSettings from '@pages/admin/settings/public-site/FooterSettings';
 import LanguageThemeSettings from '@pages/admin/settings/public-site/LanguageThemeSettings';
 import PublicPreview from '@pages/admin/settings/public-site/PublicPreview';
+import TrendingTopicsManager from '@pages/admin/settings/TrendingTopicsManager';
 import PanelRouter from '@/routes/PanelRouter';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
 import SimpleLogin from '@pages/auth/SimpleLogin';
@@ -283,6 +284,10 @@ function App() {
               <Route path="/admin-ai-logs" element={<Navigate to="/admin/ai-logs" replace />} />
               <Route path="/admin-dashboard" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/admin-settings" element={<Navigate to="/admin/settings" replace />} />
+
+              {/* Trending Topics quick aliases */}
+              <Route path="/trending-topics" element={<FounderRoute><Navigate to="/admin/settings/trending-topics" replace /></FounderRoute>} />
+              <Route path="/settings/trending-topics" element={<FounderRoute><Navigate to="/admin/settings/trending-topics" replace /></FounderRoute>} />
               {/* Settings Center (two-mode) */}
               <Route
                 path="/admin/settings"
@@ -293,6 +298,8 @@ function App() {
                 }
               >
                 <Route index element={<Navigate to="admin-panel" replace />} />
+
+                <Route path="trending-topics" element={<TrendingTopicsManager />} />
 
                 <Route path="admin-panel" element={<AdminPanelSettingsLayout />}>
                   <Route index element={<Navigate to="team" replace />} />
