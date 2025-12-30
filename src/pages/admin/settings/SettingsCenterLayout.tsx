@@ -22,9 +22,6 @@ export default function SettingsCenterLayout() {
             <NavLink to="public-site" className={tabCls} end>
               Public Site Settings
             </NavLink>
-            <NavLink to="trending-topics" className={tabCls}>
-              Trending Topics
-            </NavLink>
           </div>
         </div>
 

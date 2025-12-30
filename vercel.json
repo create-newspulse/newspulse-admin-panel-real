@@ -9,10 +9,6 @@
       "destination": "/api/admin-proxy/:path*"
     },
     {
-      "source": "/admin-auth/:path*",
-      "destination": "/api/admin-auth/:path*"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

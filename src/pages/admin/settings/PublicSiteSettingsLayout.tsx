@@ -22,7 +22,6 @@ export default function PublicSiteSettingsLayout() {
       <aside className="md:col-span-1 space-y-2">
         <NavLink to="homepage" className={linkCls}>Homepage Modules</NavLink>
         <NavLink to="tickers" className={linkCls}>Tickers</NavLink>
-        <NavLink to="/admin/settings/trending-topics" className={linkCls}>Trending Topics</NavLink>
         <NavLink to="live-tv" className={linkCls}>Live TV</NavLink>
         <NavLink to="footer" className={linkCls}>Footer</NavLink>
         <NavLink to="language-theme" className={linkCls}>Language & Theme</NavLink>

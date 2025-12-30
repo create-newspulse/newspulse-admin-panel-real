@@ -33,7 +33,7 @@ if (import.meta.env.PROD) {
   try {
     if (typeof window !== 'undefined') {
       window.addEventListener('np:api-config-error', (ev: any) => {
-        const msg = ev?.detail?.message || 'Backend is not configured. Set VITE_API_ORIGIN (or VITE_ADMIN_API_ORIGIN), or use proxy mode (/admin-api/* + ADMIN_BACKEND_URL on Vercel).';
+        const msg = ev?.detail?.message || 'Backend is not configured. Please set VITE_API_URL.';
         toast.error(msg);
       });
     }
