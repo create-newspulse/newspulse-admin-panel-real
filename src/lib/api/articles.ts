@@ -12,6 +12,7 @@ export interface Article {
   summary?: string;
   content?: string;
   imageUrl?: string;
+  translationGroupId?: string;
   // Some environments/public site use coverImageUrl instead of imageUrl.
   coverImageUrl?: string;
   // Canonical field requested by admin publish contract
@@ -141,6 +142,9 @@ export async function listArticles(params: {
   const query: Record<string, any> = { ...params };
   // Contract: All view should not force legacy status lists; omit status filter.
   if (query.status === 'all') delete query.status;
+
+  // Some backends use `lang` instead of `language`.
+  if (query.language && !query.lang) query.lang = query.language;
 
   // Prefer the normal articles route first:
   // Proxy mode:   GET /admin-api/articles  (proxy rewrites to backend /api/articles)

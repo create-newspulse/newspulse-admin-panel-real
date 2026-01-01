@@ -19,8 +19,81 @@ import PreviewModal from '@/components/preview/PreviewModal';
 import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailability';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
-import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey } from '@/lib/articleCategories';
+import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
+
+type LangCode = 'en' | 'hi' | 'gu';
+const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
+
+function normalizeLang(input: any): LangCode {
+  const v = String(input || '').trim().toLowerCase();
+  if (v === 'en' || v === 'hi' || v === 'gu') return v;
+  return 'en';
+}
+
+type ScriptKind = 'latin' | 'devanagari' | 'gujarati';
+const RE_LATIN = /\p{Script=Latin}/u;
+const RE_DEVANAGARI = /\p{Script=Devanagari}/u;
+const RE_GUJARATI = /\p{Script=Gujarati}/u;
+
+function expectedScriptForLang(lang: LangCode): ScriptKind {
+  if (lang === 'hi') return 'devanagari';
+  if (lang === 'gu') return 'gujarati';
+  return 'latin';
+}
+
+function formatScriptKind(k: ScriptKind): string {
+  if (k === 'devanagari') return 'Devanagari';
+  if (k === 'gujarati') return 'Gujarati';
+  return 'Latin';
+}
+
+function analyzeScripts(text: string): { latin: number; devanagari: number; gujarati: number; total: number } {
+  const raw = String(text || '');
+  let latin = 0;
+  let devanagari = 0;
+  let gujarati = 0;
+
+  for (const ch of raw) {
+    if (RE_GUJARATI.test(ch)) { gujarati += 1; continue; }
+    if (RE_DEVANAGARI.test(ch)) { devanagari += 1; continue; }
+    if (RE_LATIN.test(ch)) { latin += 1; continue; }
+  }
+
+  const total = latin + devanagari + gujarati;
+  return { latin, devanagari, gujarati, total };
+}
+
+function mixedScriptWarning(lang: LangCode, label: 'Title' | 'Summary', text: string): string | null {
+  const stats = analyzeScripts(text);
+  // Keep this lightweight and avoid noise on short strings.
+  if (stats.total < 12) return null;
+
+  const expected = expectedScriptForLang(lang);
+  const expectedCount = expected === 'latin' ? stats.latin : expected === 'devanagari' ? stats.devanagari : stats.gujarati;
+  const expectedShare = expectedCount / stats.total;
+  if (expectedShare >= 0.6) return null;
+
+  const candidates: Array<{ kind: ScriptKind; count: number }> = [
+    { kind: 'latin', count: stats.latin },
+    { kind: 'devanagari', count: stats.devanagari },
+    { kind: 'gujarati', count: stats.gujarati },
+  ];
+  candidates.sort((a, b) => b.count - a.count);
+  const dominant = candidates[0];
+  const dominantShare = dominant.count / stats.total;
+
+  if (dominant.kind !== expected && dominantShare >= 0.6) {
+    return `${label} looks mostly ${formatScriptKind(dominant.kind)}, but Language is set to ${lang}.`;
+  }
+
+  const present = candidates.filter((c) => (c.count / stats.total) >= 0.2).map((c) => formatScriptKind(c.kind));
+  if (present.length >= 2 && expectedShare < 0.4) {
+    return `${label} mixes ${present.join(' + ')} scripts; consider adjusting Language or text.`;
+  }
+
+  return null;
+}
 
 const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
   { label: 'Ahmedabad', slug: 'ahmedabad' },
@@ -119,7 +192,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
-  const [language, setLanguage] = useState<string>('en');
+  const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
+  const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
   // Keep original status to ensure Save Draft never downgrades/changes live states
   const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
@@ -383,6 +457,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const wordCount = useMemo(() => countWords(content), [content]);
 
+  const mixedScriptWarnings = useMemo(() => {
+    const w1 = mixedScriptWarning(language, 'Title', title);
+    const w2 = mixedScriptWarning(language, 'Summary', summary);
+    return [w1, w2].filter(Boolean) as string[];
+  }, [language, title, summary]);
+
   // Admin publish contract fields
   const [isBreaking, setIsBreaking] = useState(false);
   const previousCategoryBeforeBreakingRef = useRef<string>('');
@@ -400,6 +480,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     content: string;
     category: string;
     language: string;
+    translationGroupId: string;
     status: 'draft' | 'scheduled' | 'published';
     tags: string[];
     coverImage: string;
@@ -417,7 +498,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     summary: '',
     content: '',
     category: '',
-    language: 'en',
+    language: DEFAULT_CREATE_LANGUAGE,
+    translationGroupId: '',
     status: 'draft',
     tags: [],
     coverImage: '',
@@ -439,7 +521,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setAutoSummary(true);
     setContent('');
     setCategory('');
-    setLanguage('en');
+    setLanguage(DEFAULT_CREATE_LANGUAGE);
+    setTranslationGroupId('');
     setStatus('draft');
     setTags([]);
     setScheduledAt('');
@@ -478,6 +561,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       content: (next?.content ?? content ?? '').toString(),
       category: (next?.category ?? category ?? '').toString(),
       language: (next?.language ?? language ?? '').toString(),
+      translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
       status: (next?.status ?? status) as Snapshot['status'],
       tags: Array.isArray(next?.tags) ? (next?.tags as string[]) : tags,
       coverImage: (next?.coverImage ?? imageUrl ?? '').toString(),
@@ -498,6 +582,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       content: (s.content || ''),
       category: (s.category || ''),
       language: (s.language || ''),
+      translationGroupId: (s.translationGroupId || ''),
       status: (s.status || 'draft'),
       tags: (Array.isArray(s.tags) ? s.tags : []).map((t) => String(t || '').trim()).filter(Boolean),
       coverImage: (s.coverImage || ''),
@@ -634,26 +719,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [tags]);
 
   const breakingChecked = useMemo(() => {
-    return isBreaking || String(category || '').trim() === 'breaking' || hasTag('breaking');
+    return isBreaking || hasTag('breaking') || String(category || '').trim() === 'breaking';
   }, [isBreaking, category, tags]);
 
   function handleBreakingToggle(checked: boolean) {
     setIsBreaking(checked);
     if (checked) {
-      if (String(category || '').trim() !== 'breaking') {
-        previousCategoryBeforeBreakingRef.current = String(category || '').trim();
-        setCategory('breaking');
-      }
       ensureTag('breaking');
       return;
     }
 
     removeTag('breaking');
-    // Best-effort restore previous category if we auto-set it.
-    const prev = String(previousCategoryBeforeBreakingRef.current || '').trim();
-    if (String(category || '').trim() === 'breaking' && prev && prev !== 'breaking') {
-      setCategory(prev);
-    }
+    // If legacy data had category="breaking", clear it so the editor must pick a real category.
+    if (String(category || '').trim() === 'breaking') setCategory('');
   }
 
   function handleGujaratToggle(checked: boolean) {
@@ -712,8 +790,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           : (typeof incomingCategory === 'string'
             ? incomingCategory
             : '');
-      setCategory(String(categorySlug || '').trim());
-      setLanguage(((src as any).language as any) || 'en');
+
+      const normalizedCategory = normalizeArticleCategoryKey(categorySlug);
+      setCategory(normalizedCategory || '');
+      setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
+      setTranslationGroupId(String((src as any).translationGroupId || ''));
       const incomingStatus = (((src as any).status as any) || 'draft') as 'draft'|'scheduled'|'published';
       setStatus(incomingStatus);
       originalStatusRef.current = incomingStatus;
@@ -752,7 +833,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           category: (typeof (src as any).category === 'object' && (src as any).category)
             ? String(((src as any).category.slug ?? (src as any).category._id ?? '') || '')
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
-          language: ((src as any).language as any) || 'en',
+          language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
+          translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
           coverImage: String(incomingImage || ''),
@@ -777,9 +859,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   useEffect(()=> { setReadingSeconds(readingTimeSec(content)); }, [content]);
 
   const languageOptions = useMemo(() => {
-    const remote = languagesQuery.data;
-    return (remote && remote.length) ? remote : (['en', 'hi', 'gu'] as string[]);
-  }, [languagesQuery.data]);
+    // Hard rule for Option A+ multilingual publishing.
+    return ['en', 'hi', 'gu'] as string[];
+  }, []);
 
   const languageLabel = (code: string) => {
     const c = (code || '').toLowerCase();
@@ -938,8 +1020,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         summary: string;
         content: string;
         category?: string;
+        postType?: string;
+        isFounder?: boolean;
         status: PublicArticleStatus;
         language: 'en'|'hi'|'gu';
+        lang: 'en'|'hi'|'gu';
+        translationGroupId?: string;
         publishedAt?: string;
         isBreaking: boolean;
         state?: string;
@@ -948,18 +1034,26 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImage?: string;
         tags: string[];
       } => {
-        const categoryKey = (category || '').trim();
+        const categoryKeyRaw = (category || '').trim();
+        const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
         const publishedAtToSend = opts.status === 'published'
           ? (opts.publishedAt || new Date().toISOString())
           : undefined;
+
+        const isViralVideo = categoryKey === 'viral-videos';
+        const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
         return {
           title,
           slug: safeSlug,
           summary,
           content,
           category: categoryKey || undefined,
+          postType: isViralVideo ? 'video' : undefined,
+          isFounder: isFounderEditorial ? true : undefined,
           status: opts.status,
           language: (language as any) as 'en'|'hi'|'gu',
+          lang: (language as any) as 'en'|'hi'|'gu',
+          translationGroupId: (translationGroupId || '').trim() ? (translationGroupId || '').trim() : undefined,
           publishedAt: publishedAtToSend,
           isBreaking,
           state: trimOrUndef(state),
@@ -970,8 +1064,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         };
       };
 
-      const categoryKey = (category || '').trim();
-      const categoryAllowed = !categoryKey || isAllowedArticleCategoryKey(categoryKey);
+      const categoryKeyRaw = (category || '').trim();
+      const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
+      const categoryAllowed = !categoryKeyRaw || !!categoryKey;
 
       const publishedAtIso = (() => {
         const v = (publishedAt || '').trim();
@@ -1050,6 +1145,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     onSuccess: (result: any) => {
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
+      const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
         (effectiveId ||
           raw?.__npCreatedId ||
@@ -1087,9 +1183,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         originalStatusRef.current = statusToSend;
       }
 
+      if (savedGroupId && savedGroupId !== translationGroupId) {
+        setTranslationGroupId(savedGroupId);
+      }
+
       setLastSavedSnapshot(buildSnapshot({
         slug: safeSlug,
         status: statusToSend,
+        translationGroupId: savedGroupId || translationGroupId,
         coverImage: imageUrl,
         isBreaking,
         publishedAt,
@@ -1201,6 +1302,50 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setIsUploadingCover(false);
     }
   }
+
+  async function createLinkedTranslation(target: 'hi' | 'gu') {
+    if (!effectiveId) {
+      toast.error('Save this story first to create a translation');
+      return;
+    }
+
+    const gid = String(translationGroupId || '').trim();
+    if (!gid) {
+      toast.error('Save once to generate Translation Group ID');
+      return;
+    }
+
+    const categoryKey = normalizeArticleCategoryKey(String(category || '').trim());
+    if (!categoryKey) {
+      toast.error('Category required to create translation');
+      return;
+    }
+
+    try {
+      const payload: any = {
+        title,
+        summary,
+        content,
+        category: categoryKey,
+        status: 'draft',
+        language: target,
+        lang: target,
+        translationGroupId: gid,
+      };
+
+      const created: any = await createArticle(payload);
+      const createdPayload = created?.article || created?.data?.article || created?.data || created;
+      const newId: string | null =
+        createdPayload?._id || createdPayload?.id || created?._id || created?.id || null;
+
+      if (!newId) throw new Error('Failed to create translation (missing id)');
+
+      toast.success(`Created ${languageLabel(target)} draft`);
+      navigate(`/admin/articles/${encodeURIComponent(String(newId))}/edit`);
+    } catch (err: any) {
+      toast.error(normalizeError(err, 'Failed to create translation').message);
+    }
+  }
   useEffect(()=> {
     if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current);
     autoSaveRef.current = window.setInterval(()=> {
@@ -1214,7 +1359,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, imageUrl, category, language, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, imageUrl, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(content || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -1247,7 +1392,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, status, tags, imageUrl, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, imageUrl, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -1617,7 +1762,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       />
                       <span>
                         <span className="font-medium">Mark as Breaking</span>
-                        <span className="block text-[11px] text-slate-600">Sets category to Breaking and adds tag <span className="font-mono">breaking</span>.</span>
+                        <span className="block text-[11px] text-slate-600">Adds tag <span className="font-mono">breaking</span> and sets <span className="font-mono">isBreaking</span> (does not change category).</span>
                       </span>
                     </label>
 
@@ -1707,15 +1852,54 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-medium">Language</label>
-                <select value={language} onChange={e=> setLanguage(e.target.value)} className="w-full border px-2 py-2 rounded" disabled={languagesQuery.isLoading}>
-                  {languageOptions.map(code => (
-                    <option key={code} value={code}>{languageLabel(code)}</option>
-                  ))}
+                <select value={language} onChange={e=> setLanguage(normalizeLang(e.target.value))} className="w-full border px-2 py-2 rounded" required>
+                  <option value="en">English (en)</option>
+                  <option value="hi">Hindi (hi)</option>
+                  <option value="gu">Gujarati (gu)</option>
                 </select>
-                {languagesQuery.isLoading && <div className="mt-1 text-[11px] text-slate-500">Loading languages…</div>}
                 {!languagesQuery.isLoading && !languageValidForPublish && language && (
                   <div className="mt-1 text-xs text-red-600">Selected language is not supported.</div>
                 )}
+                {mixedScriptWarnings.length > 0 && (
+                  <div className="mt-1 space-y-1">
+                    {mixedScriptWarnings.map((m) => (
+                      <div key={m} className="text-[11px] text-amber-700">{m}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium">Translation Group ID (optional)</label>
+                <input
+                  value={translationGroupId}
+                  onChange={(e) => setTranslationGroupId(e.target.value)}
+                  className="w-full border px-2 py-2 rounded text-sm"
+                  placeholder="Leave empty to auto-generate on save"
+                />
+                {translationGroupId ? (
+                  <div className="mt-1 text-[11px] text-slate-500">Group: {translationGroupId}</div>
+                ) : (
+                  <div className="mt-1 text-[11px] text-slate-500">Save once to generate a group id.</div>
+                )}
+
+                {effectiveId && String(translationGroupId || '').trim() ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {language !== 'hi' ? (
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
+                        onClick={() => createLinkedTranslation('hi')}
+                      >Create Hindi version</button>
+                    ) : null}
+                    {language !== 'gu' ? (
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
+                        onClick={() => createLinkedTranslation('gu')}
+                      >Create Gujarati version</button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div>
                 <label className="block text-xs font-medium">Status</label>

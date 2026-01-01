@@ -84,6 +84,15 @@ function formatUpdatedAt(a: Article): string {
   return new Date(ts).toLocaleString();
 }
 
+function formatLangTag(code: any): string {
+  const c = String(code || '').trim().toLowerCase();
+  if (!c) return '';
+  if (c === 'en') return 'EN';
+  if (c === 'hi') return 'HI';
+  if (c === 'gu') return 'GU';
+  return c.slice(0, 4).toUpperCase();
+}
+
 function getAuthorName(a: Article): string {
   const authorRaw = (a as any)?.author;
 
@@ -697,7 +706,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                             {st}
                           </span>
                         </td>
-                        <td className="px-3 py-3 align-top text-xs text-slate-700">{(a.language || '').toUpperCase() || '—'}</td>
+                        <td className="px-3 py-3 align-top">
+                          {formatLangTag((a as any)?.lang ?? a.language) ? (
+                            <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
+                              {formatLangTag((a as any)?.lang ?? a.language)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-700">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 align-top"><LocationBadge a={a} /></td>
                         <td className="px-3 py-3 align-top text-xs text-slate-700 whitespace-nowrap">{formatUpdatedAt(a)}</td>
                         <td className="px-3 py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
@@ -744,7 +761,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     </div>
                     <div>
                       <div className="text-[11px] text-slate-500">Language</div>
-                      <div>{(a.language || '').toUpperCase() || '—'}</div>
+                      <div>
+                        {formatLangTag((a as any)?.lang ?? a.language) ? (
+                          <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
+                            {formatLangTag((a as any)?.lang ?? a.language)}
+                          </span>
+                        ) : (
+                          <span>—</span>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[11px] text-slate-500">Updated</div>
