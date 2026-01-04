@@ -6,6 +6,11 @@
 # Direct mode: exclude all Serverless Functions so Hobby plan stays under limit
 api/**
 
+# Re-include the minimal functions needed for production proxy mode
+!api/admin-proxy/**
+!api/system/proxy-selftest.js
+!api/ping.js
+
 # Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
 /admin-backend/
 /backend/
