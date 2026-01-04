@@ -10,14 +10,13 @@ api/**
 !api
 !api/ping.js
 
-# system functions (un-ignore dir + files)
+# system functions (only the self-test endpoint)
 !api/system
-!api/system/*
 !api/system/proxy-selftest.js
 
-# admin proxy function (un-ignore dir + files)
+# admin proxy function (single catch-all handler)
 !api/admin-proxy
-!api/admin-proxy/*
+!api/admin-proxy/[...path].js
 
 # Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
 /admin-backend/
