@@ -16,7 +16,7 @@ api/**
 
 # admin proxy function (single catch-all handler)
 !api/admin-proxy
-!api/admin-proxy/[...path].js
+!api/admin-proxy/**
 
 # Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
 /admin-backend/
