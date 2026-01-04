@@ -1,6 +1,15 @@
 import { SiteSettingsSchema, type SiteSettings, DEFAULT_SETTINGS } from '@/types/siteSettings';
 import { adminJson } from '@/lib/http/adminFetch';
 
+function isProxyMode(): boolean {
+  try {
+    const raw = ((import.meta as any)?.env?.VITE_API_URL || '').toString().trim();
+    return raw.startsWith('/');
+  } catch {
+    return false;
+  }
+}
+
 // Public settings shape (subset safe for frontend)
 export type PublicSettings = Record<string, any>;
 
@@ -54,8 +63,11 @@ async function putAdminSettings(patch: Partial<SiteSettings>, audit?: { action?:
   let raw: any;
   // Update via single endpoint; do not auto-refetch via settings/load
   raw = await adminJson<any>('/admin/settings', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}) },
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(audit?.action && isProxyMode() ? { 'X-Admin-Action': audit.action } : {}),
+    },
     body: JSON.stringify(patch || {}),
   });
   if (raw && typeof raw === 'object' && raw.settings) raw = raw.settings;
