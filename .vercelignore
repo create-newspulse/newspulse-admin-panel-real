@@ -7,6 +7,9 @@
 api/**
 
 # Re-include the minimal functions needed for production proxy mode
+!api/
+!api/system/
+!api/admin-proxy/
 !api/admin-proxy/**
 !api/system/proxy-selftest.js
 !api/ping.js
