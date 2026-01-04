@@ -20,6 +20,7 @@ api/**
 
 # Ignore backend/server code not needed on Vercel (runs elsewhere like Render)
 /admin-backend/
+/admin/
 /backend/
 /newspulse-backend/
 /render-backend-real/
