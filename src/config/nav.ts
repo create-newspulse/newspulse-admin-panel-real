@@ -19,7 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'add', label:'Add News', path:'/add', roles:['editor','admin','founder'], icon:'📰' },
   // Keep main nav pointing to /admin/articles (alias routes handle others)
   { key:'manage', label:'Manage News', path:'/admin/articles', roles:['editor','admin','founder','moderator'], icon:'📁' },
-  { key:'drafts', label:'Draft Desk', path:'/admin/drafts', roles:['editor','admin','founder'], icon:'📰' },
+  { key:'drafts', label:'Draft Desk', path:'/draft-desk', roles:['editor','admin','founder'], icon:'📰' },
   { key:'community-reporter', label:'Community Reporter Queue', path:'/community/reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   // Founder preview – Community Reporter self-service workspace
   { key:'reporter-portal', label:'Reporter Portal', path:'/community/reporter-portal', roles:['admin','founder'], icon:'👥' },

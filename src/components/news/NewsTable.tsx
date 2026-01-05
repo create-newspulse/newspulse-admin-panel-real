@@ -231,13 +231,25 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   // Client-side search + quick view filtering
   const searchKey = React.useMemo(() => norm(search), [search]);
 
+  const isSeededSample = React.useCallback((a: Article) => {
+    const title = String((a as any)?.title || '').toLowerCase();
+    const authorName = String(getAuthorName(a) || '').toLowerCase();
+    const tags = getTags(a).map((t) => norm(t));
+
+    // Backend seed artifacts we never want to show in the admin list.
+    if (authorName === 'seeder') return true;
+    if (title.startsWith('sample article')) return true;
+    if (tags.includes('demo') && tags.includes('seed')) return true;
+    return false;
+  }, []);
+
   const baseRows = React.useMemo(() => {
     // Keep parity with old behavior: hide deleted in All tab
     const view = (params.status ?? 'all') as any;
-    const cleaned = rawRows;
+    const cleaned = rawRows.filter((r) => !isSeededSample(r));
     if (view === 'all') return cleaned.filter((r) => (r.status ?? 'draft') !== 'deleted');
     return cleaned;
-  }, [rawRows, params.status]);
+  }, [rawRows, params.status, isSeededSample]);
 
   const searchedRows = React.useMemo(() => {
     if (!searchKey) return baseRows;

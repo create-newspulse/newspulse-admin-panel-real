@@ -77,6 +77,7 @@ import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
 import DraftDeskPage from '@pages/admin/DraftDeskPage';
+import DraftWorkspacePage from '@pages/admin/DraftWorkspacePage';
 import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
 import ReporterPortal from '@pages/community/ReporterPortal';
@@ -104,6 +105,7 @@ import FooterSettings from '@pages/admin/settings/public-site/FooterSettings';
 import LanguageThemeSettings from '@pages/admin/settings/public-site/LanguageThemeSettings';
 import PublicPreview from '@pages/admin/settings/public-site/PublicPreview';
 import PanelRouter from '@/routes/PanelRouter';
+import LegacyArticleEditRedirect from '@/routes/LegacyArticleEditRedirect';
 // UnifiedLogin deprecated in favor of SimpleLogin for a single flow
 import SimpleLogin from '@pages/auth/SimpleLogin';
 import { RequireRole } from '@/routes/guards';
@@ -198,6 +200,10 @@ function App() {
               <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New dedicated modern edit route using ArticleForm */}
               <Route path="/admin/articles/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ArticleEditPage /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Legacy edit URLs (backward compatibility) */}
+              <Route path="/admin/manage-news/:id/edit" element={<ProtectedRoute><LockCheckWrapper><LegacyArticleEditRedirect /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/manage-news/:id/edit" element={<ProtectedRoute><LockCheckWrapper><LegacyArticleEditRedirect /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/news/:id/edit" element={<ProtectedRoute><LockCheckWrapper><LegacyArticleEditRedirect /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/push-history" element={<ProtectedRoute><LockCheckWrapper><PushHistory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/add-category" element={<ProtectedRoute><LockCheckWrapper><AddCategory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
@@ -215,7 +221,11 @@ function App() {
               {/* Ads Manager */}
               <Route path="/admin/ads" element={<ProtectedRoute><LockCheckWrapper><AdsManager /></LockCheckWrapper></ProtectedRoute>} />
               {/* Draft Desk */}
-              <Route path="/admin/drafts" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/draft-desk" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/draft-desk/:id" element={<ProtectedRoute><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></ProtectedRoute>} />
+              {/* Legacy Draft Desk routes */}
+              <Route path="/admin/drafts" element={<Navigate to="/draft-desk" replace />} />
+              <Route path="/admin/drafts/:id" element={<Navigate to="/draft-desk/:id" replace />} />
 
               {/* 📡 Broadcast Center (Founder-only) */}
               <Route path="/broadcast-center" element={<RequireRole allow={['founder']}><BroadcastCenter /></RequireRole>} />

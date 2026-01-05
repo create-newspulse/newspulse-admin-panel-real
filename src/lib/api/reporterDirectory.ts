@@ -92,12 +92,23 @@ export async function listReporterContacts(params?: {
     const id = String(c._id ?? c.id ?? c.reporterKey ?? c.userId ?? '');
     const fullName = (c.fullName ?? c.name ?? c.userName ?? c.contactName ?? '').toString().trim();
     const email = (c.email ?? c.contactEmail ?? '').toString().trim();
-    const phone = (c.phone ?? c.contactPhone ?? '').toString().trim();
+    const phone = (
+      c.phone
+      ?? c.phoneFull
+      ?? c.phoneNumber
+      ?? c.contactPhone
+      ?? c.contact?.phone
+      ?? ''
+    ).toString().trim();
     const type = (c.type ?? c.reporterType ?? c.kind ?? '').toString().toLowerCase();
     const status = (c.status ?? '').toString().toLowerCase();
     const verificationStatus = (c.verificationStatus ?? c.verification ?? c.verificationLevel ?? '').toString().toLowerCase();
     const storiesCount = Number(c.storiesCount ?? c.totalStories ?? 0) || 0;
     const lastStoryAt = (c.lastStoryAt ?? c.lastStory ?? c.lastStoryDate ?? '').toString();
+
+    const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? null);
+    const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? null);
+    const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? null);
 
     return {
       id: id || cryptoRandomFallbackId(),
@@ -105,9 +116,9 @@ export async function listReporterContacts(params?: {
       name: fullName || null,
       email: email || null,
       phone: phone || null,
-      city: (c.city ?? null),
-      state: (c.state ?? null),
-      country: (c.country ?? null),
+      city: (city ?? null),
+      state: (state ?? null),
+      country: (country ?? null),
       notes: (c.notes ?? null),
       totalStories: storiesCount,
       pendingStories: Number(c.pendingStories ?? 0) || 0,

@@ -3,7 +3,7 @@ import React from 'react';
 
 const EnvTest: React.FC = () => {
   const demoMode = import.meta.env.VITE_DEMO_MODE;
-  const apiUrl = import.meta.env.VITE_API_BASE_URL;
+  const apiUrl = import.meta.env.VITE_API_URL;
   const mode = import.meta.env.MODE;
   const dev = import.meta.env.DEV;
   const prod = import.meta.env.PROD;

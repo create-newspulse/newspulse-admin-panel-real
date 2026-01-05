@@ -33,19 +33,30 @@ export default function Login(): JSX.Element {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const ok = await login(email.trim(), password);
-    setLoading(false);
-    if (ok) {
-      try {
-        // Clear any force-logout flags set during prior logout
-        sessionStorage.removeItem('np_force_logout');
-        localStorage.removeItem('np_force_logout');
-      } catch {}
-  // Revert: always go to admin dashboard after login
-  navigate('/admin/dashboard', { replace: true });
-    } else {
-      console.error('Login failed: cannot reach server or invalid credentials');
-      setError('Cannot reach server or invalid credentials.');
+    try {
+      const ok = await login(email.trim(), password);
+      if (ok) {
+        try {
+          // Clear any force-logout flags set during prior logout
+          sessionStorage.removeItem('np_force_logout');
+          localStorage.removeItem('np_force_logout');
+        } catch {}
+        // Revert: always go to admin dashboard after login
+        navigate('/admin/dashboard', { replace: true });
+      } else {
+        console.error('Login failed: invalid credentials');
+        setError('Invalid email or password.');
+      }
+    } catch (err: any) {
+      const status = err?.status ?? err?.response?.status;
+      const msg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
+      if (typeof status === 'number' && status >= 500) {
+        setError(msg ? `Server error. Check backend logs. ${msg}` : 'Server error. Check backend logs.');
+      } else {
+        setError(msg || 'Network error - could not reach login API');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

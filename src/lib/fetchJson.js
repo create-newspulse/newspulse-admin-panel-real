@@ -68,7 +68,7 @@ export async function fetchJson(url, options = {}) {
         if (!/application\/json/i.test(ct)) {
             const txt = await res.text().catch(() => '');
             const advisory = /text\/html/i.test(ct)
-                ? 'Likely hitting SPA fallback (HTML) instead of backend. Check VITE_ADMIN_API_BASE_URL or vercel.json rewrite.'
+                ? 'Likely hitting SPA fallback (HTML) instead of backend. Check VITE_API_URL or vercel.json rewrite.'
                 : 'Unexpected non-JSON response.';
             const err = new FetchJsonError(`Unexpected content-type: ${ct || 'unknown'}. ${advisory} Preview: ${txt.slice(0, 200)}`);
             err.status = res.status;

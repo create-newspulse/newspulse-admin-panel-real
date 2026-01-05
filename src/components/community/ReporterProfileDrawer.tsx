@@ -67,9 +67,9 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
       />
       {/* Panel */}
       <div
-        className={`absolute right-0 top-0 h-full w-full sm:w-[420px] bg-white shadow-xl border-l transition-transform ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`absolute right-0 top-0 h-full w-full sm:w-[420px] bg-white shadow-xl border-l transition-transform ${open ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b">
+        <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
           <div>
             <h2 className="text-lg font-semibold">{name}</h2>
             <p className="text-xs text-slate-600">{reporter?.email || '—'}</p>
@@ -94,7 +94,7 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
           <button onClick={onClose} className="px-2 py-1 text-sm rounded-md border hover:bg-slate-50">✕</button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-8">
           {/* Meta badges duplicated in header; keep story count */}
           {/* Meta */}
           <div className="flex items-center justify-between">
@@ -202,7 +202,7 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 pt-2">
+          <div className="flex flex-wrap items-center gap-2 pt-2">
             <button
               disabled={!key}
               onClick={() => key && onOpenStories(key)}
@@ -219,7 +219,7 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             </button>
             {/* Quick status actions */}
             {reporter?.id && (
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { await updateReporterStatus(reporter.id, { status: 'watchlist' }); toast.success('Marked watchlist'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); }}>Mark Watchlist</button>
                 <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { if (window.confirm('Suspend this reporter?')) { await updateReporterStatus(reporter.id, { status: 'suspended' }); toast.success('Suspended'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Suspend</button>
                 <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" onClick={async ()=> { if (window.confirm('Ban this reporter?')) { await updateReporterStatus(reporter.id, { status: 'banned' }); toast.success('Banned'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Ban</button>

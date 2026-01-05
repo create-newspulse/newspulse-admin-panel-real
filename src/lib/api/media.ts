@@ -1,6 +1,12 @@
 import type { AxiosInstance } from 'axios';
 import apiClient from '@/lib/api';
 
+const envAny = import.meta.env as any;
+
+function isLocalDemoBackendEnabled(): boolean {
+  return String(envAny?.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
+}
+
 export type MediaStatus = {
   uploadEnabled: boolean;
 };
@@ -40,6 +46,11 @@ async function probeUploadRoute(client: AxiosInstance): Promise<boolean> {
 }
 
 export async function getMediaStatus(client: AxiosInstance = apiClient): Promise<MediaStatus> {
+  // Some production backends do not implement media endpoints yet.
+  // Avoid triggering a noisy 404 in the browser console by only probing media status
+  // when running the local demo backend.
+  if (!isLocalDemoBackendEnabled()) return { uploadEnabled: false };
+
   try {
     const res = await client.get('/media/status', {
       // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)

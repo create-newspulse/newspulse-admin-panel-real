@@ -64,9 +64,7 @@ export async function putSettings(
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        // Only attach audit header in proxy/same-origin mode.
-        // In direct mode (browser -> Render), this header often fails CORS preflight unless backend allows it.
-        ...(audit?.action && isProxyMode() ? { "X-Admin-Action": audit.action } : {}),
+        ...(audit?.action ? { "X-Admin-Action": audit.action } : {}),
       },
       body: JSON.stringify(patch || {}),
     });

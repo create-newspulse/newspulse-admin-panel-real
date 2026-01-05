@@ -62,6 +62,11 @@ function isNotFoundOrMethodNotAllowed(err: any): boolean {
   return status === 404 || status === 405;
 }
 
+function isAuthDenied(err: any): boolean {
+  const status = err?.response?.status;
+  return status === 401 || status === 403;
+}
+
 async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
   try {
     const res = await apiClient.patch(url, payload);
@@ -143,10 +148,37 @@ export async function listArticles(params: {
   // Contract: All view should not force legacy status lists; omit status filter.
   if (query.status === 'all') delete query.status;
 
+  // Some backends restrict the PUBLIC articles list to published-only.
+  // Prefer the admin route whenever we might need non-published items.
+  // - status=draft/deleted/etc -> admin list
+  // - status=all (or omitted)  -> try admin list first, then fall back
+  const requestedStatus = String(query.status || '').toLowerCase();
+  const wantsAll = params.status === 'all' || query.status == null;
+  const preferAdminList = wantsAll || (!!requestedStatus && requestedStatus !== 'published');
+
   // Some backends use `lang` instead of `language`.
   if (query.language && !query.lang) query.lang = query.language;
 
-  // Prefer the normal articles route first:
+  // If admin list is available, try it first.
+  // Proxy mode:   GET /admin-api/admin/articles
+  // Direct mode:  GET <origin>/api/admin/articles
+  if (preferAdminList) {
+    try {
+      const resAdmin = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
+        params: query,
+        // @ts-expect-error custom flag read by interceptor
+        skipErrorLog: true,
+      });
+      return normalizeListResponse(resAdmin.data, { requestedPage, limit });
+    } catch (e: any) {
+      // If the environment doesn't expose admin list routes (404/405), fall back.
+      // If the user isn't authenticated yet (401/403), fall back to public list
+      // so at least published content can load.
+      if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
+    }
+  }
+
+  // Prefer the normal (public) articles route:
   // Proxy mode:   GET /admin-api/articles  (proxy rewrites to backend /api/articles)
   // Direct mode:  GET <origin>/api/articles
   try {
@@ -156,9 +188,7 @@ export async function listArticles(params: {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
 
-  // Fallback: some older backends expose admin-only articles routes.
-  // Proxy mode:   GET /admin-api/admin/articles
-  // Direct mode:  GET <origin>/api/admin/articles
+  // Final fallback: some backends only expose the admin-only list.
   const res2 = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
     params: query,
     // @ts-expect-error custom flag read by interceptor
@@ -330,6 +360,40 @@ export async function updateArticle(id: string, data: Partial<Article>) {
   }
   const res2 = await apiClient.put(url, data);
   return res2.data;
+}
+
+export async function updateArticlePartial(id: string, patch: Partial<Article>): Promise<Article> {
+  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
+
+  // Prefer PATCH for Draft Workspace autosave.
+  try {
+    const res = await adminApi.patch(url, patch);
+    const raw = res.data as any;
+    const article = raw?.article || raw?.data?.article || raw?.data || raw;
+    if (article && article._id) return article as Article;
+  } catch (e: any) {
+    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
+  }
+
+  try {
+    const res2 = await apiClient.patch(url, patch);
+    const raw2 = res2.data as any;
+    const article2 = raw2?.article || raw2?.data?.article || raw2?.data || raw2;
+    if (article2 && article2._id) return article2 as Article;
+  } catch (e: any) {
+    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
+  }
+
+  // Fallback: merge with current draft and PUT.
+  const current = await getArticle(id);
+  const merged = { ...current, ...patch } as Partial<Article>;
+  const updated = await updateArticle(id, merged);
+  const raw3 = updated as any;
+  const article3 = raw3?.article || raw3?.data?.article || raw3?.data || raw3;
+  if (article3 && article3._id) return article3 as Article;
+  // If updateArticle already returns the article object
+  if (raw3 && raw3._id) return raw3 as Article;
+  throw new Error('Failed to update draft');
 }
 export async function metaCounts(): Promise<{ total: number }> {
   // Use the stable /articles list contract to compute counts without relying on /articles/meta.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@context/AuthContext';
-import api from '@/lib/api.js';
+import { adminApi, adminUrl } from '@/lib/api';
 
 type SessionInfo = { authenticated?: boolean; email?: string };
 
@@ -16,10 +16,12 @@ export default function SecurityAdmin() {
     (async () => {
       setLoading(true);
       try {
-        const res = await api.get('/api/admin-auth/session', { withCredentials: true });
-        const data = res.data;
+        const res = await adminApi.get('/me');
+        const data = res.data || {};
+        const email = data?.email || data?.user?.email;
+        const authenticated = Boolean(data?.authenticated ?? data?.ok ?? data?.user);
         if (!mounted) return;
-        setSession(data);
+        setSession({ authenticated, email });
       } catch {
         if (!mounted) return;
         setSession(null);
@@ -63,13 +65,13 @@ export default function SecurityAdmin() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <a
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                  href="/api/admin-auth/logout"
+                  href={adminUrl('/logout')}
                 >
                   Logout
                 </a>
                 <a
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100"
-                  href="/api/admin-auth/logout"
+                  href={adminUrl('/logout')}
                   title="Backend does not expose global session revocation; this logs out this browser session."
                 >
                   Logout All

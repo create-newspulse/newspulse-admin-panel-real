@@ -11,6 +11,8 @@ import {
   patchBroadcastItem,
   updateBroadcastSettings,
 } from '@/lib/broadcastApi';
+import { adminSettingsApi } from '@/lib/adminSettingsApi';
+import type { SiteSettings } from '@/types/siteSettings';
 
 function formatLocalTime(iso: string) {
   const d = new Date(iso);
@@ -48,12 +50,28 @@ function serializeSettings(s: BroadcastSettings | null) {
   });
 }
 
+type TickerSpeeds = {
+  liveSpeedSec: number;
+  breakingSpeedSec: number;
+};
+
+function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
+  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 8;
+  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 6;
+  return {
+    liveSpeedSec: Math.max(1, Math.min(60, Number(live) || 8)),
+    breakingSpeedSec: Math.max(1, Math.min(60, Number(breaking) || 6)),
+  };
+}
+
 function SectionCard(props: {
   title: string;
   enabled: boolean;
   onEnabledChange: (next: boolean) => void;
   mode: 'manual' | 'auto';
   onModeChange: (next: 'manual' | 'auto') => void;
+  speedSec?: number;
+  onSpeedChange?: (next: number) => void;
   inputValue: string;
   onInputChange: (next: string) => void;
   onAdd: () => void;
@@ -91,10 +109,24 @@ function SectionCard(props: {
             onChange={(e) => props.onModeChange(e.target.value as 'manual' | 'auto')}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-72"
           >
-            <option value="manual">Manual</option>
+            <option value="manual">Force ON</option>
             <option value="auto">Auto</option>
           </select>
         </div>
+
+        {typeof props.speedSec === 'number' && typeof props.onSpeedChange === 'function' ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Ticker speed (seconds)</label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={props.speedSec}
+              onChange={(e) => props.onSpeedChange?.(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-72"
+            />
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -172,6 +204,9 @@ export default function BroadcastCenter() {
   const [settings, setSettings] = useState<BroadcastSettings | null>(null);
   const [initialSettings, setInitialSettings] = useState<string>('');
 
+  const [tickerSpeeds, setTickerSpeeds] = useState<TickerSpeeds>(() => normalizeSpeeds(null));
+  const [initialSpeeds, setInitialSpeeds] = useState<string>('');
+
   const [breakingText, setBreakingText] = useState('');
   const [liveText, setLiveText] = useState('');
 
@@ -183,8 +218,9 @@ export default function BroadcastCenter() {
 
   const dirty = useMemo(() => {
     if (!settings) return false;
-    return serializeSettings(settings) !== initialSettings;
-  }, [settings, initialSettings]);
+    if (serializeSettings(settings) !== initialSettings) return true;
+    return JSON.stringify(tickerSpeeds) !== initialSpeeds;
+  }, [settings, initialSettings, tickerSpeeds, initialSpeeds]);
 
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
@@ -194,15 +230,20 @@ export default function BroadcastCenter() {
   }, []);
 
   const loadAll = useCallback(async (signal?: AbortSignal) => {
-    const [s, breaking, live] = await Promise.all([
+    const [s, breaking, live, site] = await Promise.all([
       getBroadcastSettings({ signal }),
       listBroadcastItems('breaking', { signal }),
       listBroadcastItems('live', { signal }),
+      adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
     setSettings(s);
     setInitialSettings(serializeSettings(s));
     setBreakingItems(breaking);
     setLiveItems(live);
+
+    const speeds = normalizeSpeeds((site as any)?.tickers);
+    setTickerSpeeds(speeds);
+    setInitialSpeeds(JSON.stringify(speeds));
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -249,15 +290,31 @@ export default function BroadcastCenter() {
     setSaving(true);
     try {
       const saved = await updateBroadcastSettings(settings);
+
+      // Keep public-site ticker visibility/speeds in sync from ONE place.
+      // This ensures the homepage actually shows/hides tickers consistently.
+      const patch: Partial<SiteSettings> = {
+        ui: {
+          showLiveUpdatesTicker: !!saved.liveEnabled,
+          showBreakingTicker: !!saved.breakingEnabled,
+        } as any,
+        tickers: {
+          liveSpeedSec: tickerSpeeds.liveSpeedSec,
+          breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+        } as any,
+      };
+      await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
+
       setSettings(saved);
       setInitialSettings(serializeSettings(saved));
+      setInitialSpeeds(JSON.stringify(tickerSpeeds));
       notify.ok('Saved ✅');
     } catch (e: any) {
       notify.err('Save failed', e?.message || 'Unknown error');
     } finally {
       setSaving(false);
     }
-  }, [notify, saving, settings]);
+  }, [notify, saving, settings, tickerSpeeds]);
 
   const addItem = useCallback(async (type: BroadcastType) => {
     const text = (type === 'breaking' ? breakingText : liveText).trim();
@@ -353,6 +410,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
+          speedSec={tickerSpeeds.breakingSpeedSec}
+          onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, breakingSpeedSec: next }))}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -369,6 +428,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
+          speedSec={tickerSpeeds.liveSpeedSec}
+          onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, liveSpeedSec: next }))}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}

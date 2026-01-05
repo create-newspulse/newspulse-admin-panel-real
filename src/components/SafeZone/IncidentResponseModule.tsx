@@ -1,11 +1,4 @@
 import { useEffect, useState } from 'react';
-// Prefer admin backend dedicated base first to avoid production 404 for dev-only routes.
-const API_ORIGIN = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
-  import.meta.env.VITE_API_URL?.toString() ||
-  ''
-).replace(/\/+$/, '');
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaClock, FaLink, FaRobot, FaBell
@@ -30,7 +23,7 @@ const IncidentResponseModule = () => {
     const fetchIncidents = async () => {
       if (routeAvailable === false) return; // hard stub mode
       try {
-        const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`${API_BASE}/system/incidents`, {
+        const data = await fetchJson<{ incidents?: Incident[]; lastSync?: string }>(`/system/incidents`, {
           timeoutMs: 15000,
         });
         routeAvailable = true;

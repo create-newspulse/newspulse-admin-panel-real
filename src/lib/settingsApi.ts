@@ -1,14 +1,6 @@
 import { SiteSettingsSchema, type SiteSettings, DEFAULT_SETTINGS } from '@/types/siteSettings';
 import { adminJson } from '@/lib/http/adminFetch';
-
-function isProxyMode(): boolean {
-  try {
-    const raw = ((import.meta as any)?.env?.VITE_API_URL || '').toString().trim();
-    return raw.startsWith('/');
-  } catch {
-    return false;
-  }
-}
+import { apiUrl } from '@/lib/api';
 
 // Public settings shape (subset safe for frontend)
 export type PublicSettings = Record<string, any>;
@@ -66,7 +58,7 @@ async function putAdminSettings(patch: Partial<SiteSettings>, audit?: { action?:
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      ...(audit?.action && isProxyMode() ? { 'X-Admin-Action': audit.action } : {}),
+      ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}),
     },
     body: JSON.stringify(patch || {}),
   });
@@ -85,7 +77,7 @@ async function putAdminSettings(patch: Partial<SiteSettings>, audit?: { action?:
 const PUBLIC_CACHE_KEY = 'np_public_settings_cache_v1';
 
 async function getPublicSettings(): Promise<PublicSettings> {
-  const res = await fetch('/settings/public', { cache: 'no-store' });
+  const res = await fetch(apiUrl('/settings/public'), { cache: 'no-store', credentials: 'include' });
   try { return await json<PublicSettings>(res); } catch { return {}; }
 }
 

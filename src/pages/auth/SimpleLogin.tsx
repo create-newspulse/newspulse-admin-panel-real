@@ -39,13 +39,20 @@ export default function SimpleLogin() {
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
       if (import.meta.env.DEV) console.error('❌ Login exception:', err);
-      if (err?.response) {
-        if (import.meta.env.DEV) console.error('Server responded (error):', err.response.status, err.response.data);
-        toast.error(err.response.data?.message || 'Login failed');
-      } else {
-        // Fail-safe: only show toast for network errors if we truly cannot reach backend
-        toast.error('Network error - could not reach login API');
+      const status = err?.status ?? err?.response?.status;
+      const backendMsg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
+
+      if (typeof status === 'number' && status >= 500) {
+        toast.error(
+          backendMsg
+            ? `Server error. Check backend logs. ${backendMsg}`
+            : 'Server error. Check backend logs.'
+        );
+        return;
       }
+
+      // Fail-safe: only show toast for network errors if we truly cannot reach backend
+      toast.error(backendMsg || 'Network error - could not reach login API');
     } finally { setLoading(false); }
   };
 

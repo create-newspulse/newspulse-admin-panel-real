@@ -86,7 +86,9 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     ...init,
     headers,
     body,
-    credentials: init.credentials ?? 'include',
+    // If we have an explicit Bearer token, cookies are typically unnecessary and
+    // can trigger stricter CORS requirements in cross-origin direct mode.
+    credentials: init.credentials ?? (token ? 'omit' : 'include'),
   });
 
   // Align with existing global behaviors

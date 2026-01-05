@@ -1,10 +1,8 @@
 // vite.config.ts
-import { defineConfig, loadEnv, type UserConfig } from 'vite';
+import { createLogger, defineConfig, loadEnv, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fileURLToPath, URL } from 'node:url';
 
-const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
-const stripSlash = (u?: string) => (u ? u.replace(/\/+$/, '') : u);
+const stripSlash = (u?: string): string => String(u ?? '').replace(/\/+$/, '');
 const hasPlaceholders = (s?: string) => /[<>]/.test(String(s || ''));
 const isValidAbsoluteUrl = (u?: string) => {
   const s = String(u || '').trim();
@@ -15,6 +13,7 @@ const isValidAbsoluteUrl = (u?: string) => {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
+  const baseLogger = createLogger();
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   // IMPORTANT:
@@ -221,18 +220,17 @@ export default defineConfig(({ mode }): UserConfig => {
 
     // Startup banner reminding restart when env/proxy changes
     customLogger: {
+      ...baseLogger,
       info(msg) {
-        // eslint-disable-next-line no-console
-        console.info(msg);
-        // eslint-disable-next-line no-console
+        baseLogger.info(msg);
         if (msg.includes('ready in')) {
-          console.warn('[vite] If you change VITE_ADMIN_API_TARGET or proxy, restart `npm run dev`.');
-          console.warn('[vite] Admin API dev proxy →', env.VITE_ADMIN_API_TARGET || API_TARGET || '(unset)');
+          baseLogger.warn('[vite] If you change VITE_ADMIN_API_TARGET or proxy, restart `npm run dev`.');
+          baseLogger.warn('[vite] Admin API dev proxy → ' + (env.VITE_ADMIN_API_TARGET || API_TARGET || '(unset)'));
         }
       },
-      warn(msg) { console.warn(msg); },
-      error(msg) { console.error(msg); },
-      clearScreen: undefined,
+      clearScreen(_type) {
+        // no-op
+      },
     },
 
     // Speed up dev for common deps (optional)

@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ADMIN_API_BASE } from '../lib/adminApi';
+import { apiUrl } from '../lib/api';
 
-const API_BASE = /\/api$/.test(ADMIN_API_BASE)
-  ? ADMIN_API_BASE
-  : `${ADMIN_API_BASE}/api`;
-
-// Unified API base derived from VITE_API_URL; legacy API_BASE_PATH removed
+// AIRA endpoints are public API routes (NOT admin):
+// - proxy mode:  /admin-api/aira/*
+// - direct mode: <backend>/api/aira/*
+const AIRA_BASE = apiUrl('/api/aira').replace(/\/+$/, '');
 
 export interface AiraItem {
   id: string;
@@ -43,7 +42,7 @@ const AiraVoicePlayer: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/aira/bulletins`, { credentials: 'include' });
+      const res = await fetch(`${AIRA_BASE}/bulletins`, { credentials: 'include' });
       const json = await res.json();
       if (json?.ok && Array.isArray(json.items)) setItems(json.items);
     } finally {
@@ -56,7 +55,7 @@ const AiraVoicePlayer: React.FC = () => {
   const generate = async () => {
     setGenLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/aira/generate`, {
+      const r = await fetch(`${AIRA_BASE}/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
@@ -78,7 +77,7 @@ const AiraVoicePlayer: React.FC = () => {
     if (!ok) return;
     setDeletingId(id);
     try {
-      const r = await fetch(`${API_BASE}/aira/bulletins/${encodeURIComponent(id)}`, {
+      const r = await fetch(`${AIRA_BASE}/bulletins/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         credentials: 'include',
       });

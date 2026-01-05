@@ -189,7 +189,7 @@ export default function DraftDeskPage() {
 
   const handleEdit = (id: string) => {
     // Use the same route that Manage News "Edit" button uses
-    navigate(`/admin/news/${id}/edit`);
+    navigate(`/admin/articles/${id}/edit`);
   };
 
   return (

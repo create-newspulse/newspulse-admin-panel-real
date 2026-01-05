@@ -1,12 +1,5 @@
 // 📁 src/components/SafeZone/GlobalThreatScanner.tsx
 import { useEffect, useState } from 'react';
-// Prefer admin backend dedicated base (new security routes may only exist there)
-const API_ORIGIN = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
-  import.meta.env.VITE_API_URL?.toString() ||
-  ''
-).replace(/\/+$/, '');
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaShieldAlt, FaLock, FaGlobe, FaCheckCircle, FaSyncAlt
@@ -43,7 +36,7 @@ const GlobalThreatScanner = () => {
       setLoading(true);
       setLastError(null);
       try {
-        const json = await fetchJson<any>(`${API_BASE}/system/threat-status`, { cache: 'no-store', timeoutMs: 15000 });
+        const json = await fetchJson<any>(`/system/threat-status`, { cache: 'no-store', timeoutMs: 15000 });
         if (!json || typeof json !== 'object') throw new Error('Invalid response');
         const normalized: ThreatStatus = {
           xssDetected: !!json.xssDetected,

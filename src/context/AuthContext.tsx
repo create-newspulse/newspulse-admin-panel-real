@@ -63,7 +63,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
     try {
-      const res = await adminApi.post(LOGIN_PATH, { email: trimmedEmail, password });
+      const res = await adminApi.request({
+        url: LOGIN_PATH,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Send explicit JSON string (backend expects JSON body)
+        data: JSON.stringify({ email: trimmedEmail, password }),
+      });
       const data = res.data ?? {};
       const successFlag =
         data.ok === true ||
@@ -119,7 +125,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (err: any) {
       const status = err?.response?.status;
-      const msg = err?.response?.data?.message || (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.');
+      const msg =
+        err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.response?.data?.details
+        || (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.');
       if (import.meta.env.DEV) {
         console.error('[Auth] Login error', {
           status,
@@ -130,7 +140,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           path: LOGIN_PATH,
         });
       }
-      return false;
+
+      // Invalid credentials -> keep UX calm and let login page show a friendly message.
+      if (status === 401) return false;
+
+      // Server errors should surface the real backend message to the UI.
+      if (typeof status === 'number' && status >= 500) {
+        const e = new Error(msg || 'Server error. Check backend logs.');
+        (e as any).status = status;
+        throw e;
+      }
+
+      // Network / unexpected errors: allow UI to show a clearer message.
+      const e = new Error(msg || 'Network error - could not reach login API');
+      (e as any).status = status;
+      throw e;
     } finally {
       setIsLoading(false);
     }
@@ -282,7 +306,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e:any) {
       const st = e?.response?.status;
       // Treat 404 as non-fatal (no profile) and avoid noisy warning
-      if (import.meta.env.DEV && st !== 404) console.warn('[Auth] session restore failed', st, e?.message);
+      if (st === 401) {
+        // 401 should redirect to login via interceptors (no scary logs)
+      } else if (import.meta.env.DEV && st !== 404) {
+        console.warn('[Auth] session restore failed', st, e?.message);
+      }
     } finally {
       setIsRestoring(false);
     }

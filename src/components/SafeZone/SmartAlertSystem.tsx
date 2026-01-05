@@ -1,11 +1,4 @@
 import { useEffect, useState } from 'react';
-// Prefer dedicated admin backend base if available; fallback to generic API URL then remote.
-const API_ORIGIN = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL?.toString() ||
-  import.meta.env.VITE_API_URL?.toString() ||
-  ''
-).replace(/\/+$/, '');
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import { FaCheckCircle, FaExclamationTriangle, FaEnvelope } from 'react-icons/fa';
 
@@ -20,7 +13,7 @@ const SmartAlertSystem = () => {
     const fetchAlertConfig = async () => {
       try {
         try {
-          const data = await fetchJson<{ success?: boolean }>(`${API_BASE}/system/alert-config`, { timeoutMs: 15000 });
+          const data = await fetchJson<{ success?: boolean }>(`/system/alert-config`, { timeoutMs: 15000 });
           if (data && (data.success === true || data.success === undefined)) {
             setStatus('loaded');
             return;

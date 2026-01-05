@@ -8,6 +8,7 @@ import FeatureTogglesCommunityReporter from '@/pages/founder/FeatureTogglesCommu
 import ReporterPortalPreview from '@/pages/founder/ReporterPortalPreview';
 import SiteControls from '@/pages/SiteControls';
 import EditorialWorkflowEngine from '@/components/advanced/EditorialWorkflowEngine';
+import LegacyArticleEditRedirect from '@/routes/LegacyArticleEditRedirect';
 
 // Placeholder pages
 function Page({ title }: { title: string }) { return <div className="space-y-4"><h1 className="text-2xl font-semibold">{title}</h1><p className="opacity-70 text-sm">TODO: implement "{title}"</p></div>; }
@@ -38,7 +39,9 @@ export default function PanelRouter() {
           {/* Admin */}
           <Route path="admin/news/new" element={<RequireRole allow={['founder','admin']}><Page title="Add News" /></RequireRole>} />
           <Route path="admin/news" element={<RequireRole allow={['founder','admin']}><Page title="Manage News" /></RequireRole>} />
-          <Route path="admin/drafts" element={<RequireRole allow={['founder','admin','editor']}><DraftDeskPage /></RequireRole>} />
+          <Route path="admin/news/:id/edit" element={<RequireRole allow={['founder','admin','editor']}><LegacyArticleEditRedirect /></RequireRole>} />
+          <Route path="admin/manage-news/:id/edit" element={<RequireRole allow={['founder','admin','editor']}><LegacyArticleEditRedirect /></RequireRole>} />
+          <Route path="admin/drafts" element={<RequireRole allow={['founder','admin','editor']}><Navigate to="/draft-desk" replace /></RequireRole>} />
           <Route path="admin/moderation" element={<RequireRole allow={['founder','admin']}><Page title="Moderation" /></RequireRole>} />
           <Route path="admin/compliance" element={<RequireRole allow={['founder','admin']}><Page title="Compliance" /></RequireRole>} />
           <Route path="admin/operations" element={<RequireRole allow={['founder','admin']}><Page title="Operations" /></RequireRole>} />
