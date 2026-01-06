@@ -1,43 +1,6 @@
 import { adminUrl, getAuthToken } from '@/lib/api';
 
-const envAny = import.meta.env as any;
-
-function stripTrailingSlashes(s: string) {
-  return (s || '').replace(/\/+$/, '');
-}
-
-function isAbsoluteHttpUrl(u: string): boolean {
-  return /^https?:\/\//i.test(u);
-}
-
-function ensureApiBase(base: string): string {
-  const b = stripTrailingSlashes((base || '').toString().trim());
-  if (!b) return '';
-
-  // Spec preference: VITE_ADMIN_API_BASE_URL should include '/api'.
-  // Be tolerant if the user provides only an origin.
-  if (isAbsoluteHttpUrl(b) && !/\/api$/i.test(b)) return `${b}/api`;
-  return b;
-}
-
-function joinBase(base: string, path: string): string {
-  const b = stripTrailingSlashes(base);
-  const p = (path || '').startsWith('/') ? path : `/${path || ''}`;
-  if (!b) return p;
-  return `${b}${p}`.replace(/\/\/+/g, '/').replace(/^https:\/\//i, (m) => m); // keep scheme
-}
-
-function getAdminApiBaseOverride(): string | null {
-  const raw = (envAny?.VITE_ADMIN_API_BASE_URL || '').toString().trim();
-  if (!raw) return null;
-  return ensureApiBase(raw);
-}
-
-export const ADMIN_API_BASE = (() => {
-  const override = getAdminApiBaseOverride();
-  if (override) return joinBase(override, '/admin');
-  return adminUrl('/').replace(/\/+$/, '');
-})();
+export const ADMIN_API_BASE = adminUrl('/').replace(/\/+$/, '');
 
 export class AdminApiError extends Error {
   status: number;
@@ -64,26 +27,7 @@ function normalizePath(input: string): string {
   return p;
 }
 
-function normalizeAdminRest(path: string): string {
-  // Produces a path relative to the admin root.
-  // Accept '/admin/*', '/api/admin/*', or a bare segment like '/me'.
-  let rest = normalizePath(path);
-  if (rest === '/api/admin') rest = '/';
-  if (rest.startsWith('/api/admin/')) rest = rest.replace(/^\/api\/admin\//, '/');
-  if (rest === '/admin') rest = '/';
-  if (rest.startsWith('/admin/')) rest = rest.replace(/^\/admin\//, '/');
-  if (!rest.startsWith('/')) rest = `/${rest}`;
-  return rest;
-}
-
 export function adminApiUrl(path: string): string {
-  const override = getAdminApiBaseOverride();
-  if (override) {
-    const rest = normalizeAdminRest(path);
-    const full = rest === '/' ? '/admin' : `/admin${rest}`;
-    return joinBase(override, full);
-  }
-
   const p = normalizePath(path);
   // adminUrl already prefixes '/admin'
   return adminUrl(p);
