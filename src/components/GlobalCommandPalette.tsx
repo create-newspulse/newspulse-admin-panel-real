@@ -36,7 +36,6 @@ export default function GlobalCommandPalette({
       { label: 'Go: Manage News', path: '/manage-news' },
       { label: 'Go: AI Engine', path: '/admin/ai-engine' },
   { label: 'Go: Analytics', path: '/admin/analytics' },
-  { label: 'Go: Live TV Control', path: '/admin/live' },
       { label: 'Go: Poll Editor', path: '/poll-editor' },
       { label: 'Go: Poll Results', path: '/poll-results' },
       // Inspiration Hub removed

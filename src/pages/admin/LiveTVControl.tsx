@@ -125,7 +125,7 @@ export default function LiveTVControl() {
     <div className="space-y-6">
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">📺 Live TV Control</h1>
+          <h1 className="text-2xl font-bold">Live TV Control</h1>
           <p className="text-sm text-slate-500">Manage live sources with sanitization, PTI, safety and fallback</p>
         </div>
         <div className="text-sm">

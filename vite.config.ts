@@ -80,17 +80,43 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   }
   const proxy: any = {};
+
+  const configureProxy = (label: string) => (proxyServer: any) => {
+    proxyServer.on('error', (err: any, _req: any, res: any) => {
+      const code = err?.code || 'PROXY_ERROR';
+      // Important: don't let proxy errors crash the dev server.
+      // Respond with 502 so the frontend can handle offline/404 fallback.
+      // eslint-disable-next-line no-console
+      console.warn(`[vite] proxy error (${label}):`, code, err?.message || err);
+      try {
+        if (res && !res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+        }
+        if (res && !res.writableEnded) {
+          res.end(JSON.stringify({ error: 'dev_proxy_error', code }));
+        }
+      } catch {
+        // ignore
+      }
+    });
+  };
   if (BACKEND_ORIGIN) {
     proxy['/api'] = {
       target: `${BACKEND_ORIGIN}`,
       changeOrigin: true,
       secure: false,
+      timeout: 8000,
+      proxyTimeout: 8000,
+      configure: configureProxy('/api'),
     };
     // Support public settings in local dev (maps /settings/* -> /api/settings/*)
     proxy['/settings'] = {
       target: `${BACKEND_ORIGIN}`,
       changeOrigin: true,
       secure: false,
+      timeout: 8000,
+      proxyTimeout: 8000,
+      configure: configureProxy('/settings'),
       rewrite: (path: string) => path.replace(/^\/settings/, '/api/settings'),
     };
     proxy['/socket.io'] = {
@@ -98,6 +124,9 @@ export default defineConfig(({ mode }): UserConfig => {
       ws: true,
       changeOrigin: true,
       secure: false,
+      timeout: 8000,
+      proxyTimeout: 8000,
+      configure: configureProxy('/socket.io'),
     };
   }
   if (ADMIN_API_PROXY_TARGET) {
@@ -105,6 +134,9 @@ export default defineConfig(({ mode }): UserConfig => {
       target: ADMIN_API_PROXY_TARGET,
       changeOrigin: true,
       secure: false,
+      timeout: 8000,
+      proxyTimeout: 8000,
+      configure: configureProxy('/admin-api'),
       rewrite: (path: string) => {
         if (ADMIN_PROXY_IS_VERCEL) return path;
         if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '');

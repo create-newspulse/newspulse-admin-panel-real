@@ -56,6 +56,27 @@ export default defineConfig(({ mode }) => {
         // eslint-disable-next-line no-console
         console.log('[vite] Using localhost demo backend:', useLocalDemo);
     }
+
+    const configureProxy = (label) => (proxy) => {
+        proxy.on('error', (err, _req, res) => {
+            const code = err?.code || 'PROXY_ERROR';
+            // eslint-disable-next-line no-console
+            console.warn(`[vite] proxy error (${label}):`, code, err?.message || err);
+            // Important: don't let proxy errors crash the dev server.
+            // Respond with 502 so the frontend can handle offline/404 fallback.
+            try {
+                if (res && !res.headersSent) {
+                    res.writeHead(502, { 'Content-Type': 'application/json' });
+                }
+                if (res && !res.writableEnded) {
+                    res.end(JSON.stringify({ error: 'dev_proxy_error', code }));
+                }
+            }
+            catch {
+                // ignore
+            }
+        });
+    };
     return {
         plugins: [react()],
         envPrefix: 'VITE_',
@@ -87,6 +108,9 @@ export default defineConfig(({ mode }) => {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    timeout: 8000,
+                    proxyTimeout: 8000,
+                    configure: configureProxy('/admin-api'),
                     // Map '/admin-api/*' -> backend '/api/*'
                     // Example: /admin-api/admin/ad-settings -> /api/admin/ad-settings
                     rewrite: (p) => {
@@ -102,6 +126,9 @@ export default defineConfig(({ mode }) => {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    timeout: 8000,
+                    proxyTimeout: 8000,
+                    configure: configureProxy('/api'),
                     // keep path mostly as-is so /api/* hits backend /api/*
                     // but collapse accidental double-prefixes: /api/api/* -> /api/*
                     rewrite: (p) => p.replace(/^\/api\/api\//, '/api/'),
@@ -111,6 +138,9 @@ export default defineConfig(({ mode }) => {
                     ws: true,
                     changeOrigin: true,
                     secure: false,
+                    timeout: 8000,
+                    proxyTimeout: 8000,
+                    configure: configureProxy('/socket.io'),
                 },
             },
             watch: {

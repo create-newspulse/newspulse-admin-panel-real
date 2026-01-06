@@ -43,6 +43,13 @@ export default async function handler(req, res) {
     const secret = secretValue ? new TextEncoder().encode(secretValue) : null;
         const pathParam = req.query.path || [];
         const joinedPath = pathParam.join('/');
+
+        // Public site settings routes are forwarded to the upstream backend:
+        // - /api/admin/settings/public
+        // - /api/admin/settings/public/draft
+        // - /api/admin/settings/public/publish
+        // (We rely on Vercel rewrites to route /api/admin/settings/public/* into this proxy
+        //  because there is a file route at api/admin/settings.ts that would otherwise shadow it.)
         // Allow unauthenticated access for explicit public endpoints
         // - admin/login: credential-based login to obtain a JWT (no session yet)
         // - admin/auth/ping: health check
@@ -78,10 +85,13 @@ export default async function handler(req, res) {
                 }
             }
         }
-    // Build target URL, avoiding accidental double "/api" when client paths already include it
-    const needsApiPrefix = !/^api\//i.test(joinedPath);
-    const targetPath = needsApiPrefix ? `api/${joinedPath}` : joinedPath;
-    const targetUrl = new URL(`${backendBase}/${targetPath}`);
+
+        // NOTE: do not intercept admin/settings/public/* here.
+        // Let the generic proxy forwarding below hit the upstream backend routes exactly.
+        // Build target URL, avoiding accidental double "/api" when client paths already include it
+        const needsApiPrefix = !/^api\//i.test(joinedPath);
+        const targetPath = needsApiPrefix ? `api/${joinedPath}` : joinedPath;
+        const targetUrl = new URL(`${backendBase}/${targetPath}`);
         // Append query string
         const q = req.query;
         Object.keys(q).forEach((k) => {

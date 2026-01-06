@@ -166,6 +166,66 @@ const DEFAULT_SETTINGS = {
 
 let SITE_SETTINGS = { ...DEFAULT_SETTINGS };
 
+// ===== Public Site Settings (draft + publish) =====
+// Contract expected by admin panel:
+// - GET  /api/admin/settings/public            -> { draft, published }
+// - GET  /api/admin/settings/public/draft      -> { draft }
+// - PUT  /api/admin/settings/public/draft      -> stores draft (partial settings)
+// - POST /api/admin/settings/public/publish    -> promotes draft -> published
+
+const DEFAULT_PUBLIC_SITE_SETTINGS = {
+  ui: { ...DEFAULT_SETTINGS.ui },
+  navigation: { ...DEFAULT_SETTINGS.navigation },
+  voice: { ...DEFAULT_SETTINGS.voice },
+  homepage: {
+    modulesOrder: [
+      'explore',
+      'categoryStrip',
+      'trending',
+      'liveUpdatesTicker',
+      'breakingTicker',
+      'quickTools',
+      'appPromo',
+      'footer',
+    ],
+  },
+  tickers: {
+    liveSpeedSec: 8,
+    breakingSpeedSec: 6,
+  },
+  liveTv: {
+    enabled: false,
+    embedUrl: '',
+  },
+  footer: {
+    text: '',
+  },
+};
+
+let PUBLIC_SITE_PUBLISHED = { ...DEFAULT_PUBLIC_SITE_SETTINGS };
+let PUBLIC_SITE_DRAFT = null;
+let PUBLIC_SITE_VERSION = 1;
+
+function mergePublicSiteSettings(base, patch) {
+  const next = { ...(base || {}) };
+  const p = patch && typeof patch === 'object' ? patch : {};
+  // Shallow merge per section to avoid dropping nested keys
+  for (const key of Object.keys(DEFAULT_PUBLIC_SITE_SETTINGS)) {
+    const baseSection = (base || {})[key];
+    const patchSection = p[key];
+    if (typeof DEFAULT_PUBLIC_SITE_SETTINGS[key] === 'object' && !Array.isArray(DEFAULT_PUBLIC_SITE_SETTINGS[key])) {
+      next[key] = { ...DEFAULT_PUBLIC_SITE_SETTINGS[key], ...(baseSection || {}), ...(patchSection || {}) };
+    } else if (typeof patchSection !== 'undefined') {
+      next[key] = patchSection;
+    } else if (typeof baseSection !== 'undefined') {
+      next[key] = baseSection;
+    } else {
+      next[key] = DEFAULT_PUBLIC_SITE_SETTINGS[key];
+    }
+  }
+  return next;
+}
+
 // ===== Broadcast Center (demo storage) =====
 // Minimal in-memory implementation used by the admin UI.
 // Endpoints:
@@ -531,6 +591,52 @@ app.put('/api/admin/settings', (req, res) => {
     return res.status(200).json(SITE_SETTINGS);
   } catch (e) {
     return res.status(400).json({ error: 'Invalid payload' });
+  }
+});
+
+app.get('/api/admin/settings/public', (_req, res) => {
+  return res.status(200).json({
+    draft: PUBLIC_SITE_DRAFT,
+    published: PUBLIC_SITE_PUBLISHED,
+    version: PUBLIC_SITE_VERSION,
+    updatedAt: new Date().toISOString(),
+  });
+});
+
+app.get('/api/admin/settings/public/draft', (_req, res) => {
+  return res.status(200).json({
+    draft: PUBLIC_SITE_DRAFT,
+    version: PUBLIC_SITE_VERSION,
+    updatedAt: new Date().toISOString(),
+  });
+});
+
+app.put('/api/admin/settings/public/draft', (req, res) => {
+  try {
+    const patch = req.body || {};
+    const base = PUBLIC_SITE_DRAFT || PUBLIC_SITE_PUBLISHED || DEFAULT_PUBLIC_SITE_SETTINGS;
+    PUBLIC_SITE_DRAFT = mergePublicSiteSettings(base, patch);
+    PUBLIC_SITE_VERSION += 1;
+    console.log('[audit] save-public-site-draft', { version: PUBLIC_SITE_VERSION });
+    return res.status(200).json({ ok: true, draft: PUBLIC_SITE_DRAFT, version: PUBLIC_SITE_VERSION });
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+});
+
+app.post('/api/admin/settings/public/publish', (_req, res) => {
+  try {
+    const nextPublished = PUBLIC_SITE_DRAFT
+      ? mergePublicSiteSettings(PUBLIC_SITE_PUBLISHED || DEFAULT_PUBLIC_SITE_SETTINGS, PUBLIC_SITE_DRAFT)
+      : (PUBLIC_SITE_PUBLISHED || DEFAULT_PUBLIC_SITE_SETTINGS);
+
+    PUBLIC_SITE_PUBLISHED = nextPublished;
+    PUBLIC_SITE_DRAFT = null;
+    PUBLIC_SITE_VERSION += 1;
+    console.log('[audit] publish-public-site-settings', { version: PUBLIC_SITE_VERSION });
+    return res.status(200).json({ ok: true, published: PUBLIC_SITE_PUBLISHED, version: PUBLIC_SITE_VERSION });
+  } catch (e) {
+    return res.status(400).json({ error: 'Publish failed' });
   }
 });
 

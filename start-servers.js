@@ -10,7 +10,8 @@ const __dirname = path.dirname(__filename);
 const args = new Set(process.argv.slice(2));
 const useDemo = args.has('--demo');
 const REAL_BACKEND = process.env.NP_REAL_BACKEND || '';
-const DEMO_BACKEND = process.env.NP_DEMO_BACKEND || '';
+// Demo backend origin (default localhost:5000)
+const DEMO_BACKEND = process.env.NP_DEMO_BACKEND || 'http://localhost:5000';
 
 console.log(`🚀 Starting News Pulse Admin Panel (${useDemo ? 'demo backend + frontend' : 'real backend + frontend'})...\n`);
 

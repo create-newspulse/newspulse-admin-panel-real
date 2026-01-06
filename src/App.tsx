@@ -50,7 +50,6 @@ import PanelGuide from '@pages/SafeOwner/PanelGuide';
 import UpdateFounderPIN from '@pages/admin/UpdateFounderPIN';
 import AdminControlCenter from '@components/AdminControlCenter';
 import LiveFeedManager from '@pages/admin/LiveFeedManager';
-import LiveTVControl from '@pages/admin/LiveTVControl';
 import EmbedManager from '@pages/admin/EmbedManager';
 import ToggleControls from '@pages/admin/ToggleControls';
 import ControlConstitution from '@pages/admin/ControlConstitution';
@@ -355,8 +354,6 @@ function App() {
               <Route path="/safe-owner/update-pin" element={<FounderRoute><UpdateFounderPIN /></FounderRoute>} />
               <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
               <Route path="/admin/embed-manager" element={<FounderRoute><EmbedManager /></FounderRoute>} />
-              {/* Live TV */}
-              <Route path="/admin/live" element={<ProtectedRoute><LiveTVControl /></ProtectedRoute>} />
               <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />

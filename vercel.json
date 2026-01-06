@@ -5,6 +5,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/admin/settings/public",
+      "destination": "/api/admin-proxy/admin/settings/public"
+    },
+    {
+      "source": "/api/admin/settings/public/:path*",
+      "destination": "/api/admin-proxy/admin/settings/public/:path*"
+    },
+    {
       "source": "/admin-api/:path*",
       "destination": "/api/admin-proxy/:path*"
     },
