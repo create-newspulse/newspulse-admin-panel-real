@@ -1,9 +1,11 @@
 
 import { NavLink, Link, useLocation } from 'react-router-dom';
+import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
 import { leftNav, rightNav } from '@/config/nav';
 
 export default function Navbar() {
+  const { isDark, toggleDark } = useDarkMode();
   const { isAuthenticated, user, logout } = useAuth();
   const location = useLocation();
   const role = (user?.role ?? 'viewer') as any;
@@ -45,7 +47,17 @@ export default function Navbar() {
             {/* Right-side utilities */}
             {right.map(({ key, path, icon, label }) => (
               path.startsWith('#') ? (
-                null
+                key === 'dark' ? (
+                  <button
+                    key={key}
+                    onClick={toggleDark}
+                    aria-pressed={isDark}
+                    className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 transition"
+                    title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  >
+                    {isDark ? '🌞 Light' : '🌙 Dark'}
+                  </button>
+                ) : null
               ) : (
                 key === 'logout' ? (
                   // ✅ Fix: use shared logout which redirects correctly per area

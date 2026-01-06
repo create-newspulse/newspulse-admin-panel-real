@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:demo": "node start-servers.js --demo",
     "dev:full": "node start-servers.js",
     "build": "vite build",
     "preview": "vite preview",
@@ -59,7 +58,6 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
-    "@csstools/css-parser-algorithms": "^3.0.5",
     "@hookform/resolvers": "^3.4.0",
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "@tailwindcss/forms": "^0.5.3",
@@ -78,7 +76,6 @@
     "@vercel/node": "^2.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
-    "cspell": "^9.2.1",
     "cssnano": "^7.0.3",
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.0",
@@ -87,6 +84,7 @@
     "fast-glob": "^3.3.3",
     "idb": "^7.1.1",
     "jose": "^5.8.0",
+    "cspell": "^9.2.1",
     "postcss": "^8.4.38",
     "postcss-nesting": "^12.1.5",
     "prettier": "^3.3.2",
