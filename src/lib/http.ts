@@ -174,10 +174,12 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
   try {
     if (res.status === 401 && typeof window !== 'undefined' && shouldLogoutOn401(path)) {
       try {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('newsPulseAdminAuth');
+        // legacy cleanup
         localStorage.removeItem('adminToken');
         localStorage.removeItem('np_admin_token');
         localStorage.removeItem('np_admin_access_token');
-        localStorage.removeItem('newsPulseAdminAuth');
       } catch {}
       window.dispatchEvent(new CustomEvent('np:logout'));
     }
@@ -191,7 +193,7 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
 
   if (!res.ok) {
     const errBody = await readErrorBody(res);
-    let msg = toErrorMessage(errBody, `HTTP ${res.status} ${res.statusText}`);
+    const msg = toErrorMessage(errBody, `HTTP ${res.status} ${res.statusText}`);
     if (res.status === 404) {
       // If backend returns its standard 404 "Route not found" message, surface a clean toast.
       maybeToastBackendRouteMissing(path, msg);

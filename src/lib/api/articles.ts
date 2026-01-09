@@ -2,7 +2,7 @@
 // NOTE: This file previously had duplicated sections causing "Cannot redeclare" errors.
 // We merge functionality into a single set of exports using the existing apiClient.
 
-import apiClient, { adminApi } from '@/lib/api';
+import apiClient, { adminApi, hasLikelyAdminSession } from '@/lib/api';
 import type { ArticleStatus } from '@/types/articles';
 
 export interface Article {
@@ -162,7 +162,7 @@ export async function listArticles(params: {
   // If admin list is available, try it first.
   // Proxy mode:   GET /admin-api/admin/articles
   // Direct mode:  GET <origin>/api/admin/articles
-  if (preferAdminList) {
+  if (preferAdminList && hasLikelyAdminSession()) {
     try {
       const resAdmin = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
         params: query,

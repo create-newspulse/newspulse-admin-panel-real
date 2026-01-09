@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import Switch from '@/components/settings/Switch';
-import { useSettingsDraft } from '@/features/settings/SettingsDraftContext';
+import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 
 export default function FooterSettings() {
-  const { draft, patchDraft } = useSettingsDraft();
+  const { draft, patchDraft } = usePublicSiteSettingsDraft();
 
   const footer = useMemo(() => {
     const f = (draft as any)?.footer || {};
+    const modules = (draft as any)?.homepage?.modules || {};
     return {
-      enabled: !!draft?.ui?.showFooter,
+      enabled: !!((modules as any)?.footer?.enabled ?? (draft as any)?.ui?.showFooter),
       text: typeof f.text === 'string' ? f.text : '',
     };
   }, [draft]);
@@ -26,7 +27,7 @@ export default function FooterSettings() {
             <div className="text-sm font-semibold">Show Footer</div>
             <div className="text-xs text-slate-600">Turns footer on/off on the public site.</div>
           </div>
-          <Switch checked={footer.enabled} onCheckedChange={(v) => patchDraft({ ui: { showFooter: v } } as any)} />
+          <Switch checked={footer.enabled} onCheckedChange={(v) => patchDraft({ homepage: { modules: { footer: { enabled: v } } } } as any)} />
         </div>
 
         <label className="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">

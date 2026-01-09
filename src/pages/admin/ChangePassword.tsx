@@ -10,7 +10,7 @@ export default function ChangePassword() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const hasJwt = typeof window !== 'undefined' && !!localStorage.getItem('adminToken');
+  const hasJwt = typeof window !== 'undefined' && !!localStorage.getItem('admin_token');
 
   const validate = (): string | null => {
     if (!currentPassword || !newPassword || !confirmPassword) return 'All fields are required';

@@ -1,5 +1,4 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { SettingsDraftProvider } from '@/features/settings/SettingsDraftContext';
 
 const tabCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-lg border text-sm font-semibold ` +
@@ -7,26 +6,24 @@ const tabCls = ({ isActive }: { isActive: boolean }) =>
 
 export default function SettingsCenterLayout() {
   return (
-    <SettingsDraftProvider>
-      <div className="space-y-6">
-        <div className="space-y-3">
-          <div>
-            <div className="text-sm text-slate-500">Settings</div>
-            <h1 className="text-2xl font-semibold">Settings Center</h1>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <NavLink to="admin-panel" className={tabCls} end>
-              Admin Panel Settings
-            </NavLink>
-            <NavLink to="public-site" className={tabCls} end>
-              Public Site Settings
-            </NavLink>
-          </div>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <div>
+          <div className="text-sm text-slate-500">Settings</div>
+          <h1 className="text-2xl font-semibold">Settings Center</h1>
         </div>
 
-        <Outlet />
+        <div className="flex flex-wrap gap-2">
+          <NavLink to="admin-panel" className={tabCls} end>
+            Admin Panel Settings
+          </NavLink>
+          <NavLink to="public-site" className={tabCls} end>
+            Public Site Settings
+          </NavLink>
+        </div>
       </div>
-    </SettingsDraftProvider>
+
+      <Outlet />
+    </div>
   );
 }

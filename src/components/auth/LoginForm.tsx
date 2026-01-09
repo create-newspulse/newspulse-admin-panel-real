@@ -33,9 +33,12 @@ export default function LoginForm() {
         // Normalize token: remove any leading 'Bearer ' prefix if backend already included it
         const normalizedToken = String(token).replace(/^Bearer\s+/i, '');
         setAuth(user, normalizedToken);
-        try { localStorage.setItem('np_token', normalizedToken); } catch {}
-        // Back-compat for older builds
-        try { localStorage.setItem('np_admin_token', normalizedToken); } catch {}
+        // Single source of truth (used by adminFetch + guards)
+        try { localStorage.setItem('admin_token', normalizedToken); } catch {}
+        // Cleanup legacy keys to avoid mismatched auth state
+        try { localStorage.removeItem('np_token'); } catch {}
+        try { localStorage.removeItem('np_admin_token'); } catch {}
+        try { localStorage.removeItem('np_admin_access_token'); } catch {}
         toast.success(`Welcome ${user.name} (${user.role})`);
         // Spec: route to admin dashboard
         navigate('/admin/dashboard', { replace: true });

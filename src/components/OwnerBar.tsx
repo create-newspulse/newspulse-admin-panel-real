@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import settingsApi from '@/lib/settingsApi';
+import { hasLikelyAdminSession } from '@/lib/api';
 import { getOwnerKeyRemainingMs, isOwnerKeyUnlocked, useOwnerKeyStore, type OwnerMode } from '@/lib/ownerKeyStore';
 
 function formatMmSs(ms: number) {
@@ -35,6 +36,7 @@ export default function OwnerBar() {
     let mounted = true;
     const tick = async () => {
       try {
+        if (!hasLikelyAdminSession()) return;
         const s = await settingsApi.getAdminSettings();
         if (!mounted) return;
         setMode(deriveModeFromSettings(s));

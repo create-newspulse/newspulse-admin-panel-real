@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import Switch from '@/components/settings/Switch';
-import { useSettingsDraft } from '@/features/settings/SettingsDraftContext';
+import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 
 function isValidEmbedUrl(raw: string): boolean {
   if (!raw) return true;
@@ -14,7 +14,7 @@ function isValidEmbedUrl(raw: string): boolean {
 }
 
 export default function LiveTvSettings() {
-  const { draft, patchDraft } = useSettingsDraft();
+  const { draft, patchDraft } = usePublicSiteSettingsDraft();
   const liveTv = useMemo(() => {
     const v = (draft as any)?.liveTv || {};
     return {

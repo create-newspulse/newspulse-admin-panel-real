@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import Switch from '@/components/settings/Switch';
-import { useSettingsDraft } from '@/features/settings/SettingsDraftContext';
+import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import {
   closestCenter,
   DndContext,
@@ -30,6 +30,10 @@ type ModuleKey =
   | 'footer';
 
 const DEFAULT_ORDER: ModuleKey[] = ['explore', 'categoryStrip', 'trending', 'liveUpdatesTicker', 'breakingTicker', 'quickTools', 'appPromo', 'footer'];
+
+function isTickerKey(key: ModuleKey): key is 'liveUpdatesTicker' | 'breakingTicker' {
+  return key === 'liveUpdatesTicker' || key === 'breakingTicker';
+}
 
 function SortableRow({
   id,
@@ -92,44 +96,53 @@ function SortableRow({
 }
 
 export default function HomepageModulesSettings() {
-  const { draft, patchDraft } = useSettingsDraft();
+  const { draft, patchDraft } = usePublicSiteSettingsDraft();
   const [reorderMode, setReorderMode] = useState(false);
 
   const order = useMemo(() => {
-    const raw = (draft as any)?.homepage?.modulesOrder as ModuleKey[] | undefined;
-    const arr = Array.isArray(raw) ? raw.filter(Boolean) : [];
-    const merged = [...arr];
-    for (const k of DEFAULT_ORDER) {
-      if (!merged.includes(k)) merged.push(k);
-    }
-    return merged;
+    const mods = (draft as any)?.homepage?.modules || {};
+    const tickers = (draft as any)?.tickers || {};
+    const withOrder = DEFAULT_ORDER.map((k, idx) => {
+      const ord = isTickerKey(k)
+        ? Number(k === 'liveUpdatesTicker' ? tickers?.live?.order : tickers?.breaking?.order)
+        : Number(
+            k === 'explore'
+              ? ((mods as any)?.explore?.order ?? (mods as any)?.exploreCategories?.order)
+              : k === 'trending'
+                ? ((mods as any)?.trending?.order ?? (mods as any)?.trendingStrip?.order)
+                : (mods as any)?.[k]?.order
+          );
+      return { k, ord: Number.isFinite(ord) && ord > 0 ? ord : (idx + 1) };
+    });
+    withOrder.sort((a, b) => a.ord - b.ord);
+    return withOrder.map((x) => x.k);
   }, [draft]);
 
   const enabled = useMemo(() => {
-    const ui = draft?.ui;
+    const mods = (draft as any)?.homepage?.modules || {};
+    const tickers = (draft as any)?.tickers || {};
     return {
-      explore: !!ui?.showExploreCategories,
-      categoryStrip: !!ui?.showCategoryStrip,
-      trending: !!ui?.showTrendingStrip,
-      liveUpdatesTicker: !!ui?.showLiveUpdatesTicker,
-      breakingTicker: !!ui?.showBreakingTicker,
-      quickTools: !!ui?.showQuickTools,
-      appPromo: !!ui?.showAppPromo,
-      footer: !!ui?.showFooter,
+      explore: !!((mods as any)?.explore?.enabled ?? (mods as any)?.exploreCategories?.enabled),
+      categoryStrip: !!(mods as any)?.categoryStrip?.enabled,
+      trending: !!((mods as any)?.trending?.enabled ?? (mods as any)?.trendingStrip?.enabled),
+      liveUpdatesTicker: !!tickers?.live?.enabled,
+      breakingTicker: !!tickers?.breaking?.enabled,
+      quickTools: !!(mods as any)?.quickTools?.enabled,
+      appPromo: !!(mods as any)?.appPromo?.enabled,
+      footer: !!(mods as any)?.footer?.enabled,
     } as Record<ModuleKey, boolean>;
   }, [draft]);
 
   function setEnabled(key: ModuleKey, next: boolean) {
-    const uiPatch: any = {};
-    if (key === 'explore') uiPatch.showExploreCategories = next;
-    if (key === 'categoryStrip') uiPatch.showCategoryStrip = next;
-    if (key === 'trending') uiPatch.showTrendingStrip = next;
-    if (key === 'liveUpdatesTicker') uiPatch.showLiveUpdatesTicker = next;
-    if (key === 'breakingTicker') uiPatch.showBreakingTicker = next;
-    if (key === 'quickTools') uiPatch.showQuickTools = next;
-    if (key === 'appPromo') uiPatch.showAppPromo = next;
-    if (key === 'footer') uiPatch.showFooter = next;
-    patchDraft({ ui: uiPatch } as any);
+    if (key === 'liveUpdatesTicker') {
+      patchDraft({ tickers: { live: { enabled: next } } } as any);
+      return;
+    }
+    if (key === 'breakingTicker') {
+      patchDraft({ tickers: { breaking: { enabled: next } } } as any);
+      return;
+    }
+    patchDraft({ homepage: { modules: { [key]: { enabled: next } } } } as any);
   }
 
   const sensors = useSensors(
@@ -147,7 +160,18 @@ export default function HomepageModulesSettings() {
     const newIndex = order.indexOf(b);
     if (oldIndex < 0 || newIndex < 0) return;
     const next = arrayMove(order, oldIndex, newIndex);
-    patchDraft({ homepage: { modulesOrder: next } } as any);
+    const modulesPatch: any = {};
+    const tickersPatch: any = {};
+    next.forEach((k, idx) => {
+      const pos = idx + 1;
+      if (k === 'liveUpdatesTicker') tickersPatch.live = { order: pos };
+      else if (k === 'breakingTicker') tickersPatch.breaking = { order: pos };
+      else modulesPatch[k] = { order: pos };
+    });
+    patchDraft({
+      ...(Object.keys(modulesPatch).length ? { homepage: { modules: modulesPatch } } : {}),
+      ...(Object.keys(tickersPatch).length ? { tickers: tickersPatch } : {}),
+    } as any);
   }
 
   const label: Record<ModuleKey, string> = {
@@ -192,7 +216,20 @@ export default function HomepageModulesSettings() {
             </button>
             <button
               type="button"
-              onClick={() => patchDraft({ homepage: { modulesOrder: DEFAULT_ORDER } } as any)}
+              onClick={() => {
+                const modulesPatch: any = {};
+                const tickersPatch: any = {};
+                DEFAULT_ORDER.forEach((k, idx) => {
+                  const pos = idx + 1;
+                  if (k === 'liveUpdatesTicker') tickersPatch.live = { order: pos };
+                  else if (k === 'breakingTicker') tickersPatch.breaking = { order: pos };
+                  else modulesPatch[k] = { order: pos };
+                });
+                patchDraft({
+                  ...(Object.keys(modulesPatch).length ? { homepage: { modules: modulesPatch } } : {}),
+                  ...(Object.keys(tickersPatch).length ? { tickers: tickersPatch } : {}),
+                } as any);
+              }}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100"
               title="Restore the default ordering"
             >

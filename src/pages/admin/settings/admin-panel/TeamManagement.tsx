@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import apiClient from '@lib/api';
+import { adminApi } from '@lib/api';
 import { useAuth } from '@context/AuthContext';
 
 type AdminUser = {
@@ -52,9 +52,11 @@ export default function TeamManagement() {
     setStaffEndpointMissing(false);
     try {
       // Contract: /api/admin/staff
-      // - DEV proxy base: /admin-api/api  -> request becomes /admin-api/api/admin/staff
-      // - Backend receives: /api/admin/staff
-      const res = await apiClient.get('/admin/staff');
+      // Proxy mode:
+      //   browser -> /admin-api/admin/staff  (Vite/Vercel) -> backend /api/admin/staff
+      // We intentionally call the canonical backend path and let the adminApi interceptor
+      // normalize it for proxy/direct mode.
+      const res = await adminApi.get(STAFF_LIST_ENDPOINT);
       const data = (res as any)?.data ?? res;
       // Tolerate common shapes
       const list = Array.isArray(data?.staff)
@@ -66,8 +68,17 @@ export default function TeamManagement() {
       if (status === 404) {
         setStaffEndpointMissing(true);
         setErr(null);
+      } else if (status === 401) {
+        // Session expired / missing credentials
+        setErr('Not authenticated. Please log in again.');
+      } else if (status === 403) {
+        // Role/owner-key gate
+        setErr('Access denied. Your account may require additional permissions.');
+      } else if (!status) {
+        // Network / proxy / CORS / backend not running
+        setErr('Backend unreachable. Ensure the backend is running and the /admin-api proxy is configured.');
       } else {
-        setErr('Failed to load staff. Please try again.');
+        setErr(`Failed to load staff (HTTP ${status}). Please try again.`);
       }
     } finally {
       setLoading(false);
@@ -76,7 +87,7 @@ export default function TeamManagement() {
 
   async function updateRole(userId: string, nextRole: string) {
     if (!isFounder || staffEndpointMissing) return;
-    await apiClient.put(`/admin/update-role/${userId}`, { role: nextRole });
+    await adminApi.put(`/admin/update-role/${userId}`, { role: nextRole });
     await fetchStaff();
   }
 

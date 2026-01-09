@@ -13,7 +13,7 @@ export default function useAuthGuard() {
     // Per spec: only protect /admin/* routes.
     if (!p.startsWith('/admin') && !p.startsWith('/employee')) return;
 
-    const token = localStorage.getItem('np_token') || localStorage.getItem('adminToken');
+    const token = localStorage.getItem('admin_token');
     if (!token) {
       const dest = p.startsWith('/employee') ? '/employee/login' : '/login';
       navigate(dest, { replace: true });

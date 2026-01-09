@@ -1,15 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Single source of truth:
-// - `VITE_API_URL` ONLY (no other env names).
-//   - Proxy mode (recommended on Vercel): set `VITE_API_URL=/admin-api`
-//     Browser calls:
-//       - Public: /admin-api/*  -> backend /api/*
-//       - Admin:  /admin-api/admin/* -> backend /api/admin/*
-//   - Direct mode: set `VITE_API_URL=https://<backend-origin>`
-//     Browser calls:
-//       - Public: https://<backend-origin>/api/*
-//       - Admin:  https://<backend-origin>/api/admin/*
+// API base (same-origin only)
+// - All frontend requests MUST go through `/admin-api/*` and rely on proxy/rewrites.
+// - Direct-to-backend absolute URLs are intentionally not supported here.
 const envAny = import.meta.env as any;
 
 function stripTrailingSlashes(s: string) {
@@ -51,21 +44,17 @@ function isValidApiBase(u: string): boolean {
 export function getApiBase(): string {
   const raw = (envAny.VITE_API_URL || '').toString().trim();
   const base = stripTrailingSlashes(raw).replace(/\/api$/i, '');
-  if (base && isValidApiBase(base)) return base;
 
-  // Developer convenience: allow local dev without env config.
-  if (import.meta.env.DEV) return '/admin-api';
-
-  // Production: do not silently fall back to random origins.
-  // Emit a visible toast via the global listener in src/main.tsx.
-  try {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('np:api-config-error', {
-        detail: { message: 'Backend is not configured. Set VITE_API_URL (e.g. /admin-api or https://<backend-origin>).' }
-      }));
+  // Allow env to explicitly set '/admin-api' (or '/admin-api/'), but ignore absolute URLs.
+  if (base && isValidApiBase(base)) {
+    if (base === '/admin-api') return '/admin-api';
+    // Any other value (including absolute URLs) is not supported by design.
+    if (import.meta.env.DEV) {
+      try { console.warn('[api] Ignoring VITE_API_URL (only "/admin-api" is supported):', base); } catch {}
     }
-  } catch {}
-  return '/__np_missing_api_base__';
+  }
+
+  return '/admin-api';
 }
 
 function absolutizeForAxios(base: string): string {
@@ -130,39 +119,46 @@ export function adminUrl(path: string): string {
 }
 
 // Unified token retrieval.
-// Order of precedence:
-// 1) np_admin_access_token
-// 2) np_admin_token
-// 3) adminToken
+// Single source of truth:
+// - localStorage['admin_token']
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    // Priority order:
-    // 1) np_admin_access_token
-    // 2) np_admin_token
-    // 3) np_token
-    // 4) newsPulseAdminAuth JSON -> token
-    // 5) legacy adminToken
-    for (const key of ['np_admin_access_token', 'np_admin_token', 'np_token']) {
-      const val = localStorage.getItem(key);
-      if (val && String(val).trim()) return String(val).replace(/^Bearer\s+/i, '');
-    }
-
-    // Back-compat: some builds store auth state as JSON.
-    const raw = localStorage.getItem('newsPulseAdminAuth');
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const token = parsed?.token;
-        if (token && String(token).trim()) return String(token).replace(/^Bearer\s+/i, '');
-      } catch {}
-    }
-
-    // Back-compat: older key
-    const legacy = localStorage.getItem('adminToken');
-    if (legacy && String(legacy).trim()) return String(legacy).replace(/^Bearer\s+/i, '');
+    const val = localStorage.getItem('admin_token');
+    if (val && String(val).trim()) return String(val).replace(/^Bearer\s+/i, '');
   } catch {}
   return null;
+}
+
+// Best-effort admin session detection.
+// Supports both:
+// - Bearer token auth via localStorage['admin_token']
+// - Cookie-session auth signaled by localStorage['newsPulseAdminAuth']
+export function hasLikelyAdminSession(): boolean {
+  if (getAuthToken()) return true;
+  if (typeof window === 'undefined') return false;
+
+  // Cookie-session support (magic-link / server-set session cookies).
+  // If np_admin cookie exists, allow adminFetch/adminJson to attempt requests.
+  try {
+    const c = typeof document !== 'undefined' ? String(document.cookie || '') : '';
+    if (/(^|;\s*)np_admin=/.test(c)) return true;
+  } catch {
+    // ignore
+  }
+
+  try {
+    const raw = localStorage.getItem('newsPulseAdminAuth');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const ts = typeof parsed?.ts === 'number' ? parsed.ts : null;
+    // Match AuthContext's max age (24h) to avoid probing forever.
+    if (ts && Date.now() - ts > 24 * 60 * 60 * 1000) return false;
+    return true;
+  } catch {
+    // If storage can't be read, err on the side of trying.
+    return true;
+  }
 }
 
 const INITIAL_BASE = getApiBase();
@@ -378,11 +374,8 @@ adminApi.interceptors.response.use(
       const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
       if (!isCommunityQueue && shouldLogoutOn401(url)) {
         try {
-          localStorage.removeItem('adminToken');
-          localStorage.removeItem('np_admin_token');
-          localStorage.removeItem('np_admin_access_token');
+          localStorage.removeItem('admin_token');
           localStorage.removeItem('newsPulseAdminAuth');
-          localStorage.removeItem('np_token');
         } catch {}
         try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
       }
@@ -619,11 +612,11 @@ export function setAuthToken(token: string | null) {
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     adminApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    try { localStorage.setItem('np_token', token); } catch {}
+    try { localStorage.setItem('admin_token', token); } catch {}
   } else {
     delete api.defaults.headers.common['Authorization'];
     delete adminApi.defaults.headers.common['Authorization'];
-    try { localStorage.removeItem('np_token'); } catch {}
+    try { localStorage.removeItem('admin_token'); } catch {}
   }
 }
 

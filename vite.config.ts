@@ -16,20 +16,29 @@ export default defineConfig(({ mode }): UserConfig => {
   const baseLogger = createLogger();
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
+  const adminApiUrl = stripSlash(env.VITE_ADMIN_API_URL || '');
   // IMPORTANT:
   // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
   // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
   //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
   // Use a dedicated variable for proxy targeting.
   // Prefer dedicated proxy target; fall back to VITE_API_BASE_URL (used by the simple axios client).
+  // Source of truth for dev proxy:
+  // Prefer VITE_BACKEND_ORIGIN (used by older config) but also honor VITE_ADMIN_API_TARGET.
   const rawCandidate = stripSlash(
-    env.VITE_ADMIN_API_TARGET
+    env.VITE_BACKEND_ORIGIN
+    || env.VITE_ADMIN_API_TARGET
     || env.VITE_BACKEND_URL
     || env.VITE_ADMIN_API_ORIGIN
     || env.VITE_API_BASE_URL
     || ''
   );
   const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
+  const DEFAULT_REAL_BACKEND = stripSlash(
+    process.env.NP_REAL_BACKEND
+    || (env as any).NP_REAL_BACKEND
+    || 'https://newspulse-backend-real.onrender.com'
+  );
   const looksLocalhost = (() => {
     const s = String(rawCandidate || '').toLowerCase();
     return s.includes('localhost:') || s.includes('127.0.0.1:') || s.includes('0.0.0.0:');
@@ -39,7 +48,7 @@ export default defineConfig(({ mode }): UserConfig => {
     && (!looksLocalhost || useLocalDemo))
     ? rawCandidate
     // Safe dev default: local demo backend origin.
-    : 'http://localhost:5000';
+    : (useLocalDemo ? 'http://localhost:5000' : DEFAULT_REAL_BACKEND);
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
@@ -49,7 +58,8 @@ export default defineConfig(({ mode }): UserConfig => {
   // Keep /admin-api proxy target consistent with the primary backend origin.
   // (Historically some setups used VITE_BACKEND_URL; keep it as a fallback only.)
   const ADMIN_API_PROXY_TARGET = stripSlash(
-    BACKEND_ORIGIN
+    (adminApiUrl && isValidAbsoluteUrl(adminApiUrl) ? adminApiUrl : '')
+    || BACKEND_ORIGIN
     || env.VITE_BACKEND_URL
     || process.env.VITE_BACKEND_URL
     || ''
@@ -67,10 +77,13 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   })();
 
-  // Dev diagnostic: show current admin API proxy target
+  // Dev diagnostic: show current proxy target
   if (mode === 'development') {
+    const src = (stripSlash(env.VITE_BACKEND_ORIGIN || '') && isValidAbsoluteUrl(env.VITE_BACKEND_ORIGIN))
+      ? 'VITE_BACKEND_ORIGIN'
+      : ((stripSlash(env.VITE_ADMIN_API_TARGET || '') && isValidAbsoluteUrl(env.VITE_ADMIN_API_TARGET)) ? 'VITE_ADMIN_API_TARGET' : 'default');
     // eslint-disable-next-line no-console
-    console.log('[vite] Admin API target:', API_TARGET || '(undefined)');
+    console.log('[vite] Resolved backend origin:', BACKEND_ORIGIN, `(source: ${src})`);
     if (BACKEND_URL) {
       console.log('[vite] Dev proxy BACKEND_URL:', BACKEND_URL);
     }

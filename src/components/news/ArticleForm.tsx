@@ -1695,7 +1695,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <div className="mt-2 text-xs text-red-600">PTI flags: {checks.compliance.ptiFlags.join(' · ')} <button type="button" className="underline" onClick={addAttribution}>Add attribution</button></div>
               )}
               {checks.duplicate && checks.duplicate.score >= 0.78 && (
-                <div className="mt-1 text-xs text-amber-700">Similar headline ({Math.round(checks.duplicate.score*100)}%). {checks.duplicate.closestId && <a className="underline" href={`/admin/articles/${checks.duplicate.closestId}`} target="_blank">View closest</a>}</div>
+                <div className="mt-1 text-xs text-amber-700">Similar headline ({Math.round(checks.duplicate.score*100)}%). {checks.duplicate.closestId && <a className="underline" href={`/admin/articles/${checks.duplicate.closestId}`} target="_blank" rel="noreferrer">View closest</a>}</div>
               )}
               <div className="mt-2 flex gap-2 flex-wrap">
                 {summary.length > 200 && <button type="button" onClick={trimSummaryTo160} className="btn-secondary text-[11px] px-2 py-1">Trim to ~160</button>}

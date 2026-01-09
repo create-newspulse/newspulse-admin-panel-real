@@ -1,19 +1,16 @@
 import { useMemo } from 'react';
-import { useSettingsDraft } from '@/features/settings/SettingsDraftContext';
+import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 
 export default function PublicPreview() {
-  const { draft } = useSettingsDraft();
+  const { draft } = usePublicSiteSettingsDraft();
 
   const safe = useMemo(() => {
     const s: any = draft || {};
     return {
-      ui: s.ui,
-      navigation: s.navigation,
-      voice: s.voice,
       homepage: s.homepage,
       tickers: s.tickers,
       liveTv: s.liveTv,
-      footer: s.footer,
+      languageTheme: s.languageTheme,
     };
   }, [draft]);
 

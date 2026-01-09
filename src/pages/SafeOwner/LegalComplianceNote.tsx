@@ -27,7 +27,7 @@ const LegalComplianceNote: React.FC = () => {
 
         <h2 className="text-lg font-semibold mt-6 mb-2 text-blue-700">3. Source Attribution</h2>
         <ul className="list-disc pl-6 text-sm text-gray-700 dark:text-gray-300">
-          <li>📡 Source: <a href="https://www.youtube.com/@sansadtv" target="_blank" className="text-blue-600 underline">Sansad TV Official YouTube</a></li>
+          <li>📡 Source: <a href="https://www.youtube.com/@sansadtv" target="_blank" className="text-blue-600 underline" rel="noreferrer">Sansad TV Official YouTube</a></li>
           <li>🎯 Content displayed is for civic awareness and public broadcast relay only.</li>
         </ul>
       </div>

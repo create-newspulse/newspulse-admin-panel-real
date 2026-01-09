@@ -88,16 +88,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const normalized = String(tokenVal).replace(/^Bearer\s+/i, '');
         setAuthToken(normalized);
         setTokenState(normalized);
-        // Persist under both new and legacy keys so interceptors always find it
-        try { localStorage.setItem('np_token', normalized); } catch {}
-        try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
-        try { localStorage.setItem('np_admin_token', normalized); } catch {}
+        // Single source of truth
+        try { localStorage.setItem('admin_token', normalized); } catch {}
       } else {
         setAuthToken(null);
         setTokenState(null);
-        try { localStorage.removeItem('np_token'); } catch {}
-        try { localStorage.removeItem('np_admin_token'); } catch {}
-        try { localStorage.removeItem('np_admin_access_token'); } catch {}
+        try { localStorage.removeItem('admin_token'); } catch {}
       }
 
       const u = data.user || data.data?.user || {
@@ -165,9 +161,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTokenState(null);
     setUser(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem('admin_token'); } catch {}
+    // Cleanup legacy keys (migration/hygiene)
     try { localStorage.removeItem('np_admin_token'); } catch {}
     try { localStorage.removeItem('np_admin_access_token'); } catch {}
     try { localStorage.removeItem('np_token'); } catch {}
+    try { localStorage.removeItem('adminToken'); } catch {}
     if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage', { reason: reason || 'manual' });
     // Per spec: no hard reload redirects; keep /login public and don't redirect to itself.
     if (location.pathname !== '/login') {
@@ -179,13 +178,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (import.meta.env.DEV) console.debug('[Auth] hydration start');
     try {
-      // Per spec: np_token is the canonical token key.
+      // Single source of truth: admin_token
+      // Migration: if admin_token missing, adopt from legacy keys once.
       try {
-        const t = localStorage.getItem('np_token');
-        if (t && String(t).trim()) {
-          const normalized = String(t).replace(/^Bearer\s+/i, '');
+        const current = localStorage.getItem('admin_token');
+        const legacy =
+          localStorage.getItem('np_token') ||
+          localStorage.getItem('np_admin_access_token') ||
+          localStorage.getItem('np_admin_token') ||
+          localStorage.getItem('adminToken');
+        const use = (current && String(current).trim()) ? current : legacy;
+        if (use && String(use).trim()) {
+          const normalized = String(use).replace(/^Bearer\s+/i, '');
           setTokenState(normalized);
           setAuthToken(normalized);
+          try { localStorage.setItem('admin_token', normalized); } catch {}
+          // wipe legacy keys to enforce single-key behavior going forward
+          try { localStorage.removeItem('np_token'); } catch {}
+          try { localStorage.removeItem('np_admin_access_token'); } catch {}
+          try { localStorage.removeItem('np_admin_token'); } catch {}
+          try { localStorage.removeItem('adminToken'); } catch {}
         }
       } catch {}
 
@@ -197,30 +209,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try { localStorage.removeItem(STORAGE_KEY); } catch {}
           if (import.meta.env.DEV) console.debug('[Auth] stored session expired');
         } else {
-          // Only use stored token if np_token was not present.
-          if (!localStorage.getItem('np_token') && parsed.token) {
+          // Only use stored token if admin_token was not present.
+          if (!localStorage.getItem('admin_token') && parsed.token) {
             const normalized = String(parsed.token).replace(/^Bearer\s+/i, '');
             setTokenState(normalized);
             setAuthToken(normalized);
-            try { localStorage.setItem('np_token', normalized); } catch {}
-            try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
-            try { localStorage.setItem('np_admin_token', normalized); } catch {}
+            try { localStorage.setItem('admin_token', normalized); } catch {}
           }
           if (parsed.email || parsed.role) {
             setUser(prev => prev || { id: '', email: String(parsed.email||''), name: '', role: String(parsed.role||'') });
           }
         }
-      }
-      // Fallback: if no structured storage found, try legacy token keys
-      if (!localStorage.getItem(STORAGE_KEY)) {
-        try {
-          const legacy = localStorage.getItem('np_token') || localStorage.getItem('np_admin_access_token') || localStorage.getItem('np_admin_token');
-          if (legacy && String(legacy).trim()) {
-            const normalized = String(legacy).replace(/^Bearer\s+/i, '');
-            setTokenState(normalized);
-            setAuthToken(normalized);
-          }
-        } catch {}
       }
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed', e);
@@ -230,19 +229,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Keep np_token in sync with in-memory token.
+  // Keep admin_token in sync with in-memory token.
   useEffect(() => {
     if (!isReady) return;
     try {
       if (token && String(token).trim()) {
         const normalized = String(token).replace(/^Bearer\s+/i, '');
-        try { localStorage.setItem('np_token', normalized); } catch {}
-        // Back-compat keys still used in some legacy modules.
-        try { localStorage.setItem('np_admin_access_token', normalized); } catch {}
-        try { localStorage.setItem('np_admin_token', normalized); } catch {}
+        try { localStorage.setItem('admin_token', normalized); } catch {}
+        // Cleanup legacy keys to enforce single-key behavior.
+        try { localStorage.removeItem('np_token'); } catch {}
+        try { localStorage.removeItem('np_admin_access_token'); } catch {}
+        try { localStorage.removeItem('np_admin_token'); } catch {}
+        try { localStorage.removeItem('adminToken'); } catch {}
         setAuthToken(normalized);
       } else {
-        try { localStorage.removeItem('np_token'); } catch {}
+        try { localStorage.removeItem('admin_token'); } catch {}
       }
     } catch {}
   }, [isReady, token]);

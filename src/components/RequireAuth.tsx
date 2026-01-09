@@ -15,7 +15,7 @@ export default function RequireAuth({ children }: PropsWithChildren) {
       setOk(null);
       return;
     }
-    const token = localStorage.getItem("np_token");
+    const token = localStorage.getItem("admin_token");
     if (!token) {
       setOk(false);
       return;

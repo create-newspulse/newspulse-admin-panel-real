@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 type Props = {
   dirty: boolean;
   canPublish: boolean;
-  onReset: () => void;
-  onSaveDraft: () => void;
+  onReset: () => void | Promise<void>;
+  onSaveDraft: () => void | Promise<void>;
   onPublish: () => Promise<void>;
   previewTo?: string;
   busy?: boolean;

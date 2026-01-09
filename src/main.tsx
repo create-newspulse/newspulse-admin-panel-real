@@ -70,7 +70,7 @@ if (import.meta.env.DEV) {
       }
       registry.set(key, meta);
     };
-  } catch {}
+  } catch (e) { void e; }
 }
 
 // 🎯 Grouped providers
@@ -120,5 +120,5 @@ createRoot(rootEl).render(
 );
 
 if (import.meta.env.DEV) {
-  try { runNavAudit(); } catch {}
+  try { runNavAudit(); } catch (e) { void e; }
 }

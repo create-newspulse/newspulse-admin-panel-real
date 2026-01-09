@@ -33,8 +33,15 @@ async function json<T>(res: Response): Promise<T> {
   try { return JSON.parse(text) as T; } catch { return {} as any; }
 }
 
+let inFlightAdminSettings: Promise<SiteSettings> | null = null;
+let inFlightAdminPublicSiteSettings: Promise<SiteSettings> | null = null;
+let inFlightAdminPublicSiteSettingsBundle: Promise<{ draft: SiteSettings; published: SiteSettings; meta: { version?: number; updatedAt?: string; draftVersion?: number; draftUpdatedAt?: string } }> | null = null;
+
 // Admin settings (auth required)
 async function getAdminSettings(): Promise<SiteSettings> {
+  if (inFlightAdminSettings) return inFlightAdminSettings;
+
+  inFlightAdminSettings = (async () => {
   let raw: any;
   // Single endpoint only; no automatic fallback chain to settings/load
   raw = await adminJson<any>('/admin/settings', { cache: 'no-store' });
@@ -47,6 +54,117 @@ async function getAdminSettings(): Promise<SiteSettings> {
     const parsed = SiteSettingsSchema.safeParse({ ...merged, ...meta });
     return parsed.success ? parsed.data : DEFAULT_SETTINGS;
   }
+  const parsed = SiteSettingsSchema.safeParse(raw ?? {});
+  return parsed.success ? parsed.data : DEFAULT_SETTINGS;
+  })().finally(() => {
+    inFlightAdminSettings = null;
+  });
+
+  return inFlightAdminSettings;
+}
+
+// Public-site settings (auth required) — admin endpoint for safe public settings only
+async function getAdminPublicSiteSettings(): Promise<SiteSettings> {
+  if (inFlightAdminPublicSiteSettings) return inFlightAdminPublicSiteSettings;
+
+  inFlightAdminPublicSiteSettings = (async () => {
+    const raw = await adminJson<any>('/admin/settings/public', { cache: 'no-store' });
+    return parseAdminPublicSiteSettingsResponse(raw, { prefer: 'draft' });
+  })().finally(() => {
+    inFlightAdminPublicSiteSettings = null;
+  });
+
+  return inFlightAdminPublicSiteSettings;
+}
+
+async function getAdminPublicSiteSettingsBundle(): Promise<{
+  draft: SiteSettings;
+  published: SiteSettings;
+  meta: { version?: number; updatedAt?: string; draftVersion?: number; draftUpdatedAt?: string };
+}> {
+  if (inFlightAdminPublicSiteSettingsBundle) return inFlightAdminPublicSiteSettingsBundle;
+
+  inFlightAdminPublicSiteSettingsBundle = (async () => {
+    const raw = await adminJson<any>('/admin/settings/public', { cache: 'no-store' });
+    const envelope = (raw && typeof raw === 'object' && (raw as any).settings) ? (raw as any).settings : raw;
+
+    const draft = parseAdminPublicSiteSettingsResponse(envelope, { prefer: 'draft' });
+    const published = parseAdminPublicSiteSettingsResponse(envelope, { prefer: 'published' });
+    const meta = {
+      version: typeof (envelope as any)?.version === 'number' ? (envelope as any).version : undefined,
+      updatedAt: typeof (envelope as any)?.updatedAt === 'string' ? (envelope as any).updatedAt : undefined,
+      draftVersion: typeof (envelope as any)?.draftVersion === 'number' ? (envelope as any).draftVersion : undefined,
+      draftUpdatedAt: typeof (envelope as any)?.draftUpdatedAt === 'string' ? (envelope as any).draftUpdatedAt : undefined,
+    };
+    return { draft, published, meta };
+  })().finally(() => {
+    inFlightAdminPublicSiteSettingsBundle = null;
+  });
+
+  return inFlightAdminPublicSiteSettingsBundle;
+}
+
+async function putAdminPublicSiteSettings(patch: Partial<SiteSettings>, audit?: { action?: string }): Promise<SiteSettings> {
+  const raw = await adminJson<any>('/admin/settings/public/draft', {
+    method: 'PUT',
+    headers: {
+      ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}),
+    },
+    json: patch || {},
+  });
+  return parseAdminPublicSiteSettingsResponse(raw, { prefer: 'draft' });
+}
+
+async function publishAdminPublicSiteSettings(settings: Partial<SiteSettings>, audit?: { action?: string }): Promise<SiteSettings> {
+  const payload = settings || {};
+  const raw = await adminJson<any>('/admin/settings/public/publish', {
+    method: 'POST',
+    headers: {
+      ...(audit?.action ? { 'X-Admin-Action': audit.action } : {}),
+    },
+    // Backend may publish the stored draft; sending the current draft keeps the call self-describing.
+    json: payload,
+  });
+  return parseAdminPublicSiteSettingsResponse(raw, { prefer: 'published' });
+}
+
+function parseAdminPublicSiteSettingsResponse(
+  input: unknown,
+  opts: { prefer: 'draft' | 'published' } = { prefer: 'draft' }
+): SiteSettings {
+  let raw: any = input as any;
+
+  // Common wrapper: { settings: ... }
+  if (raw && typeof raw === 'object' && (raw as any).settings) raw = (raw as any).settings;
+
+  // Canonical backend envelope:
+  // - GET returns { ok, draft, published, ... }
+  // - PUT draft returns { ok, status:'draft', draft, ... }
+  // - POST publish returns { ok, status:'published', published, ... }
+  if (raw && typeof raw === 'object') {
+    const anyRaw: any = raw as any;
+    const preferredValue =
+      opts.prefer === 'published'
+        ? (anyRaw.published ?? anyRaw.draft)
+        : (anyRaw.draft ?? anyRaw.published);
+    if (preferredValue && typeof preferredValue === 'object') {
+      raw = preferredValue;
+    } else if (anyRaw.status === 'published' && anyRaw.published && typeof anyRaw.published === 'object') {
+      raw = anyRaw.published;
+    } else if (anyRaw.status === 'draft' && anyRaw.draft && typeof anyRaw.draft === 'object') {
+      raw = anyRaw.draft;
+    }
+  }
+
+  // Accept envelope { public, admin, version, ... } and direct SiteSettings
+  if (raw && typeof raw === 'object' && ((raw as any).public || (raw as any).admin)) {
+    const anyRaw: any = raw as any;
+    const merged = { ...(anyRaw.public || {}), ...(anyRaw.admin || {}) };
+    const meta = { version: anyRaw.version, updatedAt: anyRaw.updatedAt, updatedBy: anyRaw.updatedBy };
+    const parsed = SiteSettingsSchema.safeParse({ ...merged, ...meta });
+    return parsed.success ? parsed.data : DEFAULT_SETTINGS;
+  }
+
   const parsed = SiteSettingsSchema.safeParse(raw ?? {});
   return parsed.success ? parsed.data : DEFAULT_SETTINGS;
 }
@@ -89,5 +207,14 @@ async function getCachedPublicSettings(ttlMs = 10 * 60 * 1000): Promise<PublicSe
   return fresh;
 }
 
-export const settingsApi = { getAdminSettings, putAdminSettings, getPublicSettings, getCachedPublicSettings };
+export const settingsApi = {
+  getAdminSettings,
+  putAdminSettings,
+  getAdminPublicSiteSettings,
+  getAdminPublicSiteSettingsBundle,
+  putAdminPublicSiteSettings,
+  publishAdminPublicSiteSettings,
+  getPublicSettings,
+  getCachedPublicSettings,
+};
 export default settingsApi;

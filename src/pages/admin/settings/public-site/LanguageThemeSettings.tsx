@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
-import { useSettingsDraft } from '@/features/settings/SettingsDraftContext';
+import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 
 export default function LanguageThemeSettings() {
-  const { draft, patchDraft } = useSettingsDraft();
+  const { draft, patchDraft } = usePublicSiteSettingsDraft();
 
-  const theme = draft?.ui?.theme || 'system';
+  const theme = (draft as any)?.languageTheme?.themePreset || 'system';
 
   const languages = useMemo(() => {
-    const arr = draft?.voice?.languages;
+    const arr = (draft as any)?.languageTheme?.languages;
     return Array.isArray(arr) ? arr : ['en'];
   }, [draft]);
 
@@ -27,7 +27,7 @@ export default function LanguageThemeSettings() {
           <select
             className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
             value={theme}
-            onChange={(e) => patchDraft({ ui: { theme: e.target.value as any } } as any)}
+            onChange={(e) => patchDraft({ languageTheme: { themePreset: e.target.value as any } } as any)}
           >
             <option value="light">Light</option>
             <option value="dark">Dark</option>
@@ -43,7 +43,7 @@ export default function LanguageThemeSettings() {
             value={languages.join(',')}
             onChange={(e) => {
               const next = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
-              patchDraft({ voice: { languages: next } } as any);
+              patchDraft({ languageTheme: { languages: next } } as any);
             }}
             placeholder="en,hi"
           />

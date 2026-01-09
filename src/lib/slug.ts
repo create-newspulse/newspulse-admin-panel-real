@@ -15,7 +15,7 @@ export function slugify(input: string) {
 }
 
 export async function uniqueSlug(base: string, existing: Set<string>) {
-  let attempt = slugify(base) || 'article';
+  const attempt = slugify(base) || 'article';
   if (!existing.has(attempt)) return attempt;
   let i = 1;
   while (existing.has(`${attempt}-${i}`)) i++;

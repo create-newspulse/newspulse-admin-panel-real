@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import type { SiteSettings } from '@/types/siteSettings';
-import { DEFAULT_SETTINGS, SiteSettingsSchema } from '@/types/siteSettings';
+import { DEFAULT_SETTINGS } from '@/types/siteSettings';
 import settingsApi from '@/lib/settingsApi';
 import { deepMerge } from '@/features/settings/deepMerge';
 
 type Status = 'idle' | 'loading' | 'ready' | 'saving' | 'publishing' | 'error';
+
+export type SettingsDraftScope = 'admin-panel' | 'public-site';
 
 type Ctx = {
   status: Status;
@@ -16,12 +18,15 @@ type Ctx = {
   patchDraft: (patch: Partial<SiteSettings>) => void;
   resetDraft: () => void;
   saveDraftLocal: () => void;
+  saveDraftRemote: (auditAction?: string) => Promise<void>;
   publish: (auditAction?: string) => Promise<void>;
 };
 
 const SettingsDraftContext = createContext<Ctx | null>(null);
 
-const DRAFT_KEY = 'np_settings_draft_v1';
+function draftKey(scope: SettingsDraftScope): string {
+  return scope === 'public-site' ? 'np_settings_draft_public_v1' : 'np_settings_draft_admin_v1';
+}
 
 function safeParseDraft(raw: string | null): any {
   if (!raw) return null;
@@ -32,7 +37,23 @@ function safeParseDraft(raw: string | null): any {
   }
 }
 
-export function SettingsDraftProvider({ children }: PropsWithChildren) {
+function stableStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const replacer = (_key: string, v: any) => {
+    if (!v || typeof v !== 'object') return v;
+    if (seen.has(v)) return '[Circular]';
+    seen.add(v);
+
+    if (Array.isArray(v)) return v;
+
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(v).sort()) out[k] = v[k];
+    return out;
+  };
+  return JSON.stringify(value, replacer);
+}
+
+export function SettingsDraftProvider({ children, scope = 'admin-panel' }: PropsWithChildren<{ scope?: SettingsDraftScope }>) {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [base, setBase] = useState<SiteSettings | null>(null);
@@ -44,11 +65,13 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
       setStatus('loading');
       setError(null);
       try {
-        const s = await settingsApi.getAdminSettings();
+        const s = scope === 'public-site'
+          ? await settingsApi.getAdminPublicSiteSettings()
+          : await settingsApi.getAdminSettings();
         if (!mounted) return;
         setBase(s);
 
-        const local = safeParseDraft(localStorage.getItem(DRAFT_KEY));
+        const local = safeParseDraft(localStorage.getItem(draftKey(scope)));
         if (local && typeof local === 'object' && local.value) {
           setDraft(deepMerge(s, local.value as Partial<SiteSettings>));
         } else {
@@ -66,11 +89,11 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [scope]);
 
   const dirty = useMemo(() => {
     if (!base || !draft) return false;
-    return JSON.stringify(base) !== JSON.stringify(draft);
+    return stableStringify(base) !== stableStringify(draft);
   }, [base, draft]);
 
   const patchDraft = (patch: Partial<SiteSettings>) => {
@@ -83,7 +106,7 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
   const resetDraft = () => {
     if (base) setDraft(base);
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(draftKey(scope));
     } catch {
       // ignore
     }
@@ -92,9 +115,30 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
   const saveDraftLocal = () => {
     if (!draft) return;
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: new Date().toISOString(), value: draft }));
+      localStorage.setItem(draftKey(scope), JSON.stringify({ savedAt: new Date().toISOString(), value: draft }));
     } catch {
       // ignore
+    }
+  };
+
+  const saveDraftRemote = async (auditAction = 'save-settings-draft') => {
+    if (!draft) return;
+    setStatus('saving');
+    setError(null);
+    try {
+      const next = scope === 'public-site'
+        ? await settingsApi.putAdminPublicSiteSettings(draft, auditAction ? { action: auditAction } : undefined)
+        : await settingsApi.putAdminSettings(draft, auditAction ? { action: auditAction } : undefined);
+      setBase(next);
+      setDraft(next);
+      try {
+        localStorage.removeItem(draftKey(scope));
+      } catch {}
+      setStatus('ready');
+    } catch (e: any) {
+      setStatus('error');
+      setError(e?.message || 'Save failed');
+      throw e;
     }
   };
 
@@ -103,13 +147,13 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
     setStatus('publishing');
     setError(null);
     try {
-      // Use the unified fetch-based admin settings API so proxy mode always hits:
-      // browser -> /admin-api/admin/settings -> backend /api/admin/settings
-      const next = await settingsApi.putAdminSettings(draft, auditAction ? { action: auditAction } : undefined);
+      const next = scope === 'public-site'
+        ? await settingsApi.publishAdminPublicSiteSettings(draft, auditAction ? { action: auditAction } : undefined)
+        : await settingsApi.putAdminSettings(draft, auditAction ? { action: auditAction } : undefined);
       setBase(next);
       setDraft(next);
       try {
-        localStorage.removeItem(DRAFT_KEY);
+        localStorage.removeItem(draftKey(scope));
       } catch {}
       setStatus('ready');
     } catch (e: any) {
@@ -129,6 +173,7 @@ export function SettingsDraftProvider({ children }: PropsWithChildren) {
       patchDraft,
       resetDraft,
       saveDraftLocal,
+      saveDraftRemote,
       publish,
     };
   }, [status, error, base, draft, dirty]);

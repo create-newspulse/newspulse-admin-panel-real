@@ -1,4 +1,3 @@
-// vite.config.ts
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
@@ -21,41 +20,56 @@ const isValidAbsoluteUrl = (u) => {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
+    const DEFAULT_REAL_BACKEND = stripSlash(process.env.NP_REAL_BACKEND
+        || env.NP_REAL_BACKEND
+        || 'https://newspulse-backend-real.onrender.com');
     // IMPORTANT:
-    // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
-    // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
-    //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
-    // Prefer dedicated proxy target; fall back to VITE_API_BASE_URL (used by the simple axios client).
-    const rawCandidate = stripSlash(env.VITE_ADMIN_API_TARGET
-        || env.VITE_BACKEND_URL
-        || env.VITE_ADMIN_API_ORIGIN
-        || env.VITE_API_BASE_URL
-        || '');
-    const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
-    const looksLocalhost = (() => {
-        const s = String(rawCandidate || '').toLowerCase();
-        return s.includes('localhost:') || s.includes('127.0.0.1:') || s.includes('0.0.0.0:');
-    })();
-    // Never default to placeholder hosts; they cause ENOTFOUND loops in dev.
-    // Order:
-    // 1) explicit env candidate (valid absolute URL)
-    // 2) local demo backend (when opted-in)
-    // 3) local demo backend as a safe default (ECONNREFUSED is clearer than ENOTFOUND)
-    const API_TARGET = (!hasPlaceholders(rawCandidate)
-        && isValidAbsoluteUrl(rawCandidate)
-        && (!looksLocalhost || useLocalDemo))
-        ? rawCandidate
-        : (useLocalDemo ? 'http://localhost:5000' : 'http://localhost:5000');
-    // IMPORTANT: proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
-    const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
+    // `VITE_BACKEND_ORIGIN` is the ONLY source of truth for the dev proxy backend origin.
+    // - Example (local):   VITE_BACKEND_ORIGIN=http://localhost:5000
+    // - Example (remote):  VITE_BACKEND_ORIGIN=https://newspulse-backend-real.onrender.com
+    // No trailing '/api'.
+    const rawOrigin = stripSlash(env.VITE_BACKEND_ORIGIN || '');
+    const devDefaultOrigin = 'http://localhost:5000';
+    let originSource = 'VITE_BACKEND_ORIGIN';
+    let ORIGIN = rawOrigin;
+    if (!ORIGIN || hasPlaceholders(ORIGIN) || !isValidAbsoluteUrl(ORIGIN)) {
+        ORIGIN = mode === 'development' ? devDefaultOrigin : DEFAULT_REAL_BACKEND;
+        originSource = mode === 'development' ? `default:${devDefaultOrigin}` : `default:${DEFAULT_REAL_BACKEND}`;
+    }
+    // Proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
+    const BACKEND_ORIGIN = /\/api$/i.test(ORIGIN) ? ORIGIN.replace(/\/api$/i, '') : ORIGIN;
     const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN;
 
     if (mode === 'development') {
         // eslint-disable-next-line no-console
-        console.log('[vite] Dev proxy target:', BACKEND_ORIGIN);
-        // eslint-disable-next-line no-console
-        console.log('[vite] Using localhost demo backend:', useLocalDemo);
+        console.log('[vite] Resolved backend origin:', BACKEND_ORIGIN, `(source: ${originSource})`);
     }
+
+    const attachProxy404Logger = (proxy, kind) => {
+        let last = 0;
+        proxy.on('proxyRes', (proxyRes, req) => {
+            try {
+                if (proxyRes?.statusCode !== 404) return;
+                const now = Date.now();
+                // throttle a bit to avoid noisy logs when the UI retries
+                if (now - last < 1000) return;
+                last = now;
+                const inUrl = String(req?.url || '');
+                let mapped = inUrl;
+                if (kind === 'admin-api') {
+                    mapped = mapped.replace(/^\/admin-api/, '/api');
+                    mapped = mapped.replace(/^\/api\/api\//, '/api/');
+                }
+                if (kind === 'api') {
+                    mapped = mapped.replace(/^\/api\/api\//, '/api/');
+                }
+                // eslint-disable-next-line no-console
+                console.warn(`[vite-proxy-404] ${req?.method || 'GET'} ${inUrl} -> ${BACKEND_ORIGIN}${mapped}`);
+            } catch {
+                // ignore
+            }
+        });
+    };
     return {
         plugins: [react()],
         envPrefix: 'VITE_',
@@ -87,6 +101,7 @@ export default defineConfig(({ mode }) => {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    configure: (proxy) => attachProxy404Logger(proxy, 'admin-api'),
                     // Map '/admin-api/*' -> backend '/api/*'
                     // Example: /admin-api/admin/ad-settings -> /api/admin/ad-settings
                     rewrite: (p) => {
@@ -95,13 +110,18 @@ export default defineConfig(({ mode }) => {
                         // - /admin-api/articles        -> /api/articles
                         // - /admin-api/api/articles    -> /api/articles
                         const out = p.replace(/^\/admin-api/, '/api');
-                        return out.replace(/^\/api\/api\//, '/api/');
+                        const final = out.replace(/^\/api\/api\//, '/api/');
+                        if (mode === 'development') {
+                            console.log(`[vite-proxy] ${p} -> ${BACKEND_ORIGIN}${final}`);
+                        }
+                        return final;
                     },
                 },
                 '/api': {
                     target: BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    configure: (proxy) => attachProxy404Logger(proxy, 'api'),
                     // keep path mostly as-is so /api/* hits backend /api/*
                     // but collapse accidental double-prefixes: /api/api/* -> /api/*
                     rewrite: (p) => p.replace(/^\/api\/api\//, '/api/'),
