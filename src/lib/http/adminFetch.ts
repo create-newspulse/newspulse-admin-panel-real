@@ -7,7 +7,7 @@ function stripTrailingSlashes(s: string): string {
 // Admin API base URL
 // Production direct mode (no proxy): set VITE_ADMIN_API_BASE=https://YOUR_BACKEND_DOMAIN
 // Dev/proxy mode: leave it empty and the app will call relative /admin-api/* (Vite/Vercel rewrites).
-const BASE = (import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim();
+const BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
 
 // Legacy/back-compat: allow overriding the full base URL/path.
@@ -86,12 +86,6 @@ let netBlockedUntil = 0;
 const NET_BLOCK_MS = 2000;
 
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
-  // Temporary debug (remove after confirming dev/prod wiring)
-  try {
-    // eslint-disable-next-line no-console
-    console.log('[adminFetch] BASE=', BASE, 'PATH=', path);
-  } catch {}
-
   const url = adminApiUrl(path);
 
   // Short-circuit repeated calls while we are actively logging out.
@@ -273,13 +267,16 @@ export function adminApiUrl(path: string): string {
   // respect it as-is so Vite can log/rewrite it.
   // Example: '/admin-api/admin/settings/public'
   const raw = (path ?? '').toString().trim();
-  if (raw.startsWith('/admin-api/') || raw === '/admin-api') {
-    const base = stripTrailingSlashes(ADMIN_API_BASE);
-    // If ADMIN_API_BASE is absolute (prod direct mode), prefix the origin.
-    if (/^https?:\/\//i.test(base)) {
-      const rest = raw.replace(/^\/admin-api/, '');
-      return `${base}${rest}`.replace(/([^:]\/)\/+?/g, '$1');
-    }
+
+  // If caller already provided a proxy-style path, keep it.
+  // Production support: when BASE is set, prefix it so requests become `${BASE}${path}`.
+  if (
+    raw.startsWith('/admin-api/') ||
+    raw === '/admin-api' ||
+    raw.startsWith('/api/') ||
+    raw === '/api'
+  ) {
+    if (BASE) return `${BASE}${raw}`.replace(/([^:]\/)\/+?/g, '$1');
     return raw.replace(/\/\/+/, '/');
   }
   // If caller provided an absolute URL, do not rewrite it.
