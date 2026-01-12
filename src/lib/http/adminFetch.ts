@@ -86,6 +86,12 @@ let netBlockedUntil = 0;
 const NET_BLOCK_MS = 2000;
 
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
+  // Temporary debug (remove after confirming dev/prod wiring)
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[adminFetch] BASE=', BASE, 'PATH=', path);
+  } catch {}
+
   const url = adminApiUrl(path);
 
   // Short-circuit repeated calls while we are actively logging out.

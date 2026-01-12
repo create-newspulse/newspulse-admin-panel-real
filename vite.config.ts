@@ -119,6 +119,15 @@ export default defineConfig(({ mode }): UserConfig => {
       target: ADMIN_API_PROXY_TARGET,
       changeOrigin: true,
       secure: false,
+      // DEV contract: frontend calls '/admin-api/*' (matches Vercel).
+      // Local backend typically serves '/api/*', so rewrite here.
+      rewrite: (path: string) => {
+        // tolerate callers that already include '/api'
+        // - /admin-api/articles     -> /api/articles
+        // - /admin-api/api/articles -> /api/articles
+        const out = path.replace(/^\/admin-api/, '/api');
+        return out.replace(/^\/api\/api\//, '/api/');
+      },
     };
   }
 

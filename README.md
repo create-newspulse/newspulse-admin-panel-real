@@ -78,6 +78,12 @@ npm install
 - Preferred (proxy mode; matches Vercel): leave `VITE_ADMIN_API_ORIGIN` empty and run a backend locally.
 - Optional (direct mode): set `VITE_ADMIN_API_ORIGIN` to a valid backend origin (no `/api` suffix).
 
+Recommended dev setup for `/admin-api/*`
+- Leave `VITE_ADMIN_API_BASE` empty so browser requests stay relative (e.g. `/admin-api/broadcast`).
+- Vite dev server proxies `/admin-api/*` and `/api/*` to your local backend (default `http://localhost:5000`).
+
+After changing any `.env*` values or Vite proxy config, restart the dev server.
+
 Example `.env.local`:
 
 ```
