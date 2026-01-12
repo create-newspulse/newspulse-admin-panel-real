@@ -4,11 +4,20 @@ import { apiUrl, adminUrl, getAuthToken } from '@/lib/api';
 
 type ApiOptions = RequestInit & { headers?: Record<string, string> };
 
+const stripTrailingSlashes = (s: string) => (s || '').replace(/\/+$/, '');
+const ADMIN_API_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+
 function resolveUrl(url: string) {
   // Full URLs pass through
   if (/^https?:\/\//i.test(url)) return url;
 
   const clean = url.startsWith('/') ? url : `/${url}`;
+
+  // Production base support: allow calling relative '/api/*' or '/admin-api/*'
+  // while still supporting proxy mode in dev when ADMIN_API_BASE is empty.
+  if (ADMIN_API_BASE && (clean.startsWith('/api/') || clean === '/api' || clean.startsWith('/admin-api/') || clean === '/admin-api')) {
+    return `${ADMIN_API_BASE}${clean}`.replace(/([^:]\/)\/+?/g, '$1');
+  }
 
   if (clean.startsWith('/admin/')) return adminUrl(clean);
   if (clean.startsWith('/api/')) return apiUrl(clean);

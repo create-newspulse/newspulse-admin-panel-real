@@ -34,6 +34,8 @@ export default defineConfig(({ mode }): UserConfig => {
     || ''
   );
   const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
+  // Dev default per repo guidance: proxy to local backend unless explicitly overridden.
+  const DEV_DEFAULT_BACKEND = stripSlash('http://localhost:5000');
   const DEFAULT_REAL_BACKEND = stripSlash(
     process.env.NP_REAL_BACKEND
     || (env as any).NP_REAL_BACKEND
@@ -47,8 +49,7 @@ export default defineConfig(({ mode }): UserConfig => {
     && isValidAbsoluteUrl(rawCandidate)
     && (!looksLocalhost || useLocalDemo))
     ? rawCandidate
-    // Safe dev default: local demo backend origin.
-    : (useLocalDemo ? 'http://localhost:5000' : DEFAULT_REAL_BACKEND);
+    : (mode === 'development' ? DEV_DEFAULT_BACKEND : DEFAULT_REAL_BACKEND);
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
@@ -118,11 +119,6 @@ export default defineConfig(({ mode }): UserConfig => {
       target: ADMIN_API_PROXY_TARGET,
       changeOrigin: true,
       secure: false,
-      rewrite: (path: string) => {
-        if (ADMIN_PROXY_IS_VERCEL) return path;
-        if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '');
-        return path.replace(/^\/admin-api/, '/api');
-      },
     };
   }
 

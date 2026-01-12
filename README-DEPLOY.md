@@ -9,6 +9,10 @@ Quick setup (2025 update)
 - Important: `.env.production.local` is intentionally blank in the repo so builds don’t force localhost. Do not reintroduce localhost values there.
 - If using direct mode, ensure backend CORS allows your Vercel preview and production domains. Our backend has pattern-based CORS that already admits `*.vercel.app` and your custom domain.
 
+Admin API base URL (dev vs prod)
+- Dev: leave `VITE_ADMIN_API_BASE` empty and run your backend on `http://localhost:5000` (Vite proxies `/admin-api/*` and `/api/*`).
+- Prod: set `VITE_ADMIN_API_BASE=https://YOUR_BACKEND_DOMAIN` so the frontend can call absolute `/admin-api/*` and `/api/*`.
+
 1) Deploy the backend (Render example)
 - Go to https://dashboard.render.com -> New -> Web Service -> Connect to GitHub -> select this repo.
 - Choose branch: main

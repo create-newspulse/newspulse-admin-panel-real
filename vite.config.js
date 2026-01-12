@@ -102,20 +102,6 @@ export default defineConfig(({ mode }) => {
                     changeOrigin: true,
                     secure: false,
                     configure: (proxy) => attachProxy404Logger(proxy, 'admin-api'),
-                    // Map '/admin-api/*' -> backend '/api/*'
-                    // Example: /admin-api/admin/ad-settings -> /api/admin/ad-settings
-                    rewrite: (p) => {
-                        // Keep parity with the Vercel proxy which tolerates callers that already include '/api'.
-                        // Examples:
-                        // - /admin-api/articles        -> /api/articles
-                        // - /admin-api/api/articles    -> /api/articles
-                        const out = p.replace(/^\/admin-api/, '/api');
-                        const final = out.replace(/^\/api\/api\//, '/api/');
-                        if (mode === 'development') {
-                            console.log(`[vite-proxy] ${p} -> ${BACKEND_ORIGIN}${final}`);
-                        }
-                        return final;
-                    },
                 },
                 '/api': {
                     target: BACKEND_ORIGIN,

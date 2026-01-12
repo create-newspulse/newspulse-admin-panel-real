@@ -5,10 +5,16 @@ function stripTrailingSlashes(s: string): string {
 }
 
 // Admin API base URL
-// Single source of truth: VITE_ADMIN_API_URL
-// Default: use same-origin proxy to avoid CORS.
+// Production direct mode (no proxy): set VITE_ADMIN_API_BASE=https://YOUR_BACKEND_DOMAIN
+// Dev/proxy mode: leave it empty and the app will call relative /admin-api/* (Vite/Vercel rewrites).
+const BASE = (import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim();
+const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
+
+// Legacy/back-compat: allow overriding the full base URL/path.
 const RAW_ADMIN_BASE = (import.meta.env.VITE_ADMIN_API_URL || '').toString().trim();
-export const ADMIN_API_BASE = stripTrailingSlashes(RAW_ADMIN_BASE || '/admin-api');
+export const ADMIN_API_BASE = stripTrailingSlashes(
+  RAW_ADMIN_BASE || (ADMIN_API_ORIGIN ? `${ADMIN_API_ORIGIN}/admin-api` : '/admin-api')
+);
 
 export class AdminApiError extends Error {
   status: number;
@@ -166,7 +172,9 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
           p.startsWith('/admin/') ||
           // proxy-mode paths
           p.startsWith('/admin-api/admin/') ||
-          p.startsWith('/admin-api/api/admin/')
+          p.startsWith('/admin-api/api/admin/') ||
+          // Broadcast Center routes are auth-protected (founder)
+          p.startsWith('/admin-api/broadcast')
         );
       } catch {
         const s = (url || '').toString();
@@ -175,7 +183,8 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
           s.includes('/api/admin/') ||
           s.includes('/admin/') ||
           s.includes('/admin-api/admin/') ||
-          s.includes('/admin-api/api/admin/')
+          s.includes('/admin-api/api/admin/') ||
+          s.includes('/admin-api/broadcast')
         );
       }
     })();
@@ -259,6 +268,12 @@ export function adminApiUrl(path: string): string {
   // Example: '/admin-api/admin/settings/public'
   const raw = (path ?? '').toString().trim();
   if (raw.startsWith('/admin-api/') || raw === '/admin-api') {
+    const base = stripTrailingSlashes(ADMIN_API_BASE);
+    // If ADMIN_API_BASE is absolute (prod direct mode), prefix the origin.
+    if (/^https?:\/\//i.test(base)) {
+      const rest = raw.replace(/^\/admin-api/, '');
+      return `${base}${rest}`.replace(/([^:]\/)\/+?/g, '$1');
+    }
     return raw.replace(/\/\/+/, '/');
   }
   // If caller provided an absolute URL, do not rewrite it.
@@ -273,6 +288,17 @@ export function adminApiUrl(path: string): string {
   // and Vite/Vercel rewrites forward it to backend /api/admin/*.
   if (base.startsWith('/')) {
     const lowerBase = base.toLowerCase();
+    const hasAdminSuffix = /\/admin$/.test(lowerBase);
+    const prefix = hasAdminSuffix ? '' : '/admin';
+    const joined = `${base}${prefix}${rest}`;
+    return joined.replace(/([^:]\/)\/+?/g, '$1');
+  }
+
+  // If the configured base already points at an /admin-api style root, keep the same joining
+  // semantics as proxy mode (i.e. add '/admin' unless base already ends with '/admin').
+  const lowerBase = base.toLowerCase();
+  const isAdminApiRoot = /\/admin-api$/.test(lowerBase) || /\/admin-api\/$/.test(lowerBase) || /\/admin-api\/admin$/.test(lowerBase);
+  if (isAdminApiRoot) {
     const hasAdminSuffix = /\/admin$/.test(lowerBase);
     const prefix = hasAdminSuffix ? '' : '/admin';
     const joined = `${base}${prefix}${rest}`;
