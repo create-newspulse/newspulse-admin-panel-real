@@ -94,15 +94,18 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   }
   const proxy: any = {};
-  if (BACKEND_ORIGIN) {
+  // DEV: always proxy common API prefixes to the backend.
+  // Default target: http://localhost:5000 (can be overridden via existing env resolution).
+  const DEV_PROXY_TARGET = stripSlash(env.VITE_DEV_PROXY_TARGET || '') || 'http://localhost:5000';
+  if (DEV_PROXY_TARGET) {
     proxy['/api'] = {
-      target: `${BACKEND_ORIGIN}`,
+      target: `${DEV_PROXY_TARGET}`,
       changeOrigin: true,
       secure: false,
     };
     // Support public settings in local dev (maps /settings/* -> /api/settings/*)
     proxy['/settings'] = {
-      target: `${BACKEND_ORIGIN}`,
+      target: `${DEV_PROXY_TARGET}`,
       changeOrigin: true,
       secure: false,
       rewrite: (path: string) => path.replace(/^\/settings/, '/api/settings'),
@@ -116,18 +119,9 @@ export default defineConfig(({ mode }): UserConfig => {
   }
   if (ADMIN_API_PROXY_TARGET) {
     proxy['/admin-api'] = {
-      target: ADMIN_API_PROXY_TARGET,
+      target: DEV_PROXY_TARGET,
       changeOrigin: true,
       secure: false,
-      // DEV contract: frontend calls '/admin-api/*' (matches Vercel).
-      // Local backend typically serves '/api/*', so rewrite here.
-      rewrite: (path: string) => {
-        // tolerate callers that already include '/api'
-        // - /admin-api/articles     -> /api/articles
-        // - /admin-api/api/articles -> /api/articles
-        const out = path.replace(/^\/admin-api/, '/api');
-        return out.replace(/^\/api\/api\//, '/api/');
-      },
     };
   }
 

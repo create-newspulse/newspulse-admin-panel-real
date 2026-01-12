@@ -102,12 +102,6 @@ export default defineConfig(({ mode }) => {
                     changeOrigin: true,
                     secure: false,
                     configure: (proxy) => attachProxy404Logger(proxy, 'admin-api'),
-                    // Map '/admin-api/*' -> backend '/api/*'
-                    // Example: /admin-api/broadcast -> /api/broadcast
-                    rewrite: (p) => {
-                        const out = p.replace(/^\/admin-api/, '/api');
-                        return out.replace(/^\/api\/api\//, '/api/');
-                    },
                 },
                 '/api': {
                     target: BACKEND_ORIGIN,
