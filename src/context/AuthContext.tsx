@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { useLocation, useNavigate } from 'react-router-dom';
 import { setAuthToken } from '@/lib/api';
 import { adminApi } from '@/lib/adminApi';
+import { hasLikelyAdminSession } from '@/lib/api';
 
 type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string };
 
@@ -39,6 +40,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAuthenticated = !!token || !!user;
   const role = (user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
+
+  const isAuthPage = ['/login', '/admin/login', '/employee/login'].some((p) => {
+    return location.pathname === p || location.pathname.startsWith(`${p}/`);
+  });
 
   // Dev-only logging to debug role-gating issues
   useEffect(() => {
@@ -121,11 +126,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (err: any) {
       const status = err?.response?.status;
+      const offline =
+        err?.isOffline === true ||
+        err?.code === 'BACKEND_OFFLINE' ||
+        (!err?.response && !status && (/network\s*error/i.test(String(err?.message || '')) || /err_connection_refused/i.test(String(err?.message || ''))));
       const msg =
         err?.response?.data?.message
         || err?.response?.data?.error
         || err?.response?.data?.details
-        || (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.');
+        || (offline ? 'Backend offline' : (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.'));
       if (import.meta.env.DEV) {
         console.error('[Auth] Login error', {
           status,
@@ -148,8 +157,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Network / unexpected errors: allow UI to show a clearer message.
-      const e = new Error(msg || 'Network error - could not reach login API');
+      const e = new Error(msg || (offline ? 'Backend offline' : 'Network error - could not reach login API'));
       (e as any).status = status;
+      if (offline) {
+        (e as any).isOffline = true;
+        (e as any).code = (e as any).code || 'BACKEND_OFFLINE';
+      }
       throw e;
     } finally {
       setIsLoading(false);
@@ -278,6 +291,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Skip if already restoring or already attempted with a fully hydrated user profile.
     // NOTE: A token alone is NOT enough for role-gated routes; we must fetch /me to get role.
     const hasFullAuth = !!(user && String(user.role || '').trim());
+    if (isAuthPage) return;
+    // Don't probe /me unless we have some reason to believe a session exists.
+    if (!token && !hasLikelyAdminSession()) return;
     if (isRestoring || restoreAttemptedRef.current || hasFullAuth) return;
     restoreAttemptedRef.current = true;
     setIsRestoring(true);
@@ -306,25 +322,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e:any) {
       const st = e?.response?.status;
+      const offline = e?.isOffline === true || e?.code === 'BACKEND_OFFLINE' || e?.code === 'NP_BACKEND_OFFLINE';
       // Treat 404 as non-fatal (no profile) and avoid noisy warning
       if (st === 401) {
         // 401 should redirect to login via interceptors (no scary logs)
+      } else if (offline) {
+        // Backend offline: stay unauthenticated and avoid noisy logs.
       } else if (import.meta.env.DEV && st !== 404) {
         console.warn('[Auth] session restore failed', st, e?.message);
       }
     } finally {
       setIsRestoring(false);
     }
-  }, [token, user, isRestoring]);
+  }, [token, user, isRestoring, isAuthPage]);
 
   // Trigger restore after hydration if we are missing profile/role (token alone is not enough for role-gated routes)
   useEffect(() => {
     if (!isReady) return;
+    if (isAuthPage) return;
     const missingProfileOrRole = !user || !String(user.role || '').trim();
     if (missingProfileOrRole) {
       restoreSession();
     }
-  }, [isReady, user, restoreSession]);
+  }, [isReady, user, restoreSession, isAuthPage]);
 
   const value: AuthContextValue = {
     user,

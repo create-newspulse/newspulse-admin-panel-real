@@ -196,9 +196,59 @@ export const adminApi = axios.create({
 
 let missingUrlWarned = false;
 
+// --- Backend-offline circuit breaker ---
+// When the dev backend (or proxy target) is down, multiple components can trigger
+// repeated network calls. We short-circuit requests for a short cooldown window.
+let netBlockedUntil = 0;
+const NET_BLOCK_MS = 5000;
+
+function makeOfflineError(): any {
+  const e: any = new Error('Backend offline');
+  e.code = 'BACKEND_OFFLINE';
+  e.isOffline = true;
+  return e;
+}
+
+function isBackendOfflineError(err: any): boolean {
+  const status = err?.response?.status;
+  if (status === 502 || status === 503 || status === 504) return true;
+  if (status === 0) return true;
+  // Axios network errors typically have no response
+  if (!err?.response) {
+    const msg = String(err?.message || '');
+    const code = String(err?.code || '');
+    if (code === 'ERR_NETWORK') return true;
+    if (/network\s*error/i.test(msg)) return true;
+    if (/err_connection_refused/i.test(msg)) return true;
+    if (/failed\s+to\s+fetch/i.test(msg)) return true;
+  }
+  return false;
+}
+
+function markBackendOffline(err?: any) {
+  netBlockedUntil = Date.now() + NET_BLOCK_MS;
+  if (err) {
+    try {
+      (err as any).isOffline = true;
+      (err as any).code = (err as any).code || 'BACKEND_OFFLINE';
+      if (typeof (err as any).message === 'string' && (err as any).message.trim()) {
+        // keep existing message
+      } else {
+        (err as any).message = 'Backend offline';
+      }
+    } catch {}
+  }
+}
+
+function throwIfBackendOffline() {
+  if (Date.now() < netBlockedUntil) throw makeOfflineError();
+}
+
 // Normalize path joins so callers can pass '/api/...'
 api.interceptors.request.use((cfg) => {
   try {
+    throwIfBackendOffline();
+
     // Attach bearer when available (covers protected endpoints called via `api`).
     const token = getAuthToken();
     if (token) {
@@ -278,6 +328,19 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// Always normalize backend-offline failures (even outside DEV).
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (isBackendOfflineError(err)) {
+      markBackendOffline(err);
+      // Prefer a consistent message for UI.
+      try { (err as any).message = 'Backend offline'; } catch {}
+    }
+    return Promise.reject(err);
+  }
+);
+
 function pathnameOf(u: unknown): string {
   const s = (u ?? '').toString();
   try {
@@ -309,6 +372,8 @@ function shouldLogoutOn401(u: unknown): boolean {
 // - Always attaches bearer token when present
 adminApi.interceptors.request.use((cfg) => {
   try {
+    throwIfBackendOffline();
+
     const token = getAuthToken();
     if (token) {
       cfg.headers = cfg.headers || {};
@@ -367,6 +432,11 @@ adminApi.interceptors.request.use((cfg) => {
 adminApi.interceptors.response.use(
   (res) => res,
   (error) => {
+    if (isBackendOfflineError(error)) {
+      markBackendOffline(error);
+      try { (error as any).message = 'Backend offline'; } catch {}
+    }
+
     const status = error?.response?.status;
     const url = error?.config?.url || error?.response?.config?.url || '';
 

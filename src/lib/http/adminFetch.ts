@@ -23,13 +23,15 @@ export class AdminApiError extends Error {
   status: number;
   url: string;
   body?: unknown;
+  code?: string;
 
-  constructor(message: string, opts: { status: number; url: string; body?: unknown }) {
+  constructor(message: string, opts: { status: number; url: string; body?: unknown; code?: string }) {
     super(message);
     this.name = 'AdminApiError';
     this.status = opts.status;
     this.url = opts.url;
     this.body = opts.body;
+    this.code = opts.code;
   }
 }
 
@@ -86,7 +88,7 @@ const AUTH_BLOCK_MS = 5000;
 
 // If the network/dev server is down (ERR_CONNECTION_REFUSED), avoid rapid retry loops.
 let netBlockedUntil = 0;
-const NET_BLOCK_MS = 2000;
+const NET_BLOCK_MS = 5000;
 
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
   const normalizedPath = adminApiPath(path);
@@ -99,7 +101,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     throw new AdminApiError('Not authenticated', { status: 401, url, body: { blocked: true } });
   }
   if (netBlockedUntil > now0) {
-    throw new AdminApiError('Network unavailable', { status: 0, url, body: { blocked: true } });
+    throw new AdminApiError('Backend offline (start local backend on :5000)', { status: 0, url, body: { blocked: true }, code: 'BACKEND_OFFLINE' });
   }
 
   const headers = new Headers(init.headers || undefined);
@@ -163,7 +165,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
         });
       } catch {}
     }
-    throw new AdminApiError(e?.message || 'Network error', { status: 0, url, body: { cause: e?.message || String(e) } });
+    throw new AdminApiError('Backend offline (start local backend on :5000)', { status: 0, url, body: { cause: e?.message || String(e) }, code: 'BACKEND_OFFLINE' });
   }
 
   // Align with existing global behaviors

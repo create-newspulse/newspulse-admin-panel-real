@@ -96,6 +96,10 @@ export function apiUrl(path: string): string {
 const routeMissingToastAt: Record<string, number> = {};
 const ROUTE_MISSING_TOAST_TTL_MS = 10_000;
 
+// Backend-offline cooldown to avoid rapid retry storms when the dev backend/proxy is down.
+let netBlockedUntil = 0;
+const NET_BLOCK_MS = 5000;
+
 function maybeToastBackendRouteMissing(path: string, message: string) {
   try {
     if (!/route not found/i.test(message || '')) return;
@@ -146,6 +150,11 @@ export type ApiOptions = RequestInit & {
 export async function api<T = any>(path: string, init: ApiOptions = {}): Promise<T> {
   const url = apiUrl(path);
 
+  const now0 = Date.now();
+  if (netBlockedUntil > now0) {
+    throw new ApiError('Backend offline', { status: 0, url, body: { blocked: true } });
+  }
+
   const headers = new Headers(init.headers || undefined);
   headers.set('Accept', 'application/json');
 
@@ -163,12 +172,23 @@ export async function api<T = any>(path: string, init: ApiOptions = {}): Promise
     body = JSON.stringify(init.json);
   }
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    body,
-    credentials: init.credentials ?? 'include',
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers,
+      body,
+      credentials: init.credentials ?? 'include',
+    });
+  } catch (e: any) {
+    netBlockedUntil = Date.now() + NET_BLOCK_MS;
+    throw new ApiError('Backend offline', { status: 0, url, body: { cause: e?.message || String(e) } });
+  }
+
+  // Treat gateway/service failures as backend offline (common when proxy target is down).
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    netBlockedUntil = Date.now() + NET_BLOCK_MS;
+  }
 
   // Required global behaviors
   try {

@@ -14,11 +14,37 @@ export default function SimpleLogin() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [backendOffline, setBackendOffline] = useState<boolean>(false);
+  const [checkingBackend, setCheckingBackend] = useState<boolean>(false);
 
   useEffect(() => {
     // Trigger subtle entrance animations after mount
     const t = setTimeout(() => setMounted(true), 40);
     return () => clearTimeout(t);
+  }, []);
+
+  // DEV-only: probe backend once on load to show a clear offline banner.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    let cancelled = false;
+    const check = async () => {
+      setCheckingBackend(true);
+      try {
+        const ac = new AbortController();
+        const to = setTimeout(() => ac.abort(), 1500);
+        const res = await fetch('/admin-api/system/health', { cache: 'no-store', signal: ac.signal });
+        clearTimeout(to);
+        if (cancelled) return;
+        setBackendOffline(!res.ok);
+      } catch {
+        if (cancelled) return;
+        setBackendOffline(true);
+      } finally {
+        if (!cancelled) setCheckingBackend(false);
+      }
+    };
+    check();
+    return () => { cancelled = true; };
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -42,6 +68,11 @@ export default function SimpleLogin() {
       const status = err?.status ?? err?.response?.status;
       const backendMsg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
 
+      const offline =
+        err?.isOffline === true ||
+        err?.code === 'BACKEND_OFFLINE' ||
+        (!err?.response && !status && (/network\s*error/i.test(String(err?.message || '')) || /err_connection_refused/i.test(String(err?.message || ''))));
+
       if (typeof status === 'number' && status >= 500) {
         toast.error(
           backendMsg
@@ -52,7 +83,8 @@ export default function SimpleLogin() {
       }
 
       // Fail-safe: only show toast for network errors if we truly cannot reach backend
-      toast.error(backendMsg || 'Network error - could not reach login API');
+      if (offline) setBackendOffline(true);
+      toast.error(offline ? 'Backend offline. Start backend on :5000.' : (backendMsg || 'Network error - could not reach login API'));
     } finally { setLoading(false); }
   };
 
@@ -85,6 +117,47 @@ export default function SimpleLogin() {
         {/* Right (form) */}
         <div className={`w-full md:w-1/2 p-8 md:p-10 lg:p-12 bg-white/60 backdrop-blur-2xl border border-white/20 shadow-2xl md:rounded-r-3xl transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
           <img src="/logo.svg" alt="News Pulse Admin" className="h-10 mb-6 motion-safe:animate-[bounce_1s_ease_1]" />
+
+          {import.meta.env.DEV && backendOffline ? (
+            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+              <div className="text-sm font-semibold">Backend offline</div>
+              <div className="mt-1 text-xs">
+                Start the local backend on port 5000, then retry.
+                <span className="ml-2 font-mono">npm run dev</span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={checkingBackend}
+                  onClick={async () => {
+                    setCheckingBackend(true);
+                    try {
+                      const ac = new AbortController();
+                      const to = setTimeout(() => ac.abort(), 1500);
+                      const res = await fetch('/admin-api/system/health', { cache: 'no-store', signal: ac.signal });
+                      clearTimeout(to);
+                      setBackendOffline(!res.ok);
+                    } catch {
+                      setBackendOffline(true);
+                    } finally {
+                      setCheckingBackend(false);
+                    }
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 disabled:opacity-60"
+                >
+                  {checkingBackend ? 'Checking…' : 'Retry'}
+                </button>
+                <a
+                  className="text-xs underline"
+                  href="/admin-api/system/health"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open /system/health
+                </a>
+              </div>
+            </div>
+          ) : null}
 
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900">News Pulse Login</h1>
           <p className="mt-1 text-sm text-slate-600">Founder • Admin • Employee</p>
