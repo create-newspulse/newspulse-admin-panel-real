@@ -67,6 +67,8 @@ Avoid shipping a hardcoded Render URL in the frontend. Use env vars instead.
 
 ## Local Development
 
+If you need **local admin/public to use DEV backend + DEV DB** while production uses PROD, follow: `docs/DEV_PROD_BACKEND_DB_SEPARATION.md`.
+
 1) Install
 
 ```
