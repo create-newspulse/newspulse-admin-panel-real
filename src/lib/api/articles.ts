@@ -2,7 +2,7 @@
 // NOTE: This file previously had duplicated sections causing "Cannot redeclare" errors.
 // We merge functionality into a single set of exports using the existing apiClient.
 
-import apiClient, { adminApi, hasLikelyAdminSession } from '@/lib/api';
+import apiClient, { adminApi } from '@/lib/api';
 import type { ArticleStatus } from '@/types/articles';
 
 export interface Article {
@@ -159,43 +159,11 @@ export async function listArticles(params: {
   // Some backends use `lang` instead of `language`.
   if (query.language && !query.lang) query.lang = query.language;
 
-  // Prefer the canonical articles list route first.
+  // Canonical list endpoint (single source of truth).
   // Proxy mode:   GET /admin-api/articles
   // Direct mode:  GET <origin>/api/articles
-  // Some backends return richer results when a session/token is present; `apiClient`
-  // already attaches the Bearer token (and/or cookies in proxy mode).
-  if (preferAdminList && hasLikelyAdminSession()) {
-    try {
-      const resPreferred = await apiClient.get(ADMIN_ARTICLES_PATH, {
-        params: query,
-        // @ts-expect-error custom flag read by interceptor
-        skipErrorLog: true,
-      });
-      return normalizeListResponse(resPreferred.data, { requestedPage, limit });
-    } catch (e: any) {
-      // If this endpoint is unavailable (404/405) or access is denied (401/403),
-      // fall back to other list routes so at least published content can load.
-      if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
-    }
-  }
-
-  // Prefer the normal (public) articles route.
-  try {
-    const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
-    return normalizeListResponse(res.data, { requestedPage, limit });
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-
-  // Final fallback: some backends only expose the admin-only list at /admin/articles.
-  // Use `apiClient` (not `adminApi`) so we don't accidentally force an extra '/admin'
-  // prefix when the backend expects '/articles'.
-  const res2 = await apiClient.get(LEGACY_ADMIN_ARTICLES_PATH, {
-    params: query,
-    // @ts-expect-error custom flag read by interceptor
-    skipErrorLog: true,
-  });
-  return normalizeListResponse(res2.data, { requestedPage, limit });
+  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
+  return normalizeListResponse(res.data, { requestedPage, limit });
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);

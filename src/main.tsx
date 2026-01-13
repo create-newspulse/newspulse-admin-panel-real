@@ -78,7 +78,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: false, // disable automatic retries to prevent exponential error cascades
+      retry: 0,
+      refetchOnWindowFocus: false,
     },
   },
 });

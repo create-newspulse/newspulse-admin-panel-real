@@ -186,7 +186,18 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   ]);
 
   const { data, isLoading, error } = useQuery<ListResponse>({
-    queryKey: ['articles', fetchParams],
+    queryKey: [
+      'articles',
+      fetchParams.page ?? 1,
+      fetchParams.limit ?? 20,
+      fetchParams.sort ?? '-updatedAt',
+      fetchParams.status ?? 'all',
+      fetchParams.category ?? '',
+      fetchParams.language ?? '',
+      fetchParams.from ?? '',
+      fetchParams.to ?? '',
+      fetchParams.q ?? '',
+    ],
     queryFn: () => listArticles(fetchParams),
   });
 
