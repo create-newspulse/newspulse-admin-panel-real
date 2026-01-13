@@ -157,9 +157,37 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
 
+  // Build a stable fetch params object so react-query doesn't refetch on every render
+  // when the parent passes a freshly-created `params` object.
+  // Also ensure backend search is driven by `search`.
+  const fetchParams = React.useMemo<ManageNewsParams>(() => {
+    const q = String(search || '').trim();
+    return {
+      status: params.status,
+      category: params.category,
+      language: params.language,
+      from: params.from,
+      to: params.to,
+      q: q ? q : undefined,
+      page: params.page,
+      limit: params.limit,
+      sort: params.sort,
+    };
+  }, [
+    params.status,
+    params.category,
+    params.language,
+    params.from,
+    params.to,
+    params.page,
+    params.limit,
+    params.sort,
+    search,
+  ]);
+
   const { data, isLoading, error } = useQuery<ListResponse>({
-    queryKey: ['articles', params],
-    queryFn: () => listArticles(params),
+    queryKey: ['articles', fetchParams],
+    queryFn: () => listArticles(fetchParams),
   });
 
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
@@ -226,7 +254,13 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   // Avoid maximum update depth errors when parent passes a non-memoized callback.
   const onSelectIdsRef = React.useRef<typeof onSelectIds>(onSelectIds);
   React.useEffect(() => { onSelectIdsRef.current = onSelectIds; }, [onSelectIds]);
-  React.useEffect(() => { onSelectIdsRef.current?.(selected); }, [selected]);
+  const lastSelectedKeyRef = React.useRef<string>('');
+  React.useEffect(() => {
+    const key = JSON.stringify(selected);
+    if (key === lastSelectedKeyRef.current) return;
+    lastSelectedKeyRef.current = key;
+    onSelectIdsRef.current?.(selected);
+  }, [selected]);
 
   // Client-side search + quick view filtering
   const searchKey = React.useMemo(() => norm(search), [search]);
@@ -295,7 +329,13 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   // Avoid maximum update depth errors when parent passes a non-memoized callback.
   const onCountsRef = React.useRef(onCounts);
   React.useEffect(() => { onCountsRef.current = onCounts; }, [onCounts]);
-  React.useEffect(() => { onCountsRef.current(counts); }, [counts]);
+  const lastCountsKeyRef = React.useRef<string>('');
+  React.useEffect(() => {
+    const key = JSON.stringify(counts);
+    if (key === lastCountsKeyRef.current) return;
+    lastCountsKeyRef.current = key;
+    onCountsRef.current(counts);
+  }, [counts]);
 
   const quickFilteredRows = React.useMemo(() => {
     switch (quickView) {
