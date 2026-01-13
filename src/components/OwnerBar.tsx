@@ -34,23 +34,42 @@ export default function OwnerBar() {
 
   useEffect(() => {
     let mounted = true;
-    const tick = async () => {
+    let sessionWatch: number | null = null;
+    let inFlight = false;
+    let attempted = false;
+
+    const loadOnce = async () => {
+      if (!mounted) return;
+      if (attempted || inFlight) return;
+      if (!hasLikelyAdminSession()) return;
+      attempted = true;
+      inFlight = true;
       try {
-        if (!hasLikelyAdminSession()) return;
         const s = await settingsApi.getAdminSettings();
         if (!mounted) return;
         setMode(deriveModeFromSettings(s));
       } catch {
-        // Silent: mode remains last-known.
+        // Do not retry automatically; avoid request storms when backend is unhealthy.
+      } finally {
+        inFlight = false;
       }
     };
 
-    // Prime once, then refresh occasionally.
-    tick();
-    const t = window.setInterval(tick, 60_000);
+    // Only fetch settings once, after auth/session is present.
+    void loadOnce();
+    if (!hasLikelyAdminSession()) {
+      sessionWatch = window.setInterval(() => {
+        void loadOnce();
+        if (attempted && sessionWatch != null) {
+          window.clearInterval(sessionWatch);
+          sessionWatch = null;
+        }
+      }, 1_000);
+    }
+
     return () => {
       mounted = false;
-      window.clearInterval(t);
+      if (sessionWatch != null) window.clearInterval(sessionWatch);
     };
   }, [setMode]);
 

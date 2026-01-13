@@ -75,6 +75,8 @@ export default function SystemHealthBadge(): JSX.Element {
   const pullRef = useRef<() => void>(() => {});
   const inFlightRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const failureCountRef = useRef(0);
 
   const status: HealthStatus = useMemo(() => deriveStatus(info || {} as any), [info]);
   const styles = statusStyle[status];
@@ -82,6 +84,20 @@ export default function SystemHealthBadge(): JSX.Element {
 
   useEffect(() => {
     let isMounted = true;
+
+    const clearTimer = () => {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+
+    const scheduleNext = (ms: number) => {
+      clearTimer();
+      timerRef.current = window.setTimeout(() => {
+        void pullRef.current();
+      }, ms);
+    };
 
     const pull = async () => {
       if (inFlightRef.current) return;
@@ -112,6 +128,10 @@ export default function SystemHealthBadge(): JSX.Element {
         if (!isMounted) return;
         setInfo({ ...json, status: json.status ?? r.status, latencyMs: json.latencyMs ?? latencyMs, success: json.success ?? (r.ok ? true : false) });
         setError(null);
+
+        // Success: reset backoff and poll at a calm cadence.
+        failureCountRef.current = 0;
+        scheduleNext(30_000);
       } catch (e: any) {
         if (!isMounted) return;
         const aborted = e?.name === 'AbortError' || e?.code === 20;
@@ -119,6 +139,17 @@ export default function SystemHealthBadge(): JSX.Element {
         // Reduce console noise: rely on UI message instead of logging
         setError(e?.response?.data?.message || e?.message || 'Failed to fetch');
         setInfo({ success: false });
+
+        // Failure: back off (and in dev, stop polling after first failure).
+        failureCountRef.current = Math.min(10, failureCountRef.current + 1);
+        if (import.meta.env.DEV) {
+          clearTimer();
+        } else {
+          const base = 30_000;
+          const exp = Math.min(4, failureCountRef.current - 1);
+          const backoffMs = Math.min(5 * 60_000, base * Math.pow(2, exp));
+          scheduleNext(backoffMs);
+        }
       } finally {
         inFlightRef.current = false;
       }
@@ -126,13 +157,11 @@ export default function SystemHealthBadge(): JSX.Element {
 
     pullRef.current = () => { void pull(); };
 
-    // Initial call, then poll at a sane cadence.
+    // Initial call; future polls are scheduled based on success/failure.
     void pull();
-    const POLL_MS = 12_000;
-    const id = window.setInterval(() => { void pull(); }, POLL_MS);
     return () => {
       isMounted = false;
-      window.clearInterval(id);
+      clearTimer();
       try { abortRef.current?.abort(); } catch {}
     };
   }, []);

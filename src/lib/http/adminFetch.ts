@@ -249,7 +249,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     if (res.status === 403 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('np:ownerkey-required'));
     }
-    if ((res.status === 503 || res.status === 423) && typeof window !== 'undefined') {
+    if ((res.status === 423) && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('np:lockdown'));
     }
   } catch {}
@@ -266,7 +266,8 @@ export async function adminJson<T = any>(path: string, init: AdminFetchOptions =
     const msg = errorMessage(body, `HTTP ${res.status} ${res.statusText}`);
     const p = adminApiPath(path);
     const errUrl = /^https?:\/\//i.test(p) ? p : `${BASE}${p}`;
-    throw new AdminApiError(msg, { status: res.status, url: errUrl, body });
+    const code = res.status === 503 ? 'DB_UNAVAILABLE' : undefined;
+    throw new AdminApiError(msg, { status: res.status, url: errUrl, body, code });
   }
 
   const ctype = res.headers.get('content-type') || '';

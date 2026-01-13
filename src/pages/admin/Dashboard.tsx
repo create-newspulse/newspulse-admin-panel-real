@@ -54,6 +54,7 @@ const Dashboard = () => {
       } catch (err: any) {
         if (cancelled) return;
         const status = err?.response?.status as number | undefined;
+        const code = String(err?.code || err?.response?.data?.code || '').toUpperCase();
 
         if (status === 401) {
           setBanner({
@@ -84,13 +85,18 @@ const Dashboard = () => {
         }
 
         // Non-auth failures: keep the dashboard usable, but show stats as unavailable.
-        const isNetworkLike = !status || status >= 500;
+        const isDbUnavailable = status === 503 || code === 'DB_UNAVAILABLE';
+        const isBackendOffline = code === 'BACKEND_OFFLINE' || (!status && !isDbUnavailable);
         setBanner({
           type: 'error',
-          title: isNetworkLike
-            ? 'Backend unreachable. Check API URL / CORS / Render status.'
-            : 'Failed to load dashboard stats.',
-          subtitle: isNetworkLike ? undefined : `Request failed (HTTP ${status}).`,
+          title: isDbUnavailable
+            ? 'Database unavailable. Check backend MONGODB_URI / Mongo service.'
+            : isBackendOffline
+              ? 'Backend offline. Start backend on localhost:5000.'
+              : 'Failed to load dashboard stats.',
+          subtitle: (isDbUnavailable || isBackendOffline)
+            ? undefined
+            : (status ? `Request failed (HTTP ${status}).` : undefined),
         });
 
         setState('disabled');

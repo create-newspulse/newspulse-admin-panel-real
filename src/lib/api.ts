@@ -211,18 +211,36 @@ function makeOfflineError(): any {
 
 function isBackendOfflineError(err: any): boolean {
   const status = err?.response?.status;
-  if (status === 502 || status === 503 || status === 504) return true;
+  if (status === 502 || status === 504) return true;
   if (status === 0) return true;
   // Axios network errors typically have no response
   if (!err?.response) {
     const msg = String(err?.message || '');
     const code = String(err?.code || '');
+    const name = String(err?.name || '');
     if (code === 'ERR_NETWORK') return true;
     if (/network\s*error/i.test(msg)) return true;
     if (/err_connection_refused/i.test(msg)) return true;
     if (/failed\s+to\s+fetch/i.test(msg)) return true;
+    if (name === 'TypeError' && /failed\s+to\s+fetch/i.test(msg)) return true;
   }
   return false;
+}
+
+function isDbUnavailableError(err: any): boolean {
+  const status = err?.response?.status;
+  return status === 503;
+}
+
+function markDbUnavailable(err?: any) {
+  if (!err) return;
+  try {
+    (err as any).code = 'DB_UNAVAILABLE';
+    (err as any).isDbUnavailable = true;
+    if (typeof (err as any).message !== 'string' || !(err as any).message.trim()) {
+      (err as any).message = 'Database unavailable';
+    }
+  } catch {}
 }
 
 function markBackendOffline(err?: any) {
@@ -332,6 +350,10 @@ api.interceptors.request.use((cfg) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    if (isDbUnavailableError(err)) {
+      markDbUnavailable(err);
+      return Promise.reject(err);
+    }
     if (isBackendOfflineError(err)) {
       markBackendOffline(err);
       // Prefer a consistent message for UI.
@@ -432,6 +454,10 @@ adminApi.interceptors.request.use((cfg) => {
 adminApi.interceptors.response.use(
   (res) => res,
   (error) => {
+    if (isDbUnavailableError(error)) {
+      markDbUnavailable(error);
+      return Promise.reject(error);
+    }
     if (isBackendOfflineError(error)) {
       markBackendOffline(error);
       try { (error as any).message = 'Backend offline'; } catch {}
