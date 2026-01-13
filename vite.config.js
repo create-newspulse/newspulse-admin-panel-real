@@ -20,7 +20,12 @@ const isValidAbsoluteUrl = (u) => {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
-    const DEFAULT_REAL_BACKEND = stripSlash(process.env.NP_REAL_BACKEND
+    // IMPORTANT (repo requirement): local admin must NEVER call production backend.
+    // In development we hard-pin API proxies to the local admin backend.
+    // Override via VITE_DEV_PROXY_TARGET if your local backend runs elsewhere.
+    const LOCAL_BACKEND = stripSlash(env.VITE_DEV_PROXY_TARGET || 'http://localhost:5000');
+    const DEFAULT_REAL_BACKEND = stripSlash(process.env.ADMIN_BACKEND_URL
+        || process.env.NP_REAL_BACKEND
         || env.NP_REAL_BACKEND
         || 'https://newspulse-backend-real.onrender.com');
     // IMPORTANT:
@@ -29,7 +34,9 @@ export default defineConfig(({ mode }) => {
     // - Example (remote):  VITE_BACKEND_ORIGIN=https://newspulse-backend-real.onrender.com
     // No trailing '/api'.
     const rawOrigin = stripSlash(env.VITE_BACKEND_ORIGIN || '');
-    const devDefaultOrigin = 'http://localhost:5000';
+    // Default dev backend: match production/Vercel behavior (remote backend).
+    // To use a local backend, set VITE_BACKEND_ORIGIN=http://localhost:5000
+    const devDefaultOrigin = DEFAULT_REAL_BACKEND;
     let originSource = 'VITE_BACKEND_ORIGIN';
     let ORIGIN = rawOrigin;
     if (!ORIGIN || hasPlaceholders(ORIGIN) || !isValidAbsoluteUrl(ORIGIN)) {
@@ -37,12 +44,13 @@ export default defineConfig(({ mode }) => {
         originSource = mode === 'development' ? `default:${devDefaultOrigin}` : `default:${DEFAULT_REAL_BACKEND}`;
     }
     // Proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
-    const BACKEND_ORIGIN = /\/api$/i.test(ORIGIN) ? ORIGIN.replace(/\/api$/i, '') : ORIGIN;
-    const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN;
+    const RESOLVED_BACKEND_ORIGIN = /\/api$/i.test(ORIGIN) ? ORIGIN.replace(/\/api$/i, '') : ORIGIN;
+    const DEV_BACKEND_ORIGIN = mode === 'development' ? LOCAL_BACKEND : RESOLVED_BACKEND_ORIGIN;
+    const API_WS = stripSlash(env.VITE_API_WS) || RESOLVED_BACKEND_ORIGIN;
 
     if (mode === 'development') {
         // eslint-disable-next-line no-console
-        console.log('[vite] Resolved backend origin:', BACKEND_ORIGIN, `(source: ${originSource})`);
+        console.log('[vite] Dev proxy target:', DEV_BACKEND_ORIGIN, `(env resolution source: ${originSource})`);
     }
 
     const attachProxy404Logger = (proxy, kind) => {
@@ -64,7 +72,7 @@ export default defineConfig(({ mode }) => {
                     mapped = mapped.replace(/^\/api\/api\//, '/api/');
                 }
                 // eslint-disable-next-line no-console
-                console.warn(`[vite-proxy-404] ${req?.method || 'GET'} ${inUrl} -> ${BACKEND_ORIGIN}${mapped}`);
+                console.warn(`[vite-proxy-404] ${req?.method || 'GET'} ${inUrl} -> ${DEV_BACKEND_ORIGIN}${mapped}`);
             } catch {
                 // ignore
             }
@@ -98,22 +106,33 @@ export default defineConfig(({ mode }) => {
             proxy: {
                 // DEV contract: frontend calls go through '/admin-api/*'.
                 '/admin-api': {
-                    target: BACKEND_ORIGIN,
+                    target: DEV_BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    timeout: 120000,
+                    proxyTimeout: 120000,
                     configure: (proxy) => attachProxy404Logger(proxy, 'admin-api'),
+                    // Match Vercel/serverless behavior: /admin-api/* -> /api/*
+                    // Also handle accidental double-prefixes.
+                    rewrite: (p) => {
+                        if (/^\/admin-api\/api\//.test(p))
+                            return p.replace(/^\/admin-api/, '').replace(/^\/api\/api\//, '/api/');
+                        return p.replace(/^\/admin-api/, '/api').replace(/^\/api\/api\//, '/api/');
+                    },
                 },
                 '/api': {
-                    target: BACKEND_ORIGIN,
+                    target: DEV_BACKEND_ORIGIN,
                     changeOrigin: true,
                     secure: false,
+                    timeout: 120000,
+                    proxyTimeout: 120000,
                     configure: (proxy) => attachProxy404Logger(proxy, 'api'),
                     // keep path mostly as-is so /api/* hits backend /api/*
                     // but collapse accidental double-prefixes: /api/api/* -> /api/*
                     rewrite: (p) => p.replace(/^\/api\/api\//, '/api/'),
                 },
                 '/socket.io': {
-                    target: API_WS,
+                    target: mode === 'development' ? LOCAL_BACKEND : API_WS,
                     ws: true,
                     changeOrigin: true,
                     secure: false,

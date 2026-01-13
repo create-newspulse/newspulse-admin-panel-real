@@ -7,8 +7,14 @@ function stripTrailingSlashes(s: string): string {
 // Admin API base URL
 // Production direct mode (no proxy): set VITE_ADMIN_API_BASE=https://YOUR_BACKEND_DOMAIN
 // Dev/proxy mode: leave it empty and the app will call relative /admin-api/* (Vite/Vercel rewrites).
-const BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+// Repo contract: use an optional origin prefix only; never auto-default to a production URL.
+// Requests are made as: fetch(`${BASE}${path}`)
+const RAW_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+// DEV safety: never allow local Vite to talk directly to production origins.
+// Always use same-origin `/admin-api/*` so the Vite proxy can route to the local dev server.
+const BASE = import.meta.env.DEV ? '' : RAW_BASE;
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
+const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 
 // Legacy/back-compat: allow overriding the full base URL/path.
 const RAW_ADMIN_BASE = (import.meta.env.VITE_ADMIN_API_URL || '').toString().trim();
@@ -86,7 +92,9 @@ let netBlockedUntil = 0;
 const NET_BLOCK_MS = 2000;
 
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
-  const url = adminApiUrl(path);
+  const normalizedPath = adminApiPath(path);
+  const url = (/^https?:\/\//i.test(normalizedPath) ? normalizedPath : `${BASE}${normalizedPath}`)
+    .replace(/([^:]\/)\/+?/g, '$1');
 
   // Short-circuit repeated calls while we are actively logging out.
   const now0 = Date.now();
@@ -235,7 +243,9 @@ export async function adminJson<T = any>(path: string, init: AdminFetchOptions =
   if (!res.ok) {
     const body = await readBody(res);
     const msg = errorMessage(body, `HTTP ${res.status} ${res.statusText}`);
-    throw new AdminApiError(msg, { status: res.status, url: adminApiUrl(path), body });
+    const p = adminApiPath(path);
+    const errUrl = /^https?:\/\//i.test(p) ? p : `${BASE}${p}`;
+    throw new AdminApiError(msg, { status: res.status, url: errUrl, body });
   }
 
   const ctype = res.headers.get('content-type') || '';
@@ -262,7 +272,7 @@ function normalizeAdminRest(path: string): string {
   return rest;
 }
 
-export function adminApiUrl(path: string): string {
+function adminApiPath(path: string): string {
   // If caller already provided a fully-qualified same-origin proxy path,
   // respect it as-is so Vite can log/rewrite it.
   // Example: '/admin-api/admin/settings/public'
@@ -276,7 +286,15 @@ export function adminApiUrl(path: string): string {
     raw.startsWith('/api/') ||
     raw === '/api'
   ) {
-    if (BASE) return `${BASE}${raw}`.replace(/([^:]\/)\/+?/g, '$1');
+    // Direct mode (BASE is an absolute backend origin): map '/admin-api/*' -> '/api/*'
+    // to preserve the same frontend call sites used in proxy mode.
+    if (BASE_IS_ABSOLUTE_ORIGIN && (raw === '/admin-api' || raw.startsWith('/admin-api/'))) {
+      const mapped = raw
+        .replace(/^\/admin-api$/, '/api')
+        .replace(/^\/admin-api\//, '/api/')
+        .replace(/^\/api\/api\//, '/api/');
+      return mapped.replace(/\/\/+/, '/');
+    }
     return raw.replace(/\/\/+/, '/');
   }
   // If caller provided an absolute URL, do not rewrite it.
@@ -321,5 +339,12 @@ export function adminApiUrl(path: string): string {
   const prefix = hasApiAdmin ? '' : (hasAdmin ? '' : (hasApi ? '/admin' : '/api/admin'));
   const joined = `${base}${prefix}${rest}`;
   // Avoid accidental double slashes in the middle.
-  return joined.replace(/([^:]\/)\/+/g, '$1');
+  return joined.replace(/([^:]\/)\/+?/g, '$1');
+}
+
+// Back-compat export: some callers/loggers may import this.
+export function adminApiUrl(path: string): string {
+  const p = adminApiPath(path);
+  const url = /^https?:\/\//i.test(p) ? p : `${BASE}${p}`;
+  return url.replace(/([^:]\/)\/+?/g, '$1');
 }

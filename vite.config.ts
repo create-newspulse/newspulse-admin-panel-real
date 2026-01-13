@@ -34,10 +34,9 @@ export default defineConfig(({ mode }): UserConfig => {
     || ''
   );
   const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
-  // Dev default per repo guidance: proxy to local backend unless explicitly overridden.
-  const DEV_DEFAULT_BACKEND = stripSlash('http://localhost:5000');
   const DEFAULT_REAL_BACKEND = stripSlash(
-    process.env.NP_REAL_BACKEND
+    process.env.ADMIN_BACKEND_URL
+    || process.env.NP_REAL_BACKEND
     || (env as any).NP_REAL_BACKEND
     || 'https://newspulse-backend-real.onrender.com'
   );
@@ -47,9 +46,12 @@ export default defineConfig(({ mode }): UserConfig => {
   })();
   const API_TARGET = (!hasPlaceholders(rawCandidate)
     && isValidAbsoluteUrl(rawCandidate)
+    // Avoid accidental localhost unless explicitly opted-in.
     && (!looksLocalhost || useLocalDemo))
     ? rawCandidate
-    : (mode === 'development' ? DEV_DEFAULT_BACKEND : DEFAULT_REAL_BACKEND);
+    // Default to real backend so localhost dev behaves like Vercel.
+    // To use a local backend, set VITE_BACKEND_ORIGIN or VITE_ADMIN_API_TARGET explicitly.
+    : DEFAULT_REAL_BACKEND;
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
@@ -68,6 +70,7 @@ export default defineConfig(({ mode }): UserConfig => {
 
   // If the dev proxy target is the Vercel admin host, DO NOT rewrite '/admin-api/*' to '/api/*'.
   // Production relies on Vercel rewrites for '/admin-api/*' -> serverless proxy.
+  // NOTE: in local dev we hard-pin the target to localhost, so this must be false.
   const ADMIN_PROXY_IS_VERCEL = (() => {
     if (!ADMIN_API_PROXY_TARGET) return false;
     try {
@@ -95,33 +98,57 @@ export default defineConfig(({ mode }): UserConfig => {
   }
   const proxy: any = {};
   // DEV: always proxy common API prefixes to the backend.
-  // Default target: http://localhost:5000 (can be overridden via existing env resolution).
-  const DEV_PROXY_TARGET = stripSlash(env.VITE_DEV_PROXY_TARGET || '') || 'http://localhost:5000';
+  // IMPORTANT (repo requirement): local admin must NEVER call production backend.
+  // In development we hard-pin proxies to the local admin backend.
+  // Override via VITE_DEV_PROXY_TARGET if your local backend runs elsewhere.
+  const LOCAL_BACKEND = stripSlash(env.VITE_DEV_PROXY_TARGET || 'http://localhost:5000');
+  const DEV_PROXY_TARGET = mode === 'development'
+    ? LOCAL_BACKEND
+    : (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || BACKEND_ORIGIN);
   if (DEV_PROXY_TARGET) {
     proxy['/api'] = {
       target: `${DEV_PROXY_TARGET}`,
       changeOrigin: true,
       secure: false,
+      timeout: 120000,
+      proxyTimeout: 120000,
     };
     // Support public settings in local dev (maps /settings/* -> /api/settings/*)
     proxy['/settings'] = {
       target: `${DEV_PROXY_TARGET}`,
       changeOrigin: true,
       secure: false,
+      timeout: 120000,
+      proxyTimeout: 120000,
       rewrite: (path: string) => path.replace(/^\/settings/, '/api/settings'),
     };
     proxy['/socket.io'] = {
-      target: API_WS,
+      target: mode === 'development' ? LOCAL_BACKEND : API_WS,
       ws: true,
       changeOrigin: true,
       secure: false,
     };
   }
-  if (ADMIN_API_PROXY_TARGET) {
+  // DEV contract: /admin-api is always proxied to local backend.
+  // In prod, Vercel handles /admin-api via serverless rewrites.
+  const ADMIN_PROXY_TARGET = mode === 'development' ? LOCAL_BACKEND : ADMIN_API_PROXY_TARGET;
+  if (ADMIN_PROXY_TARGET) {
     proxy['/admin-api'] = {
-      target: DEV_PROXY_TARGET,
+      target: ADMIN_PROXY_TARGET,
       changeOrigin: true,
       secure: false,
+      timeout: 120000,
+      proxyTimeout: 120000,
+      rewrite: (path: string) => {
+        // Local dev always maps /admin-api/* -> /api/* on the local backend.
+        if (mode === 'development') {
+          if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '').replace(/^\/api\/api\//, '/api/');
+          return path.replace(/^\/admin-api/, '/api').replace(/^\/api\/api\//, '/api/');
+        }
+        if (ADMIN_PROXY_IS_VERCEL) return path;
+        if (/^\/admin-api\/api\//.test(path)) return path.replace(/^\/admin-api/, '');
+        return path.replace(/^\/admin-api/, '/api');
+      },
     };
   }
 
