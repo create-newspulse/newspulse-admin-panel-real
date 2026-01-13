@@ -81,6 +81,7 @@ npm install
 Recommended dev setup for `/admin-api/*`
 - Leave `VITE_ADMIN_API_BASE` empty so browser requests stay relative (e.g. `/admin-api/broadcast`).
 - Vite dev server proxies `/admin-api/*` and `/api/*` to your local backend (default `http://localhost:5000`).
+- Also keep `VITE_API_URL` empty in dev (some modules still read it); this prevents accidental direct calls to production.
 
 After changing any `.env*` values or Vite proxy config, restart the dev server.
 
@@ -89,6 +90,9 @@ Example `.env.local`:
 ```
 # DEV: keep empty to use Vite proxy -> http://localhost:5000
 VITE_ADMIN_API_BASE=
+
+# DEV: keep empty so requests stay relative and use the Vite proxy
+VITE_API_URL=
 
 # PROD (Vercel): set to your backend origin (no trailing slash)
 # VITE_ADMIN_API_BASE=https://PROD_BACKEND_DOMAIN
