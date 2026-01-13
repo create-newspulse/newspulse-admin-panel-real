@@ -9,10 +9,7 @@ function stripTrailingSlashes(s: string): string {
 // Dev/proxy mode: leave it empty and the app will call relative /admin-api/* (Vite/Vercel rewrites).
 // Repo contract: use an optional origin prefix only; never auto-default to a production URL.
 // Requests are made as: fetch(`${BASE}${path}`)
-const RAW_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
-// DEV safety: never allow local Vite to talk directly to production origins.
-// Always use same-origin `/admin-api/*` so the Vite proxy can route to the local dev server.
-const BASE = import.meta.env.DEV ? '' : RAW_BASE;
+const BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
 const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 

@@ -22,8 +22,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     // IMPORTANT (repo requirement): local admin must NEVER call production backend.
     // In development we hard-pin API proxies to the local admin backend.
-    // Override via VITE_DEV_PROXY_TARGET if your local backend runs elsewhere.
-    const LOCAL_BACKEND = stripSlash(env.VITE_DEV_PROXY_TARGET || 'http://localhost:5000');
+    const LOCAL_BACKEND = 'http://localhost:5000';
     const DEFAULT_REAL_BACKEND = stripSlash(process.env.ADMIN_BACKEND_URL
         || process.env.NP_REAL_BACKEND
         || env.NP_REAL_BACKEND

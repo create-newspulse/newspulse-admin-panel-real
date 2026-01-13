@@ -24,8 +24,8 @@ Follow these steps to ship the frontend to Vercel and connect it to your backend
 - Required:
   - `ADMIN_BACKEND_URL` = https://your-backend-host.tld
 - Optional (pick ONE approach):
-  - Proxy (recommended): leave `VITE_API_URL` unset. Frontend calls `/admin-api/*` which the serverless proxy forwards to your backend.
-  - Direct: set `VITE_API_URL` = https://your-backend-host.tld and (if sockets) `VITE_API_WS` = wss://your-backend-host.tld.
+  - Proxy (recommended): keep `VITE_ADMIN_API_BASE` empty. Frontend calls relative `/admin-api/*` which the serverless proxy forwards to your backend.
+  - Direct (no proxy): set `VITE_ADMIN_API_BASE` = https://your-backend-host.tld (no trailing slash) and ensure backend CORS allows your admin origin.
 
 3) Deploy
 - Click Deploy. After it’s live, open:
@@ -75,8 +75,8 @@ npm install
 
 2) Configure
 
-- Preferred (proxy mode; matches Vercel): leave `VITE_ADMIN_API_ORIGIN` empty and run a backend locally.
-- Optional (direct mode): set `VITE_ADMIN_API_ORIGIN` to a valid backend origin (no `/api` suffix).
+- Preferred (proxy mode; matches Vercel): leave `VITE_ADMIN_API_BASE` empty and run a backend locally.
+- Optional (direct mode): set `VITE_ADMIN_API_BASE` to a valid backend origin (no trailing slash).
 
 Recommended dev setup for `/admin-api/*`
 - Leave `VITE_ADMIN_API_BASE` empty so browser requests stay relative (e.g. `/admin-api/broadcast`).
@@ -87,8 +87,11 @@ After changing any `.env*` values or Vite proxy config, restart the dev server.
 Example `.env.local`:
 
 ```
-VITE_ADMIN_API_ORIGIN=https://your-backend-host.tld
-VITE_ADMIN_API_PROXY_BASE=/admin-api
+# DEV: keep empty to use Vite proxy -> http://localhost:5000
+VITE_ADMIN_API_BASE=
+
+# PROD (Vercel): set to your backend origin (no trailing slash)
+# VITE_ADMIN_API_BASE=https://PROD_BACKEND_DOMAIN
 ```
 
 3) Run

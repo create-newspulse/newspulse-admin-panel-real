@@ -5,10 +5,7 @@ import { apiUrl, adminUrl, getAuthToken } from '@/lib/api';
 type ApiOptions = RequestInit & { headers?: Record<string, string> };
 
 const stripTrailingSlashes = (s: string) => (s || '').replace(/\/+$/, '');
-const RAW_ADMIN_API_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
-// DEV safety: never let localhost dev talk to production origins directly.
-// Keep requests same-origin so Vite proxy can route them to the local backend.
-const ADMIN_API_BASE = import.meta.env.DEV ? '' : RAW_ADMIN_API_BASE;
+const ADMIN_API_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
 
 function resolveUrl(url: string) {
   // Full URLs pass through

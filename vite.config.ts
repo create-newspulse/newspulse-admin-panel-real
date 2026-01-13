@@ -100,8 +100,7 @@ export default defineConfig(({ mode }): UserConfig => {
   // DEV: always proxy common API prefixes to the backend.
   // IMPORTANT (repo requirement): local admin must NEVER call production backend.
   // In development we hard-pin proxies to the local admin backend.
-  // Override via VITE_DEV_PROXY_TARGET if your local backend runs elsewhere.
-  const LOCAL_BACKEND = stripSlash(env.VITE_DEV_PROXY_TARGET || 'http://localhost:5000');
+  const LOCAL_BACKEND = 'http://localhost:5000';
   const DEV_PROXY_TARGET = mode === 'development'
     ? LOCAL_BACKEND
     : (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || BACKEND_ORIGIN);

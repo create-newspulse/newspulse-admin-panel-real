@@ -4,7 +4,7 @@ This README explains the recommended deployment: frontend hosted on Vercel, back
 
 Quick setup (2025 update)
 - Development fallback: if `VITE_API_URL` is unset or invalid, the frontend uses the `/admin-api` proxy (see `vite.config.ts`).
-- Production (Vercel): set `VITE_API_URL` to your real backend origin (Render URL, NO trailing `/api`). If it is missing or invalid, the UI will show a toast error.
+- Production (Vercel): set `VITE_ADMIN_API_BASE` to your real backend origin (Render URL, NO trailing slash).
 - Optional proxy envs: set `ADMIN_BACKEND_URL` in Vercel to your backend origin (e.g., `https://your-backend-host.tld`).
 - Important: `.env.production.local` is intentionally blank in the repo so builds don’t force localhost. Do not reintroduce localhost values there.
 - If using direct mode, ensure backend CORS allows your Vercel preview and production domains. Our backend has pattern-based CORS that already admits `*.vercel.app` and your custom domain.
@@ -30,7 +30,7 @@ Admin API base URL (dev vs prod)
 
 2) Configure Vercel (frontend)
 - In Vercel Dashboard for this project -> Settings -> Environment Variables, add:
-  - VITE_API_URL      = https://<your-backend-origin>   (NO trailing `/api`)
+  - VITE_ADMIN_API_BASE = https://<your-backend-origin> (NO trailing slash)
   - ADMIN_BACKEND_URL = https://<your-backend-origin>   (optional; used by `/admin-api/*` serverless proxy)
   - ADMIN_JWT_SECRET  = <optional-if-backend-issues-jwt> (leave blank for cookie-only backends)
 - Set these for both Preview and Production environments.
