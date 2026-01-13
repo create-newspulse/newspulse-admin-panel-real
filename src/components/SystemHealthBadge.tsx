@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiUrl } from '@/lib/apiBase';
 
 type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
@@ -72,7 +72,9 @@ function deriveStatus(data: HealthPayload): HealthStatus {
 export default function SystemHealthBadge(): JSX.Element {
   const [info, setInfo] = useState<HealthPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const pullRef = useRef<() => void>(() => {});
+  const inFlightRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const status: HealthStatus = useMemo(() => deriveStatus(info || {} as any), [info]);
   const styles = statusStyle[status];
@@ -82,10 +84,18 @@ export default function SystemHealthBadge(): JSX.Element {
     let isMounted = true;
 
     const pull = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
+      // Cancel any previous in-flight request before starting a new one.
+      try { abortRef.current?.abort(); } catch {}
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
         const url = apiUrl('/system/health');
         const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        const r = await fetch(url, { credentials: 'include' });
+        const r = await fetch(url, { credentials: 'include', cache: 'no-store', signal: controller.signal });
         const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         const ct = r.headers.get('content-type') || '';
         const latencyMs = Math.max(0, Math.round(t1 - t0));
@@ -94,6 +104,7 @@ export default function SystemHealthBadge(): JSX.Element {
           const text = await r.text().catch(() => '');
           if (!isMounted) return;
           setInfo({ success: false, status: r.status, latencyMs, backend: { nonJson: true, text } });
+          setError(r.ok ? null : `HTTP ${r.status}`);
           return;
         }
 
@@ -103,20 +114,28 @@ export default function SystemHealthBadge(): JSX.Element {
         setError(null);
       } catch (e: any) {
         if (!isMounted) return;
+        const aborted = e?.name === 'AbortError' || e?.code === 20;
+        if (aborted) return;
         // Reduce console noise: rely on UI message instead of logging
-        setError(e?.response?.data?.message || 'Failed to fetch');
+        setError(e?.response?.data?.message || e?.message || 'Failed to fetch');
         setInfo({ success: false });
+      } finally {
+        inFlightRef.current = false;
       }
     };
 
-    // initial call
-    pull();
-    const id = window.setInterval(pull, 60_000);
+    pullRef.current = () => { void pull(); };
+
+    // Initial call, then poll at a sane cadence.
+    void pull();
+    const POLL_MS = 12_000;
+    const id = window.setInterval(() => { void pull(); }, POLL_MS);
     return () => {
       isMounted = false;
       window.clearInterval(id);
+      try { abortRef.current?.abort(); } catch {}
     };
-  }, [refreshTick]);
+  }, []);
 
   const waking = useMemo(() => {
     const d = info || {} as HealthPayload;
@@ -156,7 +175,7 @@ export default function SystemHealthBadge(): JSX.Element {
       {waking && (
         <>
           <span className="text-xs opacity-70">• Backend waking…</span>
-          <button className="text-xs underline opacity-80" onClick={() => setRefreshTick((t) => t + 1)}>Retry</button>
+          <button className="text-xs underline opacity-80" onClick={() => pullRef.current()}>Retry</button>
         </>
       )}
       {error && <span className="text-xs opacity-70">• {error}</span>}

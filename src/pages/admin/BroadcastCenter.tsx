@@ -192,6 +192,8 @@ function SectionCard(props: {
 
 export default function BroadcastCenter() {
   const notify = useNotify();
+  const notifyRef = useRef(notify);
+  useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   const didInitialLoad = useRef(false);
   const refreshInFlight = useRef(false);
@@ -260,14 +262,14 @@ export default function BroadcastCenter() {
       setLastRefreshAt(new Date().toISOString());
     } catch (e: any) {
       const aborted = e?.name === 'AbortError' || e?.code === 20;
-      notify.err('Refresh failed', aborted ? 'Request timed out' : (e?.message || 'Unknown error'));
+      notifyRef.current.err('Refresh failed', aborted ? 'Request timed out' : (e?.message || 'Unknown error'));
       throw e;
     } finally {
       window.clearTimeout(t);
       refreshInFlight.current = false;
       setIsRefreshing(false);
     }
-  }, [loadAll, notify]);
+  }, [loadAll]);
 
   useEffect(() => {
     let mounted = true;
@@ -308,22 +310,22 @@ export default function BroadcastCenter() {
       setSettings(saved);
       setInitialSettings(serializeSettings(saved));
       setInitialSpeeds(JSON.stringify(tickerSpeeds));
-      notify.ok('Saved ✅');
+      notifyRef.current.ok('Saved ✅');
     } catch (e: any) {
-      notify.err('Save failed', e?.message || 'Unknown error');
+      notifyRef.current.err('Save failed', e?.message || 'Unknown error');
     } finally {
       setSaving(false);
     }
-  }, [notify, saving, settings, tickerSpeeds]);
+  }, [saving, settings, tickerSpeeds]);
 
   const addItem = useCallback(async (type: BroadcastType) => {
     const text = (type === 'breaking' ? breakingText : liveText).trim();
     if (!text) {
-      notify.err('Cannot add empty story');
+      notifyRef.current.err('Cannot add empty story');
       return;
     }
     if (text.length > 160) {
-      notify.err('Story is too long', 'Max 160 characters');
+      notifyRef.current.err('Story is too long', 'Max 160 characters');
       return;
     }
     setAddingType(type);
@@ -335,11 +337,11 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notify.err('Add failed', e?.message || 'Unknown error');
+      notifyRef.current.err('Add failed', e?.message || 'Unknown error');
     } finally {
       setAddingType(null);
     }
-  }, [breakingText, liveText, notify]);
+  }, [breakingText, liveText]);
 
   const toggleLive = useCallback(async (type: BroadcastType, id: string, next: boolean) => {
     setWorking(id, true);
@@ -349,11 +351,11 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notify.err('Update failed', e?.message || 'Unknown error');
+      notifyRef.current.err('Update failed', e?.message || 'Unknown error');
     } finally {
       setWorking(id, false);
     }
-  }, [notify, setWorking]);
+  }, [setWorking]);
 
   const deleteItem = useCallback(async (type: BroadcastType, id: string) => {
     setWorking(id, true);
@@ -363,11 +365,11 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notify.err('Delete failed', e?.message || 'Unknown error');
+      notifyRef.current.err('Delete failed', e?.message || 'Unknown error');
     } finally {
       setWorking(id, false);
     }
-  }, [notify, setWorking]);
+  }, [setWorking]);
 
   return (
     <div className="space-y-6">
