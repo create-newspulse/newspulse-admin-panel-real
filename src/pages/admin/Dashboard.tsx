@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 
 import StatsCards from '@components/StatsCards';
 import LiveTicker from '@components/LiveTicker';
@@ -18,98 +19,67 @@ type AdminStats = {
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [state, setState] = useState<'loading' | 'ready' | 'disabled'>('loading');
-  const [statsState, setStatsState] = useState<'loading' | 'ready' | 'disabled'>('loading');
-  const [statsErrorText, setStatsErrorText] = useState<string | undefined>(undefined);
-  const [banner, setBanner] = useState<null | { type: 'error' | 'forbidden' | 'expired'; title: string; subtitle?: string }>(null);
+
+  const statsQuery = useQuery({
+    queryKey: ['admin', 'stats'],
+    queryFn: async () => {
+      const res = await api.get('/admin/stats', { timeout: 12000 });
+      const payload = (res as any)?.data?.data ?? (res as any)?.data ?? {};
+      return {
+        totalNews: Number((payload as any)?.totalNews ?? 0),
+        categoriesCount: Number((payload as any)?.categories ?? 0),
+        languagesCount: Number((payload as any)?.languages ?? 0),
+        activeUsersCount: Number((payload as any)?.activeUsers ?? 0),
+        aiLogsCount: Number((payload as any)?.aiLogs ?? 0),
+      } satisfies AdminStats;
+    },
+    retry: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    staleTime: 60_000,
+  });
+
+  const stats = statsQuery.data ?? null;
+  const statsState: 'loading' | 'ready' | 'disabled' = statsQuery.isLoading ? 'loading' : (statsQuery.isSuccess ? 'ready' : 'disabled');
+  const state: 'loading' | 'ready' | 'disabled' = statsQuery.isSuccess ? 'ready' : (statsQuery.isLoading ? 'loading' : 'disabled');
+  const statsErrorText = statsQuery.isError ? 'Failed to load stats' : undefined;
+
+  const err: any = statsQuery.error;
+  const status = err?.response?.status as number | undefined;
+  const code = String(err?.code || err?.response?.data?.code || '').toUpperCase();
 
   useEffect(() => {
-    let cancelled = false;
+    if (status === 401) {
+      try { navigate('/admin/login', { replace: true }); } catch {}
+    }
+  }, [navigate, status]);
 
-    async function load() {
-      setState('loading');
-      setStatsState('loading');
-      setStatsErrorText(undefined);
-      setBanner(null);
-      setStats(null);
+  const banner: null | { type: 'error' | 'forbidden' | 'expired'; title: string; subtitle?: string } = (() => {
+    if (!statsQuery.isError) return null;
 
-      try {
-        const res = await api.get('/admin/stats', { timeout: 12000 });
-        // Backend wraps as { data: { ...counters } }. Some deployments may return the payload directly.
-        const payload = (res as any)?.data?.data ?? (res as any)?.data ?? {};
-
-        const normalized: AdminStats = {
-          totalNews: Number((payload as any)?.totalNews ?? 0),
-          categoriesCount: Number((payload as any)?.categories ?? 0),
-          languagesCount: Number((payload as any)?.languages ?? 0),
-          activeUsersCount: Number((payload as any)?.activeUsers ?? 0),
-          aiLogsCount: Number((payload as any)?.aiLogs ?? 0),
-        };
-
-        if (cancelled) return;
-        setStats(normalized);
-        setStatsState('ready');
-        setState('ready');
-      } catch (err: any) {
-        if (cancelled) return;
-        const status = err?.response?.status as number | undefined;
-        const code = String(err?.code || err?.response?.data?.code || '').toUpperCase();
-
-        if (status === 401) {
-          setBanner({
-            type: 'expired',
-            title: 'Session expired',
-            subtitle: 'Please log in again.',
-          });
-          setState('disabled');
-          setStatsState('disabled');
-          setStatsErrorText('Failed to load stats');
-          // Let global interceptors clear auth, but also redirect here for correctness.
-          try {
-            navigate('/admin/login', { replace: true });
-          } catch {}
-          return;
-        }
-
-        if (status === 403) {
-          setBanner({
-            type: 'forbidden',
-            title: 'Access denied',
-            subtitle: 'Your account does not have permission to view these stats.',
-          });
-          setState('disabled');
-          setStatsState('disabled');
-          setStatsErrorText('Failed to load stats');
-          return;
-        }
-
-        // Non-auth failures: keep the dashboard usable, but show stats as unavailable.
-        const isDbUnavailable = status === 503 || code === 'DB_UNAVAILABLE';
-        const isBackendOffline = code === 'BACKEND_OFFLINE' || (!status && !isDbUnavailable);
-        setBanner({
-          type: 'error',
-          title: isDbUnavailable
-            ? 'Database unavailable. Check backend MONGODB_URI / Mongo service.'
-            : isBackendOffline
-              ? 'Backend offline. Start backend on localhost:5000.'
-              : 'Failed to load dashboard stats.',
-          subtitle: (isDbUnavailable || isBackendOffline)
-            ? undefined
-            : (status ? `Request failed (HTTP ${status}).` : undefined),
-        });
-
-        setState('disabled');
-        setStatsState('disabled');
-        setStatsErrorText('Failed to load stats');
-      }
+    if (status === 401) {
+      return { type: 'expired', title: 'Session expired', subtitle: 'Please log in again.' };
     }
 
-    load();
-    return () => {
-      cancelled = true;
+    if (status === 403) {
+      return { type: 'forbidden', title: 'Access denied', subtitle: 'Your account does not have permission to view these stats.' };
+    }
+
+    const isDbUnavailable = status === 503 || code === 'DB_UNAVAILABLE';
+    const isBackendOffline = code === 'BACKEND_OFFLINE' || (!status && !isDbUnavailable);
+    return {
+      type: 'error',
+      title: isDbUnavailable
+        ? 'Database unavailable. Check backend MONGODB_URI / Mongo service.'
+        : isBackendOffline
+          ? 'Backend offline. Start backend on localhost:5000.'
+          : 'Failed to load dashboard stats.',
+      subtitle: (isDbUnavailable || isBackendOffline)
+        ? undefined
+        : (status ? `Request failed (HTTP ${status}).` : undefined),
     };
-  }, [navigate]);
+  })();
 
   // Feature flag: disable the yellow scrolling ticker by default.
   // Enable by setting VITE_SHOW_TICKER=true at build time.
