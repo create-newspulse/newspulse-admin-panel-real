@@ -159,28 +159,27 @@ export async function listArticles(params: {
   // Some backends use `lang` instead of `language`.
   if (query.language && !query.lang) query.lang = query.language;
 
-  // If admin list is available, try it first.
-  // Proxy mode:   GET /admin-api/admin/articles
-  // Direct mode:  GET <origin>/api/admin/articles
+  // Prefer the canonical articles list route first.
+  // Proxy mode:   GET /admin-api/articles
+  // Direct mode:  GET <origin>/api/articles
+  // Some backends return richer results when a session/token is present; `apiClient`
+  // already attaches the Bearer token (and/or cookies in proxy mode).
   if (preferAdminList && hasLikelyAdminSession()) {
     try {
-      const resAdmin = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
+      const resPreferred = await apiClient.get(ADMIN_ARTICLES_PATH, {
         params: query,
         // @ts-expect-error custom flag read by interceptor
         skipErrorLog: true,
       });
-      return normalizeListResponse(resAdmin.data, { requestedPage, limit });
+      return normalizeListResponse(resPreferred.data, { requestedPage, limit });
     } catch (e: any) {
-      // If the environment doesn't expose admin list routes (404/405), fall back.
-      // If the user isn't authenticated yet (401/403), fall back to public list
-      // so at least published content can load.
+      // If this endpoint is unavailable (404/405) or access is denied (401/403),
+      // fall back to other list routes so at least published content can load.
       if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
     }
   }
 
-  // Prefer the normal (public) articles route:
-  // Proxy mode:   GET /admin-api/articles  (proxy rewrites to backend /api/articles)
-  // Direct mode:  GET <origin>/api/articles
+  // Prefer the normal (public) articles route.
   try {
     const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
     return normalizeListResponse(res.data, { requestedPage, limit });
@@ -188,8 +187,10 @@ export async function listArticles(params: {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
 
-  // Final fallback: some backends only expose the admin-only list.
-  const res2 = await adminApi.get(LEGACY_ADMIN_ARTICLES_PATH, {
+  // Final fallback: some backends only expose the admin-only list at /admin/articles.
+  // Use `apiClient` (not `adminApi`) so we don't accidentally force an extra '/admin'
+  // prefix when the backend expects '/articles'.
+  const res2 = await apiClient.get(LEGACY_ADMIN_ARTICLES_PATH, {
     params: query,
     // @ts-expect-error custom flag read by interceptor
     skipErrorLog: true,
