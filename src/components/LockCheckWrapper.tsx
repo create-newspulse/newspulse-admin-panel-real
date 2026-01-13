@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import apiClient, { safeSettingsLoad } from '@lib/api';
 import SignatureUnlock from './SafeZone/SignatureUnlock';
@@ -7,8 +8,15 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
   const [loading, setLoading] = useState(true);
   const [bypass, setBypass] = useState(false);
   const [locked, setLocked] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
+    const p = (location?.pathname || '').toLowerCase();
+    const isLogin = p === '/login' || p.endsWith('/login') || p === '/admin/login';
+    if (isLogin) {
+      setLoading(false);
+      return;
+    }
     safeSettingsLoad({ skipProbe: true })
       .then((settings: any) => {
         if (settings?.lockdown) {
@@ -23,7 +31,7 @@ export default function LockCheckWrapper({ children }: { children: React.ReactNo
         toast.error('⚠️ Could not verify lockdown status (stub assumed).');
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [location?.pathname]);
 
   const handleUnlockSuccess = async () => {
     try {

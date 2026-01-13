@@ -42,6 +42,19 @@ if (import.meta.env.PROD) {
   }
 }
 
+// Global (DEV-focused) banner when the backend is offline.
+// Fired by adminFetch() on network failures. Use a stable toast id to avoid duplicates.
+try {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('np:backend-offline', (ev: any) => {
+      const msg = ev?.detail?.message || 'Backend offline. Start backend on http://localhost:5000';
+      toast.error(msg, { id: 'np-backend-offline', duration: 12_000 });
+    });
+  }
+} catch {
+  // ignore
+}
+
 // Debug env detection for API base on boot (useful on Vercel)
 console.log(
   '[adminBoot][env]',

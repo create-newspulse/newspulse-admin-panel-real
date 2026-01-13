@@ -12,7 +12,18 @@ import CommunityReporterPage from './pages/admin/community-reporter';
 import './styles.css';
 import { AdminAuthProvider } from './context/AdminAuthContext';
 
-const qc = new QueryClient();
+const qc = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 0,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+    mutations: {
+      retry: 0,
+    },
+  },
+});
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

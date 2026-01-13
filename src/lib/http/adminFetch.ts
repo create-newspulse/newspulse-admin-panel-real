@@ -90,6 +90,24 @@ const AUTH_BLOCK_MS = 5000;
 let netBlockedUntil = 0;
 const NET_BLOCK_MS = 5000;
 
+// UI banner for offline backend (avoid spamming repeated banners)
+let lastOfflineBannerAt = 0;
+const OFFLINE_BANNER_COOLDOWN_MS = 60_000;
+
+function notifyBackendOfflineOnce() {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  if (lastOfflineBannerAt && (now - lastOfflineBannerAt) < OFFLINE_BANNER_COOLDOWN_MS) return;
+  lastOfflineBannerAt = now;
+  try {
+    window.dispatchEvent(new CustomEvent('np:backend-offline', {
+      detail: { message: 'Backend offline. Start backend on http://localhost:5000' },
+    }));
+  } catch {
+    // ignore
+  }
+}
+
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
   const normalizedPath = adminApiPath(path);
   const url = (/^https?:\/\//i.test(normalizedPath) ? normalizedPath : `${BASE}${normalizedPath}`)
@@ -101,6 +119,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     throw new AdminApiError('Not authenticated', { status: 401, url, body: { blocked: true } });
   }
   if (netBlockedUntil > now0) {
+    notifyBackendOfflineOnce();
     throw new AdminApiError('Backend offline (start local backend on :5000)', { status: 0, url, body: { blocked: true }, code: 'BACKEND_OFFLINE' });
   }
 
@@ -152,8 +171,11 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
       // In cross-origin direct mode, omit cookies when using Bearer tokens to reduce CORS friction.
       credentials: init.credentials ?? (isAbsoluteUrl ? (token ? 'omit' : 'include') : 'include'),
     });
+    // Reset banner cooldown once we successfully reach the backend again.
+    lastOfflineBannerAt = 0;
   } catch (e: any) {
     netBlockedUntil = Date.now() + NET_BLOCK_MS;
+    notifyBackendOfflineOnce();
     if (import.meta.env.DEV) {
       try {
         const origin = typeof window !== 'undefined' ? window.location.origin : '(no-window)';
