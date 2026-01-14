@@ -6,7 +6,7 @@ import OtpModal from '@/components/auth/OtpModal';
 
 export default function SimpleLogin() {
   const navigate = useNavigate();
-  const { login, user } = useAuth();
+  const { login, user, restoreSession } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,6 +47,30 @@ export default function SimpleLogin() {
     return () => { cancelled = true; };
   }, []);
 
+  // Attempt a silent session check on the login screen.
+  // If a cookie-based session is already active, redirect to dashboard.
+  // If /admin/me returns 401, that's expected and should not show scary UI.
+  useEffect(() => {
+    let cancelled = false;
+    const probeMe = async () => {
+      try {
+        const res = await fetch('/admin-api/admin/me', { cache: 'no-store', credentials: 'include' });
+        if (cancelled) return;
+        if (res.ok) {
+          // hydrate context (best-effort) then redirect
+          try { await restoreSession({ allowOnAuthPage: true, force: true }); } catch {}
+          navigate('/admin/dashboard', { replace: true });
+          return;
+        }
+        // 401/403/404: ignore quietly
+      } catch {
+        // ignore: offline banner already handled by /system/health probe
+      }
+    };
+    probeMe();
+    return () => { cancelled = true; };
+  }, [navigate, restoreSession]);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -61,6 +85,11 @@ export default function SimpleLogin() {
         toast.error('Invalid admin email/password (production creds).');
         return;
       }
+
+      // Refetch /admin/me after successful login to ensure role/profile is loaded.
+      try {
+        await restoreSession({ allowOnAuthPage: true, force: true });
+      } catch {}
       // Re-read user after login (context state updated)
       toast.success(`Welcome ${user?.name || email}`);
       navigate('/admin/dashboard', { replace: true });

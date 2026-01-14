@@ -570,6 +570,34 @@ if (import.meta.env.DEV) {
       const ct = (r?.headers?.['content-type'] || '').toString();
       const code = (err as any)?.code;
 
+      // Treat expected auth failures as normal (especially on /login):
+      // - GET /admin/me returning 401 when not logged in
+      // - POST /admin/login returning 401 for invalid creds
+      // These should not show up as scary console errors.
+      const isExpectedAuth401 = (() => {
+        if (status !== 401) return false;
+        try {
+          const full = baseURL ? new URL(url, baseURL).toString() : url;
+          const p = pathnameOf(full);
+          return (
+            p === '/api/admin/me'
+            || p === '/admin/me'
+            || p === '/admin-api/admin/me'
+            || p === '/admin-api/api/admin/me'
+            || p === '/api/admin/login'
+            || p === '/admin/login'
+            || p === '/admin-api/admin/login'
+            || p === '/admin-api/api/admin/login'
+          );
+        } catch {
+          const s = String(url || '');
+          return s.includes('/admin/me') || s.includes('/admin/login');
+        }
+      })();
+      if (isExpectedAuth401) {
+        return Promise.reject(err);
+      }
+
       // Best-effort resolved URL for quick diagnosis
       let full = '';
       try {

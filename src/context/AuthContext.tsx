@@ -14,7 +14,7 @@ export interface AuthContextValue {
   isLoading: boolean; // network/loading state for login actions
   isReady: boolean; // localStorage hydration complete
   isRestoring: boolean; // true while calling session restore endpoint
-  restoreSession: () => Promise<void>;
+  restoreSession: (opts?: { force?: boolean; allowOnAuthPage?: boolean }) => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
   logout: (reason?: string) => void;
 }
@@ -36,8 +36,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const SESSION_ENDPOINT = '/me';
 
   // Consider cookie-session success (no token) as authenticated if we have user
-  // Auth considered valid if we have a token or a resolved user
-  const isAuthenticated = !!token || !!user;
+  // Auth considered valid if we have a token OR a likely restorable cookie-session.
+  // Do NOT treat a cached localStorage user stub as authenticated by itself.
+  const likelySession = hasLikelyAdminSession();
+  const isAuthenticated = !!token || likelySession;
   const role = (user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
 
@@ -72,8 +74,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         url: LOGIN_PATH,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Send explicit JSON string (backend expects JSON body)
-        data: JSON.stringify({ email: trimmedEmail, password }),
+        // Send a JSON object with the expected body keys.
+        data: { email: trimmedEmail, password },
+        withCredentials: true,
       });
       const data = res.data ?? {};
       const successFlag =
@@ -123,6 +126,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (import.meta.env.DEV) console.debug('[Auth] persistence write', persistPayload);
       } catch { /* ignore quota errors */ }
       if (import.meta.env.DEV) console.log('[Auth] login success', data);
+
+      // After login, immediately refetch /me to get the authoritative role/profile.
+      // This must work even if we're currently on /login (cookie-based auth).
+      try {
+        const me = await adminApi.get(SESSION_ENDPOINT, {
+          withCredentials: true,
+          // @ts-expect-error custom flag (suppresses noisy DEV logging)
+          skipErrorLog: true,
+        });
+        const rawMe = me.data || {};
+        const u2 = rawMe.user || rawMe.data?.user || rawMe.data || rawMe;
+        if (u2 && (u2.email || u2.role)) {
+          const refreshed: User = {
+            id: String(u2.id || u2._id || normalizedUser.id || ''),
+            _id: String(u2._id || u2.id || normalizedUser._id || ''),
+            email: String(u2.email || normalizedUser.email || ''),
+            name: String(u2.name || normalizedUser.name || ''),
+            role: String(u2.role || normalizedUser.role || ''),
+          };
+          setUser(refreshed);
+          try {
+            const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
+          } catch {}
+        }
+      } catch {
+        // Ignore: some backends may not expose /me or may require different auth.
+      }
+
       return true;
     } catch (err: any) {
       const status = err?.response?.status;
@@ -135,6 +167,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         || err?.response?.data?.error
         || err?.response?.data?.details
         || (offline ? 'Backend offline' : (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.'));
+      // Invalid credentials -> keep UX calm and let login page show a friendly message.
+      if (status === 401) {
+        if (import.meta.env.DEV) {
+          console.debug('[Auth] Login rejected (401)', { baseURL: adminApi.defaults.baseURL, path: LOGIN_PATH });
+        }
+        return false;
+      }
+
       if (import.meta.env.DEV) {
         console.error('[Auth] Login error', {
           status,
@@ -145,9 +185,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           path: LOGIN_PATH,
         });
       }
-
-      // Invalid credentials -> keep UX calm and let login page show a friendly message.
-      if (status === 401) return false;
 
       // Server errors should surface the real backend message to the UI.
       if (typeof status === 'number' && status >= 500) {
@@ -229,8 +266,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setAuthToken(normalized);
             try { localStorage.setItem('admin_token', normalized); } catch {}
           }
-          if (parsed.email || parsed.role) {
-            setUser(prev => prev || { id: '', email: String(parsed.email||''), name: '', role: String(parsed.role||'') });
+          // Only seed a user stub if we have a real session signal (token or cookie-session marker).
+          // This prevents ProtectedRoute from rendering protected pages with no auth.
+          const hasTokenNow = !!localStorage.getItem('admin_token');
+          const canRestore = hasTokenNow || hasLikelyAdminSession();
+          if (canRestore && (parsed.email || parsed.role)) {
+            setUser(prev => prev || { id: '', email: String(parsed.email || ''), name: '', role: String(parsed.role || '') });
           }
         }
       }
@@ -287,19 +328,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Track attempted restore to prevent loops
   const restoreAttemptedRef = useRef(false);
 
-  const restoreSession = useCallback(async () => {
+  const restoreSession = useCallback(async (opts?: { force?: boolean; allowOnAuthPage?: boolean }) => {
     // Skip if already restoring or already attempted with a fully hydrated user profile.
     // NOTE: A token alone is NOT enough for role-gated routes; we must fetch /me to get role.
     const hasFullAuth = !!(user && String(user.role || '').trim());
-    if (isAuthPage) return;
+    const allowOnAuthPage = opts?.allowOnAuthPage === true;
+    if (isAuthPage && !allowOnAuthPage) return;
     // Don't probe /me unless we have some reason to believe a session exists.
     if (!token && !hasLikelyAdminSession()) return;
-    if (isRestoring || restoreAttemptedRef.current || hasFullAuth) return;
+    if (isRestoring) return;
+    if (!opts?.force && (restoreAttemptedRef.current || hasFullAuth)) return;
     restoreAttemptedRef.current = true;
     setIsRestoring(true);
     if (import.meta.env.DEV) console.debug('[Auth] attempting session restore (no full auth)');
     try {
-      const res = await adminApi.get(SESSION_ENDPOINT, { withCredentials: true });
+      const res = await adminApi.get(SESSION_ENDPOINT, {
+        withCredentials: true,
+        // @ts-expect-error custom flag (suppresses noisy DEV logging)
+        skipErrorLog: true,
+      });
       const raw = res.data || {};
       const u = raw.user || raw.data?.user || raw.data || raw;
       if (u && (u.email || u.role)) {
