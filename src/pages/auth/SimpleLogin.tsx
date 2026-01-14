@@ -56,17 +56,25 @@ export default function SimpleLogin() {
     try {
       const ok = await login(email, password);
       if (!ok) {
-        if (import.meta.env.DEV) console.warn('⚠️ Login returned false (no success flag)');
-        toast.error('Invalid email or password');
+        // 401 is an expected outcome for wrong credentials in production.
+        // Keep UX calm and show a clear, user-friendly message.
+        toast.error('Invalid admin email/password (production creds).');
         return;
       }
       // Re-read user after login (context state updated)
       toast.success(`Welcome ${user?.name || email}`);
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
-      if (import.meta.env.DEV) console.error('❌ Login exception:', err);
       const status = err?.status ?? err?.response?.status;
       const backendMsg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
+
+      // Treat 401 as a normal invalid-credentials outcome (no scary console noise).
+      if (status === 401) {
+        toast.error('Invalid admin email/password (production creds).');
+        return;
+      }
+
+      if (import.meta.env.DEV) console.error('❌ Login exception:', err);
 
       const offline =
         err?.isOffline === true ||

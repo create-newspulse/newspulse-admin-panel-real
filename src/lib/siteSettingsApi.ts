@@ -9,26 +9,18 @@ type AdminSettingsPayload = {
   showFooter: boolean;
 };
 
-const base = (import.meta as any).env?.VITE_API_URL as string | undefined;
+import { apiUrl } from './api';
 
-function buildUrl(path: string) {
-  if (!base) return null;
-  const trimmed = base.replace(/\/$/, '');
-  return `${trimmed}${path}`;
-}
+const SETTINGS_PATH = '/api/site-settings/admin';
 
 export async function getAdminSettings(): Promise<AdminSettingsPayload | null> {
-  const url = buildUrl('/api/site-settings/admin');
-  if (!url) return null;
-  const res = await fetch(url, { credentials: 'include' });
+  const res = await fetch(apiUrl(SETTINGS_PATH), { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to load settings (${res.status})`);
   return res.json();
 }
 
 export async function saveAdminSettings(payload: AdminSettingsPayload): Promise<boolean> {
-  const url = buildUrl('/api/site-settings/admin');
-  if (!url) return false;
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(SETTINGS_PATH), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',

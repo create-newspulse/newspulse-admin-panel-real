@@ -465,10 +465,29 @@ adminApi.interceptors.response.use(
 
     const status = error?.response?.status;
     const url = error?.config?.url || error?.response?.config?.url || '';
+    const p = pathnameOf(url);
+
+    // Expected auth failures shouldn't look scary in console.
+    const isAuthEndpoint = (
+      p === '/api/admin/me' || p === '/api/admin/login' ||
+      p === '/admin/me' || p === '/admin/login' ||
+      p === '/admin-api/admin/me' || p === '/admin-api/admin/login' ||
+      p === '/admin-api/api/admin/me' || p === '/admin-api/api/admin/login'
+    );
+    const isLoginEndpoint = (
+      p === '/api/admin/login'
+      || p === '/admin/login'
+      || p === '/admin-api/admin/login'
+      || p === '/admin-api/api/admin/login'
+    );
 
     if (status === 401) {
       const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
-      if (!isCommunityQueue && shouldLogoutOn401(url)) {
+      // Only broadcast a global logout if we actually had a token to clear.
+      // 401 from cookie-session probes (e.g. /me) is normal when not logged in.
+      // Never broadcast logout for an invalid login attempt.
+      const hasToken = !!getAuthToken();
+      if (!isCommunityQueue && hasToken && shouldLogoutOn401(url) && !isLoginEndpoint) {
         try {
           localStorage.removeItem('admin_token');
           localStorage.removeItem('newsPulseAdminAuth');
@@ -484,7 +503,7 @@ adminApi.interceptors.response.use(
 
     if (import.meta.env.DEV) {
       // Allow callers to suppress expected/handled errors (e.g., legacy fallback probes)
-      if (!(error as any)?.config?.skipErrorLog) {
+      if (!(error as any)?.config?.skipErrorLog && !(status === 401 && isAuthEndpoint)) {
         try { console.error('[adminApi:err]', status, url, error?.response?.headers?.['content-type']); } catch {}
       }
     }

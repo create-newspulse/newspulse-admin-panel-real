@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { adminApiClient } from '@/lib/adminApiClient';
 import { useAuth } from '@context/AuthContext';
 
@@ -38,10 +39,21 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { token, isReady } = useAuth();
+  const location = useLocation();
+  const isAuthPage = ['/login', '/admin/login', '/employee/login'].some((p) => {
+    const current = location.pathname || '';
+    return current === p || current.startsWith(`${p}/`);
+  });
 
   useEffect(() => {
     // Wait until auth hydration completes; avoid auto-401 on first paint.
     if (!isReady) return;
+    // Don't make protected calls from public login routes.
+    if (isAuthPage) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!token) {
       setLoading(false);
       return;
@@ -58,6 +70,13 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
         setError(null);
       } catch (e: any) {
         if (cancelled) return;
+        const status = e?.response?.status ?? e?.status;
+        // 401/403 is normal when not logged in (or session expired).
+        if (status === 401 || status === 403) {
+          setError(null);
+          setInfo(null);
+          return;
+        }
         setError('Failed to load AI training info.');
       } finally {
         if (!cancelled) setLoading(false);
@@ -66,7 +85,7 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [isReady, token]);
+  }, [isReady, token, isAuthPage]);
 
   return (
     <AITrainingInfoContext.Provider value={{ info, loading, error }}>

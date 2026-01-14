@@ -44,12 +44,15 @@ export default function Login(): JSX.Element {
         // Revert: always go to admin dashboard after login
         navigate('/admin/dashboard', { replace: true });
       } else {
-        console.error('Login failed: invalid credentials');
-        setError('Invalid email or password.');
+        setError('Invalid admin email/password (production creds).');
       }
     } catch (err: any) {
       const status = err?.status ?? err?.response?.status;
       const msg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
+      if (status === 401) {
+        setError('Invalid admin email/password (production creds).');
+        return;
+      }
       if (typeof status === 'number' && status >= 500) {
         setError(msg ? `Server error. Check backend logs. ${msg}` : 'Server error. Check backend logs.');
       } else {
