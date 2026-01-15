@@ -42,15 +42,25 @@ function isValidApiBase(u: string): boolean {
 }
 
 export function getApiBase(): string {
-  const raw = (envAny.VITE_API_URL || '').toString().trim();
-  const base = stripTrailingSlashes(raw).replace(/\/api$/i, '');
+  // Prefer the explicit admin proxy base, then fall back to VITE_API_URL.
+  // Per repo contract for Vercel: this should be a root-relative path ("/admin-api").
+  const raw = (
+    envAny.VITE_ADMIN_API_BASE
+    || envAny.VITE_ADMIN_API_BASE_URL
+    || envAny.VITE_API_URL
+    || ''
+  ).toString().trim();
 
-  // Allow env to explicitly set '/admin-api' (or '/admin-api/'), but ignore absolute URLs.
+  let base = stripTrailingSlashes(raw).replace(/\/api$/i, '');
+  if (base && !base.startsWith('/') && !isAbsoluteHttpUrl(base)) {
+    base = `/${base}`;
+  }
+
   if (base && isValidApiBase(base)) {
+    // In this repo, only the proxy base is supported in-browser.
     if (base === '/admin-api') return '/admin-api';
-    // Any other value (including absolute URLs) is not supported by design.
     if (import.meta.env.DEV) {
-      try { console.warn('[api] Ignoring VITE_API_URL (only "/admin-api" is supported):', base); } catch {}
+      try { console.warn('[api] Ignoring API base (only "/admin-api" is supported):', base); } catch {}
     }
   }
 

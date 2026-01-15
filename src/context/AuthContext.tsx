@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { setAuthToken } from '@/lib/api';
 import { adminApi } from '@/lib/adminApi';
 import { hasLikelyAdminSession } from '@/lib/api';
+import { ADMIN_API_BASE } from '@/lib/http/adminFetch';
 
 type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string };
 
@@ -55,9 +56,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.role]);
 
-  // Resolve relative to admin base; avoid double '/admin' in path
-  // Direct/base: <origin>/api/admin/login ; Proxy: /admin-api/admin/login
-  const LOGIN_PATH = '/login';
+  // Per Vercel contract: use the proxy base and hit POST ${ADMIN_API_BASE}/admin/login
+  // so the rewrite can forward to backend /api/admin/login.
+  const LOGIN_PATH = `${ADMIN_API_BASE}/admin/login`;
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);

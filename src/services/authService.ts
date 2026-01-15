@@ -1,8 +1,8 @@
 // 📁 src/services/authService.ts
-import { adminApi, resolveAdminPath } from '../lib/adminApi';
+import { adminApi } from '../lib/adminApi';
+import { ADMIN_API_BASE } from '../lib/http/adminFetch';
 
 export const login = async (email: string, password: string) => {
-  // Use '/admin/login' when proxy base, '/api/admin/login' when direct host
-  const path = resolveAdminPath('/api/admin/login');
-  return adminApi.post(path, { email, password });
+  // Per spec: always POST to `${ADMIN_API_BASE}/admin/login`
+  return adminApi.post(`${ADMIN_API_BASE}/admin/login`, { email, password });
 };

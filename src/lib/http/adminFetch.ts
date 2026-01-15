@@ -13,10 +13,19 @@ const BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').to
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
 const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 
+function normalizeAdminApiBase(input: string): string {
+  const s = stripTrailingSlashes((input || '').toString().trim());
+  if (!s) return '/admin-api';
+  // If it's an absolute origin (https://host), append /admin-api.
+  if (/^https?:\/\//i.test(s)) return stripTrailingSlashes(s) + '/admin-api';
+  // Otherwise treat it as a root-relative path.
+  return s.startsWith('/') ? s : `/${s}`;
+}
+
 // Legacy/back-compat: allow overriding the full base URL/path.
 const RAW_ADMIN_BASE = (import.meta.env.VITE_ADMIN_API_URL || '').toString().trim();
-export const ADMIN_API_BASE = stripTrailingSlashes(
-  RAW_ADMIN_BASE || (ADMIN_API_ORIGIN ? `${ADMIN_API_ORIGIN}/admin-api` : '/admin-api')
+export const ADMIN_API_BASE = normalizeAdminApiBase(
+  RAW_ADMIN_BASE || (ADMIN_API_ORIGIN ? `${ADMIN_API_ORIGIN}` : '/admin-api')
 );
 
 export class AdminApiError extends Error {
