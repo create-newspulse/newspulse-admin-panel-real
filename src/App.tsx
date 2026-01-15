@@ -267,7 +267,7 @@ function App() {
               <Route path="/admin/locked" element={<LockedPage />} />
 
               {/* 🛡️ Founder-Only Routes */}
-              <Route path="/admin/dashboard" element={<FounderRoute><Dashboard /></FounderRoute>} />
+              <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
               {/* Admin tools (Founder/Admin only) */}
               <Route

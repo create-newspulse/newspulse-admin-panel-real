@@ -1,23 +1,29 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
-import { adminApi, adminUrl } from '@/lib/api';
+import { toast } from 'react-hot-toast';
+import { adminJson } from '@/lib/http/adminFetch';
+import { logoutAll, toFriendlyErrorMessage } from '@/api/adminPanelSettingsApi';
 
 type SessionInfo = { authenticated?: boolean; email?: string };
 
 export default function SecurityAdmin() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const role = String(user?.role || '').toLowerCase();
+  const isFounder = role === 'founder';
 
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [logoutAllOpen, setLogoutAllOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       setLoading(true);
       try {
-        const res = await adminApi.get('/me');
-        const data = res.data || {};
+        const data: any = await adminJson('/me', { cache: 'no-store' } as any);
         const email = data?.email || data?.user?.email;
         const authenticated = Boolean(data?.authenticated ?? data?.ok ?? data?.user);
         if (!mounted) return;
@@ -34,6 +40,33 @@ export default function SecurityAdmin() {
       mounted = false;
     };
   }, []);
+
+  const doLogout = () => {
+    try {
+      logout('manual');
+      navigate('/login', { replace: true });
+    } catch {
+      // ignore
+    }
+  };
+
+  const doLogoutAll = async () => {
+    if (!isFounder) {
+      toast.error('Access denied (founder only).');
+      return;
+    }
+    setBusy(true);
+    try {
+      await logoutAll();
+      toast.success('Logged out everywhere');
+    } catch (e: any) {
+      toast.error(toFriendlyErrorMessage(e, 'Logout all failed'));
+    } finally {
+      setBusy(false);
+      setLogoutAllOpen(false);
+      doLogout();
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -63,23 +96,58 @@ export default function SecurityAdmin() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2">
-                <a
+                <button
+                  type="button"
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                  href={adminUrl('/logout')}
+                  onClick={doLogout}
                 >
                   Logout
-                </a>
-                <a
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100"
-                  href={adminUrl('/logout')}
-                  title="Backend does not expose global session revocation; this logs out this browser session."
+                </button>
+                <button
+                  type="button"
+                  disabled={!isFounder || busy}
+                  className={
+                    'rounded-lg border px-4 py-2 text-sm font-semibold hover:bg-slate-100 ' +
+                    (isFounder ? 'border-slate-300 bg-white' : 'border-slate-200 bg-slate-100 text-slate-400')
+                  }
+                  onClick={() => setLogoutAllOpen(true)}
+                  title={isFounder ? 'Revoke sessions across devices.' : 'Founder only'}
                 >
                   Logout All
-                </a>
+                </button>
               </div>
             </div>
           )}
         </div>
+
+        {logoutAllOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+              <div className="text-lg font-semibold">Confirm logout all</div>
+              <div className="mt-2 text-sm text-slate-700">
+                This will revoke all sessions for your account and log you out here.
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100"
+                  onClick={() => setLogoutAllOpen(false)}
+                  disabled={busy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                  onClick={doLogoutAll}
+                  disabled={busy}
+                >
+                  {busy ? 'Working…' : 'Logout All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-base font-semibold">Password Policy</div>

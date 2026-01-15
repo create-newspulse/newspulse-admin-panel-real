@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import apiClient from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { changePassword, toFriendlyErrorMessage } from '@/api/adminPanelSettingsApi';
 
 export default function ChangePassword() {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -30,21 +30,21 @@ export default function ChangePassword() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await apiClient.post('/admin/auth/change-password', {
-        currentPassword,
-        newPassword,
-      });
-      if ((res.data?.success) || (res as any).success) {
+      const res: any = await changePassword({ currentPassword, newPassword });
+      if (res?.success || res?.ok) {
         toast.success('Password updated');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
         // Optional: force fresh login for security
         // navigate('/login', { replace: true });
       } else {
-        const msg = (res as any).message || 'Failed to change password';
+        const msg = (res as any)?.message || 'Failed to change password';
         setError(msg);
         toast.error(msg);
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || 'Failed to change password';
+      const msg = toFriendlyErrorMessage(err, 'Failed to change password');
       setError(msg);
       toast.error(msg);
     } finally {

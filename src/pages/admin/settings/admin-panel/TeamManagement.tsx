@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { adminApi } from '@lib/api';
 import { useAuth } from '@context/AuthContext';
-
-type AdminUser = {
-  _id: string;
-  name?: string;
-  email?: string;
-  role?: string;
-  designation?: string;
-  permissions?: string[];
-  isActive?: boolean;
-};
+import { toast } from 'react-hot-toast';
+import {
+  activateUser,
+  createTeamUser,
+  forceResetUser,
+  getTeamUsers,
+  suspendUser,
+  toFriendlyErrorMessage,
+  type TeamUser,
+} from '@/api/adminPanelSettingsApi';
 
 export default function TeamManagement() {
   const { user } = useAuth();
   const role = String(user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
-
-  const STAFF_LIST_ENDPOINT = '/api/admin/staff';
 
   const [createForm, setCreateForm] = useState({
     name: '',
@@ -27,10 +24,13 @@ export default function TeamManagement() {
     permissions: '',
   });
 
-  const [items, setItems] = useState<AdminUser[]>([]);
+  const [items, setItems] = useState<TeamUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [staffEndpointMissing, setStaffEndpointMissing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+  const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
+  const [createdEmail, setCreatedEmail] = useState<string | null>(null);
 
   const roles = useMemo(() => ['founder', 'admin', 'editor', 'intern', 'employee'], []);
 
@@ -49,63 +49,94 @@ export default function TeamManagement() {
   async function fetchStaff() {
     setLoading(true);
     setErr(null);
-    setStaffEndpointMissing(false);
     try {
-      // Contract: /api/admin/staff
-      // Proxy mode:
-      //   browser -> /admin-api/admin/staff  (Vite/Vercel) -> backend /api/admin/staff
-      // We intentionally call the canonical backend path and let the adminApi interceptor
-      // normalize it for proxy/direct mode.
-      const res = await adminApi.get(STAFF_LIST_ENDPOINT);
-      const data = (res as any)?.data ?? res;
-      // Tolerate common shapes
-      const list = Array.isArray(data?.staff)
-        ? data.staff
-        : (Array.isArray(data?.users) ? data.users : (Array.isArray(data) ? data : []));
-      setItems(list);
+      const list = await getTeamUsers();
+      setItems(Array.isArray(list) ? list : []);
     } catch (e: any) {
-      const status = e?.response?.status;
-      if (status === 404) {
-        setStaffEndpointMissing(true);
-        setErr(null);
-      } else if (status === 401) {
-        // Session expired / missing credentials
-        setErr('Not authenticated. Please log in again.');
-      } else if (status === 403) {
-        // Role/owner-key gate
-        setErr('Access denied. Your account may require additional permissions.');
-      } else if (!status) {
-        // Network / proxy / CORS / backend not running
-        setErr('Backend unreachable. Ensure the backend is running and the /admin-api proxy is configured.');
-      } else {
-        setErr(`Failed to load staff (HTTP ${status}). Please try again.`);
-      }
+      setItems([]);
+      setErr(toFriendlyErrorMessage(e, 'Failed to load staff.'));
     } finally {
       setLoading(false);
     }
   }
 
-  async function updateRole(userId: string, nextRole: string) {
-    if (!isFounder || staffEndpointMissing) return;
-    await adminApi.put(`/admin/update-role/${userId}`, { role: nextRole });
-    await fetchStaff();
-  }
+  const parsePermissions = () =>
+    createForm.permissions
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
 
-  const backendMissingHint =
-    'This action is UI-only until the production backend exposes a supported endpoint.';
+  const userId = (u: TeamUser) => String(u?._id || u?.id || '');
+
+  const isUserActive = (u: TeamUser): boolean => {
+    if (typeof u?.isActive === 'boolean') return u.isActive;
+    const s = String(u?.status || '').toLowerCase();
+    if (s === 'suspended' || s === 'inactive' || s === 'disabled') return false;
+    if (s === 'active') return true;
+    return true;
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isFounder) {
+      toast.error('Access denied (founder only).');
+      return;
+    }
+    const email = String(createForm.email || '').trim();
+    if (!email || !email.includes('@')) {
+      toast.error('Enter a valid email.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const payload = {
+        email,
+        name: createForm.name?.trim() || undefined,
+        role: createForm.role,
+        designation: createForm.designation?.trim() || undefined,
+        permissions: parsePermissions(),
+      };
+      const res: any = await createTeamUser(payload);
+      const tempPassword =
+        res?.tempPassword ||
+        res?.password ||
+        res?.data?.tempPassword ||
+        res?.data?.password ||
+        null;
+      setCreatedTempPassword(tempPassword ? String(tempPassword) : null);
+      setCreatedEmail(email);
+      toast.success('Staff created');
+      setCreateForm({ name: '', email: '', role: 'editor', designation: '', permissions: '' });
+      await fetchStaff();
+    } catch (err2: any) {
+      toast.error(toFriendlyErrorMessage(err2, 'Create failed'));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const runRowAction = async (id: string, action: () => Promise<any>, label: string) => {
+    if (!isFounder) {
+      toast.error('Access denied (founder only).');
+      return;
+    }
+    if (!id) return;
+    setRowBusyId(id);
+    try {
+      await action();
+      toast.success(label);
+      await fetchStaff();
+    } catch (err2: any) {
+      toast.error(toFriendlyErrorMessage(err2, 'Action failed'));
+    } finally {
+      setRowBusyId(null);
+    }
+  };
 
   useEffect(() => {
     fetchStaff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (!isFounder) {
-    return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800">
-        Founder-only: Team Management
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -114,27 +145,70 @@ export default function TeamManagement() {
           <div>
             <div className="text-lg font-semibold">Team Management</div>
             <div className="mt-1 text-sm text-slate-600">Manage staff roles and access.</div>
+            {!isFounder && (
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Access denied: founder-only controls are disabled.
+              </div>
+            )}
           </div>
           <button
             type="button"
             onClick={fetchStaff}
+            disabled={loading}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100"
           >
-            Refresh
+            {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
 
+      {createdEmail && createdTempPassword && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+          <div className="font-semibold">Temporary password (shown once)</div>
+          <div className="mt-1 text-sm">
+            For: <span className="font-semibold">{createdEmail}</span>
+          </div>
+          <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3 font-mono text-sm">
+            {createdTempPassword}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+              onClick={async () => {
+                try {
+                  if (!navigator?.clipboard?.writeText) throw new Error('Clipboard unavailable');
+                  await navigator.clipboard.writeText(createdTempPassword);
+                  toast.success('Copied');
+                } catch {
+                  toast.error('Copy failed');
+                }
+              }}
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-emerald-100"
+              onClick={() => {
+                setCreatedTempPassword(null);
+                setCreatedEmail(null);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-base font-semibold">Create Staff</div>
-          <div className="mt-1 text-sm text-slate-600">Founder-only staff creation form (pending backend support).</div>
+          <div className="mt-1 text-sm text-slate-600">Create a staff user (founder only).</div>
 
           <form
             className="mt-4 space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-            }}
+            onSubmit={handleCreate}
           >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
@@ -204,13 +278,15 @@ export default function TeamManagement() {
             <div className="flex items-center gap-2">
               <button
                 type="submit"
-                disabled
-                className="rounded-lg bg-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
-                title={backendMissingHint}
+                disabled={!isFounder || creating}
+                className={
+                  'rounded-lg px-4 py-2 text-sm font-semibold ' +
+                  (isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700')
+                }
               >
-                Create
+                {creating ? 'Creating…' : 'Create'}
               </button>
-              <div className="text-xs text-slate-600">{backendMissingHint}</div>
+              {!isFounder && <div className="text-xs text-slate-600">Founder-only</div>}
             </div>
           </form>
         </div>
@@ -221,34 +297,7 @@ export default function TeamManagement() {
 
           <div className="mt-4 space-y-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              These actions are displayed to satisfy the admin UX spec, but will remain disabled until production backend endpoints are available.
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                title={backendMissingHint}
-              >
-                Activate
-              </button>
-              <button
-                type="button"
-                disabled
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                title={backendMissingHint}
-              >
-                Suspend
-              </button>
-              <button
-                type="button"
-                disabled
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                title={backendMissingHint}
-              >
-                Force Reset
-              </button>
+              Use the per-user actions in the Staff list below.
             </div>
           </div>
         </div>
@@ -256,22 +305,6 @@ export default function TeamManagement() {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="text-base font-semibold">Staff</div>
-
-        {staffEndpointMissing && (
-          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-            <div className="text-sm font-semibold">Backend endpoint missing: {STAFF_LIST_ENDPOINT} (pending backend support)</div>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={fetchStaff}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-amber-100"
-              >
-                Retry
-              </button>
-              <div className="text-xs text-amber-800">Create and actions are disabled until this endpoint exists.</div>
-            </div>
-          </div>
-        )}
 
         {loading ? (
           <div className="mt-3 text-slate-600">Loading…</div>
@@ -287,41 +320,78 @@ export default function TeamManagement() {
                   <th className="py-2 pr-3">Name</th>
                   <th className="py-2 pr-3">Email</th>
                   <th className="py-2 pr-3">Role</th>
-                  <th className="py-2 pr-3">Designation</th>
-                  <th className="py-2 pr-3">Permissions</th>
                   <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3">Action</th>
+                  <th className="py-2 pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((u) => (
-                  <tr key={u._id} className="border-t border-slate-200">
-                    <td className="py-2 pr-3">{u.name || '—'}</td>
-                    <td className="py-2 pr-3">{u.email || '—'}</td>
-                    <td className="py-2 pr-3">{u.role || '—'}</td>
-                    <td className="py-2 pr-3">{u.designation || '—'}</td>
-                    <td className="py-2 pr-3">
-                      {Array.isArray(u.permissions) && u.permissions.length ? u.permissions.join(', ') : '—'}
-                    </td>
-                    <td className="py-2 pr-3">{typeof u.isActive === 'boolean' ? (u.isActive ? 'Active' : 'Suspended') : '—'}</td>
-                    <td className="py-2 pr-3">
-                      <select
-                        value={String(u.role || '')}
-                        onChange={(e) => updateRole(u._id, e.target.value)}
-                        disabled={staffEndpointMissing}
-                        className="rounded border border-slate-300 bg-white px-2 py-1"
-                      >
-                        {roles.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((u) => {
+                  const id = userId(u);
+                  const active = isUserActive(u);
+                  const busy = rowBusyId === id;
+                  return (
+                    <tr key={id || `${u.email}-${u.name}`} className="border-t border-slate-200">
+                      <td className="py-2 pr-3">{u.name || '—'}</td>
+                      <td className="py-2 pr-3">{u.email || '—'}</td>
+                      <td className="py-2 pr-3">{u.role || '—'}</td>
+                      <td className="py-2 pr-3">
+                        <span
+                          className={
+                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ' +
+                            (active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-800')
+                          }
+                        >
+                          {active ? 'Active' : 'Suspended'}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={!isFounder || busy}
+                            className={
+                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
+                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
+                            }
+                            onClick={() => runRowAction(id, () => activateUser(id), 'User activated')}
+                          >
+                            {busy ? 'Working…' : 'Activate'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!isFounder || busy}
+                            className={
+                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
+                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
+                            }
+                            onClick={() => runRowAction(id, () => suspendUser(id), 'User suspended')}
+                          >
+                            {busy ? 'Working…' : 'Suspend'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!isFounder || busy}
+                            className={
+                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
+                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
+                            }
+                            onClick={() => runRowAction(id, () => forceResetUser(id), 'Reset triggered')}
+                          >
+                            {busy ? 'Working…' : 'Force Reset'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!isFounder && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            You can view staff, but only a founder can create/activate/suspend/reset users.
           </div>
         )}
       </div>

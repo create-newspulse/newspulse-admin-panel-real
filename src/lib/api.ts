@@ -481,13 +481,25 @@ adminApi.interceptors.response.use(
       || p === '/admin-api/api/admin/login'
     );
 
+    const hasStoredSessionMarker = (() => {
+      try {
+        return typeof window !== 'undefined' && !!localStorage.getItem('newsPulseAdminAuth');
+      } catch {
+        return false;
+      }
+    })();
+
     if (status === 401) {
       const isCommunityQueue = typeof url === 'string' && url.includes('/community-reporter/queue');
-      // Only broadcast a global logout if we actually had a token to clear.
-      // 401 from cookie-session probes (e.g. /me) is normal when not logged in.
-      // Never broadcast logout for an invalid login attempt.
+      // Broadcast a global logout if we had an auth signal to clear.
+      // - 401 from cookie-session probes (e.g. /me) is normal when not logged in.
+      // - Never broadcast logout for an invalid login attempt.
+      // - In cookie-session mode, we may have no token; clear the marker to avoid auth/UI loops.
       const hasToken = !!getAuthToken();
-      if (!isCommunityQueue && hasToken && shouldLogoutOn401(url) && !isLoginEndpoint) {
+      const hadSessionSignal = hasToken || hasStoredSessionMarker;
+      const shouldBroadcast = hadSessionSignal && shouldLogoutOn401(url) && !isLoginEndpoint && !isAuthEndpoint;
+
+      if (!isCommunityQueue && shouldBroadcast) {
         try {
           localStorage.removeItem('admin_token');
           localStorage.removeItem('newsPulseAdminAuth');

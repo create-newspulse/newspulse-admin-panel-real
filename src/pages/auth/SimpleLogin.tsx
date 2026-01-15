@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@context/AuthContext';
@@ -7,6 +7,8 @@ import OtpModal from '@/components/auth/OtpModal';
 export default function SimpleLogin() {
   const navigate = useNavigate();
   const { login, user, restoreSession } = useAuth();
+
+  const probeAttemptedRef = useRef(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -51,15 +53,36 @@ export default function SimpleLogin() {
   // If a cookie-based session is already active, redirect to dashboard.
   // If /admin/me returns 401, that's expected and should not show scary UI.
   useEffect(() => {
+    // Prevent runaway loops: only probe once per mount.
+    if (probeAttemptedRef.current) return;
+    probeAttemptedRef.current = true;
+
     let cancelled = false;
     const probeMe = async () => {
       try {
         const res = await fetch('/admin-api/admin/me', { cache: 'no-store', credentials: 'include' });
         if (cancelled) return;
         if (res.ok) {
-          // hydrate context (best-effort) then redirect
-          try { await restoreSession({ allowOnAuthPage: true, force: true }); } catch {}
-          navigate('/admin/dashboard', { replace: true });
+          // Cookie-based sessions may be invisible to JS (httpOnly cookie), so the
+          // auth layer can't detect them unless we set a localStorage marker.
+          // Persist a minimal marker to unlock hasLikelyAdminSession().
+          try {
+            const data = await res.clone().json().catch(() => null);
+            const u = (data && (data.user || data.data?.user || data.data)) || data;
+            const email = u?.email ? String(u.email) : undefined;
+            const role = u?.role ? String(u.role) : undefined;
+            localStorage.setItem('newsPulseAdminAuth', JSON.stringify({ ts: Date.now(), email, role }));
+          } catch {
+            // If storage fails, still attempt restoreSession.
+          }
+
+          // Hydrate context, then redirect only if restore succeeded.
+          try {
+            await restoreSession({ allowOnAuthPage: true, force: true });
+            if (!cancelled) navigate('/admin/dashboard', { replace: true });
+          } catch {
+            // If restore fails (e.g., session cookie rejected), stay on /login.
+          }
           return;
         }
         // 401/403/404: ignore quietly
@@ -82,7 +105,7 @@ export default function SimpleLogin() {
       if (!ok) {
         // 401 is an expected outcome for wrong credentials in production.
         // Keep UX calm and show a clear, user-friendly message.
-        toast.error('Invalid admin email/password (production creds).');
+        toast.error('Invalid email/password. If this is local dev, seed the founder first (POST /admin-api/admin/seed-founder).');
         return;
       }
 
@@ -99,7 +122,7 @@ export default function SimpleLogin() {
 
       // Treat 401 as a normal invalid-credentials outcome (no scary console noise).
       if (status === 401) {
-        toast.error('Invalid admin email/password (production creds).');
+        toast.error('Invalid email/password. If this is local dev, seed the founder first (POST /admin-api/admin/seed-founder).');
         return;
       }
 
