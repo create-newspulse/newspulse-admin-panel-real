@@ -4,12 +4,43 @@ function stripTrailingSlashes(s: string): string {
   return (s || '').replace(/\/+$/, '');
 }
 
+function isLocalHostname(hostname: string): boolean {
+  const h = (hostname || '').toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
+
+function isLocalUiHost(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    return isLocalHostname(window.location.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLocalOrigin(input: string): boolean {
+  try {
+    if (!/^https?:\/\//i.test(input || '')) return false;
+    const u = new URL(input);
+    return isLocalHostname(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Admin API base URL
 // Production direct mode (no proxy): set VITE_ADMIN_API_BASE=https://YOUR_BACKEND_DOMAIN
 // Dev/proxy mode: leave it empty and the app will call relative /admin-api/* (Vite/Vercel rewrites).
 // Repo contract: use an optional origin prefix only; never auto-default to a production URL.
 // Requests are made as: fetch(`${BASE}${path}`)
-const BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+const BASE = (() => {
+  const raw = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+  // Safety: never allow production builds to call a localhost backend.
+  // If someone accidentally sets VITE_ADMIN_API_BASE=http://localhost:5000 in Vercel,
+  // it would break Save/Add and show misleading offline errors.
+  if (!import.meta.env.DEV && isLocalOrigin(raw)) return '';
+  return raw;
+})();
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
 const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 
@@ -110,7 +141,11 @@ function notifyBackendOfflineOnce() {
   lastOfflineBannerAt = now;
   try {
     window.dispatchEvent(new CustomEvent('np:backend-offline', {
-      detail: { message: 'Backend offline. Start backend on http://localhost:5000' },
+      detail: {
+        message: isLocalUiHost()
+          ? 'Backend offline. Start backend on http://localhost:5000'
+          : 'API unreachable. Please try again in a moment.',
+      },
     }));
   } catch {
     // ignore
@@ -129,7 +164,10 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   }
   if (netBlockedUntil > now0) {
     notifyBackendOfflineOnce();
-    throw new AdminApiError('Backend offline (start local backend on :5000)', { status: 0, url, body: { blocked: true }, code: 'BACKEND_OFFLINE' });
+    throw new AdminApiError(
+      isLocalUiHost() ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
+      { status: 0, url, body: { blocked: true }, code: 'BACKEND_OFFLINE' }
+    );
   }
 
   const headers = new Headers(init.headers || undefined);
@@ -196,7 +234,10 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
         });
       } catch {}
     }
-    throw new AdminApiError('Backend offline (start local backend on :5000)', { status: 0, url, body: { cause: e?.message || String(e) }, code: 'BACKEND_OFFLINE' });
+    throw new AdminApiError(
+      isLocalUiHost() ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
+      { status: 0, url, body: { cause: e?.message || String(e) }, code: 'BACKEND_OFFLINE' }
+    );
   }
 
   // Align with existing global behaviors

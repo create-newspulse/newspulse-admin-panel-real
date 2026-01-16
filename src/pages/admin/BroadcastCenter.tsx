@@ -4,15 +4,29 @@ import {
   type BroadcastItem,
   type BroadcastSettings,
   type BroadcastType,
-  createBroadcastItem,
-  deleteBroadcastItem,
-  getBroadcastSettings,
-  listBroadcastItems,
-  patchBroadcastItem,
-  updateBroadcastSettings,
 } from '@/lib/broadcastApi';
+import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
+
+const BROADCAST_BASE = '/admin-api/admin/broadcast';
+
+const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
+const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
+
+function apiStatusText(e: unknown): string {
+  if (e instanceof AdminApiError) {
+    if (e.status && e.status !== 0) return `HTTP ${e.status}`;
+    return 'Network error';
+  }
+  return '';
+}
+
+function apiMessage(e: unknown, fallback = 'API error'): string {
+  if (e instanceof AdminApiError) return e.message || fallback;
+  const anyErr: any = e as any;
+  return anyErr?.message || fallback;
+}
 
 function formatLocalTime(iso: string) {
   const d = new Date(iso);
@@ -35,9 +49,8 @@ function expiresIn(expiresAtIso: string) {
 }
 
 function sortByCreatedDesc(items: BroadcastItem[]) {
-  return items
-    .slice()
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  if (!Array.isArray(items)) return [];
+  return items.slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 function serializeSettings(s: BroadcastSettings | null) {
@@ -232,16 +245,20 @@ export default function BroadcastCenter() {
   }, []);
 
   const loadAll = useCallback(async (signal?: AbortSignal) => {
-    const [s, breaking, live, site] = await Promise.all([
-      getBroadcastSettings({ signal }),
-      listBroadcastItems('breaking', { signal }),
-      listBroadcastItems('live', { signal }),
+    const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
+      adminJson<any>(BROADCAST_BASE, { method: 'GET', signal }),
+      adminJson<any>(`${BROADCAST_BASE}/items?type=breaking`, { method: 'GET', signal }),
+      adminJson<any>(`${BROADCAST_BASE}/items?type=live`, { method: 'GET', signal }),
       adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
-    setSettings(s);
-    setInitialSettings(serializeSettings(s));
-    setBreakingItems(breaking);
-    setLiveItems(live);
+
+    const broadcastObj = unwrapObj(broadcastRes);
+    const settingsObj = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as BroadcastSettings;
+
+    setSettings(settingsObj);
+    setInitialSettings(serializeSettings(settingsObj));
+    setBreakingItems(unwrapArray(breakingRes) as BroadcastItem[]);
+    setLiveItems(unwrapArray(liveRes) as BroadcastItem[]);
 
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
@@ -291,10 +308,17 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
-      const saved = await updateBroadcastSettings(settings, {
-        liveSpeedSec: tickerSpeeds.liveSpeedSec,
-        breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+      const res = await adminJson<any>(BROADCAST_BASE, {
+        method: 'PUT',
+        json: {
+          ...settings,
+          liveSpeedSec: tickerSpeeds.liveSpeedSec,
+          breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+        },
       });
+
+      const savedObj = unwrapObj(res);
+      const saved = unwrapObj((savedObj as any)?.settings ?? savedObj) as BroadcastSettings;
 
       // Keep public-site ticker visibility/speeds in sync from ONE place.
       // This ensures the homepage actually shows/hides tickers consistently.
@@ -315,7 +339,8 @@ export default function BroadcastCenter() {
       setInitialSpeeds(JSON.stringify(tickerSpeeds));
       notifyRef.current.ok('Saved ✅');
     } catch (e: any) {
-      notifyRef.current.err('Save failed', e?.message || 'Unknown error');
+      const status = apiStatusText(e);
+      notifyRef.current.err('Save failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
       setSaving(false);
     }
@@ -333,14 +358,19 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      await createBroadcastItem({ type, text });
+      await adminJson(`${BROADCAST_BASE}/items`, {
+        method: 'POST',
+        json: { type, text },
+      });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
-      const items = await listBroadcastItems(type);
+      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notifyRef.current.err('Add failed', e?.message || 'Unknown error');
+      const status = apiStatusText(e);
+      notifyRef.current.err('Add failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
       setAddingType(null);
     }
@@ -349,12 +379,17 @@ export default function BroadcastCenter() {
   const toggleLive = useCallback(async (type: BroadcastType, id: string, next: boolean) => {
     setWorking(id, true);
     try {
-      await patchBroadcastItem({ id, isLive: next });
-      const items = await listBroadcastItems(type);
+      await adminJson(`${BROADCAST_BASE}/items/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        json: { isLive: next },
+      });
+      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notifyRef.current.err('Update failed', e?.message || 'Unknown error');
+      const status = apiStatusText(e);
+      notifyRef.current.err('Update failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
       setWorking(id, false);
     }
@@ -363,12 +398,14 @@ export default function BroadcastCenter() {
   const deleteItem = useCallback(async (type: BroadcastType, id: string) => {
     setWorking(id, true);
     try {
-      await deleteBroadcastItem(id);
-      const items = await listBroadcastItems(type);
+      await adminJson(`${BROADCAST_BASE}/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      notifyRef.current.err('Delete failed', e?.message || 'Unknown error');
+      const status = apiStatusText(e);
+      notifyRef.current.err('Delete failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
       setWorking(id, false);
     }
