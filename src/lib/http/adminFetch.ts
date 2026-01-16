@@ -140,11 +140,10 @@ function notifyBackendOfflineOnce() {
   if (lastOfflineBannerAt && (now - lastOfflineBannerAt) < OFFLINE_BANNER_COOLDOWN_MS) return;
   lastOfflineBannerAt = now;
   try {
+    const devMsg = import.meta.env.DEV ? 'Backend offline. Start backend on http://localhost:5000' : 'API unreachable.';
     window.dispatchEvent(new CustomEvent('np:backend-offline', {
       detail: {
-        message: isLocalUiHost()
-          ? 'Backend offline. Start backend on http://localhost:5000'
-          : 'API unreachable. Please try again in a moment.',
+        message: devMsg,
       },
     }));
   } catch {
@@ -180,7 +179,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   if (netBlockedUntil > now0) {
     notifyBackendOfflineOnce();
     throw new AdminApiError(
-      isLocalUiHost() ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
+      import.meta.env.DEV ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
       { status: 0, url, body: { blocked: true }, code: 'BACKEND_OFFLINE' }
     );
   }
@@ -266,7 +265,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
       } catch {}
     }
     throw new AdminApiError(
-      isLocalUiHost() ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
+      import.meta.env.DEV ? 'Backend offline (start local backend on :5000)' : 'API error (network)',
       { status: 0, url, body: { cause: e?.message || String(e) }, code: 'BACKEND_OFFLINE' }
     );
   }

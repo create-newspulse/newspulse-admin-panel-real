@@ -68,12 +68,15 @@ const Dashboard = () => {
 
     const isDbUnavailable = status === 503 || code === 'DB_UNAVAILABLE';
     const isBackendOffline = code === 'BACKEND_OFFLINE' || (!status && !isDbUnavailable);
+    const backendOfflineTitle = import.meta.env.DEV
+      ? 'Backend offline. Start backend on localhost:5000.'
+      : 'API unreachable.';
     return {
       type: 'error',
       title: isDbUnavailable
         ? 'Database unavailable. Check backend MONGODB_URI / Mongo service.'
         : isBackendOffline
-          ? 'Backend offline. Start backend on localhost:5000.'
+          ? backendOfflineTitle
           : 'Failed to load dashboard stats.',
       subtitle: (isDbUnavailable || isBackendOffline)
         ? undefined

@@ -10,6 +10,34 @@ import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
 const BROADCAST_BASE = '/admin-api/admin/broadcast';
+const LEGACY_BROADCAST_BASE = '/admin-api/broadcast';
+
+function isLocalHostUi(): boolean {
+  try {
+    if (typeof window === 'undefined') return false;
+    const h = window.location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
+async function broadcastJson<T = any>(
+  path: string,
+  init: Parameters<typeof adminJson>[1] = {},
+): Promise<T> {
+  try {
+    return await adminJson<T>(`${BROADCAST_BASE}${path}`, init as any);
+  } catch (e) {
+    // Dev/localhost fallback for the bundled demo backend, which exposes /api/broadcast/* (not /api/admin/broadcast/*).
+    // IMPORTANT: Never fall back in production, to keep all prod traffic on /admin-api/admin/broadcast*.
+    const canFallback = import.meta.env.DEV || isLocalHostUi();
+    if (canFallback && e instanceof AdminApiError && e.status === 404) {
+      return await adminJson<T>(`${LEGACY_BROADCAST_BASE}${path}`, init as any);
+    }
+    throw e;
+  }
+}
 
 const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
@@ -250,9 +278,9 @@ export default function BroadcastCenter() {
 
   const loadAll = useCallback(async (signal?: AbortSignal) => {
     const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
-      adminJson<any>(BROADCAST_BASE, { method: 'GET', signal }),
-      adminJson<any>(`${BROADCAST_BASE}/items?type=breaking`, { method: 'GET', signal }),
-      adminJson<any>(`${BROADCAST_BASE}/items?type=live`, { method: 'GET', signal }),
+      broadcastJson<any>('', { method: 'GET', signal }),
+      broadcastJson<any>('/items?type=breaking', { method: 'GET', signal }),
+      broadcastJson<any>('/items?type=live', { method: 'GET', signal }),
       adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
 
@@ -312,7 +340,7 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
-      const res = await adminJson<any>(BROADCAST_BASE, {
+      const res = await broadcastJson<any>('', {
         method: 'PUT',
         json: {
           ...settings,
@@ -374,13 +402,13 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      await adminJson(`${BROADCAST_BASE}/items`, {
+      await broadcastJson('/items', {
         method: 'POST',
         json: { type, text },
       });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
-      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
       const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
@@ -408,15 +436,21 @@ export default function BroadcastCenter() {
   const toggleLive = useCallback(async (type: BroadcastType, id: string, next: boolean) => {
     setWorking(id, true);
     try {
-      await adminJson(`${BROADCAST_BASE}/items/${encodeURIComponent(id)}`, {
+      await broadcastJson(`/items/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         json: { isLive: next },
       });
-      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
       const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
+      // If the production backend doesn't support item PATCH (not part of the minimal contract),
+      // show a clear message instead of spamming generic 404s.
+      if (e instanceof AdminApiError && e.status === 404) {
+        notifyRef.current.err('Update not supported', 'This backend does not support editing item LIVE state');
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Update failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -427,8 +461,8 @@ export default function BroadcastCenter() {
   const deleteItem = useCallback(async (type: BroadcastType, id: string) => {
     setWorking(id, true);
     try {
-      await adminJson(`${BROADCAST_BASE}/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      const itemsRes = await adminJson<any>(`${BROADCAST_BASE}/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+      await broadcastJson(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
       const items = unwrapArray(itemsRes) as BroadcastItem[];
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);

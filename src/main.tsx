@@ -47,7 +47,8 @@ if (import.meta.env.PROD) {
 try {
   if (typeof window !== 'undefined') {
     window.addEventListener('np:backend-offline', (ev: any) => {
-      const msg = ev?.detail?.message || 'Backend offline. Start backend on http://localhost:5000';
+      const devHint = import.meta.env.DEV ? 'Backend offline. Start backend on http://localhost:5000' : 'API unreachable.';
+      const msg = ev?.detail?.message || devHint;
       toast.error(msg, { id: 'np-backend-offline', duration: 12_000 });
     });
   }
