@@ -45,6 +45,20 @@ async function broadcastJson<T = any>(
 const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
+function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
+  const itemId = item?._id ?? item?.id;
+  if (!itemId) throw new Error('Broadcast item missing id');
+  return String(itemId);
+}
+
+function normalizeItems(items: any[]): BroadcastItem[] {
+  return (items || []).map((it: any) => {
+    const _id = it?._id ?? it?.id;
+    const id = it?.id ?? it?._id;
+    return { ...it, _id, id } as BroadcastItem;
+  });
+}
+
 function apiStatusText(e: unknown): string {
   if (e instanceof AdminApiError) {
     if (e.status && e.status !== 0) return `HTTP ${e.status}`;
@@ -53,10 +67,29 @@ function apiStatusText(e: unknown): string {
   return '';
 }
 
+function apiBodyText(e: unknown): string {
+  if (!(e instanceof AdminApiError)) return '';
+  const body = (e as any).body;
+  if (!body) return '';
+  try {
+    return typeof body === 'string' ? body : JSON.stringify(body);
+  } catch {
+    return '';
+  }
+}
+
 function apiMessage(e: unknown, fallback = 'API error'): string {
   if (e instanceof AdminApiError) return e.message || fallback;
   const anyErr: any = e as any;
   return anyErr?.message || fallback;
+}
+
+function apiErrorDetails(e: unknown, fallback = 'API error'): string {
+  const status = apiStatusText(e);
+  const msg = apiMessage(e, fallback);
+  const bodyText = apiBodyText(e);
+  const head = `${status ? `${status}: ` : ''}${msg}`;
+  return bodyText ? `${head} • ${bodyText}` : head;
 }
 
 function isUnauthorized(e: unknown): boolean {
@@ -209,15 +242,24 @@ function SectionCard(props: {
           ) : (
             <div className="divide-y divide-slate-200 dark:divide-slate-700">
               {itemsSorted.map((it) => {
-                const busy = !!props.workingIdMap[it._id];
+                let itemId: string | null = null;
+                try {
+                  itemId = getBroadcastItemId(it as any);
+                } catch {
+                  itemId = null;
+                }
+                const busy = itemId ? !!props.workingIdMap[itemId] : false;
                 return (
-                  <div key={(it as any)?.id ?? it._id} className="flex items-start gap-3 p-4">
+                  <div key={itemId ?? (it as any)?.createdAt ?? Math.random()} className="flex items-start gap-3 p-4">
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
                       checked={!!it.isLive}
-                      disabled={busy}
-                      onChange={(e) => props.onToggleLive(it._id, e.target.checked)}
+                      disabled={busy || !itemId}
+                      onChange={(e) => {
+                        if (!itemId) return;
+                        props.onToggleLive(itemId, e.target.checked);
+                      }}
                       aria-label="LIVE"
                     />
 
@@ -231,8 +273,11 @@ function SectionCard(props: {
                     <button
                       type="button"
                       className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
-                      disabled={busy}
-                      onClick={() => props.onDelete(it._id)}
+                      disabled={busy || !itemId}
+                      onClick={() => {
+                        if (!itemId) return;
+                        props.onDelete(itemId);
+                      }}
                     >
                       Delete
                     </button>
@@ -301,8 +346,8 @@ export default function BroadcastCenter() {
 
     setSettings(settingsObj);
     setInitialSettings(serializeSettings(settingsObj));
-    setBreakingItems(unwrapArray(breakingRes) as BroadcastItem[]);
-    setLiveItems(unwrapArray(liveRes) as BroadcastItem[]);
+    setBreakingItems(normalizeItems(unwrapArray(breakingRes) as any[]));
+    setLiveItems(normalizeItems(unwrapArray(liveRes) as any[]));
 
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
@@ -352,13 +397,31 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
+      const payload = {
+        breaking: {
+          enabled: !!settings.breakingEnabled,
+          mode: settings.breakingMode,
+          speed: tickerSpeeds.breakingSpeedSec,
+          speedSec: tickerSpeeds.breakingSpeedSec,
+        },
+        live: {
+          enabled: !!settings.liveEnabled,
+          mode: settings.liveMode,
+          speed: tickerSpeeds.liveSpeedSec,
+          speedSec: tickerSpeeds.liveSpeedSec,
+        },
+        // Back-compat for servers still expecting the flat shape
+        breakingEnabled: !!settings.breakingEnabled,
+        breakingMode: settings.breakingMode,
+        liveEnabled: !!settings.liveEnabled,
+        liveMode: settings.liveMode,
+        breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+        liveSpeedSec: tickerSpeeds.liveSpeedSec,
+      };
+
       const res = await broadcastJson<any>('', {
         method: 'PUT',
-        json: {
-          ...settings,
-          liveSpeedSec: tickerSpeeds.liveSpeedSec,
-          breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
-        },
+        json: payload,
       });
 
       const savedObj = unwrapObj(res);
@@ -399,8 +462,7 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Save failed', notFoundDetails(e, `${BROADCAST_BASE}`));
         return;
       }
-      const status = apiStatusText(e);
-      notifyRef.current.err('Save failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
+      notifyRef.current.err('Save failed', apiErrorDetails(e, 'API error'));
     } finally {
       setSaving(false);
     }
@@ -425,7 +487,7 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
       const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = unwrapArray(itemsRes) as BroadcastItem[];
+      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -446,14 +508,17 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Add failed', notFoundDetails(e, `${BROADCAST_BASE}/items`));
         return;
       }
-      const status = apiStatusText(e);
-      notifyRef.current.err('Add failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
+      notifyRef.current.err('Add failed', apiErrorDetails(e, 'API error'));
     } finally {
       setAddingType(null);
     }
   }, [breakingText, liveText]);
 
   const toggleLive = useCallback(async (type: BroadcastType, id: string, next: boolean) => {
+    if (!id) {
+      notifyRef.current.err('Update failed', 'Broadcast item missing id');
+      return;
+    }
     setWorking(id, true);
     try {
       await broadcastJson(`/items/${encodeURIComponent(id)}`, {
@@ -461,7 +526,7 @@ export default function BroadcastCenter() {
         json: { isLive: next },
       });
       const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = unwrapArray(itemsRes) as BroadcastItem[];
+      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -473,19 +538,26 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Update failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
         return;
       }
-      const status = apiStatusText(e);
-      notifyRef.current.err('Update failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
+      notifyRef.current.err('Update failed', apiErrorDetails(e, 'API error'));
     } finally {
       setWorking(id, false);
     }
   }, [setWorking]);
 
   const deleteItem = useCallback(async (type: BroadcastType, id: string) => {
+    if (!id) {
+      notifyRef.current.err('Delete failed', 'Broadcast item missing id');
+      return;
+    }
     setWorking(id, true);
     try {
       await broadcastJson(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      // Optimistic UI removal (then refresh for canonical state)
+      if (type === 'breaking') setBreakingItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
+      else setLiveItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
+
       const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = unwrapArray(itemsRes) as BroadcastItem[];
+      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -507,8 +579,7 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Delete failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
         return;
       }
-      const status = apiStatusText(e);
-      notifyRef.current.err('Delete failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
+      notifyRef.current.err('Delete failed', apiErrorDetails(e, 'API error'));
     } finally {
       setWorking(id, false);
     }
