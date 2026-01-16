@@ -97,12 +97,14 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   }
   const proxy: any = {};
-  // DEV: always proxy common API prefixes to the backend.
-  // IMPORTANT (repo requirement): local admin must NEVER call production backend.
-  // In development we hard-pin proxies to the local admin backend.
+  // DEV: proxy common API prefixes to the backend.
+  // Default is the real backend so localhost behaves like production.
+  // To use a local backend, explicitly opt-in via:
+  // - VITE_USE_LOCAL_DEMO_BACKEND=true  (uses http://localhost:5000)
+  // - or VITE_DEV_PROXY_TARGET=http://localhost:5000
   const LOCAL_BACKEND = 'http://localhost:5000';
   const DEV_PROXY_TARGET = mode === 'development'
-    ? LOCAL_BACKEND
+    ? (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || (useLocalDemo ? LOCAL_BACKEND : BACKEND_ORIGIN))
     : (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || BACKEND_ORIGIN);
   if (DEV_PROXY_TARGET) {
     proxy['/api'] = {
@@ -128,9 +130,12 @@ export default defineConfig(({ mode }): UserConfig => {
       secure: false,
     };
   }
-  // DEV contract: /admin-api is always proxied to local backend.
-  // In prod, Vercel handles /admin-api via serverless rewrites.
-  const ADMIN_PROXY_TARGET = mode === 'development' ? LOCAL_BACKEND : ADMIN_API_PROXY_TARGET;
+  // /admin-api proxy
+  // - Dev: default to real backend, unless explicitly pointed to localhost.
+  // - Prod: Vercel handles /admin-api via serverless rewrites.
+  const ADMIN_PROXY_TARGET = mode === 'development'
+    ? (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || (useLocalDemo ? LOCAL_BACKEND : ADMIN_API_PROXY_TARGET))
+    : ADMIN_API_PROXY_TARGET;
   if (ADMIN_PROXY_TARGET) {
     proxy['/admin-api'] = {
       target: ADMIN_PROXY_TARGET,

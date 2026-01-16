@@ -157,11 +157,9 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   // In production, always treat '/admin-api/*' as a SAME-ORIGIN proxy call.
   // This prevents accidental cross-origin calls (e.g., to Render) when an env var sets
   // an absolute backend base and the browser blocks POST/PUT/DELETE preflights.
-  const forceSameOriginProxy =
-    !import.meta.env.DEV &&
-    !isLocalUiHost() &&
-    typeof normalizedPath === 'string' &&
-    normalizedPath.startsWith('/admin-api/');
+  const forceSameOriginProxy = typeof normalizedPath === 'string' && (
+    normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/')
+  );
 
   const url = (
     /^https?:\/\//i.test(normalizedPath)
@@ -388,15 +386,6 @@ function adminApiPath(path: string): string {
     raw.startsWith('/api/') ||
     raw === '/api'
   ) {
-    // Direct mode (BASE is an absolute backend origin): map '/admin-api/*' -> '/api/*'
-    // to preserve the same frontend call sites used in proxy mode.
-    if (BASE_IS_ABSOLUTE_ORIGIN && (raw === '/admin-api' || raw.startsWith('/admin-api/'))) {
-      const mapped = raw
-        .replace(/^\/admin-api$/, '/api')
-        .replace(/^\/admin-api\//, '/api/')
-        .replace(/^\/api\/api\//, '/api/');
-      return mapped.replace(/\/\/+/, '/');
-    }
     return raw.replace(/\/\/+/, '/');
   }
   // If caller provided an absolute URL, do not rewrite it.

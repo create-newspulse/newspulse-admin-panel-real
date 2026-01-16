@@ -9,8 +9,11 @@ import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
-const BROADCAST_BASE = '/admin-api/admin/broadcast';
-const LEGACY_BROADCAST_BASE = '/admin-api/broadcast';
+const RAW_API_BASE = String(import.meta.env.VITE_ADMIN_API_BASE || '/admin-api').replace(/\/+$/, '') || '/admin-api';
+const API_BASE = /^https?:\/\//i.test(RAW_API_BASE) ? '/admin-api' : RAW_API_BASE;
+
+const BROADCAST_BASE = `${API_BASE}/admin/broadcast`;
+const LEGACY_BROADCAST_BASE = `${API_BASE}/broadcast`;
 
 function isLocalHostUi(): boolean {
   try {
@@ -58,6 +61,15 @@ function apiMessage(e: unknown, fallback = 'API error'): string {
 
 function isUnauthorized(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 401;
+}
+
+function isNotFound(e: unknown): boolean {
+  return e instanceof AdminApiError && e.status === 404;
+}
+
+function notFoundDetails(e: unknown, url: string): string {
+  const missing = e instanceof AdminApiError && e.url ? e.url : url;
+  return `Backend route missing: ${missing}`;
 }
 
 function formatLocalTime(iso: string) {
@@ -383,6 +395,10 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
+      if (isNotFound(e)) {
+        notifyRef.current.err('Save failed', notFoundDetails(e, `${BROADCAST_BASE}`));
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Save failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -426,6 +442,10 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
+      if (isNotFound(e)) {
+        notifyRef.current.err('Add failed', notFoundDetails(e, `${BROADCAST_BASE}/items`));
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Add failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -445,10 +465,12 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
-      // If the production backend doesn't support item PATCH (not part of the minimal contract),
-      // show a clear message instead of spamming generic 404s.
-      if (e instanceof AdminApiError && e.status === 404) {
-        notifyRef.current.err('Update not supported', 'This backend does not support editing item LIVE state');
+      if (isUnauthorized(e)) {
+        notifyRef.current.err('Session expired — please login again');
+        return;
+      }
+      if (isNotFound(e)) {
+        notifyRef.current.err('Update failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
         return;
       }
       const status = apiStatusText(e);
@@ -479,6 +501,10 @@ export default function BroadcastCenter() {
 
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
+        return;
+      }
+      if (isNotFound(e)) {
+        notifyRef.current.err('Delete failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
         return;
       }
       const status = apiStatusText(e);
