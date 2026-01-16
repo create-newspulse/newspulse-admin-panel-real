@@ -168,8 +168,8 @@ function SectionCard(props: {
   addDisabled: boolean;
   items: BroadcastItem[];
   workingIdMap: Record<string, boolean>;
-  onToggleLive: (id: string, next: boolean) => void;
-  onDelete: (id: string) => void;
+  onToggleLive: (item: BroadcastItem, next: boolean) => void;
+  onDelete: (item: BroadcastItem) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
 
@@ -250,15 +250,14 @@ function SectionCard(props: {
                 }
                 const busy = itemId ? !!props.workingIdMap[itemId] : false;
                 return (
-                  <div key={itemId ?? (it as any)?.createdAt ?? Math.random()} className="flex items-start gap-3 p-4">
+                  <div key={itemId ?? `${it.createdAt}-${it.text}`} className="flex items-start gap-3 p-4">
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
                       checked={!!it.isLive}
                       disabled={busy || !itemId}
                       onChange={(e) => {
-                        if (!itemId) return;
-                        props.onToggleLive(itemId, e.target.checked);
+                        props.onToggleLive(it, e.target.checked);
                       }}
                       aria-label="LIVE"
                     />
@@ -275,8 +274,7 @@ function SectionCard(props: {
                       className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
                       disabled={busy || !itemId}
                       onClick={() => {
-                        if (!itemId) return;
-                        props.onDelete(itemId);
+                        props.onDelete(it);
                       }}
                     >
                       Delete
@@ -480,16 +478,28 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      await broadcastJson('/items', {
+      const createdRes = await broadcastJson<any>('/items', {
         method: 'POST',
         json: { type, text },
       });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
-      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
-      if (type === 'breaking') setBreakingItems(items);
-      else setLiveItems(items);
+
+      const createdObj = unwrapObj(createdRes);
+      const createdCandidate = unwrapObj((createdObj as any)?.item ?? (createdObj as any)?.data ?? createdObj);
+      const createdItem = createdCandidate && typeof createdCandidate === 'object'
+        ? (normalizeItems([createdCandidate])[0] as BroadcastItem)
+        : null;
+
+      if (createdItem && (createdItem._id || createdItem.id)) {
+        if (type === 'breaking') setBreakingItems((prev) => normalizeItems([createdItem, ...(prev || [])] as any[]));
+        else setLiveItems((prev) => normalizeItems([createdItem, ...(prev || [])] as any[]));
+      } else {
+        const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
+        const items = normalizeItems(unwrapArray(itemsRes) as any[]);
+        if (type === 'breaking') setBreakingItems(items);
+        else setLiveItems(items);
+      }
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Add failed', {
@@ -514,14 +524,16 @@ export default function BroadcastCenter() {
     }
   }, [breakingText, liveText]);
 
-  const toggleLive = useCallback(async (type: BroadcastType, id: string, next: boolean) => {
-    if (!id) {
-      notifyRef.current.err('Update failed', 'Broadcast item missing id');
+  const toggleLive = useCallback(async (type: BroadcastType, item: BroadcastItem, next: boolean) => {
+    const itemId = (item as any)?.id ?? (item as any)?._id;
+    if (!itemId) {
+      notifyRef.current.err('Update failed', 'Missing item id');
       return;
     }
-    setWorking(id, true);
+
+    setWorking(String(itemId), true);
     try {
-      await broadcastJson(`/items/${encodeURIComponent(id)}`, {
+      await broadcastJson(`/items/${encodeURIComponent(String(itemId))}`, {
         method: 'PATCH',
         json: { isLive: next },
       });
@@ -535,20 +547,22 @@ export default function BroadcastCenter() {
         return;
       }
       if (isNotFound(e)) {
-        notifyRef.current.err('Update failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
+        notifyRef.current.err('Update not supported', 'Backend missing PATCH /admin/broadcast/items/:id — deploy backend update');
         return;
       }
       notifyRef.current.err('Update failed', apiErrorDetails(e, 'API error'));
     } finally {
-      setWorking(id, false);
+      setWorking(String(itemId), false);
     }
   }, [setWorking]);
 
-  const deleteItem = useCallback(async (type: BroadcastType, id: string) => {
-    if (!id) {
-      notifyRef.current.err('Delete failed', 'Broadcast item missing id');
+  const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
+    const itemId = (item as any)?.id ?? (item as any)?._id;
+    if (!itemId) {
+      notifyRef.current.err('Delete failed', 'Missing item id');
       return;
     }
+    const id = String(itemId);
     setWorking(id, true);
     try {
       await broadcastJson(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -634,8 +648,8 @@ export default function BroadcastCenter() {
           onAdd={() => addItem('breaking')}
           items={breakingItems}
           workingIdMap={workingIdMap}
-          onToggleLive={(id, next) => toggleLive('breaking', id, next)}
-          onDelete={(id) => deleteItem('breaking', id)}
+          onToggleLive={(item, next) => toggleLive('breaking', item, next)}
+          onDelete={(item) => deleteItem('breaking', item)}
         />
 
         <SectionCard
@@ -652,8 +666,8 @@ export default function BroadcastCenter() {
           onAdd={() => addItem('live')}
           items={liveItems}
           workingIdMap={workingIdMap}
-          onToggleLive={(id, next) => toggleLive('live', id, next)}
-          onDelete={(id) => deleteItem('live', id)}
+          onToggleLive={(item, next) => toggleLive('live', item, next)}
+          onDelete={(item) => deleteItem('live', item)}
         />
       </div>
     </div>
