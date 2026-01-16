@@ -199,7 +199,7 @@ function SectionCard(props: {
               {itemsSorted.map((it) => {
                 const busy = !!props.workingIdMap[it._id];
                 return (
-                  <div key={it._id} className="flex items-start gap-3 p-4">
+                  <div key={(it as any)?.id ?? it._id} className="flex items-start gap-3 p-4">
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
