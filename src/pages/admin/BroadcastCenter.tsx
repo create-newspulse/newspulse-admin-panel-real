@@ -291,7 +291,10 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
-      const saved = await updateBroadcastSettings(settings);
+      const saved = await updateBroadcastSettings(settings, {
+        liveSpeedSec: tickerSpeeds.liveSpeedSec,
+        breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+      });
 
       // Keep public-site ticker visibility/speeds in sync from ONE place.
       // This ensures the homepage actually shows/hides tickers consistently.
