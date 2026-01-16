@@ -137,6 +137,27 @@ export function getAuthToken(): string | null {
     const val = localStorage.getItem('admin_token');
     if (val && String(val).trim()) return String(val).replace(/^Bearer\s+/i, '');
   } catch {}
+
+  // Fallbacks (back-compat): some flows rely on a cookie-set JWT.
+  // If the backend expects Bearer auth for writes, using the cookie value as the token
+  // keeps requests authenticated without requiring an explicit localStorage token.
+  try {
+    const legacyKeys = ['np_admin_token', 'np_admin_access_token', 'adminToken'];
+    for (const k of legacyKeys) {
+      const v = localStorage.getItem(k);
+      if (v && String(v).trim()) return String(v).replace(/^Bearer\s+/i, '');
+    }
+  } catch {}
+
+  try {
+    const c = typeof document !== 'undefined' ? String(document.cookie || '') : '';
+    const m = c.match(/(?:^|;\s*)np_admin=([^;]+)/);
+    if (m && m[1]) {
+      const raw = decodeURIComponent(m[1]);
+      if (raw && raw.trim()) return raw.replace(/^Bearer\s+/i, '');
+    }
+  } catch {}
+
   return null;
 }
 

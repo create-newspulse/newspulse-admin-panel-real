@@ -28,6 +28,10 @@ function apiMessage(e: unknown, fallback = 'API error'): string {
   return anyErr?.message || fallback;
 }
 
+function isUnauthorized(e: unknown): boolean {
+  return e instanceof AdminApiError && e.status === 401;
+}
+
 function formatLocalTime(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -346,6 +350,11 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
+
+      if (isUnauthorized(e)) {
+        notifyRef.current.err('Session expired — please login again');
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Save failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -384,6 +393,11 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
+
+      if (isUnauthorized(e)) {
+        notifyRef.current.err('Session expired — please login again');
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Add failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -428,6 +442,11 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
+
+      if (isUnauthorized(e)) {
+        notifyRef.current.err('Session expired — please login again');
+        return;
+      }
       const status = apiStatusText(e);
       notifyRef.current.err('Delete failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
