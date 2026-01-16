@@ -9,11 +9,9 @@ import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
-const RAW_API_BASE = String(import.meta.env.VITE_ADMIN_API_BASE || '/admin-api').replace(/\/+$/, '') || '/admin-api';
-const API_BASE = /^https?:\/\//i.test(RAW_API_BASE) ? '/admin-api' : RAW_API_BASE;
-
-const BROADCAST_BASE = `${API_BASE}/admin/broadcast`;
-const LEGACY_BROADCAST_BASE = `${API_BASE}/broadcast`;
+// BroadcastCenter must always go through the same adminFetch/adminJson wrapper used elsewhere.
+// We only hardcode the proxy prefix for the legacy demo backend fallback.
+const LEGACY_PROXY_PREFIX = '/admin-api';
 
 function isLocalHostUi(): boolean {
   try {
@@ -30,13 +28,15 @@ async function broadcastJson<T = any>(
   init: Parameters<typeof adminJson>[1] = {},
 ): Promise<T> {
   try {
-    return await adminJson<T>(`${BROADCAST_BASE}${path}`, init as any);
+    // Normal path: /admin-api/admin/broadcast... (resolved by adminJson)
+    return await adminJson<T>(`/admin/broadcast${path}`, init as any);
   } catch (e) {
     // Dev/localhost fallback for the bundled demo backend, which exposes /api/broadcast/* (not /api/admin/broadcast/*).
     // IMPORTANT: Never fall back in production, to keep all prod traffic on /admin-api/admin/broadcast*.
     const canFallback = import.meta.env.DEV || isLocalHostUi();
     if (canFallback && e instanceof AdminApiError && e.status === 404) {
-      return await adminJson<T>(`${LEGACY_BROADCAST_BASE}${path}`, init as any);
+      // Legacy proxy path: /admin-api/broadcast... (proxy resolves to backend /api/broadcast...)
+      return await adminJson<T>(`${LEGACY_PROXY_PREFIX}/broadcast${path}`, init as any);
     }
     throw e;
   }
@@ -90,6 +90,10 @@ function apiErrorDetails(e: unknown, fallback = 'API error'): string {
   const bodyText = apiBodyText(e);
   const head = `${status ? `${status}: ` : ''}${msg}`;
   return bodyText ? `${head} • ${bodyText}` : head;
+}
+
+function isNetworkError(e: unknown): boolean {
+  return e instanceof AdminApiError && e.status === 0;
 }
 
 function isUnauthorized(e: unknown): boolean {
@@ -447,17 +451,21 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Save failed', {
           method: 'PUT',
-          url: BROADCAST_BASE,
+          url: '/admin/broadcast',
           error: e,
         });
       } catch {}
 
+      if (isNetworkError(e)) {
+        notifyRef.current.err('Save failed', 'Wrong API base / backend unreachable');
+        return;
+      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
       if (isNotFound(e)) {
-        notifyRef.current.err('Save failed', notFoundDetails(e, `${BROADCAST_BASE}`));
+        notifyRef.current.err('Save failed', 'Backend route missing, deploy backend update');
         return;
       }
       notifyRef.current.err('Save failed', apiErrorDetails(e, 'API error'));
@@ -504,18 +512,22 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Add failed', {
           method: 'POST',
-          url: `${BROADCAST_BASE}/items`,
+          url: '/admin/broadcast/items',
           type,
           error: e,
         });
       } catch {}
 
+      if (isNetworkError(e)) {
+        notifyRef.current.err('Add failed', 'Wrong API base / backend unreachable');
+        return;
+      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
       if (isNotFound(e)) {
-        notifyRef.current.err('Add failed', notFoundDetails(e, `${BROADCAST_BASE}/items`));
+        notifyRef.current.err('Add failed', 'Backend route missing, deploy backend update');
         return;
       }
       notifyRef.current.err('Add failed', apiErrorDetails(e, 'API error'));
@@ -542,6 +554,10 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
+      if (isNetworkError(e)) {
+        notifyRef.current.err('Update failed', 'Wrong API base / backend unreachable');
+        return;
+      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
         return;
@@ -578,19 +594,23 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Delete failed', {
           method: 'DELETE',
-          url: `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`,
+          url: `/admin/broadcast/items/${encodeURIComponent(id)}`,
           type,
           id,
           error: e,
         });
       } catch {}
 
+      if (isNetworkError(e)) {
+        notifyRef.current.err('Delete failed', 'Wrong API base / backend unreachable');
+        return;
+      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
       if (isNotFound(e)) {
-        notifyRef.current.err('Delete failed', notFoundDetails(e, `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
+        notifyRef.current.err('Delete failed', 'Backend route missing, deploy backend update');
         return;
       }
       notifyRef.current.err('Delete failed', apiErrorDetails(e, 'API error'));
