@@ -339,6 +339,13 @@ export default function BroadcastCenter() {
       setInitialSpeeds(JSON.stringify(tickerSpeeds));
       notifyRef.current.ok('Saved ✅');
     } catch (e: any) {
+      try {
+        console.error('[BroadcastCenter] Save failed', {
+          method: 'PUT',
+          url: BROADCAST_BASE,
+          error: e,
+        });
+      } catch {}
       const status = apiStatusText(e);
       notifyRef.current.err('Save failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -369,6 +376,14 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
+      try {
+        console.error('[BroadcastCenter] Add failed', {
+          method: 'POST',
+          url: `${BROADCAST_BASE}/items`,
+          type,
+          error: e,
+        });
+      } catch {}
       const status = apiStatusText(e);
       notifyRef.current.err('Add failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {
@@ -404,6 +419,15 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
+      try {
+        console.error('[BroadcastCenter] Delete failed', {
+          method: 'DELETE',
+          url: `${BROADCAST_BASE}/items/${encodeURIComponent(id)}`,
+          type,
+          id,
+          error: e,
+        });
+      } catch {}
       const status = apiStatusText(e);
       notifyRef.current.err('Delete failed', `${status ? `${status}: ` : ''}${apiMessage(e, 'API error')}`);
     } finally {

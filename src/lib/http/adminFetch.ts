@@ -154,8 +154,23 @@ function notifyBackendOfflineOnce() {
 
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
   const normalizedPath = adminApiPath(path);
-  const url = (/^https?:\/\//i.test(normalizedPath) ? normalizedPath : `${BASE}${normalizedPath}`)
-    .replace(/([^:]\/)\/+?/g, '$1');
+
+  // In production, always treat '/admin-api/*' as a SAME-ORIGIN proxy call.
+  // This prevents accidental cross-origin calls (e.g., to Render) when an env var sets
+  // an absolute backend base and the browser blocks POST/PUT/DELETE preflights.
+  const forceSameOriginProxy =
+    !import.meta.env.DEV &&
+    !isLocalUiHost() &&
+    typeof normalizedPath === 'string' &&
+    normalizedPath.startsWith('/admin-api/');
+
+  const url = (
+    /^https?:\/\//i.test(normalizedPath)
+      ? normalizedPath
+      : forceSameOriginProxy
+        ? normalizedPath
+        : `${BASE}${normalizedPath}`
+  ).replace(/([^:]\/)\/+?/g, '$1');
 
   // Short-circuit repeated calls while we are actively logging out.
   const now0 = Date.now();
@@ -221,6 +236,22 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     // Reset banner cooldown once we successfully reach the backend again.
     lastOfflineBannerAt = 0;
   } catch (e: any) {
+    // Helpful debug in production: shows what URL/method fetch attempted.
+    // This is especially useful when CORS/preflight blocks cross-origin writes.
+    try {
+      const method = (init?.method || 'GET').toString().toUpperCase();
+      console.error('[adminFetch] fetch failed', {
+        method,
+        path,
+        normalizedPath,
+        url,
+        base: BASE,
+        baseIsAbsolute: BASE_IS_ABSOLUTE_ORIGIN,
+        forceSameOriginProxy,
+        message: e?.message,
+      });
+    } catch {}
+
     netBlockedUntil = Date.now() + NET_BLOCK_MS;
     notifyBackendOfflineOnce();
     if (import.meta.env.DEV) {
