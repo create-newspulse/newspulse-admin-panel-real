@@ -10,8 +10,10 @@ import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
 // BroadcastCenter must always go through the same adminFetch/adminJson wrapper used elsewhere.
-// We only hardcode the proxy prefix for the legacy demo backend fallback.
-const LEGACY_PROXY_PREFIX = '/admin-api';
+// IMPORTANT: We explicitly use the same-origin proxy prefix to avoid any env-based absolute URL
+// causing cross-origin PUT/POST/PATCH failures ("Failed to fetch") in production.
+const PROXY_BASE = '/admin-api';
+const PROXY_BROADCAST_BASE = `${PROXY_BASE}/admin/broadcast`;
 
 function isLocalHostUi(): boolean {
   try {
@@ -28,15 +30,15 @@ async function broadcastJson<T = any>(
   init: Parameters<typeof adminJson>[1] = {},
 ): Promise<T> {
   try {
-    // Normal path: /admin-api/admin/broadcast... (resolved by adminJson)
-    return await adminJson<T>(`/admin/broadcast${path}`, init as any);
+    // Normal path: /admin-api/admin/broadcast...
+    return await adminJson<T>(`${PROXY_BROADCAST_BASE}${path}`, init as any);
   } catch (e) {
     // Dev/localhost fallback for the bundled demo backend, which exposes /api/broadcast/* (not /api/admin/broadcast/*).
     // IMPORTANT: Never fall back in production, to keep all prod traffic on /admin-api/admin/broadcast*.
     const canFallback = import.meta.env.DEV || isLocalHostUi();
     if (canFallback && e instanceof AdminApiError && e.status === 404) {
       // Legacy proxy path: /admin-api/broadcast... (proxy resolves to backend /api/broadcast...)
-      return await adminJson<T>(`${LEGACY_PROXY_PREFIX}/broadcast${path}`, init as any);
+      return await adminJson<T>(`${PROXY_BASE}/broadcast${path}`, init as any);
     }
     throw e;
   }
@@ -451,7 +453,7 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Save failed', {
           method: 'PUT',
-          url: '/admin/broadcast',
+          url: `${PROXY_BROADCAST_BASE}`,
           error: e,
         });
       } catch {}
@@ -512,7 +514,7 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Add failed', {
           method: 'POST',
-          url: '/admin/broadcast/items',
+          url: `${PROXY_BROADCAST_BASE}/items`,
           type,
           error: e,
         });
@@ -594,7 +596,7 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Delete failed', {
           method: 'DELETE',
-          url: `/admin/broadcast/items/${encodeURIComponent(id)}`,
+          url: `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(id)}`,
           type,
           id,
           error: e,
