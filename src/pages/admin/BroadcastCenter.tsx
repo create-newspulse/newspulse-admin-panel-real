@@ -8,19 +8,24 @@ import {
 import { AdminApiError } from '@/lib/http/adminFetch';
 import {
   addItem as apiAddBroadcastItem,
+  addItemByLang as apiAddBroadcastItemByLang,
   deleteItem as apiDeleteBroadcastItem,
   getBroadcastConfig as apiGetBroadcastConfig,
   listItems as apiListBroadcastItems,
+  listItemsByLang as apiListBroadcastItemsByLang,
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
+import { publicSiteSettingsApi } from '@/lib/publicSiteSettingsApi';
+import { DEFAULT_PUBLIC_SITE_SETTINGS, normalizePublicSiteSettings } from '@/types/publicSiteSettings';
+import { deepMerge } from '@/features/settings/deepMerge';
 import type { SiteSettings } from '@/types/siteSettings';
 
 const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
 function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
-  const itemId = item?._id ?? item?.id;
+  const itemId = item?.id ?? item?._id;
   if (!itemId) throw new Error('Broadcast item missing id');
   return String(itemId);
 }
@@ -139,6 +144,7 @@ function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
 
 function SectionCard(props: {
   title: string;
+  lang: 'en' | 'hi' | 'gu';
   enabled: boolean;
   onEnabledChange: (next: boolean) => void;
   mode: 'manual' | 'auto';
@@ -156,6 +162,30 @@ function SectionCard(props: {
   onSelectToggle: (item: BroadcastItem, next: boolean) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
+
+  const statusMeta = useCallback((it: any) => {
+    const lang = props.lang;
+    const raw = (it && typeof it === 'object') ? (it as any).statusByLang : undefined;
+    const status = raw && typeof raw === 'object' ? String(raw[lang] || '').trim() : '';
+    const normalized = status.toUpperCase();
+    const label = normalized || 'PROCESSING';
+
+    const cls = (() => {
+      if (label === 'APPROVED') return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800/40';
+      if (label === 'BLOCKED') return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-200 dark:border-red-800/40';
+      return 'bg-yellow-100 text-yellow-900 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-100 dark:border-yellow-800/40';
+    })();
+
+    // Phase 2: backend may provide a blocked reason; surface as tooltip when present.
+    const reason = (() => {
+      const r = (it as any)?.blockedReasonByLang;
+      if (r && typeof r === 'object' && r[lang]) return String(r[lang]);
+      const r2 = (it as any)?.blockedReason;
+      return typeof r2 === 'string' ? r2 : '';
+    })();
+
+    return { label, cls, title: label === 'BLOCKED' && reason ? reason : undefined };
+  }, [props.lang]);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
@@ -233,6 +263,7 @@ function SectionCard(props: {
                   itemId = null;
                 }
                 const busy = itemId ? !!props.workingIdMap[itemId] : false;
+                const st = statusMeta(it as any);
                 return (
                   <div key={itemId ?? `${it.createdAt}-${it.text}`} className="flex items-start gap-3 p-4">
                     <input
@@ -247,7 +278,15 @@ function SectionCard(props: {
                     />
 
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-slate-900 dark:text-white break-words">{it.text}</div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white break-words">{it.text}</div>
+                        <span
+                          className={`shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}
+                          title={st.title}
+                        >
+                          {st.label}
+                        </span>
+                      </div>
                       <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         Created {formatLocalTime(it.createdAt)} • Expires in {expiresIn(it.expiresAt)}
                       </div>
@@ -296,6 +335,8 @@ export default function BroadcastCenter() {
   const [breakingText, setBreakingText] = useState('');
   const [liveText, setLiveText] = useState('');
 
+  const [selectedLang, setSelectedLang] = useState<'en' | 'hi' | 'gu'>('en');
+
   const [breakingItems, setBreakingItems] = useState<BroadcastItem[]>([]);
   const [liveItems, setLiveItems] = useState<BroadcastItem[]>([]);
 
@@ -322,8 +363,8 @@ export default function BroadcastCenter() {
   const loadAll = useCallback(async (signal?: AbortSignal) => {
     const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
       apiGetBroadcastConfig(),
-      apiListBroadcastItems('breaking'),
-      apiListBroadcastItems('live'),
+      apiListBroadcastItemsByLang('breaking', selectedLang),
+      apiListBroadcastItemsByLang('live', selectedLang),
       adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
 
@@ -338,7 +379,27 @@ export default function BroadcastCenter() {
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
     setInitialSpeeds(JSON.stringify(speeds));
-  }, []);
+  }, [selectedLang]);
+
+  const refreshItemsForLang = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutMs = 12_000;
+    const t = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const [breakingRes, liveRes] = await Promise.all([
+        apiListBroadcastItemsByLang('breaking', selectedLang),
+        apiListBroadcastItemsByLang('live', selectedLang),
+      ]);
+      setBreakingItems(normalizeItems(breakingRes as any));
+      setLiveItems(normalizeItems(liveRes as any));
+      setLastRefreshAt(new Date().toISOString());
+    } catch (e: any) {
+      const aborted = e?.name === 'AbortError' || e?.code === 20;
+      notifyRef.current.err('Refresh failed', aborted ? 'Request timed out' : (e?.message || 'Unknown error'));
+    } finally {
+      window.clearTimeout(t);
+    }
+  }, [selectedLang]);
 
   const refreshAll = useCallback(async () => {
     if (refreshInFlight.current) return;
@@ -379,6 +440,14 @@ export default function BroadcastCenter() {
     };
   }, [refreshAll]);
 
+  useEffect(() => {
+    // When switching languages, only refresh items (settings are global).
+    if (!didInitialLoad.current) return;
+    setSelectedBreaking({});
+    setSelectedLive({});
+    refreshItemsForLang().catch(() => null);
+  }, [selectedLang, refreshItemsForLang]);
+
   const saveSettings = useCallback(async () => {
     if (!settings || saving) return;
     setSaving(true);
@@ -411,18 +480,42 @@ export default function BroadcastCenter() {
       const saved = unwrapObj((savedObj as any)?.settings ?? savedObj) as BroadcastSettings;
 
       // Keep public-site ticker visibility/speeds in sync from ONE place.
-      // This ensures the homepage actually shows/hides tickers consistently.
-      const patch: Partial<SiteSettings> = {
-        ui: {
-          showLiveUpdatesTicker: !!saved.liveEnabled,
-          showBreakingTicker: !!saved.breakingEnabled,
-        } as any,
-        tickers: {
-          liveSpeedSec: tickerSpeeds.liveSpeedSec,
-          breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
-        } as any,
-      };
-      await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
+      // The public site reads these from the Public Site Settings bundle.
+      // We update both draft + published so changes take effect immediately.
+      try {
+        const publicPatch: any = {
+          tickers: {
+            live: { enabled: !!saved.liveEnabled, speedSec: tickerSpeeds.liveSpeedSec },
+            breaking: { enabled: !!saved.breakingEnabled, speedSec: tickerSpeeds.breakingSpeedSec },
+          },
+        };
+        const bundle = await publicSiteSettingsApi.getAdminPublicSiteSettingsBundle();
+        const baseDraft = (bundle?.draft || bundle?.published || DEFAULT_PUBLIC_SITE_SETTINGS) as any;
+        const nextDraft = normalizePublicSiteSettings(deepMerge(baseDraft, publicPatch));
+
+        await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(nextDraft, { action: 'broadcast-center:update-public-tickers' });
+        await publicSiteSettingsApi.publishAdminPublicSiteSettings(nextDraft, { action: 'broadcast-center:publish-public-tickers' });
+      } catch (e: any) {
+        // Do not block broadcast saves if public site settings fail; surface the real error.
+        notifyRef.current.err('Saved broadcast, but public site update failed', apiErrorDetails(e, 'Public site settings error'));
+      }
+
+      // Keep the legacy SiteSettings snapshot reasonably aligned (some admin UI uses it).
+      try {
+        const patch: Partial<SiteSettings> = {
+          ui: {
+            showLiveUpdatesTicker: !!saved.liveEnabled,
+            showBreakingTicker: !!saved.breakingEnabled,
+          } as any,
+          tickers: {
+            liveSpeedSec: tickerSpeeds.liveSpeedSec,
+            breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+          } as any,
+        };
+        await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
+      } catch (e: any) {
+        notifyRef.current.err('Saved broadcast, but admin settings sync failed', apiErrorDetails(e, 'Admin settings error'));
+      }
 
       setSettings(saved);
       setInitialSettings(serializeSettings(saved));
@@ -467,18 +560,18 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdItem = await apiAddBroadcastItem(type, text);
+      const createdItem = await apiAddBroadcastItemByLang(type, text, selectedLang);
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
 
-      if (createdItem && (createdItem._id || createdItem.id)) {
-        if (type === 'breaking') setBreakingItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
-        else setLiveItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
-      } else {
-        const items = await apiListBroadcastItems(type);
-        if (type === 'breaking') setBreakingItems(items);
-        else setLiveItems(items);
-      }
+      // Always refresh the list after add for canonical state.
+      // (Some backends don't return the created item.)
+      const items = await apiListBroadcastItemsByLang(type, selectedLang);
+      if (type === 'breaking') setBreakingItems(items);
+      else setLiveItems(items);
+
+      // Keep an optimistic feel if we did get an item back (it should already be included after refresh).
+      void createdItem;
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Add failed', {
@@ -505,7 +598,7 @@ export default function BroadcastCenter() {
     } finally {
       setAddingType(null);
     }
-  }, [breakingText, liveText]);
+  }, [breakingText, liveText, selectedLang]);
 
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
@@ -521,7 +614,7 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
       else setLiveItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
 
-      const items = await apiListBroadcastItems(type);
+      const items = await apiListBroadcastItemsByLang(type, selectedLang);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -551,7 +644,7 @@ export default function BroadcastCenter() {
     } finally {
       setWorking(id, false);
     }
-  }, [setWorking]);
+  }, [setWorking, selectedLang]);
 
   return (
     <div className="space-y-6">
@@ -562,6 +655,18 @@ export default function BroadcastCenter() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={selectedLang}
+            onChange={(e) => setSelectedLang(e.target.value as any)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+            aria-label="Language"
+            title="Language"
+          >
+            <option value="en">English (en)</option>
+            <option value="hi">Hindi (hi)</option>
+            <option value="gu">Gujarati (gu)</option>
+          </select>
+
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
@@ -590,6 +695,7 @@ export default function BroadcastCenter() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           title="🔥 Breaking"
+          lang={selectedLang}
           enabled={!!settings?.breakingEnabled}
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
@@ -616,6 +722,7 @@ export default function BroadcastCenter() {
 
         <SectionCard
           title="🔵 Live Updates"
+          lang={selectedLang}
           enabled={!!settings?.liveEnabled}
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}

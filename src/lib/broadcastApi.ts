@@ -93,12 +93,13 @@ export async function getBroadcastSnapshot(opts?: { signal?: AbortSignal }): Pro
 }
 
 export async function patchBroadcastSettings(settings: BroadcastSettings): Promise<BroadcastSettings> {
+  // New contract: update via PUT /api/admin/broadcast (proxied as /admin-api/admin/broadcast)
   try {
-    const raw = await adminJson<unknown>(`${ADMIN_BROADCAST_BASE}/settings`, { method: 'PATCH', json: settings });
+    const raw = await adminJson<unknown>(ADMIN_BROADCAST_BASE, { method: 'PUT', json: settings });
     return normalizeSettingsResponse(raw);
   } catch (e) {
     if (!isNotFound(e)) throw e;
-    // Legacy backend uses PUT
+    // Legacy backend uses /broadcast/settings
     return adminJson<BroadcastSettings>(`${LEGACY_BROADCAST_BASE}/settings`, { method: 'PUT', json: settings });
   }
 }

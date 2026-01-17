@@ -23,33 +23,38 @@ export default defineConfig(({ mode }) => {
     // IMPORTANT (repo requirement): local admin must NEVER call production backend.
     // In development we hard-pin API proxies to the local admin backend.
     const LOCAL_BACKEND = 'http://localhost:5000';
+    const DEV_PROXY_ENV = stripSlash(env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
+    const DEV_PROXY_TARGET = mode === 'development' ? (DEV_PROXY_ENV || LOCAL_BACKEND) : undefined;
+    // Never hardcode a production backend here.
+    // If you need a remote backend for `vite preview`, set ADMIN_BACKEND_URL explicitly.
     const DEFAULT_REAL_BACKEND = stripSlash(process.env.ADMIN_BACKEND_URL
         || process.env.NP_REAL_BACKEND
         || env.NP_REAL_BACKEND
-        || 'https://newspulse-backend-real.onrender.com');
+        || '');
     // IMPORTANT:
     // `VITE_BACKEND_ORIGIN` is the ONLY source of truth for the dev proxy backend origin.
     // - Example (local):   VITE_BACKEND_ORIGIN=http://localhost:5000
     // - Example (remote):  VITE_BACKEND_ORIGIN=https://newspulse-backend-real.onrender.com
     // No trailing '/api'.
     const rawOrigin = stripSlash(env.VITE_BACKEND_ORIGIN || '');
-    // Default dev backend: match production/Vercel behavior (remote backend).
-    // To use a local backend, set VITE_BACKEND_ORIGIN=http://localhost:5000
-    const devDefaultOrigin = DEFAULT_REAL_BACKEND;
+    // Default dev backend: local backend only.
+    const devDefaultOrigin = LOCAL_BACKEND;
     let originSource = 'VITE_BACKEND_ORIGIN';
     let ORIGIN = rawOrigin;
     if (!ORIGIN || hasPlaceholders(ORIGIN) || !isValidAbsoluteUrl(ORIGIN)) {
         ORIGIN = mode === 'development' ? devDefaultOrigin : DEFAULT_REAL_BACKEND;
-        originSource = mode === 'development' ? `default:${devDefaultOrigin}` : `default:${DEFAULT_REAL_BACKEND}`;
+        originSource = mode === 'development' ? `default:${devDefaultOrigin}` : (DEFAULT_REAL_BACKEND ? `default:${DEFAULT_REAL_BACKEND}` : 'default');
     }
     // Proxy targets must be backend ORIGIN (no /api suffix), otherwise we can create /api/api/*
     const RESOLVED_BACKEND_ORIGIN = /\/api$/i.test(ORIGIN) ? ORIGIN.replace(/\/api$/i, '') : ORIGIN;
-    const DEV_BACKEND_ORIGIN = mode === 'development' ? LOCAL_BACKEND : RESOLVED_BACKEND_ORIGIN;
+    const DEV_BACKEND_ORIGIN = mode === 'development' ? (DEV_PROXY_TARGET || LOCAL_BACKEND) : RESOLVED_BACKEND_ORIGIN;
     const API_WS = stripSlash(env.VITE_API_WS) || RESOLVED_BACKEND_ORIGIN;
 
     if (mode === 'development') {
         // eslint-disable-next-line no-console
         console.log('[vite] Dev proxy target:', DEV_BACKEND_ORIGIN, `(env resolution source: ${originSource})`);
+        // eslint-disable-next-line no-console
+        console.log('[vite] VITE_PROXY_TARGET:', DEV_BACKEND_ORIGIN, `(source: ${DEV_PROXY_ENV ? 'env' : 'default'})`);
     }
 
     const attachProxy404Logger = (proxy, kind) => {
@@ -111,8 +116,8 @@ export default defineConfig(({ mode }) => {
                     timeout: 120000,
                     proxyTimeout: 120000,
                     configure: (proxy) => attachProxy404Logger(proxy, 'admin-api'),
-                    // Match Vercel/serverless behavior: /admin-api/* -> /api/*
-                    // Also handle accidental double-prefixes.
+                    // DEV: match Vercel behavior: /admin-api/* -> /api/*
+                    // Also tolerate accidental double-prefixes.
                     rewrite: (p) => {
                         if (/^\/admin-api\/api\//.test(p))
                             return p.replace(/^\/admin-api/, '').replace(/^\/api\/api\//, '/api/');
@@ -169,7 +174,6 @@ export default defineConfig(({ mode }) => {
                     manualChunks: {
                         react: ['react', 'react-dom'],
                         socketio: ['socket.io-client'],
-                        html2canvas: ['html2canvas'],
                         jspdf: ['jspdf', 'html2pdf.js'],
                         tiptap: [
                             '@tiptap/react',

@@ -95,10 +95,35 @@ export async function listItems(type: BroadcastType): Promise<BroadcastItem[]> {
   return normalizeItems(parseItemsArray(raw));
 }
 
+export async function listItemsByLang(type: BroadcastType, lang: string): Promise<BroadcastItem[]> {
+  const qs = new URLSearchParams({ type, lang: String(lang || '').trim() || 'en' });
+  const raw = await requestJson<any>(`/items?${qs.toString()}`, { method: 'GET', cache: 'no-store' } as any);
+  return normalizeItems(parseItemsArray(raw));
+}
+
 export async function addItem(type: BroadcastType, text: string): Promise<BroadcastItem | null> {
   const raw = await requestJson<any>('/items', {
     method: 'POST',
     json: { type, text },
+  });
+
+  const candidate = (() => {
+    const r: any = raw as any;
+    if (r && typeof r === 'object') {
+      if (r.item && typeof r.item === 'object') return r.item;
+      if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) return r.data;
+    }
+    if (r && typeof r === 'object' && (r.id || r._id)) return r;
+    return null;
+  })();
+
+  return candidate ? normalizeItem(candidate) : null;
+}
+
+export async function addItemByLang(type: BroadcastType, text: string, lang: string): Promise<BroadcastItem | null> {
+  const raw = await requestJson<any>('/items', {
+    method: 'POST',
+    json: { type, text, lang: String(lang || '').trim() || 'en' },
   });
 
   const candidate = (() => {

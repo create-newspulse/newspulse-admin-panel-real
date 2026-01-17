@@ -113,6 +113,8 @@ import SafeOwnerZoneShell from '@/pages/admin/safe-owner-zone/SafeOwnerZoneShell
 import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
 import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
 import BroadcastCenter from '@pages/admin/BroadcastCenter';
+import GlossaryPage from '@pages/admin/GlossaryPage';
+import TranslationReviewPage from '@pages/admin/TranslationReviewPage';
 import AdminUsersPage from '@pages/AdminUsersPage';
 import AiLogsPage from '@pages/AiLogsPage';
 
@@ -228,8 +230,14 @@ function App() {
               <Route path="/admin/drafts/:id" element={<Navigate to="/draft-desk/:id" replace />} />
 
               {/* 📡 Broadcast Center (Founder-only) */}
-              <Route path="/broadcast-center" element={<RequireRole allow={['founder']}><BroadcastCenter /></RequireRole>} />
-              <Route path="/admin/broadcast-center" element={<Navigate to="/broadcast-center" replace />} />
+              <Route path="/admin/broadcast-center" element={<RequireRole allow={['founder']}><BroadcastCenter /></RequireRole>} />
+              <Route path="/broadcast-center" element={<Navigate to="/admin/broadcast-center" replace />} />
+
+              {/* 📚 Glossary (Founder/Admin only) */}
+              <Route path="/admin/glossary" element={<RequireRole allow={['founder','admin']}><GlossaryPage /></RequireRole>} />
+
+              {/* 🧾 Translation Review (Founder/Admin; override actions are founder-only inside UI) */}
+              <Route path="/admin/translation-review" element={<RequireRole allow={['founder','admin']}><TranslationReviewPage /></RequireRole>} />
 
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />

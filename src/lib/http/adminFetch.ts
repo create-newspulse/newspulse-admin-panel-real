@@ -35,6 +35,18 @@ function isLocalOrigin(input: string): boolean {
 // Requests are made as: fetch(`${BASE}${path}`)
 const BASE = (() => {
   const raw = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+  // Repo contract (per admin-proxy architecture): browser should only call same-origin '/admin-api/*'.
+  // Ignore absolute origins even in dev; use Vite proxy (VITE_PROXY_TARGET) instead.
+  if (/^https?:\/\//i.test(raw)) {
+    if (import.meta.env.DEV) {
+      try { console.warn('[adminFetch] Ignoring absolute VITE_ADMIN_API_BASE; use /admin-api + Vite proxy instead:', raw); } catch {}
+    }
+    return '';
+  }
+  // In production builds, NEVER allow an absolute backend origin.
+  // All browser calls must go through the same-origin proxy: '/admin-api/*'.
+  // (Vercel rewrites /admin-api to the serverless proxy, which then talks to the real backend.)
+  if (!import.meta.env.DEV && /^https?:\/\//i.test(raw)) return '';
   // Safety: never allow production builds to call a localhost backend.
   // If someone accidentally sets VITE_ADMIN_API_BASE=http://localhost:5000 in Vercel,
   // it would break Save/Add and show misleading offline errors.
@@ -47,8 +59,13 @@ const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 function normalizeAdminApiBase(input: string): string {
   const s = stripTrailingSlashes((input || '').toString().trim());
   if (!s) return '/admin-api';
-  // If it's an absolute origin (https://host), append /admin-api.
-  if (/^https?:\/\//i.test(s)) return stripTrailingSlashes(s) + '/admin-api';
+  // Enforce proxy-only semantics in all builds (dev uses Vite proxy).
+  if (/^https?:\/\//i.test(s)) {
+    if (import.meta.env.DEV) {
+      try { console.warn('[adminFetch] Ignoring absolute admin base; forcing /admin-api:', s); } catch {}
+    }
+    return '/admin-api';
+  }
   // Otherwise treat it as a root-relative path.
   return s.startsWith('/') ? s : `/${s}`;
 }
