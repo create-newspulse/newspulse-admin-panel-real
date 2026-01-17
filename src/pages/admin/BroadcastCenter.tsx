@@ -98,6 +98,11 @@ function isNetworkError(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 0;
 }
 
+function networkDetails(e: unknown, fallbackPath: string): string {
+  const attempted = e instanceof AdminApiError && e.url ? e.url : fallbackPath;
+  return `Wrong API base / backend unreachable • ${attempted}`;
+}
+
 function isUnauthorized(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 401;
 }
@@ -459,7 +464,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Save failed', 'Wrong API base / backend unreachable');
+        notifyRef.current.err('Save failed', networkDetails(e, `${PROXY_BROADCAST_BASE}`));
         return;
       }
       if (isUnauthorized(e)) {
@@ -521,7 +526,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Add failed', 'Wrong API base / backend unreachable');
+        notifyRef.current.err('Add failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items`));
         return;
       }
       if (isUnauthorized(e)) {
@@ -557,7 +562,7 @@ export default function BroadcastCenter() {
       else setLiveItems(items);
     } catch (e: any) {
       if (isNetworkError(e)) {
-        notifyRef.current.err('Update failed', 'Wrong API base / backend unreachable');
+        notifyRef.current.err('Update failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(String(itemId))}`));
         return;
       }
       if (isUnauthorized(e)) {
@@ -604,7 +609,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Delete failed', 'Wrong API base / backend unreachable');
+        notifyRef.current.err('Delete failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
         return;
       }
       if (isUnauthorized(e)) {
