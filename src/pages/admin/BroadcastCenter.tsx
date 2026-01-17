@@ -5,96 +5,18 @@ import {
   type BroadcastSettings,
   type BroadcastType,
 } from '@/lib/broadcastApi';
-import { AdminApiError, adminFetch } from '@/lib/http/adminFetch';
+import { AdminApiError } from '@/lib/http/adminFetch';
+import {
+  addItem as apiAddBroadcastItem,
+  deleteItem as apiDeleteBroadcastItem,
+  getBroadcastConfig as apiGetBroadcastConfig,
+  listItems as apiListBroadcastItems,
+  saveBroadcastConfig as apiSaveBroadcastConfig,
+} from '@/api/broadcast';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
-// BroadcastCenter must always use the same-origin Vercel proxy prefix.
-// Do NOT use absolute backend origins in the browser.
-const PROXY_BASE = '/admin-api';
-const PROXY_BROADCAST_BASE = `${PROXY_BASE}/admin/broadcast`;
-
-type BroadcastFetchOptions = RequestInit & { json?: unknown };
-
-async function readBody(res: Response): Promise<unknown> {
-  const ctype = (res.headers.get('content-type') || '').toLowerCase();
-  if (ctype.includes('application/json')) {
-    try {
-      return await res.json();
-    } catch {
-      return undefined;
-    }
-  }
-  try {
-    const text = await res.text();
-    return text || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function errorMessage(body: unknown, fallback: string): string {
-  if (!body) return fallback;
-  if (typeof body === 'string') return body;
-  if (typeof body === 'object') {
-    const anyBody: any = body as any;
-    const msg = anyBody?.message || anyBody?.error || anyBody?.details;
-    if (typeof msg === 'string' && msg.trim()) return msg;
-  }
-  return fallback;
-}
-
-async function broadcastJson<T = any>(path: string, init: BroadcastFetchOptions = {}): Promise<T> {
-  const method = (init.method || 'GET').toString().toUpperCase();
-  const headers = new Headers(init.headers || undefined);
-  headers.set('Accept', headers.get('Accept') || 'application/json');
-
-  let body = init.body as any;
-  if (typeof init.json !== 'undefined') {
-    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    body = JSON.stringify(init.json);
-  }
-
-  if (import.meta.env.DEV && method !== 'GET') {
-    try {
-      console.log('[BroadcastCenter] request', method, `${PROXY_BROADCAST_BASE}${path}`);
-    } catch {}
-  }
-
-  const res = await adminFetch(`${PROXY_BROADCAST_BASE}${path}`, {
-    ...init,
-    method,
-    headers,
-    body,
-  });
-
-  if (res.status === 204) return {} as any;
-
-  if (!res.ok) {
-    const bodyVal = await readBody(res.clone());
-    const msg = errorMessage(bodyVal, `HTTP ${res.status} ${res.statusText}`);
-    throw new AdminApiError(msg, { status: res.status, url: res.url || `${PROXY_BROADCAST_BASE}${path}`, body: bodyVal });
-  }
-
-  const ctype = (res.headers.get('content-type') || '').toLowerCase();
-  if (!ctype.includes('application/json')) {
-    const text = await res.text().catch(() => '');
-    return (text as any) as T;
-  }
-  return (await res.json()) as T;
-}
-
-const unwrapArray = (x: any) => (
-  Array.isArray(x)
-    ? x
-    : Array.isArray(x?.items)
-      ? x.items
-      : Array.isArray(x?.data)
-        ? x.data
-        : Array.isArray(x?.data?.items)
-          ? x.data.items
-          : []
-);
+const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
 function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
@@ -399,9 +321,9 @@ export default function BroadcastCenter() {
 
   const loadAll = useCallback(async (signal?: AbortSignal) => {
     const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
-      broadcastJson<any>('', { method: 'GET', signal }),
-      broadcastJson<any>('/items?type=breaking', { method: 'GET', signal }),
-      broadcastJson<any>('/items?type=live', { method: 'GET', signal }),
+      apiGetBroadcastConfig(),
+      apiListBroadcastItems('breaking'),
+      apiListBroadcastItems('live'),
       adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
 
@@ -410,8 +332,8 @@ export default function BroadcastCenter() {
 
     setSettings(settingsObj);
     setInitialSettings(serializeSettings(settingsObj));
-    setBreakingItems(normalizeItems(unwrapArray(breakingRes)));
-    setLiveItems(normalizeItems(unwrapArray(liveRes)));
+    setBreakingItems(normalizeItems(breakingRes as any));
+    setLiveItems(normalizeItems(liveRes as any));
 
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
@@ -483,10 +405,7 @@ export default function BroadcastCenter() {
         liveSpeedSec: tickerSpeeds.liveSpeedSec,
       };
 
-      const res = await broadcastJson<any>('', {
-        method: 'PUT',
-        json: payload,
-      });
+      const res = await apiSaveBroadcastConfig(payload);
 
       const savedObj = unwrapObj(res);
       const saved = unwrapObj((savedObj as any)?.settings ?? savedObj) as BroadcastSettings;
@@ -513,13 +432,13 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Save failed', {
           method: 'PUT',
-          url: `${PROXY_BROADCAST_BASE}`,
+          url: '/admin-api/admin/broadcast',
           error: e,
         });
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Save failed', networkDetails(e, `${PROXY_BROADCAST_BASE}`));
+        notifyRef.current.err('Save failed', networkDetails(e, '/admin-api/admin/broadcast'));
         return;
       }
       if (isUnauthorized(e)) {
@@ -548,25 +467,15 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdRes = await broadcastJson<any>('/items', {
-        method: 'POST',
-        json: { type, text },
-      });
+      const createdItem = await apiAddBroadcastItem(type, text);
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
-
-      const createdObj = unwrapObj(createdRes);
-      const createdCandidate = unwrapObj((createdObj as any)?.item ?? (createdObj as any)?.data ?? createdObj);
-      const createdItem = createdCandidate && typeof createdCandidate === 'object'
-        ? (normalizeItems([createdCandidate])[0] as BroadcastItem)
-        : null;
 
       if (createdItem && (createdItem._id || createdItem.id)) {
         if (type === 'breaking') setBreakingItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
         else setLiveItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
       } else {
-        const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-        const items = normalizeItems(unwrapArray(itemsRes));
+        const items = await apiListBroadcastItems(type);
         if (type === 'breaking') setBreakingItems(items);
         else setLiveItems(items);
       }
@@ -574,14 +483,14 @@ export default function BroadcastCenter() {
       try {
         console.error('[BroadcastCenter] Add failed', {
           method: 'POST',
-          url: `${PROXY_BROADCAST_BASE}/items`,
+          url: '/admin-api/admin/broadcast/items',
           type,
           error: e,
         });
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Add failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items`));
+        notifyRef.current.err('Add failed', networkDetails(e, '/admin-api/admin/broadcast/items'));
         return;
       }
       if (isUnauthorized(e)) {
@@ -607,20 +516,19 @@ export default function BroadcastCenter() {
     const id = String(itemId);
     setWorking(id, true);
     try {
-      await broadcastJson(`/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await apiDeleteBroadcastItem(id);
       // Optimistic UI removal (then refresh for canonical state)
       if (type === 'breaking') setBreakingItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
       else setLiveItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
 
-      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = normalizeItems(unwrapArray(itemsRes));
+      const items = await apiListBroadcastItems(type);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Delete failed', {
           method: 'DELETE',
-          url: `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(id)}`,
+          url: `/admin-api/admin/broadcast/items/${encodeURIComponent(id)}`,
           type,
           id,
           error: e,
@@ -628,7 +536,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isNetworkError(e)) {
-        notifyRef.current.err('Delete failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(id)}`));
+        notifyRef.current.err('Delete failed', networkDetails(e, `/admin-api/admin/broadcast/items/${encodeURIComponent(id)}`));
         return;
       }
       if (isUnauthorized(e)) {
