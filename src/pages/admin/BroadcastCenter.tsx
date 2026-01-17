@@ -5,46 +5,96 @@ import {
   type BroadcastSettings,
   type BroadcastType,
 } from '@/lib/broadcastApi';
-import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
+import { AdminApiError, adminFetch } from '@/lib/http/adminFetch';
 import { adminSettingsApi } from '@/lib/adminSettingsApi';
 import type { SiteSettings } from '@/types/siteSettings';
 
-// BroadcastCenter must always go through the same adminFetch/adminJson wrapper used elsewhere.
-// IMPORTANT: We explicitly use the same-origin proxy prefix to avoid any env-based absolute URL
-// causing cross-origin PUT/POST/PATCH failures ("Failed to fetch") in production.
+// BroadcastCenter must always use the same-origin Vercel proxy prefix.
+// Do NOT use absolute backend origins in the browser.
 const PROXY_BASE = '/admin-api';
 const PROXY_BROADCAST_BASE = `${PROXY_BASE}/admin/broadcast`;
 
-function isLocalHostUi(): boolean {
-  try {
-    if (typeof window === 'undefined') return false;
-    const h = window.location.hostname;
-    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
-  } catch {
-    return false;
-  }
-}
+type BroadcastFetchOptions = RequestInit & { json?: unknown };
 
-async function broadcastJson<T = any>(
-  path: string,
-  init: Parameters<typeof adminJson>[1] = {},
-): Promise<T> {
-  try {
-    // Normal path: /admin-api/admin/broadcast...
-    return await adminJson<T>(`${PROXY_BROADCAST_BASE}${path}`, init as any);
-  } catch (e) {
-    // Dev/localhost fallback for the bundled demo backend, which exposes /api/broadcast/* (not /api/admin/broadcast/*).
-    // IMPORTANT: Never fall back in production, to keep all prod traffic on /admin-api/admin/broadcast*.
-    const canFallback = import.meta.env.DEV || isLocalHostUi();
-    if (canFallback && e instanceof AdminApiError && e.status === 404) {
-      // Legacy proxy path: /admin-api/broadcast... (proxy resolves to backend /api/broadcast...)
-      return await adminJson<T>(`${PROXY_BASE}/broadcast${path}`, init as any);
+async function readBody(res: Response): Promise<unknown> {
+  const ctype = (res.headers.get('content-type') || '').toLowerCase();
+  if (ctype.includes('application/json')) {
+    try {
+      return await res.json();
+    } catch {
+      return undefined;
     }
-    throw e;
+  }
+  try {
+    const text = await res.text();
+    return text || undefined;
+  } catch {
+    return undefined;
   }
 }
 
-const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
+function errorMessage(body: unknown, fallback: string): string {
+  if (!body) return fallback;
+  if (typeof body === 'string') return body;
+  if (typeof body === 'object') {
+    const anyBody: any = body as any;
+    const msg = anyBody?.message || anyBody?.error || anyBody?.details;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
+  return fallback;
+}
+
+async function broadcastJson<T = any>(path: string, init: BroadcastFetchOptions = {}): Promise<T> {
+  const method = (init.method || 'GET').toString().toUpperCase();
+  const headers = new Headers(init.headers || undefined);
+  headers.set('Accept', headers.get('Accept') || 'application/json');
+
+  let body = init.body as any;
+  if (typeof init.json !== 'undefined') {
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    body = JSON.stringify(init.json);
+  }
+
+  if (import.meta.env.DEV && method !== 'GET') {
+    try {
+      console.log('[BroadcastCenter] request', method, `${PROXY_BROADCAST_BASE}${path}`);
+    } catch {}
+  }
+
+  const res = await adminFetch(`${PROXY_BROADCAST_BASE}${path}`, {
+    ...init,
+    method,
+    headers,
+    body,
+  });
+
+  if (res.status === 204) return {} as any;
+
+  if (!res.ok) {
+    const bodyVal = await readBody(res.clone());
+    const msg = errorMessage(bodyVal, `HTTP ${res.status} ${res.statusText}`);
+    throw new AdminApiError(msg, { status: res.status, url: res.url || `${PROXY_BROADCAST_BASE}${path}`, body: bodyVal });
+  }
+
+  const ctype = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ctype.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    return (text as any) as T;
+  }
+  return (await res.json()) as T;
+}
+
+const unwrapArray = (x: any) => (
+  Array.isArray(x)
+    ? x
+    : Array.isArray(x?.items)
+      ? x.items
+      : Array.isArray(x?.data)
+        ? x.data
+        : Array.isArray(x?.data?.items)
+          ? x.data.items
+          : []
+);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
 function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
@@ -179,8 +229,9 @@ function SectionCard(props: {
   addDisabled: boolean;
   items: BroadcastItem[];
   workingIdMap: Record<string, boolean>;
-  onToggleLive: (item: BroadcastItem, next: boolean) => void;
   onDelete: (item: BroadcastItem) => void;
+  selectedIdMap: Record<string, boolean>;
+  onSelectToggle: (item: BroadcastItem, next: boolean) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
 
@@ -265,12 +316,12 @@ function SectionCard(props: {
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
-                      checked={!!it.isLive}
-                      disabled={busy || !itemId}
+                      checked={!!(itemId && props.selectedIdMap[itemId])}
+                      disabled={!itemId}
                       onChange={(e) => {
-                        props.onToggleLive(it, e.target.checked);
+                        props.onSelectToggle(it, e.target.checked);
                       }}
-                      aria-label="LIVE"
+                      aria-label="Select"
                     />
 
                     <div className="min-w-0 flex-1">
@@ -326,6 +377,10 @@ export default function BroadcastCenter() {
   const [breakingItems, setBreakingItems] = useState<BroadcastItem[]>([]);
   const [liveItems, setLiveItems] = useState<BroadcastItem[]>([]);
 
+  // UI-only selection (no backend update)
+  const [selectedBreaking, setSelectedBreaking] = useState<Record<string, boolean>>({});
+  const [selectedLive, setSelectedLive] = useState<Record<string, boolean>>({});
+
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
 
@@ -355,8 +410,8 @@ export default function BroadcastCenter() {
 
     setSettings(settingsObj);
     setInitialSettings(serializeSettings(settingsObj));
-    setBreakingItems(normalizeItems(unwrapArray(breakingRes) as any[]));
-    setLiveItems(normalizeItems(unwrapArray(liveRes) as any[]));
+    setBreakingItems(normalizeItems(unwrapArray(breakingRes)));
+    setLiveItems(normalizeItems(unwrapArray(liveRes)));
 
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
@@ -507,11 +562,11 @@ export default function BroadcastCenter() {
         : null;
 
       if (createdItem && (createdItem._id || createdItem.id)) {
-        if (type === 'breaking') setBreakingItems((prev) => normalizeItems([createdItem, ...(prev || [])] as any[]));
-        else setLiveItems((prev) => normalizeItems([createdItem, ...(prev || [])] as any[]));
+        if (type === 'breaking') setBreakingItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
+        else setLiveItems((prev) => normalizeItems([createdItem, ...(prev || [])]));
       } else {
         const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-        const items = normalizeItems(unwrapArray(itemsRes) as any[]);
+        const items = normalizeItems(unwrapArray(itemsRes));
         if (type === 'breaking') setBreakingItems(items);
         else setLiveItems(items);
       }
@@ -543,42 +598,6 @@ export default function BroadcastCenter() {
     }
   }, [breakingText, liveText]);
 
-  const toggleLive = useCallback(async (type: BroadcastType, item: BroadcastItem, next: boolean) => {
-    const itemId = (item as any)?.id ?? (item as any)?._id;
-    if (!itemId) {
-      notifyRef.current.err('Update failed', 'Missing item id');
-      return;
-    }
-
-    setWorking(String(itemId), true);
-    try {
-      await broadcastJson(`/items/${encodeURIComponent(String(itemId))}`, {
-        method: 'PATCH',
-        json: { isLive: next },
-      });
-      const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
-      if (type === 'breaking') setBreakingItems(items);
-      else setLiveItems(items);
-    } catch (e: any) {
-      if (isNetworkError(e)) {
-        notifyRef.current.err('Update failed', networkDetails(e, `${PROXY_BROADCAST_BASE}/items/${encodeURIComponent(String(itemId))}`));
-        return;
-      }
-      if (isUnauthorized(e)) {
-        notifyRef.current.err('Session expired — please login again');
-        return;
-      }
-      if (isNotFound(e)) {
-        notifyRef.current.err('Update not supported', 'Backend missing PATCH /admin/broadcast/items/:id — deploy backend update');
-        return;
-      }
-      notifyRef.current.err('Update failed', apiErrorDetails(e, 'API error'));
-    } finally {
-      setWorking(String(itemId), false);
-    }
-  }, [setWorking]);
-
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
     if (!itemId) {
@@ -594,7 +613,7 @@ export default function BroadcastCenter() {
       else setLiveItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
 
       const itemsRes = await broadcastJson<any>(`/items?type=${encodeURIComponent(type)}`, { method: 'GET' });
-      const items = normalizeItems(unwrapArray(itemsRes) as any[]);
+      const items = normalizeItems(unwrapArray(itemsRes));
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -675,8 +694,16 @@ export default function BroadcastCenter() {
           onAdd={() => addItem('breaking')}
           items={breakingItems}
           workingIdMap={workingIdMap}
-          onToggleLive={(item, next) => toggleLive('breaking', item, next)}
           onDelete={(item) => deleteItem('breaking', item)}
+          selectedIdMap={selectedBreaking}
+          onSelectToggle={(item, next) => {
+            try {
+              const id = getBroadcastItemId(item as any);
+              setSelectedBreaking((prev) => ({ ...prev, [id]: next }));
+            } catch {
+              notifyRef.current.err('Missing item id');
+            }
+          }}
         />
 
         <SectionCard
@@ -693,8 +720,16 @@ export default function BroadcastCenter() {
           onAdd={() => addItem('live')}
           items={liveItems}
           workingIdMap={workingIdMap}
-          onToggleLive={(item, next) => toggleLive('live', item, next)}
           onDelete={(item) => deleteItem('live', item)}
+          selectedIdMap={selectedLive}
+          onSelectToggle={(item, next) => {
+            try {
+              const id = getBroadcastItemId(item as any);
+              setSelectedLive((prev) => ({ ...prev, [id]: next }));
+            } catch {
+              notifyRef.current.err('Missing item id');
+            }
+          }}
         />
       </div>
     </div>
