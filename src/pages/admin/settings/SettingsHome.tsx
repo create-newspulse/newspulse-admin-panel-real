@@ -4,6 +4,7 @@ import { SETTINGS_REGISTRY, getValue, setValue } from '@/lib/settingsRegistry';
 import type { SiteSettings } from '@/types/siteSettings';
 import StickySettingsBar from '@/components/settings/StickySettingsBar';
 import ScopeBadge from '@/components/settings/ScopeBadge';
+import TranslationHealthCard from '@/components/settings/TranslationHealthCard';
 
 export default function SettingsHome() {
   const [base, setBase] = useState<SiteSettings | null>(null);
@@ -74,6 +75,8 @@ export default function SettingsHome() {
 
   return (
     <div className="space-y-6">
+      <TranslationHealthCard />
+
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <input

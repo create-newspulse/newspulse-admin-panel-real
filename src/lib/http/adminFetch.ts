@@ -158,6 +158,15 @@ function notifyBackendOfflineOnce() {
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
   const normalizedPath = adminApiPath(path);
 
+  const isPublicProxyEndpoint = (() => {
+    try {
+      const p = (normalizedPath || '').toString().toLowerCase();
+      return p === '/admin-api/public' || p.startsWith('/admin-api/public/');
+    } catch {
+      return false;
+    }
+  })();
+
   // In production, always treat '/admin-api/*' as a SAME-ORIGIN proxy call.
   // This prevents accidental cross-origin calls (e.g., to Render) when an env var sets
   // an absolute backend base and the browser blocks POST/PUT/DELETE preflights.
@@ -204,7 +213,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   // fail fast to avoid repeatedly hammering the backend with 401s.
   // (Cookie-only auth is not relied on in this admin panel build.)
   // Note: adminFetch always targets the backend's `/admin/*` routes.
-  if (!token && !hasLikelyAdminSession()) {
+  if (!isPublicProxyEndpoint && !token && !hasLikelyAdminSession()) {
     authBlockedUntil = Date.now() + AUTH_BLOCK_MS;
     throw new AdminApiError('Not authenticated', { status: 401, url, body: { missingToken: true } });
   }
