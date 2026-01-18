@@ -175,16 +175,16 @@ function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
   const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 12;
   const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 12;
   return {
-    // UI contract: clamp 12..45
-    liveSpeedSec: Math.max(12, Math.min(45, Number(live) || 12)),
-    breakingSpeedSec: Math.max(12, Math.min(45, Number(breaking) || 12)),
+    // UI contract: clamp 12..30 (prevents extreme scroll speeds)
+    liveSpeedSec: Math.max(12, Math.min(30, Number(live) || 12)),
+    breakingSpeedSec: Math.max(12, Math.min(30, Number(breaking) || 12)),
   };
 }
 
 function clampDurationSeconds(v: unknown, fallback: number) {
   const n = Number(v);
   const base = Number.isFinite(n) ? n : fallback;
-  return Math.max(12, Math.min(45, Math.round(base)));
+  return Math.max(12, Math.min(30, Math.round(base)));
 }
 
 function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | undefined {
@@ -311,6 +311,7 @@ function SectionCard(props: {
               <div>
                 <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Scroll duration (seconds)</label>
                 <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Higher = slower = more readable</div>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Recommended range: 12–30 seconds</div>
               </div>
 
               <div className="flex flex-col items-stretch gap-2 sm:w-72">
@@ -323,7 +324,7 @@ function SectionCard(props: {
                   <input
                     type="range"
                     min={12}
-                    max={45}
+                    max={30}
                     step={1}
                     value={clampDurationSeconds(props.durationSec, 12)}
                     onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 12))}

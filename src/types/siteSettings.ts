@@ -138,6 +138,7 @@ export const SiteSettingsSchema = z.object({
 
   // Translation
   translation: z.object({
+    mode: z.enum(['auto', 'failsafe']).default('auto'),
     qualityMode: z.enum(['standard', 'strict']).default('standard'),
   }).default({}),
 

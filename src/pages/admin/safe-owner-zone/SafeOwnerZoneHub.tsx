@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Link } from 'react-router-dom';
+import { translationUiEnabled } from '@/config/featureFlags';
 import { useNotify } from '@/components/ui/toast-bridge';
 import type { OwnerZoneShellContext } from './SafeOwnerZoneShell';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
@@ -62,6 +63,7 @@ function classifyAudit(r: AuditRow): 'Security' | 'AI' | 'Settings' | 'Revenue' 
 export default function SafeOwnerZoneHub() {
   const notify = useNotify();
   const unlockForMs = useOwnerKeyStore((s) => s.unlockForMs);
+  const showTranslationUi = translationUiEnabled();
   const {
     backendConnected,
     settings,
@@ -71,14 +73,10 @@ export default function SafeOwnerZoneHub() {
     busy,
     doSnapshot,
     openRollback,
-    openEmergencyLockdown,
-    updateAdminSettings,
   } = useOutletContext<OwnerZoneShellContext>();
 
-  const [timelineFilter, setTimelineFilter] = useState<'All' | 'Security' | 'AI' | 'Settings' | 'Revenue'>('All');
-
-  const [passkeyKnown, setPasskeyKnown] = useState(false);
   const [hasPasskey, setHasPasskey] = useState(false);
+  const [passkeyKnown, setPasskeyKnown] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState<'none' | 'setup' | 'unlock'>('none');
 
   useEffect(() => {
@@ -285,18 +283,24 @@ export default function SafeOwnerZoneHub() {
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3">
-            <Link
-              to="/admin/review-queue"
-              className="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-white">Review Queue</div>
-                  <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">Approvals • PTI • Legal • Founder</div>
+            {showTranslationUi ? (
+              <Link
+                to="/admin/review-queue"
+                className="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">Review Queue</div>
+                    <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">Approvals • PTI • Legal • Founder</div>
+                  </div>
+                  <div className="shrink-0 text-lg leading-none">🧭</div>
                 </div>
-                <div className="shrink-0 text-lg leading-none">🧭</div>
+              </Link>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                Translation review tools are disabled.
               </div>
-            </Link>
+            )}
           </div>
         </div>
 

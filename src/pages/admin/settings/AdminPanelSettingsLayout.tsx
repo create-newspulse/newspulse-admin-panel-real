@@ -51,6 +51,7 @@ function AdminPanelSettingsLayoutInner() {
       <aside className="md:col-span-1 space-y-2">
         <NavLink to="team" className={linkCls}>Team Management</NavLink>
         <NavLink to="security" className={linkCls}>Security</NavLink>
+        {canPublish ? <NavLink to="translation" className={linkCls}>Translation</NavLink> : null}
         <NavLink to="change-password" className={linkCls}>Change Password</NavLink>
         <NavLink to="audit" className={linkCls}>Audit Logs</NavLink>
         <NavLink to="preview" className={linkCls}>Preview</NavLink>

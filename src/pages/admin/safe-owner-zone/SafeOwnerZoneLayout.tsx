@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { translationUiEnabled } from '@/config/featureFlags';
 
 type ModuleLink = { key: string; label: string; desc?: string; to: string; icon: string };
 
@@ -54,9 +55,14 @@ function ModuleNav({ items, onNavigate }: { items: ModuleLink[]; onNavigate?: ()
 
 export default function SafeOwnerZoneLayout() {
   const [openMobile, setOpenMobile] = useState(false);
+  const showTranslationUi = translationUiEnabled();
   const closeOnNavigate = useMemo(() => {
     return () => setOpenMobile(false);
   }, []);
+
+  const advancedControls = useMemo(() => {
+    return showTranslationUi ? ADVANCED_CONTROLS : [];
+  }, [showTranslationUi]);
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-[260px,1fr]">
@@ -113,7 +119,7 @@ export default function SafeOwnerZoneLayout() {
 
         <div className="mt-4">
           <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Advanced Controls</div>
-          <ModuleNav items={ADVANCED_CONTROLS} onNavigate={closeOnNavigate} />
+          <ModuleNav items={advancedControls} onNavigate={closeOnNavigate} />
         </div>
 
         <div className="mt-4">

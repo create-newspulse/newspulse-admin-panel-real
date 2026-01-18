@@ -96,6 +96,7 @@ import AdminPanelSettingsLayout from '@pages/admin/settings/AdminPanelSettingsLa
 import PublicSiteSettingsLayout from '@pages/admin/settings/PublicSiteSettingsLayout';
 import TeamManagement from '@pages/admin/settings/admin-panel/TeamManagement';
 import SecurityAdmin from '@pages/admin/settings/admin-panel/SecurityAdmin';
+import TranslationSettings from '@pages/admin/settings/admin-panel/TranslationSettings';
 import AuditLogsView from '@pages/admin/settings/admin-panel/AuditLogsView';
 import AdminPreview from '@pages/admin/settings/admin-panel/AdminPreview';
 import HomepageModulesSettings from '@pages/admin/settings/public-site/HomepageModulesSettings';
@@ -115,6 +116,7 @@ import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModu
 import BroadcastCenter from '@pages/admin/BroadcastCenter';
 import AdminUsersPage from '@pages/AdminUsersPage';
 import AiLogsPage from '@pages/AiLogsPage';
+import { translationUiEnabled } from '@/config/featureFlags';
 
 function LegacySafeOwnerZoneRedirect() {
   const { module } = useParams();
@@ -151,6 +153,7 @@ function App() {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   const isAuthPage = ['/login', '/admin/login', '/employee/login'].includes(location.pathname);
+  const showTranslationUi = translationUiEnabled();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -206,7 +209,14 @@ function App() {
               <Route path="/admin/news/:id/edit" element={<ProtectedRoute><LockCheckWrapper><LegacyArticleEditRedirect /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/push-history" element={<ProtectedRoute><LockCheckWrapper><PushHistory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/add-category" element={<ProtectedRoute><LockCheckWrapper><AddCategory /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/language-settings" element={<ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>} />
+              <Route
+                path="/language-settings"
+                element={
+                  showTranslationUi
+                    ? <ProtectedRoute><LockCheckWrapper><LanguageSettings /></LockCheckWrapper></ProtectedRoute>
+                    : <Navigate to="/admin/dashboard" replace />
+                }
+              />
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
               {/* Add News legacy redirect */}
@@ -308,6 +318,7 @@ function App() {
                   <Route index element={<Navigate to="team" replace />} />
                   <Route path="team" element={<FounderRoute><TeamManagement /></FounderRoute>} />
                   <Route path="security" element={<SecurityAdmin />} />
+                  <Route path="translation" element={<TranslationSettings />} />
                   <Route path="change-password" element={<ChangePassword />} />
                   <Route path="audit" element={<AuditLogsView />} />
                   <Route path="preview" element={<AdminPreview />} />
@@ -350,7 +361,14 @@ function App() {
               </Route>
 
               <Route path="/safe-owner/settings" element={<FounderRoute><AdminControlCenter /></FounderRoute>} />
-              <Route path="/safe-owner/language-settings" element={<FounderRoute><LanguageManager /></FounderRoute>} />
+              <Route
+                path="/safe-owner/language-settings"
+                element={
+                  showTranslationUi
+                    ? <FounderRoute><LanguageManager /></FounderRoute>
+                    : <Navigate to="/admin/dashboard" replace />
+                }
+              />
               <Route path="/safe-owner/panel-guide" element={<FounderRoute><PanelGuide /></FounderRoute>} />
               <Route path="/safe-owner/update-pin" element={<FounderRoute><UpdateFounderPIN /></FounderRoute>} />
               <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
@@ -372,8 +390,22 @@ function App() {
 
               {/* 🚀 Advanced Modules */}
               <Route path="/admin/ai-assistant" element={<ProtectedRoute><AIEditorialAssistant /></ProtectedRoute>} />
-              <Route path="/admin/review-queue" element={<ProtectedRoute><EditorialWorkflowEngine /></ProtectedRoute>} />
-              <Route path="/admin/workflow" element={<Navigate to="/admin/review-queue" replace />} />
+              <Route
+                path="/admin/review-queue"
+                element={
+                  showTranslationUi
+                    ? <ProtectedRoute><EditorialWorkflowEngine /></ProtectedRoute>
+                    : <Navigate to="/admin/dashboard" replace />
+                }
+              />
+              <Route
+                path="/admin/workflow"
+                element={
+                  showTranslationUi
+                    ? <Navigate to="/admin/review-queue" replace />
+                    : <Navigate to="/admin/dashboard" replace />
+                }
+              />
               <Route path="/admin/media-library" element={<ProtectedRoute><MediaLibrary /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><AnalyticsDashboard /></ProtectedRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
