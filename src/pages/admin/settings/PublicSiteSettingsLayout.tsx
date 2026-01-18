@@ -20,21 +20,25 @@ export default function PublicSiteSettingsLayout() {
 function PublicSiteSettingsLayoutInner() {
   const { user } = useAuth();
   const canPublish = String(user?.role || '').toLowerCase() === 'founder';
-  const { dirty, resetDraftToPublished, saveDraftRemote, publish, status } = usePublicSiteSettingsDraft();
+  const { dirty, resetDraftRemoteToPublished, saveDraftRemote, publish, status } = usePublicSiteSettingsDraft();
   const location = useLocation();
 
   const busy = status === 'publishing' || status === 'saving' || status === 'loading';
   const previewTo = location.pathname.includes('/admin/settings/public-site/preview') ? undefined : 'preview';
 
-  const handleReset = () => {
-    resetDraftToPublished();
-    toast('Reset to last published');
+  const handleReset = async () => {
+    try {
+      await resetDraftRemoteToPublished('reset-public-site-settings-to-published');
+      toast.success('Saved. Live will update within 10 seconds.');
+    } catch (e: unknown) {
+      toast.error(normalizeError(e as any, 'Reset failed').message);
+    }
   };
 
   const handleSaveDraft = async () => {
     try {
       await saveDraftRemote('save-public-site-settings');
-      toast.success('Saved');
+      toast.success('Saved. Live will update within 10 seconds.');
     } catch (e: unknown) {
       toast.error(normalizeError(e as any, 'Save failed').message);
     }
@@ -43,7 +47,7 @@ function PublicSiteSettingsLayoutInner() {
   const handlePublish = async () => {
     try {
       await publish('publish-public-site-settings');
-      toast.success('Published');
+      toast.success('Published to LIVE instantly.');
     } catch (e: unknown) {
       toast.error(normalizeError(e as any, 'Publish failed').message);
     }

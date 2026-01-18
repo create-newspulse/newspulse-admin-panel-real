@@ -13,11 +13,6 @@ import {
   listItems as apiListBroadcastItems,
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
-import { adminSettingsApi } from '@/lib/adminSettingsApi';
-import { publicSiteSettingsApi } from '@/lib/publicSiteSettingsApi';
-import { DEFAULT_PUBLIC_SITE_SETTINGS, normalizePublicSiteSettings } from '@/types/publicSiteSettings';
-import { deepMerge } from '@/features/settings/deepMerge';
-import type { SiteSettings } from '@/types/siteSettings';
 
 const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
@@ -72,7 +67,7 @@ function isHtmlMisrouteBody(e: unknown): boolean {
   );
 }
 
-const REWRITE_MISSING_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
+const REWRITE_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 
 function isRewriteMissing(e: unknown): boolean {
   if (e instanceof AdminApiError && e.code === 'HTML_MISROUTE') return true;
@@ -156,31 +151,45 @@ function serializeSettings(s: BroadcastSettings | null) {
   });
 }
 
+function serializeSaveKey(s: BroadcastSettings | null, breakingSec: number, liveSec: number) {
+  if (!s) return '';
+  return JSON.stringify({
+    settings: {
+      breakingEnabled: !!s.breakingEnabled,
+      breakingMode: s.breakingMode,
+      liveEnabled: !!s.liveEnabled,
+      liveMode: s.liveMode,
+    },
+    breakingDurationSec: clampDurationSeconds(breakingSec, 12),
+    liveDurationSec: clampDurationSeconds(liveSec, 12),
+  });
+}
+
 type TickerSpeeds = {
   liveSpeedSec: number;
   breakingSpeedSec: number;
 };
 
 function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
-  // Defaults (requested): Breaking 18s, Live 24s
-  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 24;
-  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 18;
+  // Defaults: start at Fast = 12s
+  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 12;
+  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 12;
   return {
-    // UI contract (requested): clamp 10..40
-    liveSpeedSec: Math.max(10, Math.min(40, Number(live) || 24)),
-    breakingSpeedSec: Math.max(10, Math.min(40, Number(breaking) || 18)),
+    // UI contract: clamp 12..45
+    liveSpeedSec: Math.max(12, Math.min(45, Number(live) || 12)),
+    breakingSpeedSec: Math.max(12, Math.min(45, Number(breaking) || 12)),
   };
 }
 
 function clampDurationSeconds(v: unknown, fallback: number) {
   const n = Number(v);
   const base = Number.isFinite(n) ? n : fallback;
-  return Math.max(10, Math.min(40, Math.round(base)));
+  return Math.max(12, Math.min(45, Math.round(base)));
 }
 
 function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | undefined {
   try {
-    const def = kind === 'breaking' ? 18 : 24;
+    const def = 12;
 
     const nested = input?.[kind];
     const nestedValue =
@@ -216,9 +225,9 @@ function PresetsRow(props: {
   presets?: Array<{ key: string; label: string; value: number }>;
 }) {
   const presets = props.presets || [
-    { key: 'fast', label: 'Fast', value: 16 },
-    { key: 'normal', label: 'Normal', value: 24 },
-    { key: 'slow', label: 'Slow', value: 34 },
+    { key: 'fast', label: 'Fast', value: 12 },
+    { key: 'normal', label: 'Normal', value: 20 },
+    { key: 'slow', label: 'Slow', value: 30 },
   ];
   return (
     <div className="flex flex-wrap gap-2">
@@ -245,38 +254,6 @@ function PresetsRow(props: {
   );
 }
 
-function TickerPreview(props: { durationSec: number; sampleText?: string }) {
-  const duration = clampDurationSeconds(props.durationSec, 24);
-  const text = props.sampleText || 'Sample headline scrolling for preview — edit duration to change speed.';
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Live preview</div>
-        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{duration}s</div>
-      </div>
-      <div className="relative h-8 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-        <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 whitespace-nowrap px-4 text-sm font-semibold text-slate-900 dark:text-white"
-          style={{
-            animationName: 'npTickerScroll',
-            animationDuration: `${duration}s`,
-            animationTimingFunction: 'linear',
-            animationIterationCount: 'infinite',
-          }}
-        >
-          {text}
-        </div>
-      </div>
-      <style>{`
-        @keyframes npTickerScroll {
-          0% { transform: translate(100%, -50%); }
-          100% { transform: translate(-120%, -50%); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
 function SectionCard(props: {
   title: string;
   enabled: boolean;
@@ -286,6 +263,7 @@ function SectionCard(props: {
   durationSec?: number;
   onDurationChange?: (next: number) => void;
   defaultDurationSec?: number;
+  onDurationReset?: () => void;
   inputValue: string;
   onInputChange: (next: string) => void;
   onAdd: () => void;
@@ -293,8 +271,6 @@ function SectionCard(props: {
   items: BroadcastItem[];
   workingIdMap: Record<string, boolean>;
   onDelete: (item: BroadcastItem) => void;
-  selectedIdMap: Record<string, boolean>;
-  onSelectToggle: (item: BroadcastItem, next: boolean) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
 
@@ -339,39 +315,60 @@ function SectionCard(props: {
 
               <div className="flex flex-col items-stretch gap-2 sm:w-72">
                 <PresetsRow
-                  value={clampDurationSeconds(props.durationSec, 24)}
-                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, 24))}
+                  value={clampDurationSeconds(props.durationSec, 20)}
+                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, 20))}
                 />
 
                 <div className="flex items-center gap-3">
                   <input
                     type="range"
-                    min={10}
-                    max={40}
+                    min={12}
+                    max={45}
                     step={1}
-                    value={clampDurationSeconds(props.durationSec, 24)}
-                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 24))}
+                    value={clampDurationSeconds(props.durationSec, 12)}
+                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 12))}
                     className="w-full"
                     aria-label="Scroll duration"
                   />
                   <div className="w-12 text-right text-sm font-semibold text-slate-900 dark:text-white">
-                    {clampDurationSeconds(props.durationSec, 24)}
+                    {clampDurationSeconds(props.durationSec, 12)}
                   </div>
                 </div>
 
-                {typeof props.defaultDurationSec === 'number' ? (
-                  <button
-                    type="button"
-                    className="self-end text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-                    onClick={() => props.onDurationChange?.(clampDurationSeconds(props.defaultDurationSec, 24))}
-                  >
-                    Reset
-                  </button>
+                {typeof props.onDurationReset === 'function' ? (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                      onClick={() => props.onDurationReset?.()}
+                    >
+                      Reset
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </div>
 
-            <TickerPreview durationSec={props.durationSec} />
+            {/* Live preview (simple marquee) */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Live preview</div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{clampDurationSeconds(props.durationSec, 12)}s</div>
+              </div>
+              <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                <style>{`@keyframes np-marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-120%); } }`}</style>
+                <div
+                  style={{
+                    display: 'inline-block',
+                    whiteSpace: 'nowrap',
+                    willChange: 'transform',
+                    animation: `np-marquee ${Math.max(6, clampDurationSeconds(props.durationSec, 12))}s linear infinite`,
+                  }}
+                >
+                  line scrolling for preview — edit duration to change speed.
+                </div>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -408,17 +405,7 @@ function SectionCard(props: {
                 const busy = itemId ? !!props.workingIdMap[itemId] : false;
                 return (
                   <div key={itemId ?? `${it.createdAt}-${it.text}`} className="flex items-start gap-3 p-4">
-                    <input
-                      type="checkbox"
-                      className="mt-1 h-4 w-4"
-                      checked={!!(itemId && props.selectedIdMap[itemId])}
-                      disabled={!itemId}
-                      onChange={(e) => {
-                        props.onSelectToggle(it, e.target.checked);
-                      }}
-                      aria-label="Select"
-                    />
-
+                    <input type="checkbox" className="mt-1 h-4 w-4" aria-label="Select item" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-sm font-semibold text-slate-900 dark:text-white break-words">{it.text}</div>
@@ -455,20 +442,18 @@ export default function BroadcastCenter() {
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   const didInitialLoad = useRef(false);
+  const lastSavedRef = useRef<string>('');
   const refreshInFlight = useRef(false);
 
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<BroadcastSettings | null>(null);
-  const [initialSettings, setInitialSettings] = useState<string>('');
 
-  // Keep speeds as separate state vars to avoid accidental merging/overwrites.
   const [breakingSpeedSeconds, setBreakingSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).breakingSpeedSec);
   const [liveSpeedSeconds, setLiveSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).liveSpeedSec);
-  const [initialSpeeds, setInitialSpeeds] = useState<string>('');
 
   const [breakingText, setBreakingText] = useState('');
   const [liveText, setLiveText] = useState('');
@@ -476,18 +461,8 @@ export default function BroadcastCenter() {
   const [breakingItems, setBreakingItems] = useState<BroadcastItem[]>([]);
   const [liveItems, setLiveItems] = useState<BroadcastItem[]>([]);
 
-  // UI-only selection (no backend update)
-  const [selectedBreaking, setSelectedBreaking] = useState<Record<string, boolean>>({});
-  const [selectedLive, setSelectedLive] = useState<Record<string, boolean>>({});
-
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
-
-  const dirty = useMemo(() => {
-    if (!settings) return false;
-    if (serializeSettings(settings) !== initialSettings) return true;
-    return JSON.stringify({ breakingSpeedSeconds, liveSpeedSeconds }) !== initialSpeeds;
-  }, [settings, initialSettings, breakingSpeedSeconds, liveSpeedSeconds, initialSpeeds]);
 
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
@@ -496,185 +471,118 @@ export default function BroadcastCenter() {
     });
   }, []);
 
-  const loadAll = useCallback(async (signal?: AbortSignal) => {
-    const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
+  const loadAll = useCallback(async (_signal?: AbortSignal) => {
+    const [broadcastRes, breakingRes, liveRes] = await Promise.all([
       apiGetBroadcastConfig(),
       apiListBroadcastItems('breaking'),
       apiListBroadcastItems('live'),
-      adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
 
     const broadcastObj = unwrapObj(broadcastRes);
-    const settingsObj = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as BroadcastSettings;
+    const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
+    const settingsObj: BroadcastSettings = {
+      breakingEnabled: !!rawSettings?.breakingEnabled,
+      breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
+      liveEnabled: !!rawSettings?.liveEnabled,
+      liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
+    };
 
-    setSettings(settingsObj);
-    setInitialSettings(serializeSettings(settingsObj));
+    // Items are already normalized by apiListBroadcastItems, but normalize again defensively.
     setBreakingItems(normalizeItems(breakingRes as any));
     setLiveItems(normalizeItems(liveRes as any));
 
-    // Prefer canonical durations from the broadcast config response (so it cannot be overwritten
-    // by stale settings snapshots), then fall back to settings tickers.
     const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
     const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
 
-    const fallbackSpeeds = normalizeSpeeds((site as any)?.tickers);
+    const fallbackSpeeds = normalizeSpeeds(null);
     const breakingDur = typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : fallbackSpeeds.breakingSpeedSec;
     const liveDur = typeof fromBroadcastLive === 'number' ? fromBroadcastLive : fallbackSpeeds.liveSpeedSec;
 
-    setBreakingSpeedSeconds(breakingDur);
-    setLiveSpeedSeconds(liveDur);
-    setInitialSpeeds(JSON.stringify({ breakingSpeedSeconds: breakingDur, liveSpeedSeconds: liveDur }));
+    const nextBreaking = clampDurationSeconds(breakingDur, 12);
+    const nextLive = clampDurationSeconds(liveDur, 12);
+
+    setSettings(settingsObj);
+    setBreakingSpeedSeconds(nextBreaking);
+    setLiveSpeedSeconds(nextLive);
+    lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
   }, []);
 
-  const refreshItems = useCallback(async () => {
-    const controller = new AbortController();
-    const timeoutMs = 12_000;
-    const t = window.setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const [breakingRes, liveRes] = await Promise.all([
-        apiListBroadcastItems('breaking'),
-        apiListBroadcastItems('live'),
-      ]);
-      setBreakingItems(normalizeItems(breakingRes as any));
-      setLiveItems(normalizeItems(liveRes as any));
-      setLastRefreshAt(new Date().toISOString());
-    } catch (e: any) {
-      const aborted = e?.name === 'AbortError' || e?.code === 20;
-      if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
-        return;
-      }
-      notifyRef.current.err('Refresh failed', aborted ? 'Request timed out' : (e?.message || 'Unknown error'));
-    } finally {
-      window.clearTimeout(t);
-    }
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
-
-    const controller = new AbortController();
-    const timeoutMs = 12_000;
-    const t = window.setTimeout(() => controller.abort(), timeoutMs);
-
-    setIsRefreshing(true);
-    try {
-      await loadAll(controller.signal);
-      setLastRefreshAt(new Date().toISOString());
-    } catch (e: any) {
-      const aborted = e?.name === 'AbortError' || e?.code === 20;
-      if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
-        throw e;
-      }
-      notifyRef.current.err('Refresh failed', aborted ? 'Request timed out' : (e?.message || 'Unknown error'));
-      throw e;
-    } finally {
-      window.clearTimeout(t);
-      refreshInFlight.current = false;
-      setIsRefreshing(false);
-    }
-  }, [loadAll]);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (didInitialLoad.current) return;
-      didInitialLoad.current = true;
-      try {
-        await refreshAll();
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [refreshAll]);
-
-  const saveSettings = useCallback(async () => {
-    if (!settings || saving) return;
+  const doSave = useCallback(async (
+    nextSettings: BroadcastSettings,
+    nextBreakingSec: number,
+    nextLiveSec: number,
+    opts?: { toast?: string }
+  ) => {
+    if (saving) return;
     setSaving(true);
     try {
-      const breakingDurationSeconds = clampDurationSeconds(breakingSpeedSeconds, 18);
-      const liveDurationSeconds = clampDurationSeconds(liveSpeedSeconds, 24);
+      const breakingDurationSeconds = clampDurationSeconds(nextBreakingSec, 12);
+      const liveDurationSeconds = clampDurationSeconds(nextLiveSec, 12);
+
+      const savedKey = serializeSaveKey(nextSettings, breakingDurationSeconds, liveDurationSeconds);
 
       const payload = {
-        breaking: {
-          enabled: !!settings.breakingEnabled,
-          mode: settings.breakingMode,
-          tickerDurationSeconds: breakingDurationSeconds,
-        },
-        live: {
-          enabled: !!settings.liveEnabled,
-          mode: settings.liveMode,
-          tickerDurationSeconds: liveDurationSeconds,
-        },
-        // Back-compat for servers still expecting the flat shape
-        breakingEnabled: !!settings.breakingEnabled,
-        breakingMode: settings.breakingMode,
-        liveEnabled: !!settings.liveEnabled,
-        liveMode: settings.liveMode,
-        // Minimal flat mirrors (avoid conflicting duplicates)
+        breakingEnabled: !!nextSettings.breakingEnabled,
+        breakingMode: nextSettings.breakingMode,
+        liveEnabled: !!nextSettings.liveEnabled,
+        liveMode: nextSettings.liveMode,
+        // Preferred terminology
+        breakingDurationSec: breakingDurationSeconds,
+        liveDurationSec: liveDurationSeconds,
+        // Back-compat keys (some backends still expect *SpeedSec)
+        breakingSpeedSec: breakingDurationSeconds,
+        liveSpeedSec: liveDurationSeconds,
+        // Back-compat keys
         breakingTickerDurationSeconds: breakingDurationSeconds,
         liveTickerDurationSeconds: liveDurationSeconds,
+        // Nested form (merge-safe on backends that expect per-ticker configs)
+        breaking: {
+          enabled: !!nextSettings.breakingEnabled,
+          mode: nextSettings.breakingMode,
+          durationSec: breakingDurationSeconds,
+        },
+        live: {
+          enabled: !!nextSettings.liveEnabled,
+          mode: nextSettings.liveMode,
+          durationSec: liveDurationSeconds,
+        },
       };
 
       await apiSaveBroadcastConfig(payload);
 
-      // Ensure UI state reflects the clamped values immediately.
-      setBreakingSpeedSeconds(breakingDurationSeconds);
-      setLiveSpeedSeconds(liveDurationSeconds);
-
-      // Keep public-site ticker visibility/speeds in sync from ONE place.
-      // The public site reads these from the Public Site Settings bundle.
-      // We update both draft + published so changes take effect immediately.
+      // Merge-safe: re-fetch the canonical server config so we don't accidentally
+      // reset the other ticker if the backend applies defaults.
       try {
-        const publicPatch: any = {
-          tickers: {
-            live: { enabled: !!settings.liveEnabled, speedSec: liveDurationSeconds },
-            breaking: { enabled: !!settings.breakingEnabled, speedSec: breakingDurationSeconds },
-          },
+        const broadcastRes = await apiGetBroadcastConfig();
+        const broadcastObj = unwrapObj(broadcastRes);
+        const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
+        const settingsObj: BroadcastSettings = {
+          breakingEnabled: !!rawSettings?.breakingEnabled,
+          breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
+          liveEnabled: !!rawSettings?.liveEnabled,
+          liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
         };
-        const bundle = await publicSiteSettingsApi.getAdminPublicSiteSettingsBundle();
-        const baseDraft = (bundle?.draft || bundle?.published || DEFAULT_PUBLIC_SITE_SETTINGS) as any;
-        const nextDraft = normalizePublicSiteSettings(deepMerge(baseDraft, publicPatch));
 
-        await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(nextDraft, { action: 'broadcast-center:update-public-tickers' });
-        await publicSiteSettingsApi.publishAdminPublicSiteSettings(nextDraft, { action: 'broadcast-center:publish-public-tickers' });
-      } catch (e: any) {
-        // Do not block broadcast saves if public site settings fail; surface the real error.
-        notifyRef.current.err('Saved broadcast, but public site update failed', apiErrorDetails(e, 'Public site settings error'));
-      }
+        const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
+        const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
 
-      // Keep the legacy SiteSettings snapshot reasonably aligned (some admin UI uses it).
-      try {
-        const patch: Partial<SiteSettings> = {
-          ui: {
-            showLiveUpdatesTicker: !!settings.liveEnabled,
-            showBreakingTicker: !!settings.breakingEnabled,
-          } as any,
-          tickers: {
-            liveSpeedSec: liveDurationSeconds,
-            breakingSpeedSec: breakingDurationSeconds,
-          } as any,
-        };
-        await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
-      } catch (e: any) {
-        notifyRef.current.err('Saved broadcast, but admin settings sync failed', apiErrorDetails(e, 'Admin settings error'));
-      }
+        const nextBreaking = clampDurationSeconds(typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : breakingDurationSeconds, 12);
+        const nextLive = clampDurationSeconds(typeof fromBroadcastLive === 'number' ? fromBroadcastLive : liveDurationSeconds, 12);
 
-      // IMPORTANT: re-fetch canonical config after save so UI reflects backend state
-      // and avoids any local merged/stale state.
-      try {
-        await loadAll();
+        setSettings(settingsObj);
+        setBreakingSpeedSeconds(nextBreaking);
+        setLiveSpeedSeconds(nextLive);
+        lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
         setLastRefreshAt(new Date().toISOString());
       } catch {
-        // Non-fatal: keep the UI responsive even if refresh fails.
+        // If refresh fails, keep the optimistic UI state.
+        setSettings(nextSettings);
+        setBreakingSpeedSeconds(breakingDurationSeconds);
+        setLiveSpeedSeconds(liveDurationSeconds);
+        lastSavedRef.current = savedKey;
       }
 
-      notifyRef.current.ok('Saved ✅');
+      notifyRef.current.ok(opts?.toast || 'Saved. Live will update within 10 seconds.');
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Save failed', {
@@ -684,7 +592,7 @@ export default function BroadcastCenter() {
         });
       } catch {}
 
-      if (isRewriteMissing(e)) {
+      if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
         notifyRef.current.err(REWRITE_MISSING_TOAST);
         return;
       }
@@ -704,7 +612,60 @@ export default function BroadcastCenter() {
     } finally {
       setSaving(false);
     }
-  }, [saving, settings, breakingSpeedSeconds, liveSpeedSeconds, loadAll]);
+  }, [saving]);
+
+  const dirty = useMemo(() => {
+    if (!settings) return false;
+    const nowKey = serializeSaveKey(settings, breakingSpeedSeconds, liveSpeedSeconds);
+    return !!nowKey && nowKey !== lastSavedRef.current;
+  }, [settings, breakingSpeedSeconds, liveSpeedSeconds]);
+
+  const refreshAll = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    setIsRefreshing(true);
+    try {
+      await loadAll();
+      setLastRefreshAt(new Date().toISOString());
+    } catch (e: any) {
+      if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
+        notifyRef.current.err(REWRITE_MISSING_TOAST);
+      } else if (isNetworkError(e)) {
+        notifyRef.current.err('Refresh failed', networkDetails(e, '/admin-api/admin/broadcast'));
+      } else {
+        notifyRef.current.err('Refresh failed', apiErrorDetails(e, 'API error'));
+      }
+    } finally {
+      refreshInFlight.current = false;
+      setIsRefreshing(false);
+    }
+  }, [loadAll]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (didInitialLoad.current) return;
+      didInitialLoad.current = true;
+      try {
+        await refreshAll();
+      } catch (e: any) {
+        if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
+          notifyRef.current.err(REWRITE_MISSING_TOAST);
+        } else if (isNetworkError(e)) {
+          notifyRef.current.err('Load failed', networkDetails(e, '/admin-api/admin/broadcast'));
+        } else if (isUnauthorized(e)) {
+          notifyRef.current.err('Session expired — please login again');
+        } else {
+          notifyRef.current.err('Load failed', apiErrorDetails(e, 'API error'));
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [refreshAll]);
 
   const addItem = useCallback(async (type: BroadcastType) => {
     const text = (type === 'breaking' ? breakingText : liveText).trim();
@@ -718,7 +679,7 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdItem = await apiAddBroadcastItem(type, text);
+      const createdItem = await apiAddBroadcastItem(type, text, { lang: 'en', autoTranslate: false });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
 
@@ -828,8 +789,15 @@ export default function BroadcastCenter() {
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            disabled={loading || saving || !dirty || !settings}
-            onClick={saveSettings}
+            disabled={loading || saving || !settings}
+            onClick={() => {
+              if (!settings) return;
+              if (!dirty) {
+                notifyRef.current.ok('No changes to save');
+                return;
+              }
+              void doSave(settings, breakingSpeedSeconds, liveSpeedSeconds);
+            }}
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -838,7 +806,7 @@ export default function BroadcastCenter() {
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
             disabled={isRefreshing}
             onClick={() => {
-              refreshAll().catch(() => null);
+              void refreshAll();
             }}
           >
             {isRefreshing ? 'Refreshing…' : 'Refresh LIVE'}
@@ -854,12 +822,15 @@ export default function BroadcastCenter() {
         <SectionCard
           title="🔥 Breaking"
           enabled={!!settings?.breakingEnabled}
-          onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
+          onEnabledChange={(next) => {
+            setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev));
+          }}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
           durationSec={breakingSpeedSeconds}
-          onDurationChange={(next) => setBreakingSpeedSeconds(clampDurationSeconds(next, 18))}
-          defaultDurationSec={18}
+          onDurationChange={(next) => setBreakingSpeedSeconds(clampDurationSeconds(next, 12))}
+          defaultDurationSec={12}
+          onDurationReset={() => setBreakingSpeedSeconds(12)}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -867,26 +838,20 @@ export default function BroadcastCenter() {
           items={breakingItems}
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('breaking', item)}
-          selectedIdMap={selectedBreaking}
-          onSelectToggle={(item, next) => {
-            try {
-              const id = getBroadcastItemId(item as any);
-              setSelectedBreaking((prev) => ({ ...prev, [id]: next }));
-            } catch {
-              notifyRef.current.err('Missing item id');
-            }
-          }}
         />
 
         <SectionCard
           title="🔵 Live Updates"
           enabled={!!settings?.liveEnabled}
-          onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
+          onEnabledChange={(next) => {
+            setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev));
+          }}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
           durationSec={liveSpeedSeconds}
-          onDurationChange={(next) => setLiveSpeedSeconds(clampDurationSeconds(next, 24))}
-          defaultDurationSec={24}
+          onDurationChange={(next) => setLiveSpeedSeconds(clampDurationSeconds(next, 12))}
+          defaultDurationSec={12}
+          onDurationReset={() => setLiveSpeedSeconds(12)}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}
@@ -894,15 +859,6 @@ export default function BroadcastCenter() {
           items={liveItems}
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('live', item)}
-          selectedIdMap={selectedLive}
-          onSelectToggle={(item, next) => {
-            try {
-              const id = getBroadcastItemId(item as any);
-              setSelectedLive((prev) => ({ ...prev, [id]: next }));
-            } catch {
-              notifyRef.current.err('Missing item id');
-            }
-          }}
         />
       </div>
     </div>

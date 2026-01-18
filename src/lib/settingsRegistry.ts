@@ -60,6 +60,12 @@ export const SETTINGS_REGISTRY: SettingItem[] = [
   { key: 'voice.rtlEnabled', label: 'RTL Enabled', section: 'Voice & Languages', scope: 'frontend', control: 'toggle' },
   { key: 'voice.languages', label: 'Languages', section: 'Voice & Languages', scope: 'both', control: 'input', tooltip: 'Comma-separated language codes (e.g., en,hi,ta)'} ,
 
+  // Translation QA
+  { key: 'translation.qualityMode', label: 'Translation Quality Mode', description: 'Strict enables additional QA checks.', section: 'Voice & Languages', scope: 'admin', control: 'select', options: [
+    { value: 'standard', label: 'Standard' },
+    { value: 'strict', label: 'Strict' },
+  ] },
+
   // Monetization
   { key: 'monetization.adsEnabled', label: 'Ads Enabled', section: 'Monetization', scope: 'frontend', control: 'toggle' },
   { key: 'monetization.sponsorBlocks', label: 'Sponsor Blocks', section: 'Monetization', scope: 'frontend', control: 'toggle' },

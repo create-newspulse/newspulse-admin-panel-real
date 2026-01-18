@@ -41,7 +41,51 @@ function isValidApiBase(u: string): boolean {
   }
 }
 
+function resolveDevBackendOrigin(): string {
+  try {
+    const raw = (envAny.VITE_BACKEND_ORIGIN || '').toString().trim();
+    if (!raw) return '';
+    if (!isAbsoluteHttpUrl(raw)) return '';
+    if (looksLikePlaceholder(raw)) return '';
+    // eslint-disable-next-line no-new
+    new URL(raw);
+    return stripTrailingSlashes(raw).replace(/\/api$/i, '');
+  } catch {
+    return '';
+  }
+}
+
+let didLogResolvedBase = false;
+function logResolvedBaseOnce(base: string) {
+  if (!import.meta.env.DEV) return;
+  try {
+    const w: any = typeof window !== 'undefined' ? (window as any) : null;
+    if (w && w.__npApiBaseLogged) return;
+    if (w) w.__npApiBaseLogged = true;
+  } catch {
+    // ignore
+  }
+  if (didLogResolvedBase) return;
+  didLogResolvedBase = true;
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[api] base =', base);
+  } catch {
+    // ignore
+  }
+}
+
 export function getApiBase(): string {
+  // DEV convenience: allow directing the UI to a backend origin without relying on Vite proxy.
+  // This keeps production behavior unchanged (still uses /admin-api rewrites).
+  if (import.meta.env.DEV) {
+    const devOrigin = resolveDevBackendOrigin();
+    if (devOrigin) {
+      logResolvedBaseOnce(devOrigin);
+      return devOrigin;
+    }
+  }
+
   // Prefer the explicit admin proxy base, then fall back to VITE_API_URL.
   // Per repo contract for Vercel: this should be a root-relative path ("/admin-api").
   const raw = (
@@ -64,6 +108,7 @@ export function getApiBase(): string {
     }
   }
 
+  logResolvedBaseOnce('/admin-api');
   return '/admin-api';
 }
 

@@ -74,7 +74,7 @@ export default function StickyActionBar({ dirty, canPublish, onReset, onSaveDraf
               }
               title={!canPublish ? 'Founder-only' : undefined}
             >
-              Publish
+              Publish LIVE
             </button>
           </div>
         </div>

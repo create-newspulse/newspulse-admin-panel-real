@@ -135,6 +135,12 @@ export const SiteSettingsSchema = z.object({
     rtlEnabled: z.boolean().default(false),
     languages: z.array(z.string()).default(['en']),
   }).default({}),
+
+  // Translation
+  translation: z.object({
+    qualityMode: z.enum(['standard', 'strict']).default('standard'),
+  }).default({}),
+
   // Community
   community: z.object({
     reporterPortalEnabled: z.boolean().default(true),

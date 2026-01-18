@@ -95,71 +95,23 @@ export async function listItems(type: BroadcastType): Promise<BroadcastItem[]> {
   return normalizeItems(parseItemsArray(raw));
 }
 
-export async function listItemsByLang(type: BroadcastType, lang: string): Promise<BroadcastItem[]> {
-  const qs = new URLSearchParams({ type, lang: String(lang || '').trim() || 'en' });
-  const raw = await requestJson<any>(`/items?${qs.toString()}`, { method: 'GET', cache: 'no-store' } as any);
-  return normalizeItems(parseItemsArray(raw));
-}
-
-export async function addItem(type: BroadcastType, text: string): Promise<BroadcastItem | null> {
-  let raw: any;
-  try {
-    raw = await requestJson<any>('/items', {
-      method: 'POST',
-      json: { type, text },
-    });
-  } catch (e: any) {
-    // Back-compat: some backends expect the type in query params and only accept text in the body.
-    if (e instanceof AdminApiError && e.status === 405) {
-      raw = await requestJson<any>(`/items?type=${encodeURIComponent(type)}`, {
-        method: 'POST',
-        json: { type, text },
-      });
-    } else {
-      throw e;
-    }
-  }
-
-  const candidate = (() => {
-    const r: any = raw as any;
-    if (r && typeof r === 'object') {
-      if (r.item && typeof r.item === 'object') return r.item;
-      if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) return r.data;
-    }
-    if (r && typeof r === 'object' && (r.id || r._id)) return r;
-    return null;
-  })();
-
-  return candidate ? normalizeItem(candidate) : null;
-}
-
-export async function addItemByLang(
+export async function addItem(
   type: BroadcastType,
   text: string,
-  lang: string,
-  opts: { autoTranslate?: boolean } = {}
+  opts?: { lang?: string; autoTranslate?: boolean }
 ): Promise<BroadcastItem | null> {
-  const safeLang = String(lang || '').trim() || 'en';
-  const extra = typeof opts.autoTranslate === 'boolean' ? { autoTranslate: opts.autoTranslate } : {};
-
-  let raw: any;
-  try {
-    raw = await requestJson<any>('/items', {
-      method: 'POST',
-      json: { type, text, lang: safeLang, ...extra },
-    });
-  } catch (e: any) {
-    // Back-compat: some backends route by query instead of body.
-    if (e instanceof AdminApiError && e.status === 405) {
-      const qs = new URLSearchParams({ type: String(type), lang: safeLang });
-      raw = await requestJson<any>(`/items?${qs.toString()}`, {
-        method: 'POST',
-        json: { type, text, lang: safeLang, ...extra },
-      });
-    } else {
-      throw e;
-    }
-  }
+  const raw = await requestJson<any>('/items', {
+    method: 'POST',
+    json: {
+      type,
+      text,
+      // requested fields (harmless if backend ignores)
+      lang: opts?.lang || 'en',
+      autoTranslate: typeof opts?.autoTranslate === 'boolean' ? opts.autoTranslate : undefined,
+      // back-compat
+      language: opts?.lang || 'en',
+    },
+  });
 
   const candidate = (() => {
     const r: any = raw as any;

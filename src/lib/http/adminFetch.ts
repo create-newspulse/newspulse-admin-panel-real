@@ -54,7 +54,46 @@ const RAW_ADMIN_BASE = (
 
 export const ADMIN_API_BASE = normalizeAdminApiBase(RAW_ADMIN_BASE || '/admin-api');
 
-const HTML_MISROUTE_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
+const HTML_MISROUTE_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
+
+function stripTrailingSlashOnce(s: string): string {
+  return (s || '').replace(/\/+$/, '');
+}
+
+function resolveDevBackendOrigin(): string {
+  try {
+    const raw = (import.meta as any)?.env?.VITE_BACKEND_ORIGIN;
+    const s = stripTrailingSlashOnce(String(raw || '').trim());
+    if (!s) return '';
+    if (!/^https?:\/\//i.test(s)) return '';
+    // Validate
+    // eslint-disable-next-line no-new
+    new URL(s);
+    return s;
+  } catch {
+    return '';
+  }
+}
+
+let didLogApiBase = false;
+function logApiBaseOnce(msg: any) {
+  if (!import.meta.env.DEV) return;
+  try {
+    const w: any = typeof window !== 'undefined' ? (window as any) : null;
+    if (w && w.__npApiBaseLogged) return;
+    if (w) w.__npApiBaseLogged = true;
+  } catch {
+    // ignore
+  }
+  if (didLogApiBase) return;
+  didLogApiBase = true;
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[api] base =', msg);
+  } catch {
+    // ignore
+  }
+}
 
 function looksLikeSpaHtml(body: string): boolean {
   const t = (body || '').toLowerCase();
@@ -158,6 +197,11 @@ function notifyBackendOfflineOnce() {
 export async function adminFetch(path: string, init: AdminFetchOptions = {}): Promise<Response> {
   const normalizedPath = adminApiPath(path);
 
+  // DEV-only: allow bypassing the Vite proxy by hitting the backend origin directly.
+  // This preserves the production contract (browser calls /admin-api/*), but lets local
+  // developers point to a backend running elsewhere.
+  const devBackendOrigin = import.meta.env.DEV ? resolveDevBackendOrigin() : '';
+
   const isPublicProxyEndpoint = (() => {
     try {
       const p = (normalizedPath || '').toString().toLowerCase();
@@ -175,13 +219,30 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/')
   );
 
-  const url = (
-    /^https?:\/\//i.test(normalizedPath)
-      ? normalizedPath
-      : forceSameOriginProxy
-        ? normalizedPath
-        : `${BASE}${normalizedPath}`
-  ).replace(/([^:]\/)\/+?/g, '$1');
+  const url = (() => {
+    if (/^https?:\/\//i.test(normalizedPath)) {
+      logApiBaseOnce({ mode: 'absolute', base: '(caller supplied absolute URL)' });
+      return normalizedPath;
+    }
+
+    // If dev backend origin is set and we're targeting the proxy prefix, map:
+    //   /admin-api/<path>  ->  <origin>/api/<path>
+    // This mirrors the Vite/Vercel rewrite behavior.
+    if (devBackendOrigin && (normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/'))) {
+      const mapped = normalizedPath.replace(/^\/admin-api/, '/api').replace(/^\/api\/api\//, '/api/');
+      logApiBaseOnce({ mode: 'dev-direct', base: devBackendOrigin, mappedPrefix: '/api' });
+      return `${devBackendOrigin}${mapped}`;
+    }
+
+    // Default: same-origin proxy path.
+    if (forceSameOriginProxy) {
+      logApiBaseOnce({ mode: 'proxy', base: '/admin-api' });
+      return normalizedPath;
+    }
+
+    logApiBaseOnce({ mode: 'internal', base: BASE || '(empty)' });
+    return `${BASE}${normalizedPath}`;
+  })().replace(/([^:]\/)\/+?/g, '$1');
 
   // Short-circuit repeated calls while we are actively logging out.
   const now0 = Date.now();
@@ -391,6 +452,18 @@ export async function adminJson<T = any>(path: string, init: AdminFetchOptions =
     return (text as any) as T;
   }
   return (await res.json()) as T;
+}
+
+export async function adminPost<T = any>(path: string, json?: unknown, init: AdminFetchOptions = {}): Promise<T> {
+  return adminJson<T>(path, { ...init, method: 'POST', json });
+}
+
+export async function adminPatch<T = any>(path: string, json?: unknown, init: AdminFetchOptions = {}): Promise<T> {
+  return adminJson<T>(path, { ...init, method: 'PATCH', json });
+}
+
+export async function adminDelete<T = any>(path: string, init: AdminFetchOptions = {}): Promise<T> {
+  return adminJson<T>(path, { ...init, method: 'DELETE' });
 }
 
 function normalizeAdminRest(path: string): string {

@@ -16,6 +16,7 @@ type Ctx = {
   dirty: boolean;
   patchDraft: (patch: Partial<PublicSiteSettings>) => void;
   resetDraftToPublished: () => void;
+  resetDraftRemoteToPublished: (auditAction?: string) => Promise<void>;
   saveDraftLocal: () => void;
   saveDraftRemote: (auditAction?: string) => Promise<void>;
   publish: (auditAction?: string) => Promise<void>;
@@ -112,6 +113,28 @@ export function PublicSiteSettingsDraftProvider({ children }: PropsWithChildren)
     }
   };
 
+  const resetDraftRemoteToPublished = async (auditAction = 'reset-public-site-settings-to-published') => {
+    if (!basePublished) return;
+    setStatus('saving');
+    setError(null);
+    try {
+      const normalized = normalizePublicSiteSettings(basePublished);
+      const nextDraft = await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(
+        normalized,
+        auditAction ? { action: auditAction } : undefined
+      );
+      setDraft(nextDraft);
+      try {
+        localStorage.removeItem(LOCAL_KEY);
+      } catch {}
+      setStatus('ready');
+    } catch (e: any) {
+      setStatus('error');
+      setError(e?.message || 'Reset failed');
+      throw e;
+    }
+  };
+
   const saveDraftLocal = () => {
     if (!draft) return;
     try {
@@ -175,11 +198,24 @@ export function PublicSiteSettingsDraftProvider({ children }: PropsWithChildren)
       dirty,
       patchDraft,
       resetDraftToPublished,
+      resetDraftRemoteToPublished,
       saveDraftLocal,
       saveDraftRemote,
       publish,
     };
-  }, [status, error, basePublished, draft, dirty]);
+  }, [
+    status,
+    error,
+    basePublished,
+    draft,
+    dirty,
+    patchDraft,
+    resetDraftToPublished,
+    resetDraftRemoteToPublished,
+    saveDraftLocal,
+    saveDraftRemote,
+    publish,
+  ]);
 
   return <PublicSiteSettingsDraftContext.Provider value={value}>{children}</PublicSiteSettingsDraftContext.Provider>;
 }

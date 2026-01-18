@@ -5,8 +5,10 @@ import type { SiteSettings } from '@/types/siteSettings';
 import StickySettingsBar from '@/components/settings/StickySettingsBar';
 import ScopeBadge from '@/components/settings/ScopeBadge';
 import TranslationHealthCard from '@/components/settings/TranslationHealthCard';
+import { translationUiEnabled } from '@/config/featureFlags';
 
 export default function SettingsHome() {
+  const showTranslationUi = translationUiEnabled();
   const [base, setBase] = useState<SiteSettings | null>(null);
   const [local, setLocal] = useState<SiteSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,7 +77,7 @@ export default function SettingsHome() {
 
   return (
     <div className="space-y-6">
-      <TranslationHealthCard />
+      {showTranslationUi ? <TranslationHealthCard /> : null}
 
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
