@@ -40,8 +40,6 @@ const Breadcrumbs = () => {
     "/community/reporter": "Community Reporter Queue",
     "/broadcast-center": "Broadcast Center",
     "/admin/broadcast-center": "Broadcast Center",
-    "/admin/glossary": "Glossary",
-    "/admin/translation-review": "Translation Review",
 
     // Settings Center – mode + section friendly labels
     "/admin/settings/admin-panel": "Admin Panel Settings",

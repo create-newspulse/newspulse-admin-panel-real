@@ -35,9 +35,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Founder-only: homepage broadcast controls
   { key:'broadcast-center', label:'Broadcast Center', path:'/admin/broadcast-center', roles:['founder'], icon:'📡' },
-  // Founder/Admin: glossary management
-  { key:'glossary', label:'Glossary', path:'/admin/glossary', roles:['admin','founder'], icon:'📚' },
-  { key:'translation-review', label:'Translation Review', path:'/admin/translation-review', roles:['admin','founder'], icon:'🧾' },
   // Owner Control Center (single link; module navigation handled inside the pages)
   { key:'soz', label:'Safe Owner Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
