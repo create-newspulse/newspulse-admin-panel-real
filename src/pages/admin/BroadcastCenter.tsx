@@ -223,7 +223,10 @@ function SectionCard(props: {
 
         {typeof props.speedSec === 'number' && typeof props.onSpeedChange === 'function' ? (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Ticker speed (seconds)</label>
+            <div>
+              <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Ticker speed (seconds)</label>
+              <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Speed = seconds per full scroll loop</div>
+            </div>
             <input
               type="number"
               min={1}
@@ -325,7 +328,9 @@ export default function BroadcastCenter() {
   const [settings, setSettings] = useState<BroadcastSettings | null>(null);
   const [initialSettings, setInitialSettings] = useState<string>('');
 
-  const [tickerSpeeds, setTickerSpeeds] = useState<TickerSpeeds>(() => normalizeSpeeds(null));
+  // Keep speeds as separate state vars to avoid accidental merging/overwrites.
+  const [breakingSpeedSeconds, setBreakingSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).breakingSpeedSec);
+  const [liveSpeedSeconds, setLiveSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).liveSpeedSec);
   const [initialSpeeds, setInitialSpeeds] = useState<string>('');
 
   const [breakingText, setBreakingText] = useState('');
@@ -344,8 +349,8 @@ export default function BroadcastCenter() {
   const dirty = useMemo(() => {
     if (!settings) return false;
     if (serializeSettings(settings) !== initialSettings) return true;
-    return JSON.stringify(tickerSpeeds) !== initialSpeeds;
-  }, [settings, initialSettings, tickerSpeeds, initialSpeeds]);
+    return JSON.stringify({ breakingSpeedSeconds, liveSpeedSeconds }) !== initialSpeeds;
+  }, [settings, initialSettings, breakingSpeedSeconds, liveSpeedSeconds, initialSpeeds]);
 
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
@@ -371,8 +376,9 @@ export default function BroadcastCenter() {
     setLiveItems(normalizeItems(liveRes as any));
 
     const speeds = normalizeSpeeds((site as any)?.tickers);
-    setTickerSpeeds(speeds);
-    setInitialSpeeds(JSON.stringify(speeds));
+    setBreakingSpeedSeconds(speeds.breakingSpeedSec);
+    setLiveSpeedSeconds(speeds.liveSpeedSec);
+    setInitialSpeeds(JSON.stringify({ breakingSpeedSeconds: speeds.breakingSpeedSec, liveSpeedSeconds: speeds.liveSpeedSec }));
   }, []);
 
   const refreshItems = useCallback(async () => {
@@ -446,32 +452,42 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
+      const breakingSpeedSec = Math.max(1, Math.min(60, Number(breakingSpeedSeconds) || 1));
+      const liveSpeedSec = Math.max(1, Math.min(60, Number(liveSpeedSeconds) || 1));
+
       const payload = {
         breaking: {
           enabled: !!settings.breakingEnabled,
           mode: settings.breakingMode,
-          speed: tickerSpeeds.breakingSpeedSec,
-          speedSec: tickerSpeeds.breakingSpeedSec,
+          // Prefer explicit seconds-per-loop keys (backend variants differ).
+          tickerSpeedSeconds: breakingSpeedSec,
+          tickerSpeedSec: breakingSpeedSec,
+          speedSeconds: breakingSpeedSec,
+          speed: breakingSpeedSec,
+          speedSec: breakingSpeedSec,
         },
         live: {
           enabled: !!settings.liveEnabled,
           mode: settings.liveMode,
-          speed: tickerSpeeds.liveSpeedSec,
-          speedSec: tickerSpeeds.liveSpeedSec,
+          tickerSpeedSeconds: liveSpeedSec,
+          tickerSpeedSec: liveSpeedSec,
+          speedSeconds: liveSpeedSec,
+          speed: liveSpeedSec,
+          speedSec: liveSpeedSec,
         },
         // Back-compat for servers still expecting the flat shape
         breakingEnabled: !!settings.breakingEnabled,
         breakingMode: settings.breakingMode,
         liveEnabled: !!settings.liveEnabled,
         liveMode: settings.liveMode,
-        breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
-        liveSpeedSec: tickerSpeeds.liveSpeedSec,
+        breakingSpeedSec,
+        liveSpeedSec,
+        // Some servers use *Seconds naming.
+        breakingSpeedSeconds: breakingSpeedSec,
+        liveSpeedSeconds: liveSpeedSec,
       };
 
-      const res = await apiSaveBroadcastConfig(payload);
-
-      const savedObj = unwrapObj(res);
-      const saved = unwrapObj((savedObj as any)?.settings ?? savedObj) as BroadcastSettings;
+      await apiSaveBroadcastConfig(payload);
 
       // Keep public-site ticker visibility/speeds in sync from ONE place.
       // The public site reads these from the Public Site Settings bundle.
@@ -479,8 +495,8 @@ export default function BroadcastCenter() {
       try {
         const publicPatch: any = {
           tickers: {
-            live: { enabled: !!saved.liveEnabled, speedSec: tickerSpeeds.liveSpeedSec },
-            breaking: { enabled: !!saved.breakingEnabled, speedSec: tickerSpeeds.breakingSpeedSec },
+            live: { enabled: !!settings.liveEnabled, speedSec: liveSpeedSec },
+            breaking: { enabled: !!settings.breakingEnabled, speedSec: breakingSpeedSec },
           },
         };
         const bundle = await publicSiteSettingsApi.getAdminPublicSiteSettingsBundle();
@@ -498,12 +514,12 @@ export default function BroadcastCenter() {
       try {
         const patch: Partial<SiteSettings> = {
           ui: {
-            showLiveUpdatesTicker: !!saved.liveEnabled,
-            showBreakingTicker: !!saved.breakingEnabled,
+            showLiveUpdatesTicker: !!settings.liveEnabled,
+            showBreakingTicker: !!settings.breakingEnabled,
           } as any,
           tickers: {
-            liveSpeedSec: tickerSpeeds.liveSpeedSec,
-            breakingSpeedSec: tickerSpeeds.breakingSpeedSec,
+            liveSpeedSec,
+            breakingSpeedSec,
           } as any,
         };
         await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
@@ -511,9 +527,15 @@ export default function BroadcastCenter() {
         notifyRef.current.err('Saved broadcast, but admin settings sync failed', apiErrorDetails(e, 'Admin settings error'));
       }
 
-      setSettings(saved);
-      setInitialSettings(serializeSettings(saved));
-      setInitialSpeeds(JSON.stringify(tickerSpeeds));
+      // IMPORTANT: re-fetch canonical config after save so UI reflects backend state
+      // and avoids any local merged/stale state.
+      try {
+        await loadAll();
+        setLastRefreshAt(new Date().toISOString());
+      } catch {
+        // Non-fatal: keep the UI responsive even if refresh fails.
+      }
+
       notifyRef.current.ok('Saved ✅');
     } catch (e: any) {
       try {
@@ -544,7 +566,7 @@ export default function BroadcastCenter() {
     } finally {
       setSaving(false);
     }
-  }, [saving, settings, tickerSpeeds]);
+  }, [saving, settings, breakingSpeedSeconds, liveSpeedSeconds, loadAll]);
 
   const addItem = useCallback(async (type: BroadcastType) => {
     const text = (type === 'breaking' ? breakingText : liveText).trim();
@@ -697,8 +719,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
-          speedSec={tickerSpeeds.breakingSpeedSec}
-          onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, breakingSpeedSec: next }))}
+          speedSec={breakingSpeedSeconds}
+          onSpeedChange={(next) => setBreakingSpeedSeconds(next)}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -723,8 +745,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
-          speedSec={tickerSpeeds.liveSpeedSec}
-          onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, liveSpeedSec: next }))}
+          speedSec={liveSpeedSeconds}
+          onSpeedChange={(next) => setLiveSpeedSeconds(next)}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}
