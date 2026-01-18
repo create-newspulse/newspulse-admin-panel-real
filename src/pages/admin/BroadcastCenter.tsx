@@ -57,6 +57,17 @@ function apiBodyText(e: unknown): string {
   }
 }
 
+function isMethodNotAllowed(e: unknown): boolean {
+  return e instanceof AdminApiError && e.status === 405;
+}
+
+function isHtmlMisrouteBody(e: unknown): boolean {
+  const s = apiBodyText(e);
+  if (!s) return false;
+  const t = s.trim().toLowerCase();
+  return t.startsWith('<!doctype html') || t.startsWith('<html') || t.includes('<head') || t.includes('<body');
+}
+
 function apiMessage(e: unknown, fallback = 'API error'): string {
   if (e instanceof AdminApiError) return e.message || fallback;
   const anyErr: any = e as any;
@@ -67,6 +78,12 @@ function apiErrorDetails(e: unknown, fallback = 'API error'): string {
   const status = apiStatusText(e);
   const msg = apiMessage(e, fallback);
   const bodyText = apiBodyText(e);
+
+  // Special-case: Vercel/Vite rewrite misroute serving the SPA HTML.
+  if (isHtmlMisrouteBody(e)) {
+    return 'API rewrite misrouted (Vercel served app HTML). Check vercel rewrites for /admin-api/*';
+  }
+
   const head = `${status ? `${status}: ` : ''}${msg}`;
   return bodyText ? `${head} • ${bodyText}` : head;
 }
@@ -592,6 +609,10 @@ export default function BroadcastCenter() {
       }
       if (isNotFound(e)) {
         notifyRef.current.err('Add failed', 'Backend route missing, deploy backend update');
+        return;
+      }
+      if (isMethodNotAllowed(e)) {
+        notifyRef.current.err('Add failed', 'Backend route missing or method not allowed (POST). Check backend /broadcast/items POST route.');
         return;
       }
       notifyRef.current.err('Add failed', apiErrorDetails(e, 'API error'));

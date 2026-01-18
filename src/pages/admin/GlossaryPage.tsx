@@ -17,6 +17,9 @@ type CsvRow = {
   hi?: string;
   gu?: string;
   doNotTranslate?: boolean;
+  preferredEn?: string;
+  preferredHi?: string;
+  preferredGu?: string;
 };
 
 function cleanKey(input: string) {
@@ -40,7 +43,7 @@ function escapeCsvCell(input: unknown) {
 }
 
 function toCsv(rows: CsvRow[]) {
-  const header = ['key', 'en', 'hi', 'gu', 'doNotTranslate'];
+  const header = ['key', 'en', 'hi', 'gu', 'doNotTranslate', 'preferred_en', 'preferred_hi', 'preferred_gu'];
   const lines = [header.join(',')];
   for (const r of rows) {
     lines.push([
@@ -49,6 +52,9 @@ function toCsv(rows: CsvRow[]) {
       escapeCsvCell(r.hi || ''),
       escapeCsvCell(r.gu || ''),
       escapeCsvCell(r.doNotTranslate ? 'true' : 'false'),
+      escapeCsvCell(r.preferredEn || ''),
+      escapeCsvCell(r.preferredHi || ''),
+      escapeCsvCell(r.preferredGu || ''),
     ].join(','));
   }
   return lines.join('\n');
@@ -173,7 +179,9 @@ function applyGlossaryReplacements(input: string, entries: GlossaryEntry[], targ
   const candidates = (entries || [])
     .map((e) => {
       const from = String(e.en || '').trim();
-      const to = String((e as any)[targetLang] || '').trim();
+      const preferred = String(e.preferredTerms?.[targetLang] || '').trim();
+      const fallback = String((e as any)[targetLang] || '').trim();
+      const to = preferred || fallback;
       return { key: e.key, from, to, doNotTranslate: !!e.doNotTranslate };
     })
     .filter((c) => c.from && c.to && !c.doNotTranslate);
@@ -282,6 +290,40 @@ function GlossaryModal(props: {
               />
             </div>
           </div>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">Preferred Terms (optional)</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">If set, translation should prefer these terms for each language.</div>
+            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Preferred en</label>
+                <input
+                  value={v.preferredTerms?.en || ''}
+                  onChange={(e) => props.onChange({ ...v, preferredTerms: { ...(v.preferredTerms || {}), en: e.target.value } })}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  placeholder="Optional preferred English term"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Preferred hi</label>
+                <input
+                  value={v.preferredTerms?.hi || ''}
+                  onChange={(e) => props.onChange({ ...v, preferredTerms: { ...(v.preferredTerms || {}), hi: e.target.value } })}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  placeholder="Optional preferred Hindi term"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Preferred gu</label>
+                <input
+                  value={v.preferredTerms?.gu || ''}
+                  onChange={(e) => props.onChange({ ...v, preferredTerms: { ...(v.preferredTerms || {}), gu: e.target.value } })}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  placeholder="Optional preferred Gujarati term"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2">
@@ -315,11 +357,12 @@ export default function GlossaryPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState('');
+  const [dntFilter, setDntFilter] = useState<'all' | 'dnt' | 'translatable'>('all');
   const [items, setItems] = useState<GlossaryEntry[]>([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [draft, setDraft] = useState<GlossaryEntry>({ key: '', en: '', hi: '', gu: '', doNotTranslate: false });
+  const [draft, setDraft] = useState<GlossaryEntry>({ key: '', en: '', hi: '', gu: '', preferredTerms: {}, doNotTranslate: false });
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -338,12 +381,25 @@ export default function GlossaryPage() {
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return items;
-    return items.filter((it) => {
-      const hay = [it.key, it.en, it.hi, it.gu].map((x) => String(x || '').toLowerCase()).join('\n');
+    const filtered = items.filter((it) => {
+      if (dntFilter === 'dnt') return !!it.doNotTranslate;
+      if (dntFilter === 'translatable') return !it.doNotTranslate;
+      return true;
+    });
+    if (!needle) return filtered;
+    return filtered.filter((it) => {
+      const hay = [
+        it.key,
+        it.en,
+        it.hi,
+        it.gu,
+        it.preferredTerms?.en,
+        it.preferredTerms?.hi,
+        it.preferredTerms?.gu,
+      ].map((x) => String(x || '').toLowerCase()).join('\n');
       return hay.includes(needle);
     });
-  }, [items, q]);
+  }, [dntFilter, items, q]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -374,7 +430,7 @@ export default function GlossaryPage() {
 
   const openCreate = () => {
     setModalMode('create');
-    setDraft({ key: '', en: '', hi: '', gu: '', doNotTranslate: false });
+    setDraft({ key: '', en: '', hi: '', gu: '', preferredTerms: {}, doNotTranslate: false });
     setModalError(null);
     setModalOpen(true);
   };
@@ -389,7 +445,7 @@ export default function GlossaryPage() {
   const validateDraft = (): string | null => {
     const key = cleanKey(draft.key);
     if (!key) return 'Key is required.';
-    if (!hasAnyTranslation(draft)) return 'At least one translation (en/hi/gu) is required.';
+    if (!draft.doNotTranslate && !hasAnyTranslation(draft)) return 'At least one translation (en/hi/gu) is required (unless Do Not Translate is enabled).';
     return null;
   };
 
@@ -403,12 +459,16 @@ export default function GlossaryPage() {
     setSaving(true);
     setModalError(null);
     try {
+      const preferredEn = cleanText(draft.preferredTerms?.en || '') || undefined;
+      const preferredHi = cleanText(draft.preferredTerms?.hi || '') || undefined;
+      const preferredGu = cleanText(draft.preferredTerms?.gu || '') || undefined;
       const payload: GlossaryEntry = {
         ...draft,
         key: cleanKey(draft.key),
         en: cleanText(draft.en || ''),
         hi: cleanText(draft.hi || ''),
         gu: cleanText(draft.gu || ''),
+        preferredTerms: preferredEn || preferredHi || preferredGu ? { en: preferredEn, hi: preferredHi, gu: preferredGu } : undefined,
         doNotTranslate: !!draft.doNotTranslate,
       };
 
@@ -451,7 +511,19 @@ export default function GlossaryPage() {
   const langCells = (it: GlossaryEntry, lang: Lang) => {
     const val = (it as any)[lang];
     const s = String(val || '').trim();
-    return s ? s : <span className="text-slate-400">—</span>;
+    const preferred = String(it.preferredTerms?.[lang] || '').trim();
+
+    if (!s && !preferred) return <span className="text-slate-400">—</span>;
+    return (
+      <div className="space-y-1">
+        {s ? <div>{s}</div> : null}
+        {preferred ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Preferred: <span className="text-slate-700 dark:text-slate-200">{preferred}</span>
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   const onPickCsv = async (file: File | null) => {
@@ -472,7 +544,7 @@ export default function GlossaryPage() {
       const idx = (name: string) => header.indexOf(name);
       const keyIdx = idx('key');
       if (keyIdx < 0) {
-        setImportError('CSV header must include: key,en,hi,gu,doNotTranslate');
+        setImportError('CSV header must include: key (and optionally en,hi,gu,doNotTranslate,preferred_en,preferred_hi,preferred_gu)');
         return;
       }
 
@@ -488,7 +560,20 @@ export default function GlossaryPage() {
         const dntRaw = String(r[idx('donottranslate')] ?? r[idx('do_not_translate')] ?? r[idx('noTranslate')] ?? '').trim().toLowerCase();
         const doNotTranslate = dntRaw === 'true' || dntRaw === '1' || dntRaw === 'yes' || dntRaw === 'y';
 
-        out.push({ key, en: en || undefined, hi: hi || undefined, gu: gu || undefined, doNotTranslate });
+        const preferredEn = cleanText(r[idx('preferred_en')] ?? r[idx('preferreden')] ?? r[idx('preferred.en')] ?? '');
+        const preferredHi = cleanText(r[idx('preferred_hi')] ?? r[idx('preferredhi')] ?? r[idx('preferred.hi')] ?? '');
+        const preferredGu = cleanText(r[idx('preferred_gu')] ?? r[idx('preferredgu')] ?? r[idx('preferred.gu')] ?? '');
+
+        out.push({
+          key,
+          en: en || undefined,
+          hi: hi || undefined,
+          gu: gu || undefined,
+          doNotTranslate,
+          preferredEn: preferredEn || undefined,
+          preferredHi: preferredHi || undefined,
+          preferredGu: preferredGu || undefined,
+        });
       }
 
       if (out.length === 0) {
@@ -538,10 +623,13 @@ export default function GlossaryPage() {
             en: row.en,
             hi: row.hi,
             gu: row.gu,
+            preferredTerms: (row.preferredEn || row.preferredHi || row.preferredGu)
+              ? { en: row.preferredEn, hi: row.preferredHi, gu: row.preferredGu }
+              : undefined,
             doNotTranslate: !!row.doNotTranslate,
           };
 
-          if (!hasAnyTranslation(payload)) { skipped++; continue; }
+          if (!payload.doNotTranslate && !hasAnyTranslation(payload)) { skipped++; continue; }
 
           const existing = byKey.get(key);
           if (existing) {
@@ -571,6 +659,9 @@ export default function GlossaryPage() {
       hi: it.hi,
       gu: it.gu,
       doNotTranslate: !!it.doNotTranslate,
+      preferredEn: it.preferredTerms?.en,
+      preferredHi: it.preferredTerms?.hi,
+      preferredGu: it.preferredTerms?.gu,
     }));
     const csv = toCsv(rows);
     const stamp = new Date().toISOString().slice(0, 10);
@@ -611,12 +702,24 @@ export default function GlossaryPage() {
       </header>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by key or translation…"
-          className="w-full sm:max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 w-full">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by key, translation, preferred term…"
+            className="w-full sm:max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+          />
+          <select
+            value={dntFilter}
+            onChange={(e) => setDntFilter(e.target.value as any)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+            title="Filter by Do-Not-Translate flag"
+          >
+            <option value="all">All</option>
+            <option value="dnt">Do Not Translate</option>
+            <option value="translatable">Translatable</option>
+          </select>
+        </div>
         <div className="text-xs text-slate-500 dark:text-slate-400">Showing {visible.length} of {items.length}</div>
       </div>
 
@@ -709,7 +812,7 @@ export default function GlossaryPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="font-semibold text-slate-900 dark:text-slate-100">CSV Import / Export</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">Header: key,en,hi,gu,doNotTranslate</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">Header: key,en,hi,gu,doNotTranslate,preferred_en,preferred_hi,preferred_gu</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button

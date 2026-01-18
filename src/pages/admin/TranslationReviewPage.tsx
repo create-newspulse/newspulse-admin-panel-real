@@ -4,8 +4,10 @@ import { useAuth } from '@context/AuthContext';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import {
   approveTranslationOverride,
+  approveTranslationJob,
   getTranslationJob,
   listTranslationJobs,
+  rejectTranslationJob,
   retryTranslationJob,
   topReasonChips,
   translationJobKey,
@@ -29,8 +31,11 @@ function clampText(s: string, max = 120) {
 function badgeClasses(status: string) {
   const s = String(status || '').toUpperCase();
   if (s === 'APPROVED') return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-200 dark:border-green-800/40';
-  if (s === 'BLOCKED') return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-200 dark:border-red-800/40';
-  if (s === 'PROCESSING') return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-200 dark:border-yellow-800/40';
+  if (s === 'READY') return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800/40';
+  if (s === 'REVIEW_REQUIRED') return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800/40';
+  if (s === 'BLOCKED' || s === 'REJECTED') return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-200 dark:border-red-800/40';
+  if (s === 'QUEUED') return 'bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/20 dark:text-sky-200 dark:border-sky-800/40';
+  if (s === 'RUNNING' || s === 'PROCESSING') return 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-200 dark:border-yellow-800/40';
   return 'bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-900/40 dark:text-slate-200 dark:border-slate-700';
 }
 
@@ -112,7 +117,9 @@ function JobDetailsModal(props: {
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   const { user } = useAuth();
-  const isFounder = String(user?.role || '').toLowerCase() === 'founder';
+  const role = String(user?.role || '').toLowerCase();
+  const isFounder = role === 'founder';
+  const canDecide = role === 'founder' || role === 'admin' || role === 'owner';
 
   const [loading, setLoading] = useState(false);
   const [job, setJob] = useState<TranslationJob | null>(null);
@@ -121,6 +128,8 @@ function JobDetailsModal(props: {
   const [saving, setSaving] = useState(false);
   const [confirmRetryOpen, setConfirmRetryOpen] = useState(false);
   const [confirmApproveOpen, setConfirmApproveOpen] = useState(false);
+  const [confirmApproveJobOpen, setConfirmApproveJobOpen] = useState(false);
+  const [confirmRejectJobOpen, setConfirmRejectJobOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!props.open) return;
@@ -195,6 +204,40 @@ function JobDetailsModal(props: {
     }
   };
 
+  const approveAsIs = async () => {
+    const id = String(props.jobId || '').trim();
+    if (!id) return;
+    setConfirmApproveJobOpen(false);
+    setSaving(true);
+    try {
+      await approveTranslationJob(id, { notes: String(notes || '').trim() || undefined });
+      notifyRef.current.ok('Approved ✅');
+      props.onDidMutate();
+      await load();
+    } catch (e: any) {
+      notifyRef.current.err('Approve failed', apiErrText(e, 'Approve failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rejectJob = async () => {
+    const id = String(props.jobId || '').trim();
+    if (!id) return;
+    setConfirmRejectJobOpen(false);
+    setSaving(true);
+    try {
+      await rejectTranslationJob(id, { notes: String(notes || '').trim() || undefined });
+      notifyRef.current.ok('Rejected ✅');
+      props.onDidMutate();
+      await load();
+    } catch (e: any) {
+      notifyRef.current.err('Reject failed', apiErrText(e, 'Reject failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!props.open) return null;
 
   return (
@@ -246,6 +289,16 @@ function JobDetailsModal(props: {
             </div>
 
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">Diff (source ↔ translated)</div>
+              <div className="p-3">
+                <DiffPreview a={String(job.sourceText || '')} b={String(job.generatedText || '')} aLabel="Source" bLabel="Translated" />
+              </div>
+              <div className="px-3 pb-3 text-xs text-slate-500 dark:text-slate-400">
+                Note: cross-language diffs are best-effort and can look noisy.
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
               <div className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">Reasons</div>
               <div className="p-3 flex flex-wrap gap-2">
                 {(job.reasons || []).length === 0 ? (
@@ -268,52 +321,80 @@ function JobDetailsModal(props: {
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {job.entityType ? `${job.entityType}` : 'Entity'}{job.entityId ? ` • ${job.entityId}` : ''}{job.headline ? ` • ${clampText(job.headline, 80)}` : ''}
               </div>
-              <button
-                type="button"
-                className="text-sm px-3 py-2 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
-                onClick={() => setConfirmRetryOpen(true)}
-                disabled={saving}
-              >
-                Retry
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="text-sm px-3 py-2 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+                  onClick={() => setConfirmRetryOpen(true)}
+                  disabled={saving}
+                >
+                  Retry
+                </button>
+                {canDecide ? (
+                  <>
+                    <button
+                      type="button"
+                      className="text-sm px-3 py-2 rounded border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800/40 dark:bg-slate-950 dark:text-red-200 dark:hover:bg-red-900/10"
+                      onClick={() => setConfirmRejectJobOpen(true)}
+                      disabled={saving}
+                    >
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                      onClick={() => setConfirmApproveJobOpen(true)}
+                      disabled={saving}
+                    >
+                      Approve as-is
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">Founder Override</div>
+              <div className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">Notes (optional)</div>
+              <div className="p-3">
+                <input
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  placeholder="Optional notes for audit log / review history…"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="px-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">Edit Translation</div>
               <div className="p-3 space-y-2">
-                {!isFounder ? (
-                  <div className="text-sm text-slate-600 dark:text-slate-300">Founder-only. Switch to founder to approve an override.</div>
+                {!canDecide ? (
+                  <div className="text-sm text-slate-600 dark:text-slate-300">You don’t have permission to approve/edit/reject this job.</div>
                 ) : (
                   <>
                     <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
-                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Diff (generated → override)</div>
-                      <DiffPreview a={String(job.generatedText || '')} b={String(activeText || '')} />
+                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Diff (generated → edited)</div>
+                      <DiffPreview a={String(job.generatedText || '')} b={String(activeText || '')} aLabel="Generated" bLabel="Edited" />
                     </div>
                     <textarea
                       rows={6}
                       value={activeText}
                       onChange={(e) => setActiveText(e.target.value)}
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                      placeholder="Enter the final translation text…"
+                      placeholder="Edit the final translation text…"
                     />
-                    <input
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                      placeholder="Optional notes for audit log…"
-                    />
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {isFounder ? 'Founder override uses /override endpoint.' : 'If backend restricts overrides to Founder, this may fail.'}
+                      </div>
                       <button
                         type="button"
                         className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
                         onClick={() => setConfirmApproveOpen(true)}
                         disabled={saving}
                       >
-                        Approve override
+                        Approve edited
                       </button>
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      Approving an override should write an audit record and update Translation Memory as APPROVED (backend).
                     </div>
                   </>
                 )}
@@ -333,11 +414,29 @@ function JobDetailsModal(props: {
 
         <ConfirmModal
           open={confirmApproveOpen}
-          title="Approve founder override?"
-          description="This will approve the edited translation and record an audit log entry."
+          title="Approve edited translation?"
+          description="This will approve the edited translation (override) and record an audit entry (backend)."
           confirmLabel="Approve"
           onConfirm={() => { void approveOverride(); }}
           onCancel={() => setConfirmApproveOpen(false)}
+        />
+
+        <ConfirmModal
+          open={confirmApproveJobOpen}
+          title="Approve translation as-is?"
+          description="This will approve the generated translation without edits."
+          confirmLabel="Approve"
+          onConfirm={() => { void approveAsIs(); }}
+          onCancel={() => setConfirmApproveJobOpen(false)}
+        />
+
+        <ConfirmModal
+          open={confirmRejectJobOpen}
+          title="Reject translation?"
+          description="This will mark the job as rejected/blocked and keep it out of READY."
+          confirmLabel="Reject"
+          onConfirm={() => { void rejectJob(); }}
+          onCancel={() => setConfirmRejectJobOpen(false)}
         />
       </div>
     </div>
@@ -415,7 +514,7 @@ export default function TranslationReviewPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">🧾 Translation Review</h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Review blocked/processing/approved translations and apply founder overrides.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Filter by status, review diffs, and approve/edit/reject translations.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -463,9 +562,13 @@ export default function TranslationReviewPage() {
             onChange={(e) => setStatus(e.target.value as any)}
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
           >
+            <option value="QUEUED">QUEUED</option>
+            <option value="RUNNING">RUNNING</option>
+            <option value="READY">READY</option>
+            <option value="REVIEW_REQUIRED">REVIEW_REQUIRED</option>
             <option value="BLOCKED">BLOCKED</option>
-            <option value="PROCESSING">PROCESSING</option>
             <option value="APPROVED">APPROVED</option>
+            <option value="REJECTED">REJECTED</option>
             <option value="ALL">ALL</option>
           </select>
 

@@ -102,10 +102,23 @@ export async function listItemsByLang(type: BroadcastType, lang: string): Promis
 }
 
 export async function addItem(type: BroadcastType, text: string): Promise<BroadcastItem | null> {
-  const raw = await requestJson<any>('/items', {
-    method: 'POST',
-    json: { type, text },
-  });
+  let raw: any;
+  try {
+    raw = await requestJson<any>('/items', {
+      method: 'POST',
+      json: { type, text },
+    });
+  } catch (e: any) {
+    // Back-compat: some backends expect the type in query params and only accept text in the body.
+    if (e instanceof AdminApiError && e.status === 405) {
+      raw = await requestJson<any>(`/items?type=${encodeURIComponent(type)}`, {
+        method: 'POST',
+        json: { type, text },
+      });
+    } else {
+      throw e;
+    }
+  }
 
   const candidate = (() => {
     const r: any = raw as any;
@@ -121,10 +134,25 @@ export async function addItem(type: BroadcastType, text: string): Promise<Broadc
 }
 
 export async function addItemByLang(type: BroadcastType, text: string, lang: string): Promise<BroadcastItem | null> {
-  const raw = await requestJson<any>('/items', {
-    method: 'POST',
-    json: { type, text, lang: String(lang || '').trim() || 'en' },
-  });
+  const safeLang = String(lang || '').trim() || 'en';
+  let raw: any;
+  try {
+    raw = await requestJson<any>('/items', {
+      method: 'POST',
+      json: { type, text, lang: safeLang },
+    });
+  } catch (e: any) {
+    // Back-compat: some backends route by query instead of body.
+    if (e instanceof AdminApiError && e.status === 405) {
+      const qs = new URLSearchParams({ type: String(type), lang: safeLang });
+      raw = await requestJson<any>(`/items?${qs.toString()}`, {
+        method: 'POST',
+        json: { type, text, lang: safeLang },
+      });
+    } else {
+      throw e;
+    }
+  }
 
   const candidate = (() => {
     const r: any = raw as any;

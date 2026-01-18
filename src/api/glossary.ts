@@ -7,6 +7,11 @@ export type GlossaryEntry = {
   en?: string;
   hi?: string;
   gu?: string;
+  preferredTerms?: {
+    en?: string;
+    hi?: string;
+    gu?: string;
+  };
   doNotTranslate?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -15,6 +20,16 @@ export type GlossaryEntry = {
 function normalizeEntry(raw: any): GlossaryEntry {
   const id = raw?.id ?? raw?._id;
   const _id = raw?._id ?? raw?.id;
+
+  const preferredRaw = raw?.preferredTerms ?? raw?.preferred ?? raw?.preferredByLang ?? raw?.preferred_terms;
+  const preferredTerms = preferredRaw && typeof preferredRaw === 'object'
+    ? {
+      en: typeof preferredRaw?.en === 'string' ? preferredRaw.en : undefined,
+      hi: typeof preferredRaw?.hi === 'string' ? preferredRaw.hi : undefined,
+      gu: typeof preferredRaw?.gu === 'string' ? preferredRaw.gu : undefined,
+    }
+    : undefined;
+
   return {
     ...raw,
     id: id ? String(id) : undefined,
@@ -23,6 +38,7 @@ function normalizeEntry(raw: any): GlossaryEntry {
     en: typeof raw?.en === 'string' ? raw.en : (typeof raw?.translations?.en === 'string' ? raw.translations.en : undefined),
     hi: typeof raw?.hi === 'string' ? raw.hi : (typeof raw?.translations?.hi === 'string' ? raw.translations.hi : undefined),
     gu: typeof raw?.gu === 'string' ? raw.gu : (typeof raw?.translations?.gu === 'string' ? raw.translations.gu : undefined),
+    preferredTerms,
     doNotTranslate: !!(raw?.doNotTranslate ?? raw?.do_not_translate ?? raw?.noTranslate),
   };
 }
@@ -59,7 +75,17 @@ export async function createGlossary(entry: Omit<GlossaryEntry, 'id' | '_id'>): 
 export async function updateGlossary(entry: GlossaryEntry): Promise<GlossaryEntry> {
   const idOrKey = entryIdOrKey(entry);
   const raw = await adminJson<any>(`/admin/glossary/${encodeURIComponent(idOrKey)}`,
-    { method: 'PUT', json: { key: entry.key, en: entry.en, hi: entry.hi, gu: entry.gu, doNotTranslate: !!entry.doNotTranslate } }
+    {
+      method: 'PUT',
+      json: {
+        key: entry.key,
+        en: entry.en,
+        hi: entry.hi,
+        gu: entry.gu,
+        preferredTerms: entry.preferredTerms,
+        doNotTranslate: !!entry.doNotTranslate,
+      },
+    }
   );
   return normalizeEntry(raw?.item ?? raw?.data ?? raw);
 }

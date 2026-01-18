@@ -1,6 +1,14 @@
 import { adminJson } from '@/lib/http/adminFetch';
 
-export type TranslationJobStatus = 'BLOCKED' | 'PROCESSING' | 'APPROVED' | string;
+export type TranslationJobStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'READY'
+  | 'REVIEW_REQUIRED'
+  | 'BLOCKED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | string;
 
 export type TranslationReason = {
   code?: string;
@@ -127,6 +135,16 @@ export async function getTranslationJob(id: string, opts?: { signal?: AbortSigna
 export async function retryTranslationJob(id: string): Promise<any> {
   const safe = encodeURIComponent(String(id || '').trim());
   return adminJson<any>(`/admin/translation/jobs/${safe}/retry`, { method: 'POST' });
+}
+
+export async function approveTranslationJob(id: string, payload?: { notes?: string }): Promise<any> {
+  const safe = encodeURIComponent(String(id || '').trim());
+  return adminJson<any>(`/admin/translation/jobs/${safe}/approve`, { method: 'POST', json: payload || undefined });
+}
+
+export async function rejectTranslationJob(id: string, payload?: { notes?: string; reason?: string }): Promise<any> {
+  const safe = encodeURIComponent(String(id || '').trim());
+  return adminJson<any>(`/admin/translation/jobs/${safe}/reject`, { method: 'POST', json: payload || undefined });
 }
 
 export type TranslationOverridePayload = {
