@@ -178,6 +178,37 @@ function clampDurationSeconds(v: unknown, fallback: number) {
   return Math.max(10, Math.min(40, Math.round(base)));
 }
 
+function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | undefined {
+  try {
+    const def = kind === 'breaking' ? 18 : 24;
+
+    const nested = input?.[kind];
+    const nestedValue =
+      nested?.tickerDurationSeconds ??
+      nested?.tickerDurationSec ??
+      nested?.tickerSpeedSeconds ??
+      nested?.tickerSpeedSec ??
+      nested?.speedSeconds ??
+      nested?.speedSec ??
+      nested?.durationSeconds ??
+      nested?.durationSec;
+
+    const flatValue =
+      input?.[`${kind}TickerDurationSeconds`] ??
+      input?.[`${kind}TickerDurationSec`] ??
+      input?.[`${kind}SpeedSeconds`] ??
+      input?.[`${kind}SpeedSec`] ??
+      input?.[`${kind}DurationSeconds`] ??
+      input?.[`${kind}DurationSec`];
+
+    const candidate = typeof nestedValue !== 'undefined' ? nestedValue : flatValue;
+    if (typeof candidate === 'undefined') return undefined;
+    return clampDurationSeconds(candidate, def);
+  } catch {
+    return undefined;
+  }
+}
+
 function PresetsRow(props: {
   value: number;
   onChange: (next: number) => void;
@@ -254,6 +285,7 @@ function SectionCard(props: {
   onModeChange: (next: 'manual' | 'auto') => void;
   durationSec?: number;
   onDurationChange?: (next: number) => void;
+  defaultDurationSec?: number;
   inputValue: string;
   onInputChange: (next: string) => void;
   onAdd: () => void;
@@ -326,6 +358,16 @@ function SectionCard(props: {
                     {clampDurationSeconds(props.durationSec, 24)}
                   </div>
                 </div>
+
+                {typeof props.defaultDurationSec === 'number' ? (
+                  <button
+                    type="button"
+                    className="self-end text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+                    onClick={() => props.onDurationChange?.(clampDurationSeconds(props.defaultDurationSec, 24))}
+                  >
+                    Reset
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -470,10 +512,18 @@ export default function BroadcastCenter() {
     setBreakingItems(normalizeItems(breakingRes as any));
     setLiveItems(normalizeItems(liveRes as any));
 
-    const speeds = normalizeSpeeds((site as any)?.tickers);
-    setBreakingSpeedSeconds(speeds.breakingSpeedSec);
-    setLiveSpeedSeconds(speeds.liveSpeedSec);
-    setInitialSpeeds(JSON.stringify({ breakingSpeedSeconds: speeds.breakingSpeedSec, liveSpeedSeconds: speeds.liveSpeedSec }));
+    // Prefer canonical durations from the broadcast config response (so it cannot be overwritten
+    // by stale settings snapshots), then fall back to settings tickers.
+    const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
+    const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
+
+    const fallbackSpeeds = normalizeSpeeds((site as any)?.tickers);
+    const breakingDur = typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : fallbackSpeeds.breakingSpeedSec;
+    const liveDur = typeof fromBroadcastLive === 'number' ? fromBroadcastLive : fallbackSpeeds.liveSpeedSec;
+
+    setBreakingSpeedSeconds(breakingDur);
+    setLiveSpeedSeconds(liveDur);
+    setInitialSpeeds(JSON.stringify({ breakingSpeedSeconds: breakingDur, liveSpeedSeconds: liveDur }));
   }, []);
 
   const refreshItems = useCallback(async () => {
@@ -555,36 +605,27 @@ export default function BroadcastCenter() {
           enabled: !!settings.breakingEnabled,
           mode: settings.breakingMode,
           tickerDurationSeconds: breakingDurationSeconds,
-          // Prefer explicit seconds-per-loop keys (backend variants differ).
-          tickerSpeedSeconds: breakingDurationSeconds,
-          tickerSpeedSec: breakingDurationSeconds,
-          speedSeconds: breakingDurationSeconds,
-          speed: breakingDurationSeconds,
-          speedSec: breakingDurationSeconds,
         },
         live: {
           enabled: !!settings.liveEnabled,
           mode: settings.liveMode,
           tickerDurationSeconds: liveDurationSeconds,
-          tickerSpeedSeconds: liveDurationSeconds,
-          tickerSpeedSec: liveDurationSeconds,
-          speedSeconds: liveDurationSeconds,
-          speed: liveDurationSeconds,
-          speedSec: liveDurationSeconds,
         },
         // Back-compat for servers still expecting the flat shape
         breakingEnabled: !!settings.breakingEnabled,
         breakingMode: settings.breakingMode,
         liveEnabled: !!settings.liveEnabled,
         liveMode: settings.liveMode,
-        breakingSpeedSec: breakingDurationSeconds,
-        liveSpeedSec: liveDurationSeconds,
-        // Some servers use *Seconds naming.
-        breakingSpeedSeconds: breakingDurationSeconds,
-        liveSpeedSeconds: liveDurationSeconds,
+        // Minimal flat mirrors (avoid conflicting duplicates)
+        breakingTickerDurationSeconds: breakingDurationSeconds,
+        liveTickerDurationSeconds: liveDurationSeconds,
       };
 
       await apiSaveBroadcastConfig(payload);
+
+      // Ensure UI state reflects the clamped values immediately.
+      setBreakingSpeedSeconds(breakingDurationSeconds);
+      setLiveSpeedSeconds(liveDurationSeconds);
 
       // Keep public-site ticker visibility/speeds in sync from ONE place.
       // The public site reads these from the Public Site Settings bundle.
@@ -818,6 +859,7 @@ export default function BroadcastCenter() {
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
           durationSec={breakingSpeedSeconds}
           onDurationChange={(next) => setBreakingSpeedSeconds(clampDurationSeconds(next, 18))}
+          defaultDurationSec={18}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -844,6 +886,7 @@ export default function BroadcastCenter() {
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
           durationSec={liveSpeedSeconds}
           onDurationChange={(next) => setLiveSpeedSeconds(clampDurationSeconds(next, 24))}
+          defaultDurationSec={24}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}
