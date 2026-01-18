@@ -133,13 +133,20 @@ export async function addItem(type: BroadcastType, text: string): Promise<Broadc
   return candidate ? normalizeItem(candidate) : null;
 }
 
-export async function addItemByLang(type: BroadcastType, text: string, lang: string): Promise<BroadcastItem | null> {
+export async function addItemByLang(
+  type: BroadcastType,
+  text: string,
+  lang: string,
+  opts: { autoTranslate?: boolean } = {}
+): Promise<BroadcastItem | null> {
   const safeLang = String(lang || '').trim() || 'en';
+  const extra = typeof opts.autoTranslate === 'boolean' ? { autoTranslate: opts.autoTranslate } : {};
+
   let raw: any;
   try {
     raw = await requestJson<any>('/items', {
       method: 'POST',
-      json: { type, text, lang: safeLang },
+      json: { type, text, lang: safeLang, ...extra },
     });
   } catch (e: any) {
     // Back-compat: some backends route by query instead of body.
@@ -147,7 +154,7 @@ export async function addItemByLang(type: BroadcastType, text: string, lang: str
       const qs = new URLSearchParams({ type: String(type), lang: safeLang });
       raw = await requestJson<any>(`/items?${qs.toString()}`, {
         method: 'POST',
-        json: { type, text, lang: safeLang },
+        json: { type, text, lang: safeLang, ...extra },
       });
     } else {
       throw e;

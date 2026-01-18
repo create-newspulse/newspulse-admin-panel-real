@@ -7,11 +7,9 @@ import {
 } from '@/lib/broadcastApi';
 import { AdminApiError } from '@/lib/http/adminFetch';
 import {
-  addItem as apiAddBroadcastItem,
   addItemByLang as apiAddBroadcastItemByLang,
   deleteItem as apiDeleteBroadcastItem,
   getBroadcastConfig as apiGetBroadcastConfig,
-  listItems as apiListBroadcastItems,
   listItemsByLang as apiListBroadcastItemsByLang,
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
@@ -168,10 +166,6 @@ function SectionCard(props: {
   onModeChange: (next: 'manual' | 'auto') => void;
   speedSec?: number;
   onSpeedChange?: (next: number) => void;
-  inputValue: string;
-  onInputChange: (next: string) => void;
-  onAdd: () => void;
-  addDisabled: boolean;
   items: BroadcastItem[];
   workingIdMap: Record<string, boolean>;
   onDelete: (item: BroadcastItem) => void;
@@ -249,24 +243,6 @@ function SectionCard(props: {
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            value={props.inputValue}
-            onChange={(e) => props.onInputChange(e.target.value)}
-            maxLength={160}
-            placeholder="Add story (max 160 chars)"
-            className="w-full flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-          />
-          <button
-            type="button"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            disabled={props.addDisabled}
-            onClick={props.onAdd}
-          >
-            Add
-          </button>
-        </div>
-
         <div className="rounded-xl border border-slate-200 dark:border-slate-700">
           {itemsSorted.length === 0 ? (
             <div className="p-4 text-sm text-slate-600 dark:text-slate-300">No recent stories found</div>
@@ -335,6 +311,8 @@ export default function BroadcastCenter() {
   const notifyRef = useRef(notify);
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
+  const fixedLang: 'gu' = 'gu';
+
   const didInitialLoad = useRef(false);
   const refreshInFlight = useRef(false);
 
@@ -349,10 +327,8 @@ export default function BroadcastCenter() {
   const [tickerSpeeds, setTickerSpeeds] = useState<TickerSpeeds>(() => normalizeSpeeds(null));
   const [initialSpeeds, setInitialSpeeds] = useState<string>('');
 
-  const [breakingText, setBreakingText] = useState('');
-  const [liveText, setLiveText] = useState('');
-
-  const [selectedLang, setSelectedLang] = useState<'en' | 'hi' | 'gu'>('en');
+  const [newText, setNewText] = useState('');
+  const [autoTranslate, setAutoTranslate] = useState(true);
 
   const [breakingItems, setBreakingItems] = useState<BroadcastItem[]>([]);
   const [liveItems, setLiveItems] = useState<BroadcastItem[]>([]);
@@ -380,8 +356,8 @@ export default function BroadcastCenter() {
   const loadAll = useCallback(async (signal?: AbortSignal) => {
     const [broadcastRes, breakingRes, liveRes, site] = await Promise.all([
       apiGetBroadcastConfig(),
-      apiListBroadcastItemsByLang('breaking', selectedLang),
-      apiListBroadcastItemsByLang('live', selectedLang),
+      apiListBroadcastItemsByLang('breaking', fixedLang),
+      apiListBroadcastItemsByLang('live', fixedLang),
       adminSettingsApi.getSettings() as Promise<SiteSettings>,
     ]);
 
@@ -396,7 +372,7 @@ export default function BroadcastCenter() {
     const speeds = normalizeSpeeds((site as any)?.tickers);
     setTickerSpeeds(speeds);
     setInitialSpeeds(JSON.stringify(speeds));
-  }, [selectedLang]);
+  }, [fixedLang]);
 
   const refreshItemsForLang = useCallback(async () => {
     const controller = new AbortController();
@@ -404,8 +380,8 @@ export default function BroadcastCenter() {
     const t = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const [breakingRes, liveRes] = await Promise.all([
-        apiListBroadcastItemsByLang('breaking', selectedLang),
-        apiListBroadcastItemsByLang('live', selectedLang),
+        apiListBroadcastItemsByLang('breaking', fixedLang),
+        apiListBroadcastItemsByLang('live', fixedLang),
       ]);
       setBreakingItems(normalizeItems(breakingRes as any));
       setLiveItems(normalizeItems(liveRes as any));
@@ -416,7 +392,7 @@ export default function BroadcastCenter() {
     } finally {
       window.clearTimeout(t);
     }
-  }, [selectedLang]);
+  }, [fixedLang]);
 
   const refreshAll = useCallback(async () => {
     if (refreshInFlight.current) return;
@@ -457,13 +433,7 @@ export default function BroadcastCenter() {
     };
   }, [refreshAll]);
 
-  useEffect(() => {
-    // When switching languages, only refresh items (settings are global).
-    if (!didInitialLoad.current) return;
-    setSelectedBreaking({});
-    setSelectedLive({});
-    refreshItemsForLang().catch(() => null);
-  }, [selectedLang, refreshItemsForLang]);
+  // Language is fixed (Gujarati). Keep a dedicated refresh helper for manual refresh + after mutations.
 
   const saveSettings = useCallback(async () => {
     if (!settings || saving) return;
@@ -566,7 +536,7 @@ export default function BroadcastCenter() {
   }, [saving, settings, tickerSpeeds]);
 
   const addItem = useCallback(async (type: BroadcastType) => {
-    const text = (type === 'breaking' ? breakingText : liveText).trim();
+    const text = newText.trim();
     if (!text) {
       notifyRef.current.err('Cannot add empty story');
       return;
@@ -577,13 +547,12 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdItem = await apiAddBroadcastItemByLang(type, text, selectedLang);
-      if (type === 'breaking') setBreakingText('');
-      else setLiveText('');
+      const createdItem = await apiAddBroadcastItemByLang(type, text, fixedLang, { autoTranslate });
+      setNewText('');
 
       // Always refresh the list after add for canonical state.
       // (Some backends don't return the created item.)
-      const items = await apiListBroadcastItemsByLang(type, selectedLang);
+      const items = await apiListBroadcastItemsByLang(type, fixedLang);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
 
@@ -619,7 +588,7 @@ export default function BroadcastCenter() {
     } finally {
       setAddingType(null);
     }
-  }, [breakingText, liveText, selectedLang]);
+  }, [newText, fixedLang, autoTranslate]);
 
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
@@ -635,7 +604,7 @@ export default function BroadcastCenter() {
       if (type === 'breaking') setBreakingItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
       else setLiveItems((prev) => prev.filter((it: any) => (it?._id ?? it?.id) !== id));
 
-      const items = await apiListBroadcastItemsByLang(type, selectedLang);
+  const items = await apiListBroadcastItemsByLang(type, fixedLang);
       if (type === 'breaking') setBreakingItems(items);
       else setLiveItems(items);
     } catch (e: any) {
@@ -665,7 +634,7 @@ export default function BroadcastCenter() {
     } finally {
       setWorking(id, false);
     }
-  }, [setWorking, selectedLang]);
+  }, [setWorking, fixedLang]);
 
   return (
     <div className="space-y-6">
@@ -676,18 +645,6 @@ export default function BroadcastCenter() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <select
-            value={selectedLang}
-            onChange={(e) => setSelectedLang(e.target.value as any)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
-            aria-label="Language"
-            title="Language"
-          >
-            <option value="en">English (en)</option>
-            <option value="hi">Hindi (hi)</option>
-            <option value="gu">Gujarati (gu)</option>
-          </select>
-
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
@@ -713,20 +670,56 @@ export default function BroadcastCenter() {
         <div className="text-xs text-slate-500 dark:text-slate-400">Last refreshed {formatLocalTime(lastRefreshAt)}</div>
       ) : null}
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            value={newText}
+            onChange={(e) => setNewText(e.target.value)}
+            maxLength={160}
+            placeholder="Add Gujarati story (max 160 chars)"
+            className="w-full flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+          />
+
+          <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-white">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={autoTranslate}
+              onChange={(e) => setAutoTranslate(e.target.checked)}
+            />
+            Auto Translate ON
+          </label>
+
+          <button
+            type="button"
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+            disabled={loading || addingType === 'breaking' || !newText.trim()}
+            onClick={() => addItem('breaking')}
+          >
+            {addingType === 'breaking' ? 'Adding…' : 'Add Breaking'}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+            disabled={loading || addingType === 'live' || !newText.trim()}
+            onClick={() => addItem('live')}
+          >
+            {addingType === 'live' ? 'Adding…' : 'Add Live'}
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">Language: Gujarati (gu)</div>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           title="🔥 Breaking"
-          lang={selectedLang}
+          lang={fixedLang}
           enabled={!!settings?.breakingEnabled}
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
           speedSec={tickerSpeeds.breakingSpeedSec}
           onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, breakingSpeedSec: next }))}
-          inputValue={breakingText}
-          onInputChange={setBreakingText}
-          addDisabled={loading || addingType === 'breaking'}
-          onAdd={() => addItem('breaking')}
           items={breakingItems}
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('breaking', item)}
@@ -743,17 +736,13 @@ export default function BroadcastCenter() {
 
         <SectionCard
           title="🔵 Live Updates"
-          lang={selectedLang}
+          lang={fixedLang}
           enabled={!!settings?.liveEnabled}
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
           speedSec={tickerSpeeds.liveSpeedSec}
           onSpeedChange={(next) => setTickerSpeeds((prev) => ({ ...prev, liveSpeedSec: next }))}
-          inputValue={liveText}
-          onInputChange={setLiveText}
-          addDisabled={loading || addingType === 'live'}
-          onAdd={() => addItem('live')}
           items={liveItems}
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('live', item)}
