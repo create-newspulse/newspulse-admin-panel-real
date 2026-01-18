@@ -162,12 +162,88 @@ type TickerSpeeds = {
 };
 
 function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
-  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 8;
-  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 6;
+  // Defaults (requested): Breaking 18s, Live 24s
+  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 24;
+  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 18;
   return {
-    liveSpeedSec: Math.max(1, Math.min(60, Number(live) || 8)),
-    breakingSpeedSec: Math.max(1, Math.min(60, Number(breaking) || 6)),
+    // UI contract (requested): clamp 10..40
+    liveSpeedSec: Math.max(10, Math.min(40, Number(live) || 24)),
+    breakingSpeedSec: Math.max(10, Math.min(40, Number(breaking) || 18)),
   };
+}
+
+function clampDurationSeconds(v: unknown, fallback: number) {
+  const n = Number(v);
+  const base = Number.isFinite(n) ? n : fallback;
+  return Math.max(10, Math.min(40, Math.round(base)));
+}
+
+function PresetsRow(props: {
+  value: number;
+  onChange: (next: number) => void;
+  disabled?: boolean;
+  presets?: Array<{ key: string; label: string; value: number }>;
+}) {
+  const presets = props.presets || [
+    { key: 'fast', label: 'Fast', value: 16 },
+    { key: 'normal', label: 'Normal', value: 24 },
+    { key: 'slow', label: 'Slow', value: 34 },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {presets.map((p) => {
+        const active = props.value === p.value;
+        return (
+          <button
+            key={p.key}
+            type="button"
+            disabled={props.disabled}
+            onClick={() => props.onChange(p.value)}
+            className={
+              'rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ' +
+              (active
+                ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
+                : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800')
+            }
+          >
+            {p.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TickerPreview(props: { durationSec: number; sampleText?: string }) {
+  const duration = clampDurationSeconds(props.durationSec, 24);
+  const text = props.sampleText || 'Sample headline scrolling for preview — edit duration to change speed.';
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Live preview</div>
+        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{duration}s</div>
+      </div>
+      <div className="relative h-8 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <div
+          className="absolute left-0 top-1/2 -translate-y-1/2 whitespace-nowrap px-4 text-sm font-semibold text-slate-900 dark:text-white"
+          style={{
+            animationName: 'npTickerScroll',
+            animationDuration: `${duration}s`,
+            animationTimingFunction: 'linear',
+            animationIterationCount: 'infinite',
+          }}
+        >
+          {text}
+        </div>
+      </div>
+      <style>{`
+        @keyframes npTickerScroll {
+          0% { transform: translate(100%, -50%); }
+          100% { transform: translate(-120%, -50%); }
+        }
+      `}</style>
+    </div>
+  );
 }
 
 function SectionCard(props: {
@@ -176,8 +252,8 @@ function SectionCard(props: {
   onEnabledChange: (next: boolean) => void;
   mode: 'manual' | 'auto';
   onModeChange: (next: 'manual' | 'auto') => void;
-  speedSec?: number;
-  onSpeedChange?: (next: number) => void;
+  durationSec?: number;
+  onDurationChange?: (next: number) => void;
   inputValue: string;
   onInputChange: (next: string) => void;
   onAdd: () => void;
@@ -221,20 +297,39 @@ function SectionCard(props: {
           </select>
         </div>
 
-        {typeof props.speedSec === 'number' && typeof props.onSpeedChange === 'function' ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Ticker speed (seconds)</label>
-              <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Speed = seconds per full scroll loop</div>
+        {typeof props.durationSec === 'number' && typeof props.onDurationChange === 'function' ? (
+          <div className="space-y-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <label className="text-sm font-semibold text-slate-800 dark:text-slate-200">Scroll duration (seconds)</label>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Higher = slower = more readable</div>
+              </div>
+
+              <div className="flex flex-col items-stretch gap-2 sm:w-72">
+                <PresetsRow
+                  value={clampDurationSeconds(props.durationSec, 24)}
+                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, 24))}
+                />
+
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={10}
+                    max={40}
+                    step={1}
+                    value={clampDurationSeconds(props.durationSec, 24)}
+                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 24))}
+                    className="w-full"
+                    aria-label="Scroll duration"
+                  />
+                  <div className="w-12 text-right text-sm font-semibold text-slate-900 dark:text-white">
+                    {clampDurationSeconds(props.durationSec, 24)}
+                  </div>
+                </div>
+              </div>
             </div>
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={props.speedSec}
-              onChange={(e) => props.onSpeedChange?.(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-72"
-            />
+
+            <TickerPreview durationSec={props.durationSec} />
           </div>
         ) : null}
 
@@ -452,39 +547,41 @@ export default function BroadcastCenter() {
     if (!settings || saving) return;
     setSaving(true);
     try {
-      const breakingSpeedSec = Math.max(1, Math.min(60, Number(breakingSpeedSeconds) || 1));
-      const liveSpeedSec = Math.max(1, Math.min(60, Number(liveSpeedSeconds) || 1));
+      const breakingDurationSeconds = clampDurationSeconds(breakingSpeedSeconds, 18);
+      const liveDurationSeconds = clampDurationSeconds(liveSpeedSeconds, 24);
 
       const payload = {
         breaking: {
           enabled: !!settings.breakingEnabled,
           mode: settings.breakingMode,
+          tickerDurationSeconds: breakingDurationSeconds,
           // Prefer explicit seconds-per-loop keys (backend variants differ).
-          tickerSpeedSeconds: breakingSpeedSec,
-          tickerSpeedSec: breakingSpeedSec,
-          speedSeconds: breakingSpeedSec,
-          speed: breakingSpeedSec,
-          speedSec: breakingSpeedSec,
+          tickerSpeedSeconds: breakingDurationSeconds,
+          tickerSpeedSec: breakingDurationSeconds,
+          speedSeconds: breakingDurationSeconds,
+          speed: breakingDurationSeconds,
+          speedSec: breakingDurationSeconds,
         },
         live: {
           enabled: !!settings.liveEnabled,
           mode: settings.liveMode,
-          tickerSpeedSeconds: liveSpeedSec,
-          tickerSpeedSec: liveSpeedSec,
-          speedSeconds: liveSpeedSec,
-          speed: liveSpeedSec,
-          speedSec: liveSpeedSec,
+          tickerDurationSeconds: liveDurationSeconds,
+          tickerSpeedSeconds: liveDurationSeconds,
+          tickerSpeedSec: liveDurationSeconds,
+          speedSeconds: liveDurationSeconds,
+          speed: liveDurationSeconds,
+          speedSec: liveDurationSeconds,
         },
         // Back-compat for servers still expecting the flat shape
         breakingEnabled: !!settings.breakingEnabled,
         breakingMode: settings.breakingMode,
         liveEnabled: !!settings.liveEnabled,
         liveMode: settings.liveMode,
-        breakingSpeedSec,
-        liveSpeedSec,
+        breakingSpeedSec: breakingDurationSeconds,
+        liveSpeedSec: liveDurationSeconds,
         // Some servers use *Seconds naming.
-        breakingSpeedSeconds: breakingSpeedSec,
-        liveSpeedSeconds: liveSpeedSec,
+        breakingSpeedSeconds: breakingDurationSeconds,
+        liveSpeedSeconds: liveDurationSeconds,
       };
 
       await apiSaveBroadcastConfig(payload);
@@ -495,8 +592,8 @@ export default function BroadcastCenter() {
       try {
         const publicPatch: any = {
           tickers: {
-            live: { enabled: !!settings.liveEnabled, speedSec: liveSpeedSec },
-            breaking: { enabled: !!settings.breakingEnabled, speedSec: breakingSpeedSec },
+            live: { enabled: !!settings.liveEnabled, speedSec: liveDurationSeconds },
+            breaking: { enabled: !!settings.breakingEnabled, speedSec: breakingDurationSeconds },
           },
         };
         const bundle = await publicSiteSettingsApi.getAdminPublicSiteSettingsBundle();
@@ -518,8 +615,8 @@ export default function BroadcastCenter() {
             showBreakingTicker: !!settings.breakingEnabled,
           } as any,
           tickers: {
-            liveSpeedSec,
-            breakingSpeedSec,
+            liveSpeedSec: liveDurationSeconds,
+            breakingSpeedSec: breakingDurationSeconds,
           } as any,
         };
         await adminSettingsApi.putSettings(patch, { action: 'broadcast-center:update-tickers' });
@@ -719,8 +816,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev))}
           mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
-          speedSec={breakingSpeedSeconds}
-          onSpeedChange={(next) => setBreakingSpeedSeconds(next)}
+          durationSec={breakingSpeedSeconds}
+          onDurationChange={(next) => setBreakingSpeedSeconds(clampDurationSeconds(next, 18))}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -745,8 +842,8 @@ export default function BroadcastCenter() {
           onEnabledChange={(next) => setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev))}
           mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
           onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
-          speedSec={liveSpeedSeconds}
-          onSpeedChange={(next) => setLiveSpeedSeconds(next)}
+          durationSec={liveSpeedSeconds}
+          onDurationChange={(next) => setLiveSpeedSeconds(clampDurationSeconds(next, 24))}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}
