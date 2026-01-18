@@ -34,23 +34,19 @@ function isLocalOrigin(input: string): boolean {
 // Repo contract: use an optional origin prefix only; never auto-default to a production URL.
 // Requests are made as: fetch(`${BASE}${path}`)
 const BASE = (() => {
-  const raw = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
-  // Repo contract (per admin-proxy architecture): browser should only call same-origin '/admin-api/*'.
-  // Ignore absolute origins even in dev; use Vite proxy (VITE_PROXY_TARGET) instead.
-  if (/^https?:\/\//i.test(raw)) {
-    if (import.meta.env.DEV) {
-      try { console.warn('[adminFetch] Ignoring absolute VITE_ADMIN_API_BASE; use /admin-api + Vite proxy instead:', raw); } catch {}
-    }
-    return '';
-  }
-  // In production builds, NEVER allow an absolute backend origin.
-  // All browser calls must go through the same-origin proxy: '/admin-api/*'.
-  // (Vercel rewrites /admin-api to the serverless proxy, which then talks to the real backend.)
-  if (!import.meta.env.DEV && /^https?:\/\//i.test(raw)) return '';
+  // Preferred naming (documented in .env.example):
+  // - VITE_ADMIN_API_ORIGIN=https://backend.example.com (no trailing /api)
+  // Back-compat:
+  // - VITE_ADMIN_API_BASE may be either '/admin-api' (proxy) or an absolute origin
+  const raw = stripTrailingSlashes(
+    (
+      (import.meta.env.VITE_ADMIN_API_ORIGIN || import.meta.env.VITE_ADMIN_API_BASE || '')
+    ).toString().trim()
+  );
+
   // Safety: never allow production builds to call a localhost backend.
-  // If someone accidentally sets VITE_ADMIN_API_BASE=http://localhost:5000 in Vercel,
-  // it would break Save/Add and show misleading offline errors.
   if (!import.meta.env.DEV && isLocalOrigin(raw)) return '';
+
   return raw;
 })();
 const ADMIN_API_ORIGIN = stripTrailingSlashes(BASE);
@@ -59,13 +55,8 @@ const BASE_IS_ABSOLUTE_ORIGIN = /^https?:\/\//i.test(BASE);
 function normalizeAdminApiBase(input: string): string {
   const s = stripTrailingSlashes((input || '').toString().trim());
   if (!s) return '/admin-api';
-  // Enforce proxy-only semantics in all builds (dev uses Vite proxy).
-  if (/^https?:\/\//i.test(s)) {
-    if (import.meta.env.DEV) {
-      try { console.warn('[adminFetch] Ignoring absolute admin base; forcing /admin-api:', s); } catch {}
-    }
-    return '/admin-api';
-  }
+  // Allow absolute origins for direct-mode deployments.
+  if (/^https?:\/\//i.test(s)) return s;
   // Otherwise treat it as a root-relative path.
   return s.startsWith('/') ? s : `/${s}`;
 }
@@ -75,6 +66,19 @@ const RAW_ADMIN_BASE = (import.meta.env.VITE_ADMIN_API_URL || '').toString().tri
 export const ADMIN_API_BASE = normalizeAdminApiBase(
   RAW_ADMIN_BASE || (ADMIN_API_ORIGIN ? `${ADMIN_API_ORIGIN}` : '/admin-api')
 );
+
+function directOriginRoot(originOrBase: string): string {
+  const base = stripTrailingSlashes(originOrBase);
+  const lower = base.toLowerCase();
+  if (lower.endsWith('/api/admin')) return base.slice(0, -('/api/admin'.length));
+  if (lower.endsWith('/api')) return base.slice(0, -('/api'.length));
+  return base;
+}
+
+function directApiRoot(originOrBase: string): string {
+  const root = stripTrailingSlashes(directOriginRoot(originOrBase));
+  return root ? `${root}/api` : '';
+}
 
 export class AdminApiError extends Error {
   status: number;
@@ -174,7 +178,8 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   // In production, always treat '/admin-api/*' as a SAME-ORIGIN proxy call.
   // This prevents accidental cross-origin calls (e.g., to Render) when an env var sets
   // an absolute backend base and the browser blocks POST/PUT/DELETE preflights.
-  const forceSameOriginProxy = typeof normalizedPath === 'string' && (
+  const proxyMode = ADMIN_API_BASE.startsWith('/');
+  const forceSameOriginProxy = proxyMode && typeof normalizedPath === 'string' && (
     normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/')
   );
 
@@ -395,21 +400,35 @@ function adminApiPath(path: string): string {
   // Example: '/admin-api/admin/settings/public'
   const raw = (path ?? '').toString().trim();
 
-  // If caller already provided a proxy-style path, keep it.
-  // Production support: when BASE is set, prefix it so requests become `${BASE}${path}`.
-  if (
-    raw.startsWith('/admin-api/') ||
-    raw === '/admin-api' ||
-    raw.startsWith('/api/') ||
-    raw === '/api'
-  ) {
-    return raw.replace(/\/\/+/, '/');
-  }
   // If caller provided an absolute URL, do not rewrite it.
   if (/^https?:\/\//i.test(raw)) return raw;
 
-  const rest = normalizeAdminRest(path);
   const base = stripTrailingSlashes(ADMIN_API_BASE);
+  const isAbsoluteBase = /^https?:\/\//i.test(base);
+
+  // Direct mode: translate proxy-style paths to the real backend /api/*.
+  // Example: '/admin-api/admin/me' -> 'https://backend.tld/api/admin/me'
+  if (isAbsoluteBase && (raw === '/admin-api' || raw.startsWith('/admin-api/'))) {
+    const apiRoot = directApiRoot(base) || base;
+    const rest = raw === '/admin-api' ? '' : raw.slice('/admin-api/'.length);
+    const joined = rest ? `${apiRoot}/${rest}` : `${apiRoot}`;
+    return joined.replace(/([^:]\/)\/+?/g, '$1');
+  }
+
+  // Direct mode: if someone passes a raw '/api/*' path, prefix it with the backend origin.
+  // This avoids double '/api/api' when the configured base already includes '/api'.
+  if (isAbsoluteBase && (raw === '/api' || raw.startsWith('/api/'))) {
+    const originRoot = directOriginRoot(base);
+    const joined = `${originRoot}${raw}`;
+    return joined.replace(/([^:]\/)\/+?/g, '$1');
+  }
+
+  // Proxy mode: if caller already provided a proxy-style path, keep it.
+  if (base.startsWith('/') && (raw.startsWith('/admin-api/') || raw === '/admin-api' || raw.startsWith('/api/') || raw === '/api')) {
+    return raw.replace(/\/\/+/, '/');
+  }
+
+  const rest = normalizeAdminRest(path);
 
   // Proxy/same-origin mode: allow a relative base like '/admin-api'
   // In this mode the browser calls:
