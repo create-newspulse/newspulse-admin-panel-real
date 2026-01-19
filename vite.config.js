@@ -23,15 +23,7 @@ export default defineConfig(({ mode }) => {
     // IMPORTANT (repo requirement): local admin must NEVER call production backend.
     // In development we hard-pin API proxies to the local admin backend.
     const LOCAL_BACKEND = 'http://localhost:5000';
-    // Primary dev contract: browser calls '/admin-api/*' and Vite proxies to backend origin.
-    // Support all common env names used across this repo/scripts.
-    const DEV_PROXY_ENV = stripSlash(
-        env.VITE_PROXY_TARGET
-            || env.VITE_DEV_PROXY_TARGET
-            || env.VITE_ADMIN_API_TARGET
-            || env.VITE_BACKEND_ORIGIN
-            || ''
-    );
+    const DEV_PROXY_ENV = stripSlash(env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
     const DEV_PROXY_TARGET = mode === 'development' ? (DEV_PROXY_ENV || LOCAL_BACKEND) : undefined;
     // Never hardcode a production backend here.
     // If you need a remote backend for `vite preview`, set ADMIN_BACKEND_URL explicitly.
@@ -44,7 +36,7 @@ export default defineConfig(({ mode }) => {
     // - Example (local):   VITE_BACKEND_ORIGIN=http://localhost:5000
     // - Example (remote):  VITE_BACKEND_ORIGIN=https://newspulse-backend-real.onrender.com
     // No trailing '/api'.
-    const rawOrigin = stripSlash(env.VITE_BACKEND_ORIGIN || env.VITE_ADMIN_API_TARGET || '');
+    const rawOrigin = stripSlash(env.VITE_BACKEND_ORIGIN || '');
     // Default dev backend: local backend only.
     const devDefaultOrigin = LOCAL_BACKEND;
     let originSource = 'VITE_BACKEND_ORIGIN';

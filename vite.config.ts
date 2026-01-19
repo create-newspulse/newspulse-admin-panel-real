@@ -101,7 +101,7 @@ export default defineConfig(({ mode }): UserConfig => {
   // DEV proxy target (where Vite forwards /admin-api/* and /api/*).
   // Preferred env var: VITE_PROXY_TARGET
   // Back-compat: VITE_DEV_PROXY_TARGET
-  const DEV_PROXY_ENV = stripSlash(env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || env.VITE_ADMIN_API_TARGET || env.VITE_BACKEND_ORIGIN || '');
+  const DEV_PROXY_ENV = stripSlash(env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
   // Default dev proxy to local backend so no calls ever drift to production origins.
   const DEV_PROXY_TARGET = mode === 'development'
     ? (DEV_PROXY_ENV || LOCAL_BACKEND)
