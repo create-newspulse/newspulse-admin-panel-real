@@ -344,7 +344,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   }
 
   // CRITICAL: If /admin-api rewrites are missing/misconfigured, Vercel may return the SPA HTML.
-  // Detect it and throw a clear error instead of letting callers try to JSON.parse HTML.
+  // Prefer an auto-fallback to /api/admin-proxy/* (doesn't require rewrites) before throwing.
   try {
     if (typeof normalizedPath === 'string' && (normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/'))) {
       const ctype = (res.headers.get('content-type') || '').toLowerCase();
@@ -352,6 +352,25 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
         const preview = await res.clone().text().catch(() => '');
         const snippet = (preview || '').slice(0, 4000);
         if (looksLikeSpaHtml(snippet)) {
+          const fallbackPath = normalizedPath.replace(/^\/admin-api/, '/api/admin-proxy');
+          try {
+            // eslint-disable-next-line no-console
+            console.warn('[adminFetch] /admin-api misrouted to SPA HTML; retrying via', fallbackPath);
+          } catch {}
+
+          // Retry once via the serverless function path (works even when rewrites are missing).
+          try {
+            const fallbackRes = await fetch(fallbackPath, {
+              ...init,
+              headers,
+              body,
+              credentials: init.credentials ?? (isAbsoluteUrl ? (token ? 'omit' : 'include') : 'include'),
+            });
+            return fallbackRes;
+          } catch {
+            // fall through to throwing the clearer error
+          }
+
           throw new AdminApiError(HTML_MISROUTE_TOAST, {
             status: res.status || 200,
             url,
