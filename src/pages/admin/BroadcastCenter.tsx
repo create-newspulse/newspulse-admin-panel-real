@@ -226,7 +226,7 @@ function PresetsRow(props: {
 }) {
   const presets = props.presets || [
     { key: 'fast', label: 'Fast', value: 12 },
-    { key: 'normal', label: 'Normal', value: 20 },
+    { key: 'normal', label: 'Normal', value: 18 },
     { key: 'slow', label: 'Slow', value: 30 },
   ];
   return (
@@ -238,7 +238,12 @@ function PresetsRow(props: {
             key={p.key}
             type="button"
             disabled={props.disabled}
-            onClick={() => props.onChange(p.value)}
+            onClick={() => {
+              try {
+                if (import.meta.env.DEV) console.log('[BroadcastCenter] preset', p.key, p.value);
+              } catch {}
+              props.onChange(p.value);
+            }}
             className={
               'rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ' +
               (active
@@ -273,6 +278,8 @@ function SectionCard(props: {
   onDelete: (item: BroadcastItem) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
+  const durationFallback = typeof props.defaultDurationSec === 'number' ? props.defaultDurationSec : 12;
+  const duration = clampDurationSeconds(props.durationSec, durationFallback);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
@@ -316,8 +323,8 @@ function SectionCard(props: {
 
               <div className="flex flex-col items-stretch gap-2 sm:w-72">
                 <PresetsRow
-                  value={clampDurationSeconds(props.durationSec, 20)}
-                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, 20))}
+                  value={duration}
+                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, durationFallback))}
                 />
 
                 <div className="flex items-center gap-3">
@@ -326,13 +333,13 @@ function SectionCard(props: {
                     min={12}
                     max={30}
                     step={1}
-                    value={clampDurationSeconds(props.durationSec, 12)}
-                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 12))}
+                    value={duration}
+                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, durationFallback))}
                     className="w-full"
                     aria-label="Scroll duration"
                   />
                   <div className="w-12 text-right text-sm font-semibold text-slate-900 dark:text-white">
-                    {clampDurationSeconds(props.durationSec, 12)}
+                    {duration}
                   </div>
                 </div>
 
@@ -354,7 +361,7 @@ function SectionCard(props: {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Live preview</div>
-                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{clampDurationSeconds(props.durationSec, 12)}s</div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{duration}s</div>
               </div>
               <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
                 <style>{`@keyframes np-marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-120%); } }`}</style>
@@ -363,7 +370,7 @@ function SectionCard(props: {
                     display: 'inline-block',
                     whiteSpace: 'nowrap',
                     willChange: 'transform',
-                    animation: `np-marquee ${Math.max(6, clampDurationSeconds(props.durationSec, 12))}s linear infinite`,
+                    animation: `np-marquee ${Math.max(6, duration)}s linear infinite`,
                   }}
                 >
                   line scrolling for preview — edit duration to change speed.
@@ -527,6 +534,11 @@ export default function BroadcastCenter() {
         breakingMode: nextSettings.breakingMode,
         liveEnabled: !!nextSettings.liveEnabled,
         liveMode: nextSettings.liveMode,
+        // Explicit scroll-duration keys (requested / common variants)
+        breakingScrollDurationSec: breakingDurationSeconds,
+        breakingScrollDurationSeconds: breakingDurationSeconds,
+        liveScrollDurationSec: liveDurationSeconds,
+        liveScrollDurationSeconds: liveDurationSeconds,
         // Preferred terminology
         breakingDurationSec: breakingDurationSeconds,
         liveDurationSec: liveDurationSeconds,
@@ -536,16 +548,27 @@ export default function BroadcastCenter() {
         // Back-compat keys
         breakingTickerDurationSeconds: breakingDurationSeconds,
         liveTickerDurationSeconds: liveDurationSeconds,
+        // Include items with config save (requested). Backends that don't support it will ignore.
+        breakingItems,
+        liveItems,
+        items: {
+          breaking: breakingItems,
+          live: liveItems,
+        },
         // Nested form (merge-safe on backends that expect per-ticker configs)
         breaking: {
           enabled: !!nextSettings.breakingEnabled,
           mode: nextSettings.breakingMode,
           durationSec: breakingDurationSeconds,
+          scrollDurationSec: breakingDurationSeconds,
+          items: breakingItems,
         },
         live: {
           enabled: !!nextSettings.liveEnabled,
           mode: nextSettings.liveMode,
           durationSec: liveDurationSeconds,
+          scrollDurationSec: liveDurationSeconds,
+          items: liveItems,
         },
       };
 
