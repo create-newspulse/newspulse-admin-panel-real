@@ -87,7 +87,7 @@ export async function getBroadcastConfig(): Promise<any> {
 }
 
 export async function saveBroadcastConfig(payload: any): Promise<any> {
-  return requestJson<any>('', { method: 'PUT', json: payload });
+  return requestJson<any>('', { method: 'PATCH', json: payload });
 }
 
 export async function listItems(type: BroadcastType): Promise<BroadcastItem[]> {

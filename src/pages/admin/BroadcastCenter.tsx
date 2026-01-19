@@ -94,6 +94,32 @@ function apiErrorDetails(e: unknown, fallback = 'API error'): string {
   return bodyText ? `${head} • ${bodyText}` : head;
 }
 
+function pickEnabledFlag(raw: any, kind: 'breaking' | 'live'): boolean {
+  try {
+    const flat = raw?.[`${kind}Enabled`];
+    if (typeof flat === 'boolean') return flat;
+    const nested = raw?.[kind]?.enabled;
+    if (typeof nested === 'boolean') return nested;
+    const nestedAlt = raw?.[kind]?.isEnabled;
+    if (typeof nestedAlt === 'boolean') return nestedAlt;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function pickModeFlag(raw: any, kind: 'breaking' | 'live'): 'manual' | 'auto' {
+  try {
+    const flat = raw?.[`${kind}Mode`];
+    if (flat === 'auto' || flat === 'manual') return flat;
+    const nested = raw?.[kind]?.mode;
+    if (nested === 'auto' || nested === 'manual') return nested;
+    return 'manual';
+  } catch {
+    return 'manual';
+  }
+}
+
 function isNetworkError(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 0;
 }
@@ -193,6 +219,8 @@ function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | un
 
     const nested = input?.[kind];
     const nestedValue =
+      nested?.scrollDurationSeconds ??
+      nested?.scrollDurationSec ??
       nested?.tickerDurationSeconds ??
       nested?.tickerDurationSec ??
       nested?.tickerSpeedSeconds ??
@@ -203,6 +231,8 @@ function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | un
       nested?.durationSec;
 
     const flatValue =
+      input?.[`${kind}ScrollDurationSeconds`] ??
+      input?.[`${kind}ScrollDurationSec`] ??
       input?.[`${kind}TickerDurationSeconds`] ??
       input?.[`${kind}TickerDurationSec`] ??
       input?.[`${kind}SpeedSeconds`] ??
@@ -226,8 +256,8 @@ function PresetsRow(props: {
 }) {
   const presets = props.presets || [
     { key: 'fast', label: 'Fast', value: 12 },
-    { key: 'normal', label: 'Normal', value: 20 },
-    { key: 'slow', label: 'Slow', value: 30 },
+    { key: 'normal', label: 'Normal', value: 18 },
+    { key: 'slow', label: 'Slow', value: 26 },
   ];
   return (
     <div className="flex flex-wrap gap-2">
@@ -238,7 +268,12 @@ function PresetsRow(props: {
             key={p.key}
             type="button"
             disabled={props.disabled}
-            onClick={() => props.onChange(p.value)}
+            onClick={() => {
+              try {
+                if (import.meta.env.DEV) console.log('[BroadcastCenter] preset', p.key, p.value);
+              } catch {}
+              props.onChange(p.value);
+            }}
             className={
               'rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ' +
               (active
@@ -273,6 +308,8 @@ function SectionCard(props: {
   onDelete: (item: BroadcastItem) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
+  const durationFallback = typeof props.defaultDurationSec === 'number' ? props.defaultDurationSec : 12;
+  const duration = clampDurationSeconds(props.durationSec, durationFallback);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
@@ -316,8 +353,8 @@ function SectionCard(props: {
 
               <div className="flex flex-col items-stretch gap-2 sm:w-72">
                 <PresetsRow
-                  value={clampDurationSeconds(props.durationSec, 20)}
-                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, 20))}
+                  value={duration}
+                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, durationFallback))}
                 />
 
                 <div className="flex items-center gap-3">
@@ -326,13 +363,13 @@ function SectionCard(props: {
                     min={12}
                     max={30}
                     step={1}
-                    value={clampDurationSeconds(props.durationSec, 12)}
-                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, 12))}
+                    value={duration}
+                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, durationFallback))}
                     className="w-full"
                     aria-label="Scroll duration"
                   />
                   <div className="w-12 text-right text-sm font-semibold text-slate-900 dark:text-white">
-                    {clampDurationSeconds(props.durationSec, 12)}
+                    {duration}
                   </div>
                 </div>
 
@@ -354,7 +391,7 @@ function SectionCard(props: {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Live preview</div>
-                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{clampDurationSeconds(props.durationSec, 12)}s</div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{duration}s</div>
               </div>
               <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
                 <style>{`@keyframes np-marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-120%); } }`}</style>
@@ -363,7 +400,7 @@ function SectionCard(props: {
                     display: 'inline-block',
                     whiteSpace: 'nowrap',
                     willChange: 'transform',
-                    animation: `np-marquee ${Math.max(6, clampDurationSeconds(props.durationSec, 12))}s linear infinite`,
+                    animation: `np-marquee ${Math.max(6, duration)}s linear infinite`,
                   }}
                 >
                   line scrolling for preview — edit duration to change speed.
@@ -444,6 +481,11 @@ export default function BroadcastCenter() {
 
   const didInitialLoad = useRef(false);
   const lastSavedRef = useRef<string>('');
+  const lastSavedSnapshotRef = useRef<{
+    settings: BroadcastSettings;
+    breakingScrollDurationSeconds: number;
+    liveScrollDurationSeconds: number;
+  } | null>(null);
   const refreshInFlight = useRef(false);
 
   const [loading, setLoading] = useState(true);
@@ -482,10 +524,10 @@ export default function BroadcastCenter() {
     const broadcastObj = unwrapObj(broadcastRes);
     const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
     const settingsObj: BroadcastSettings = {
-      breakingEnabled: !!rawSettings?.breakingEnabled,
-      breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
-      liveEnabled: !!rawSettings?.liveEnabled,
-      liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
+      breakingEnabled: pickEnabledFlag(rawSettings, 'breaking'),
+      breakingMode: pickModeFlag(rawSettings, 'breaking'),
+      liveEnabled: pickEnabledFlag(rawSettings, 'live'),
+      liveMode: pickModeFlag(rawSettings, 'live'),
     };
 
     // Items are already normalized by apiListBroadcastItems, but normalize again defensively.
@@ -506,6 +548,11 @@ export default function BroadcastCenter() {
     setBreakingSpeedSeconds(nextBreaking);
     setLiveSpeedSeconds(nextLive);
     lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
+    lastSavedSnapshotRef.current = {
+      settings: settingsObj,
+      breakingScrollDurationSeconds: nextBreaking,
+      liveScrollDurationSeconds: nextLive,
+    };
   }, []);
 
   const doSave = useCallback(async (
@@ -517,77 +564,95 @@ export default function BroadcastCenter() {
     if (saving) return;
     setSaving(true);
     try {
-      const breakingDurationSeconds = clampDurationSeconds(nextBreakingSec, 12);
-      const liveDurationSeconds = clampDurationSeconds(nextLiveSec, 12);
+      const breakingScrollDurationSeconds = clampDurationSeconds(nextBreakingSec, 12);
+      const liveScrollDurationSeconds = clampDurationSeconds(nextLiveSec, 12);
 
-      const savedKey = serializeSaveKey(nextSettings, breakingDurationSeconds, liveDurationSeconds);
+      const base = lastSavedSnapshotRef.current;
+      const patch: Record<string, any> = {};
 
-      const payload = {
-        breakingEnabled: !!nextSettings.breakingEnabled,
-        breakingMode: nextSettings.breakingMode,
-        liveEnabled: !!nextSettings.liveEnabled,
-        liveMode: nextSettings.liveMode,
-        // Preferred terminology
-        breakingDurationSec: breakingDurationSeconds,
-        liveDurationSec: liveDurationSeconds,
-        // Back-compat keys (some backends still expect *SpeedSec)
-        breakingSpeedSec: breakingDurationSeconds,
-        liveSpeedSec: liveDurationSeconds,
-        // Back-compat keys
-        breakingTickerDurationSeconds: breakingDurationSeconds,
-        liveTickerDurationSeconds: liveDurationSeconds,
-        // Nested form (merge-safe on backends that expect per-ticker configs)
-        breaking: {
-          enabled: !!nextSettings.breakingEnabled,
-          mode: nextSettings.breakingMode,
-          durationSec: breakingDurationSeconds,
-        },
-        live: {
-          enabled: !!nextSettings.liveEnabled,
-          mode: nextSettings.liveMode,
-          durationSec: liveDurationSeconds,
-        },
-      };
+      if (base) {
+        if (nextSettings.breakingEnabled !== base.settings.breakingEnabled) patch.breakingEnabled = !!nextSettings.breakingEnabled;
+        if (nextSettings.breakingMode !== base.settings.breakingMode) patch.breakingMode = nextSettings.breakingMode;
+        if (nextSettings.liveEnabled !== base.settings.liveEnabled) patch.liveEnabled = !!nextSettings.liveEnabled;
+        if (nextSettings.liveMode !== base.settings.liveMode) patch.liveMode = nextSettings.liveMode;
 
-      await apiSaveBroadcastConfig(payload);
+        if (breakingScrollDurationSeconds !== base.breakingScrollDurationSeconds) {
+          // Backends differ on the field name; send a small set of aliases.
+          // Still diff-only (we only include these when the duration changed).
+          patch.breakingScrollDurationSeconds = breakingScrollDurationSeconds;
+          patch.breakingDurationSec = breakingScrollDurationSeconds;
+          patch.breakingDurationSeconds = breakingScrollDurationSeconds;
+          patch.breakingSpeedSec = breakingScrollDurationSeconds;
+          patch.breakingSpeedSeconds = breakingScrollDurationSeconds;
+          patch.breakingTickerDurationSeconds = breakingScrollDurationSeconds;
+          patch.breakingTickerDurationSec = breakingScrollDurationSeconds;
+        }
+        if (liveScrollDurationSeconds !== base.liveScrollDurationSeconds) {
+          patch.liveScrollDurationSeconds = liveScrollDurationSeconds;
+          patch.liveDurationSec = liveScrollDurationSeconds;
+          patch.liveDurationSeconds = liveScrollDurationSeconds;
+          patch.liveSpeedSec = liveScrollDurationSeconds;
+          patch.liveSpeedSeconds = liveScrollDurationSeconds;
+          patch.liveTickerDurationSeconds = liveScrollDurationSeconds;
+          patch.liveTickerDurationSec = liveScrollDurationSeconds;
+        }
+      } else {
+        // Shouldn't happen (Save is disabled until initial settings load).
+        // Fall back to sending the currently visible values.
+        patch.breakingEnabled = !!nextSettings.breakingEnabled;
+        patch.breakingMode = nextSettings.breakingMode;
+        patch.liveEnabled = !!nextSettings.liveEnabled;
+        patch.liveMode = nextSettings.liveMode;
+        patch.breakingScrollDurationSeconds = breakingScrollDurationSeconds;
+        patch.breakingDurationSec = breakingScrollDurationSeconds;
+        patch.breakingDurationSeconds = breakingScrollDurationSeconds;
+        patch.breakingSpeedSec = breakingScrollDurationSeconds;
+        patch.breakingSpeedSeconds = breakingScrollDurationSeconds;
+        patch.breakingTickerDurationSeconds = breakingScrollDurationSeconds;
+        patch.breakingTickerDurationSec = breakingScrollDurationSeconds;
 
-      // Merge-safe: re-fetch the canonical server config so we don't accidentally
-      // reset the other ticker if the backend applies defaults.
-      try {
-        const broadcastRes = await apiGetBroadcastConfig();
-        const broadcastObj = unwrapObj(broadcastRes);
-        const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
-        const settingsObj: BroadcastSettings = {
-          breakingEnabled: !!rawSettings?.breakingEnabled,
-          breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
-          liveEnabled: !!rawSettings?.liveEnabled,
-          liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
-        };
-
-        const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
-        const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
-
-        const nextBreaking = clampDurationSeconds(typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : breakingDurationSeconds, 12);
-        const nextLive = clampDurationSeconds(typeof fromBroadcastLive === 'number' ? fromBroadcastLive : liveDurationSeconds, 12);
-
-        setSettings(settingsObj);
-        setBreakingSpeedSeconds(nextBreaking);
-        setLiveSpeedSeconds(nextLive);
-        lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
-        setLastRefreshAt(new Date().toISOString());
-      } catch {
-        // If refresh fails, keep the optimistic UI state.
-        setSettings(nextSettings);
-        setBreakingSpeedSeconds(breakingDurationSeconds);
-        setLiveSpeedSeconds(liveDurationSeconds);
-        lastSavedRef.current = savedKey;
+        patch.liveScrollDurationSeconds = liveScrollDurationSeconds;
+        patch.liveDurationSec = liveScrollDurationSeconds;
+        patch.liveDurationSeconds = liveScrollDurationSeconds;
+        patch.liveSpeedSec = liveScrollDurationSeconds;
+        patch.liveSpeedSeconds = liveScrollDurationSeconds;
+        patch.liveTickerDurationSeconds = liveScrollDurationSeconds;
+        patch.liveTickerDurationSec = liveScrollDurationSeconds;
       }
+
+      if (Object.keys(patch).length === 0) {
+        notifyRef.current.ok('No changes to save');
+        return;
+      }
+
+      try {
+        console.log('[BroadcastCenter] Save payload', patch);
+      } catch {}
+
+      const res = await apiSaveBroadcastConfig(patch);
+
+      // Console-only debug panel: log response for verification.
+      try {
+        console.log('[BroadcastCenter] Save response', res);
+      } catch {}
+
+      // Single-request save: keep UI state and update our last-saved snapshot.
+      setSettings(nextSettings);
+      setBreakingSpeedSeconds(breakingScrollDurationSeconds);
+      setLiveSpeedSeconds(liveScrollDurationSeconds);
+      lastSavedRef.current = serializeSaveKey(nextSettings, breakingScrollDurationSeconds, liveScrollDurationSeconds);
+      lastSavedSnapshotRef.current = {
+        settings: nextSettings,
+        breakingScrollDurationSeconds,
+        liveScrollDurationSeconds,
+      };
+      setLastRefreshAt(new Date().toISOString());
 
       notifyRef.current.ok(opts?.toast || 'Saved. Live will update within 10 seconds.');
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Save failed', {
-          method: 'PUT',
+          method: 'PATCH',
           url: '/admin-api/admin/broadcast',
           error: e,
         });
