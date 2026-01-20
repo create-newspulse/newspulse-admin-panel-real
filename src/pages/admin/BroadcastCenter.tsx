@@ -70,8 +70,9 @@ function isHtmlMisrouteBody(e: unknown): boolean {
 const REWRITE_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 
 function isRewriteMissing(e: unknown): boolean {
-  if (e instanceof AdminApiError && e.code === 'HTML_MISROUTE') return true;
-  return isHtmlMisrouteBody(e);
+  // Only show the proxy-missing toast when we *know* we hit the SPA HTML fallback.
+  // Avoid false-positives (e.g. 405/500 pages) that can include HTML.
+  return e instanceof AdminApiError && e.code === 'HTML_MISROUTE';
 }
 
 function apiMessage(e: unknown, fallback = 'API error'): string {
@@ -545,6 +546,9 @@ export default function BroadcastCenter() {
         // Back-compat keys (some backends still expect *SpeedSec)
         breakingSpeedSec: breakingDurationSeconds,
         liveSpeedSec: liveDurationSeconds,
+        // Back-compat keys (some backends use tickerSpeedSeconds)
+        breakingTickerSpeedSeconds: breakingDurationSeconds,
+        liveTickerSpeedSeconds: liveDurationSeconds,
         // Back-compat keys
         breakingTickerDurationSeconds: breakingDurationSeconds,
         liveTickerDurationSeconds: liveDurationSeconds,
@@ -561,6 +565,7 @@ export default function BroadcastCenter() {
           mode: nextSettings.breakingMode,
           durationSec: breakingDurationSeconds,
           scrollDurationSec: breakingDurationSeconds,
+          tickerSpeedSeconds: breakingDurationSeconds,
           items: breakingItems,
         },
         live: {
@@ -568,6 +573,7 @@ export default function BroadcastCenter() {
           mode: nextSettings.liveMode,
           durationSec: liveDurationSeconds,
           scrollDurationSec: liveDurationSeconds,
+          tickerSpeedSeconds: liveDurationSeconds,
           items: liveItems,
         },
       };
@@ -616,8 +622,12 @@ export default function BroadcastCenter() {
         });
       } catch {}
 
-      if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
+      if (isRewriteMissing(e)) {
         notifyRef.current.err(REWRITE_MISSING_TOAST);
+        return;
+      }
+      if (isMethodNotAllowed(e)) {
+        notifyRef.current.err('Save failed', 'Backend method not allowed (405). Expected PUT/POST /api/admin/broadcast.');
         return;
       }
       if (isNetworkError(e)) {
@@ -652,8 +662,10 @@ export default function BroadcastCenter() {
       await loadAll();
       setLastRefreshAt(new Date().toISOString());
     } catch (e: any) {
-      if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
+      if (isRewriteMissing(e)) {
         notifyRef.current.err(REWRITE_MISSING_TOAST);
+      } else if (isMethodNotAllowed(e)) {
+        notifyRef.current.err('Refresh failed', 'Backend method not allowed (405).');
       } else if (isNetworkError(e)) {
         notifyRef.current.err('Refresh failed', networkDetails(e, '/admin-api/admin/broadcast'));
       } else {
@@ -673,8 +685,10 @@ export default function BroadcastCenter() {
       try {
         await refreshAll();
       } catch (e: any) {
-        if (isRewriteMissing(e) || isMethodNotAllowed(e)) {
+        if (isRewriteMissing(e)) {
           notifyRef.current.err(REWRITE_MISSING_TOAST);
+        } else if (isMethodNotAllowed(e)) {
+          notifyRef.current.err('Load failed', 'Backend method not allowed (405).');
         } else if (isNetworkError(e)) {
           notifyRef.current.err('Load failed', networkDetails(e, '/admin-api/admin/broadcast'));
         } else if (isUnauthorized(e)) {

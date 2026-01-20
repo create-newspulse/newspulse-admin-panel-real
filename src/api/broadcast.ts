@@ -87,7 +87,15 @@ export async function getBroadcastConfig(): Promise<any> {
 }
 
 export async function saveBroadcastConfig(payload: any): Promise<any> {
-  return requestJson<any>('', { method: 'PUT', json: payload });
+  try {
+    return await requestJson<any>('', { method: 'PUT', json: payload });
+  } catch (e: any) {
+    // Some backends expose this update as POST (or temporarily disable PUT behind certain proxies).
+    if (e instanceof AdminApiError && e.status === 405) {
+      return requestJson<any>('', { method: 'POST', json: payload });
+    }
+    throw e;
+  }
 }
 
 export async function listItems(type: BroadcastType): Promise<BroadcastItem[]> {

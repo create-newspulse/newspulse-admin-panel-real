@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/admin-api/:path*",
-      "destination": "https://newspulse-backend-real.onrender.com/admin-api/:path*"
+      "destination": "/api/admin-proxy/:path*"
     },
     {
       "source": "/(.*)",
