@@ -348,12 +348,17 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   try {
     if (typeof normalizedPath === 'string' && (normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/'))) {
       const ctype = (res.headers.get('content-type') || '').toLowerCase();
-      if (ctype.includes('text/html') || (!ctype.includes('application/json') && res.status === 200)) {
+      // Only treat this as a rewrite-missing SPA fallback when the request *succeeds* (200)
+      // but returns HTML. Backends can legitimately return HTML on 401/403/500; we must not
+      // misclassify those as missing rewrites.
+      if (res.status === 200 && (ctype.includes('text/html') || !ctype.includes('application/json'))) {
         const preview = await res.clone().text().catch(() => '');
         const snippet = (preview || '').slice(0, 4000);
         if (looksLikeSpaHtml(snippet)) {
           throw new AdminApiError(HTML_MISROUTE_TOAST, {
-            status: res.status || 200,
+            // If we got HTML for an /admin-api call, we did not reach the backend.
+            // Treat this as a proxy failure (non-2xx) even if the HTTP status was 200.
+            status: res.ok ? 502 : (res.status || 502),
             url,
             body: snippet,
             code: 'HTML_MISROUTE',

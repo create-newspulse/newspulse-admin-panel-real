@@ -69,6 +69,22 @@ function isHtmlMisrouteBody(e: unknown): boolean {
 
 const REWRITE_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 
+function pickBoolean(...values: any[]): boolean {
+  for (const v of values) {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v !== 0;
+  }
+  return false;
+}
+
+function pickMode(...values: any[]): 'manual' | 'auto' {
+  for (const v of values) {
+    if (v === 'auto') return 'auto';
+    if (v === 'manual') return 'manual';
+  }
+  return 'manual';
+}
+
 function isRewriteMissing(e: unknown): boolean {
   // Only show the proxy-missing toast when we *know* we hit the SPA HTML fallback.
   // Avoid false-positives (e.g. 405/500 pages) that can include HTML.
@@ -473,6 +489,15 @@ export default function BroadcastCenter() {
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
 
+  // Avoid spamming the same confusing toast multiple times.
+  const lastProxyToastAtRef = useRef(0);
+  const showProxyMissingToastOnce = useCallback(() => {
+    const now = Date.now();
+    if (lastProxyToastAtRef.current && (now - lastProxyToastAtRef.current) < 15_000) return;
+    lastProxyToastAtRef.current = now;
+    notifyRef.current.err(REWRITE_MISSING_TOAST);
+  }, []);
+
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
       if (prev[id] === next) return prev;
@@ -489,11 +514,47 @@ export default function BroadcastCenter() {
 
     const broadcastObj = unwrapObj(broadcastRes);
     const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
+
+    // Backends vary: some store settings flat (breakingEnabled), others nested (breaking.enabled).
+    // Read both shapes so enabled/mode don't appear to "reset" after save/refresh.
+    const breakingEnabled = pickBoolean(
+      rawSettings?.breakingEnabled,
+      rawSettings?.breaking?.enabled,
+      (broadcastObj as any)?.breakingEnabled,
+      (broadcastObj as any)?.breaking?.enabled,
+      (broadcastObj as any)?.settings?.breakingEnabled,
+      (broadcastObj as any)?.settings?.breaking?.enabled,
+    );
+    const liveEnabled = pickBoolean(
+      rawSettings?.liveEnabled,
+      rawSettings?.live?.enabled,
+      (broadcastObj as any)?.liveEnabled,
+      (broadcastObj as any)?.live?.enabled,
+      (broadcastObj as any)?.settings?.liveEnabled,
+      (broadcastObj as any)?.settings?.live?.enabled,
+    );
+    const breakingMode = pickMode(
+      rawSettings?.breakingMode,
+      rawSettings?.breaking?.mode,
+      (broadcastObj as any)?.breakingMode,
+      (broadcastObj as any)?.breaking?.mode,
+      (broadcastObj as any)?.settings?.breakingMode,
+      (broadcastObj as any)?.settings?.breaking?.mode,
+    );
+    const liveMode = pickMode(
+      rawSettings?.liveMode,
+      rawSettings?.live?.mode,
+      (broadcastObj as any)?.liveMode,
+      (broadcastObj as any)?.live?.mode,
+      (broadcastObj as any)?.settings?.liveMode,
+      (broadcastObj as any)?.settings?.live?.mode,
+    );
+
     const settingsObj: BroadcastSettings = {
-      breakingEnabled: !!rawSettings?.breakingEnabled,
-      breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
-      liveEnabled: !!rawSettings?.liveEnabled,
-      liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
+      breakingEnabled,
+      breakingMode,
+      liveEnabled,
+      liveMode,
     };
 
     // Items are already normalized by apiListBroadcastItems, but normalize again defensively.
@@ -530,51 +591,21 @@ export default function BroadcastCenter() {
 
       const savedKey = serializeSaveKey(nextSettings, breakingDurationSeconds, liveDurationSeconds);
 
+      // Canonical payload: keep it small and merge-safe.
+      // Items are managed via their dedicated CRUD endpoints; do not ship item arrays in config saves.
       const payload = {
-        breakingEnabled: !!nextSettings.breakingEnabled,
-        breakingMode: nextSettings.breakingMode,
-        liveEnabled: !!nextSettings.liveEnabled,
-        liveMode: nextSettings.liveMode,
-        // Explicit scroll-duration keys (requested / common variants)
-        breakingScrollDurationSec: breakingDurationSeconds,
-        breakingScrollDurationSeconds: breakingDurationSeconds,
-        liveScrollDurationSec: liveDurationSeconds,
-        liveScrollDurationSeconds: liveDurationSeconds,
-        // Preferred terminology
-        breakingDurationSec: breakingDurationSeconds,
-        liveDurationSec: liveDurationSeconds,
-        // Back-compat keys (some backends still expect *SpeedSec)
-        breakingSpeedSec: breakingDurationSeconds,
-        liveSpeedSec: liveDurationSeconds,
-        // Back-compat keys (some backends use tickerSpeedSeconds)
-        breakingTickerSpeedSeconds: breakingDurationSeconds,
-        liveTickerSpeedSeconds: liveDurationSeconds,
-        // Back-compat keys
-        breakingTickerDurationSeconds: breakingDurationSeconds,
-        liveTickerDurationSeconds: liveDurationSeconds,
-        // Include items with config save (requested). Backends that don't support it will ignore.
-        breakingItems,
-        liveItems,
-        items: {
-          breaking: breakingItems,
-          live: liveItems,
-        },
-        // Nested form (merge-safe on backends that expect per-ticker configs)
         breaking: {
           enabled: !!nextSettings.breakingEnabled,
           mode: nextSettings.breakingMode,
           durationSec: breakingDurationSeconds,
-          scrollDurationSec: breakingDurationSeconds,
+          // Compatibility alias (backend commonly returns this name)
           tickerSpeedSeconds: breakingDurationSeconds,
-          items: breakingItems,
         },
         live: {
           enabled: !!nextSettings.liveEnabled,
           mode: nextSettings.liveMode,
           durationSec: liveDurationSeconds,
-          scrollDurationSec: liveDurationSeconds,
           tickerSpeedSeconds: liveDurationSeconds,
-          items: liveItems,
         },
       };
 
@@ -586,11 +617,45 @@ export default function BroadcastCenter() {
         const broadcastRes = await apiGetBroadcastConfig();
         const broadcastObj = unwrapObj(broadcastRes);
         const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
+
+        const breakingEnabled = pickBoolean(
+          rawSettings?.breakingEnabled,
+          rawSettings?.breaking?.enabled,
+          (broadcastObj as any)?.breakingEnabled,
+          (broadcastObj as any)?.breaking?.enabled,
+          (broadcastObj as any)?.settings?.breakingEnabled,
+          (broadcastObj as any)?.settings?.breaking?.enabled,
+        );
+        const liveEnabled = pickBoolean(
+          rawSettings?.liveEnabled,
+          rawSettings?.live?.enabled,
+          (broadcastObj as any)?.liveEnabled,
+          (broadcastObj as any)?.live?.enabled,
+          (broadcastObj as any)?.settings?.liveEnabled,
+          (broadcastObj as any)?.settings?.live?.enabled,
+        );
+        const breakingMode = pickMode(
+          rawSettings?.breakingMode,
+          rawSettings?.breaking?.mode,
+          (broadcastObj as any)?.breakingMode,
+          (broadcastObj as any)?.breaking?.mode,
+          (broadcastObj as any)?.settings?.breakingMode,
+          (broadcastObj as any)?.settings?.breaking?.mode,
+        );
+        const liveMode = pickMode(
+          rawSettings?.liveMode,
+          rawSettings?.live?.mode,
+          (broadcastObj as any)?.liveMode,
+          (broadcastObj as any)?.live?.mode,
+          (broadcastObj as any)?.settings?.liveMode,
+          (broadcastObj as any)?.settings?.live?.mode,
+        );
+
         const settingsObj: BroadcastSettings = {
-          breakingEnabled: !!rawSettings?.breakingEnabled,
-          breakingMode: rawSettings?.breakingMode === 'auto' ? 'auto' : 'manual',
-          liveEnabled: !!rawSettings?.liveEnabled,
-          liveMode: rawSettings?.liveMode === 'auto' ? 'auto' : 'manual',
+          breakingEnabled,
+          breakingMode,
+          liveEnabled,
+          liveMode,
         };
 
         const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
@@ -623,7 +688,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
+        showProxyMissingToastOnce();
         return;
       }
       if (isMethodNotAllowed(e)) {
@@ -663,7 +728,7 @@ export default function BroadcastCenter() {
       setLastRefreshAt(new Date().toISOString());
     } catch (e: any) {
       if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
+        showProxyMissingToastOnce();
       } else if (isMethodNotAllowed(e)) {
         notifyRef.current.err('Refresh failed', 'Backend method not allowed (405).');
       } else if (isNetworkError(e)) {
@@ -686,7 +751,7 @@ export default function BroadcastCenter() {
         await refreshAll();
       } catch (e: any) {
         if (isRewriteMissing(e)) {
-          notifyRef.current.err(REWRITE_MISSING_TOAST);
+          showProxyMissingToastOnce();
         } else if (isMethodNotAllowed(e)) {
           notifyRef.current.err('Load failed', 'Backend method not allowed (405).');
         } else if (isNetworkError(e)) {
@@ -740,7 +805,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
+        showProxyMissingToastOnce();
         return;
       }
       if (isNetworkError(e)) {
@@ -794,7 +859,7 @@ export default function BroadcastCenter() {
       } catch {}
 
       if (isRewriteMissing(e)) {
-        notifyRef.current.err(REWRITE_MISSING_TOAST);
+        showProxyMissingToastOnce();
         return;
       }
       if (isNetworkError(e)) {
