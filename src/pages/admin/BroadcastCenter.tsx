@@ -14,7 +14,18 @@ import {
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
 
-const unwrapArray = (x: any) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
+const PROXY_MISSING_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
+const PROXY_MISSING_TOAST_ID = 'np-admin-proxy-missing';
+const PROXY_HEALTH_URL = '/admin-api/system/health';
+
+const DEFAULT_TICKER_SPEED_SECONDS = 12;
+const DEFAULT_SETTINGS: BroadcastSettings = {
+  breakingEnabled: false,
+  breakingMode: 'manual',
+  liveEnabled: false,
+  liveMode: 'manual',
+};
+
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
 function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
@@ -54,45 +65,62 @@ function isMethodNotAllowed(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 405;
 }
 
-function isHtmlMisrouteBody(e: unknown): boolean {
-  const s = apiBodyText(e);
-  if (!s) return false;
-  const t = s.trim().toLowerCase();
-  return (
-    t.includes('enable javascript to run this app') ||
-    t.startsWith('<!doctype html') ||
-    t.startsWith('<html') ||
-    t.includes('<head') ||
-    t.includes('<body')
-  );
+function notifyProxyMissingOnce(notify: ReturnType<typeof useNotify>) {
+  notify.err(PROXY_MISSING_TOAST, undefined, { id: PROXY_MISSING_TOAST_ID, duration: 12_000 });
 }
 
-const REWRITE_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
+async function checkProxyHealth(): Promise<{ ok: boolean; status?: number }> {
+  try {
+    const res = await fetch(PROXY_HEALTH_URL, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    // If health is auth-gated, proxy is still reachable.
+    if (res.status === 401 || res.status === 403) return { ok: true, status: res.status };
+
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false };
+  }
+}
 
 function pickBoolean(...values: any[]): boolean {
   for (const v of values) {
     if (typeof v === 'boolean') return v;
     if (typeof v === 'number') return v !== 0;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true') return true;
+      if (s === 'false') return false;
+      if (s === '1') return true;
+      if (s === '0') return false;
+    }
   }
   return false;
 }
 
 function pickMode(...values: any[]): 'manual' | 'auto' {
   for (const v of values) {
+    if (v === 'force_on' || v === 'force-on' || v === 'forceon') return 'manual';
     if (v === 'auto') return 'auto';
     if (v === 'manual') return 'manual';
   }
   return 'manual';
 }
 
-function isRewriteMissing(e: unknown): boolean {
-  // Only show the proxy-missing toast when we *know* we hit the SPA HTML fallback.
-  // Avoid false-positives (e.g. 405/500 pages) that can include HTML.
-  return e instanceof AdminApiError && e.code === 'HTML_MISROUTE';
+function toBackendMode(ui: 'manual' | 'auto'): 'force_on' | 'auto' {
+  return ui === 'auto' ? 'auto' : 'force_on';
 }
 
 function apiMessage(e: unknown, fallback = 'API error'): string {
-  if (e instanceof AdminApiError) return e.message || fallback;
+  if (e instanceof AdminApiError) {
+    return e.message || fallback;
+  }
   const anyErr: any = e as any;
   return anyErr?.message || fallback;
 }
@@ -102,35 +130,12 @@ function apiErrorDetails(e: unknown, fallback = 'API error'): string {
   const msg = apiMessage(e, fallback);
   const bodyText = apiBodyText(e);
 
-  // Special-case: Vercel/Vite rewrite misroute serving the SPA HTML.
-  if (isRewriteMissing(e)) {
-    return REWRITE_MISSING_TOAST;
-  }
-
   const head = `${status ? `${status}: ` : ''}${msg}`;
   return bodyText ? `${head} • ${bodyText}` : head;
 }
 
-function isNetworkError(e: unknown): boolean {
-  return e instanceof AdminApiError && e.status === 0;
-}
-
-function networkDetails(e: unknown, fallbackPath: string): string {
-  const attempted = e instanceof AdminApiError && e.url ? e.url : fallbackPath;
-  return `Wrong API base / backend unreachable • ${attempted}`;
-}
-
 function isUnauthorized(e: unknown): boolean {
   return e instanceof AdminApiError && e.status === 401;
-}
-
-function isNotFound(e: unknown): boolean {
-  return e instanceof AdminApiError && e.status === 404;
-}
-
-function notFoundDetails(e: unknown, url: string): string {
-  const missing = e instanceof AdminApiError && e.url ? e.url : url;
-  return `Backend route missing: ${missing}`;
 }
 
 function formatLocalTime(iso: string) {
@@ -158,16 +163,6 @@ function sortByCreatedDesc(items: BroadcastItem[]) {
   return items.slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
-function serializeSettings(s: BroadcastSettings | null) {
-  if (!s) return '';
-  return JSON.stringify({
-    breakingEnabled: !!s.breakingEnabled,
-    breakingMode: s.breakingMode,
-    liveEnabled: !!s.liveEnabled,
-    liveMode: s.liveMode,
-  });
-}
-
 function serializeSaveKey(s: BroadcastSettings | null, breakingSec: number, liveSec: number) {
   if (!s) return '';
   return JSON.stringify({
@@ -177,24 +172,24 @@ function serializeSaveKey(s: BroadcastSettings | null, breakingSec: number, live
       liveEnabled: !!s.liveEnabled,
       liveMode: s.liveMode,
     },
-    breakingDurationSec: clampDurationSeconds(breakingSec, 12),
-    liveDurationSec: clampDurationSeconds(liveSec, 12),
+    breakingTickerSpeedSeconds: clampDurationSeconds(breakingSec, 12),
+    liveTickerSpeedSeconds: clampDurationSeconds(liveSec, 12),
   });
 }
 
 type TickerSpeeds = {
-  liveSpeedSec: number;
-  breakingSpeedSec: number;
+  liveTickerSpeedSeconds: number;
+  breakingTickerSpeedSeconds: number;
 };
 
 function normalizeSpeeds(s?: Partial<TickerSpeeds> | null): TickerSpeeds {
   // Defaults: start at Fast = 12s
-  const live = typeof s?.liveSpeedSec === 'number' ? s!.liveSpeedSec : 12;
-  const breaking = typeof s?.breakingSpeedSec === 'number' ? s!.breakingSpeedSec : 12;
+  const live = typeof s?.liveTickerSpeedSeconds === 'number' ? s!.liveTickerSpeedSeconds : 12;
+  const breaking = typeof s?.breakingTickerSpeedSeconds === 'number' ? s!.breakingTickerSpeedSeconds : 12;
   return {
     // UI contract: clamp 12..30 (prevents extreme scroll speeds)
-    liveSpeedSec: Math.max(12, Math.min(30, Number(live) || 12)),
-    breakingSpeedSec: Math.max(12, Math.min(30, Number(breaking) || 12)),
+    liveTickerSpeedSeconds: Math.max(12, Math.min(30, Number(live) || 12)),
+    breakingTickerSpeedSeconds: Math.max(12, Math.min(30, Number(breaking) || 12)),
   };
 }
 
@@ -243,7 +238,7 @@ function PresetsRow(props: {
 }) {
   const presets = props.presets || [
     { key: 'fast', label: 'Fast', value: 12 },
-    { key: 'normal', label: 'Normal', value: 18 },
+    { key: 'normal', label: 'Normal', value: 20 },
     { key: 'slow', label: 'Slow', value: 30 },
   ];
   return (
@@ -278,14 +273,15 @@ function PresetsRow(props: {
 
 function SectionCard(props: {
   title: string;
+  disabled?: boolean;
   enabled: boolean;
   onEnabledChange: (next: boolean) => void;
   mode: 'manual' | 'auto';
   onModeChange: (next: 'manual' | 'auto') => void;
-  durationSec?: number;
-  onDurationChange?: (next: number) => void;
-  defaultDurationSec?: number;
-  onDurationReset?: () => void;
+  tickerSpeedSeconds?: number;
+  onTickerSpeedSecondsChange?: (next: number) => void;
+  defaultTickerSpeedSeconds?: number;
+  onTickerSpeedSecondsReset?: () => void;
   inputValue: string;
   onInputChange: (next: string) => void;
   onAdd: () => void;
@@ -295,8 +291,8 @@ function SectionCard(props: {
   onDelete: (item: BroadcastItem) => void;
 }) {
   const itemsSorted = useMemo(() => sortByCreatedDesc(props.items), [props.items]);
-  const durationFallback = typeof props.defaultDurationSec === 'number' ? props.defaultDurationSec : 12;
-  const duration = clampDurationSeconds(props.durationSec, durationFallback);
+  const durationFallback = typeof props.defaultTickerSpeedSeconds === 'number' ? props.defaultTickerSpeedSeconds : 12;
+  const duration = clampDurationSeconds(props.tickerSpeedSeconds, durationFallback);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
@@ -309,6 +305,7 @@ function SectionCard(props: {
           <input
             type="checkbox"
             className="h-4 w-4"
+            disabled={!!props.disabled}
             checked={props.enabled}
             onChange={(e) => props.onEnabledChange(e.target.checked)}
           />
@@ -322,6 +319,7 @@ function SectionCard(props: {
           <select
             value={props.mode}
             onChange={(e) => props.onModeChange(e.target.value as 'manual' | 'auto')}
+            disabled={!!props.disabled}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-72"
           >
             <option value="manual">Force ON</option>
@@ -329,7 +327,7 @@ function SectionCard(props: {
           </select>
         </div>
 
-        {typeof props.durationSec === 'number' && typeof props.onDurationChange === 'function' ? (
+        {typeof props.tickerSpeedSeconds === 'number' && typeof props.onTickerSpeedSecondsChange === 'function' ? (
           <div className="space-y-2">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -341,7 +339,8 @@ function SectionCard(props: {
               <div className="flex flex-col items-stretch gap-2 sm:w-72">
                 <PresetsRow
                   value={duration}
-                  onChange={(next) => props.onDurationChange?.(clampDurationSeconds(next, durationFallback))}
+                  onChange={(next) => props.onTickerSpeedSecondsChange?.(clampDurationSeconds(next, durationFallback))}
+                  disabled={!!props.disabled}
                 />
 
                 <div className="flex items-center gap-3">
@@ -351,7 +350,8 @@ function SectionCard(props: {
                     max={30}
                     step={1}
                     value={duration}
-                    onChange={(e) => props.onDurationChange?.(clampDurationSeconds(e.target.value, durationFallback))}
+                    onChange={(e) => props.onTickerSpeedSecondsChange?.(clampDurationSeconds(e.target.value, durationFallback))}
+                    disabled={!!props.disabled}
                     className="w-full"
                     aria-label="Scroll duration"
                   />
@@ -360,12 +360,12 @@ function SectionCard(props: {
                   </div>
                 </div>
 
-                {typeof props.onDurationReset === 'function' ? (
+                {typeof props.onTickerSpeedSecondsReset === 'function' ? (
                   <div className="flex justify-end">
                     <button
                       type="button"
                       className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-                      onClick={() => props.onDurationReset?.()}
+                      onClick={() => props.onTickerSpeedSecondsReset?.()}
                     >
                       Reset
                     </button>
@@ -383,6 +383,7 @@ function SectionCard(props: {
               <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
                 <style>{`@keyframes np-marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-120%); } }`}</style>
                 <div
+                    key={`np-marquee-${duration}`}
                   style={{
                     display: 'inline-block',
                     whiteSpace: 'nowrap',
@@ -408,7 +409,7 @@ function SectionCard(props: {
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            disabled={props.addDisabled}
+            disabled={props.addDisabled || !!props.disabled}
             onClick={props.onAdd}
           >
             Add
@@ -466,8 +467,22 @@ export default function BroadcastCenter() {
   const notifyRef = useRef(notify);
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
+  const [proxyHealthy, setProxyHealthy] = useState<boolean | null>(null);
+  const proxyHealthyRef = useRef<boolean | null>(proxyHealthy);
+  useEffect(() => { proxyHealthyRef.current = proxyHealthy; }, [proxyHealthy]);
+
+  const ensureProxyHealthy = useCallback(async (opts?: { force?: boolean }) => {
+    // If we already confirmed the proxy is reachable, do not re-check unless forced.
+    if (!opts?.force && proxyHealthyRef.current === true) return true;
+
+    const health = await checkProxyHealth();
+    setProxyHealthy(health.ok);
+    if (!health.ok) notifyProxyMissingOnce(notifyRef.current);
+    return health.ok;
+  }, []);
+
   const didInitialLoad = useRef(false);
-  const lastSavedRef = useRef<string>('');
+  const lastSavedRef = useRef<string>(serializeSaveKey(DEFAULT_SETTINGS, DEFAULT_TICKER_SPEED_SECONDS, DEFAULT_TICKER_SPEED_SECONDS));
   const refreshInFlight = useRef(false);
 
   const [loading, setLoading] = useState(true);
@@ -475,10 +490,10 @@ export default function BroadcastCenter() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
 
-  const [settings, setSettings] = useState<BroadcastSettings | null>(null);
+  const [settings, setSettings] = useState<BroadcastSettings>(() => DEFAULT_SETTINGS);
 
-  const [breakingSpeedSeconds, setBreakingSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).breakingSpeedSec);
-  const [liveSpeedSeconds, setLiveSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).liveSpeedSec);
+  const [breakingTickerSpeedSeconds, setBreakingTickerSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).breakingTickerSpeedSeconds);
+  const [liveTickerSpeedSeconds, setLiveTickerSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).liveTickerSpeedSeconds);
 
   const [breakingText, setBreakingText] = useState('');
   const [liveText, setLiveText] = useState('');
@@ -489,15 +504,6 @@ export default function BroadcastCenter() {
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
 
-  // Avoid spamming the same confusing toast multiple times.
-  const lastProxyToastAtRef = useRef(0);
-  const showProxyMissingToastOnce = useCallback(() => {
-    const now = Date.now();
-    if (lastProxyToastAtRef.current && (now - lastProxyToastAtRef.current) < 15_000) return;
-    lastProxyToastAtRef.current = now;
-    notifyRef.current.err(REWRITE_MISSING_TOAST);
-  }, []);
-
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
       if (prev[id] === next) return prev;
@@ -506,11 +512,8 @@ export default function BroadcastCenter() {
   }, []);
 
   const loadAll = useCallback(async (_signal?: AbortSignal) => {
-    const [broadcastRes, breakingRes, liveRes] = await Promise.all([
-      apiGetBroadcastConfig(),
-      apiListBroadcastItems('breaking'),
-      apiListBroadcastItems('live'),
-    ]);
+    // Load config first; do not fail the whole page if a secondary history endpoint is missing.
+    const broadcastRes = await apiGetBroadcastConfig();
 
     const broadcastObj = unwrapObj(broadcastRes);
     const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
@@ -518,36 +521,28 @@ export default function BroadcastCenter() {
     // Backends vary: some store settings flat (breakingEnabled), others nested (breaking.enabled).
     // Read both shapes so enabled/mode don't appear to "reset" after save/refresh.
     const breakingEnabled = pickBoolean(
-      rawSettings?.breakingEnabled,
       rawSettings?.breaking?.enabled,
-      (broadcastObj as any)?.breakingEnabled,
+      rawSettings?.breakingEnabled,
       (broadcastObj as any)?.breaking?.enabled,
-      (broadcastObj as any)?.settings?.breakingEnabled,
-      (broadcastObj as any)?.settings?.breaking?.enabled,
+      (broadcastObj as any)?.breakingEnabled,
     );
     const liveEnabled = pickBoolean(
-      rawSettings?.liveEnabled,
       rawSettings?.live?.enabled,
-      (broadcastObj as any)?.liveEnabled,
+      rawSettings?.liveEnabled,
       (broadcastObj as any)?.live?.enabled,
-      (broadcastObj as any)?.settings?.liveEnabled,
-      (broadcastObj as any)?.settings?.live?.enabled,
+      (broadcastObj as any)?.liveEnabled,
     );
     const breakingMode = pickMode(
-      rawSettings?.breakingMode,
       rawSettings?.breaking?.mode,
-      (broadcastObj as any)?.breakingMode,
+      rawSettings?.breakingMode,
       (broadcastObj as any)?.breaking?.mode,
-      (broadcastObj as any)?.settings?.breakingMode,
-      (broadcastObj as any)?.settings?.breaking?.mode,
+      (broadcastObj as any)?.breakingMode,
     );
     const liveMode = pickMode(
-      rawSettings?.liveMode,
       rawSettings?.live?.mode,
-      (broadcastObj as any)?.liveMode,
+      rawSettings?.liveMode,
       (broadcastObj as any)?.live?.mode,
-      (broadcastObj as any)?.settings?.liveMode,
-      (broadcastObj as any)?.settings?.live?.mode,
+      (broadcastObj as any)?.liveMode,
     );
 
     const settingsObj: BroadcastSettings = {
@@ -557,23 +552,38 @@ export default function BroadcastCenter() {
       liveMode,
     };
 
-    // Items are already normalized by apiListBroadcastItems, but normalize again defensively.
-    setBreakingItems(normalizeItems(breakingRes as any));
-    setLiveItems(normalizeItems(liveRes as any));
+    const [breakingRes, liveRes] = await Promise.allSettled([
+      apiListBroadcastItems('breaking'),
+      apiListBroadcastItems('live'),
+    ]);
+
+    if (breakingRes.status === 'fulfilled') {
+      setBreakingItems(normalizeItems(breakingRes.value as any));
+    } else {
+      setBreakingItems([]);
+      notifyRef.current.err('Breaking history unavailable', apiErrorDetails(breakingRes.reason, 'API error'));
+    }
+
+    if (liveRes.status === 'fulfilled') {
+      setLiveItems(normalizeItems(liveRes.value as any));
+    } else {
+      setLiveItems([]);
+      notifyRef.current.err('Live history unavailable', apiErrorDetails(liveRes.reason, 'API error'));
+    }
 
     const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
     const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
 
     const fallbackSpeeds = normalizeSpeeds(null);
-    const breakingDur = typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : fallbackSpeeds.breakingSpeedSec;
-    const liveDur = typeof fromBroadcastLive === 'number' ? fromBroadcastLive : fallbackSpeeds.liveSpeedSec;
+    const breakingDur = typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : fallbackSpeeds.breakingTickerSpeedSeconds;
+    const liveDur = typeof fromBroadcastLive === 'number' ? fromBroadcastLive : fallbackSpeeds.liveTickerSpeedSeconds;
 
     const nextBreaking = clampDurationSeconds(breakingDur, 12);
     const nextLive = clampDurationSeconds(liveDur, 12);
 
     setSettings(settingsObj);
-    setBreakingSpeedSeconds(nextBreaking);
-    setLiveSpeedSeconds(nextLive);
+    setBreakingTickerSpeedSeconds(nextBreaking);
+    setLiveTickerSpeedSeconds(nextLive);
     lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
   }, []);
 
@@ -586,27 +596,41 @@ export default function BroadcastCenter() {
     if (saving) return;
     setSaving(true);
     try {
-      const breakingDurationSeconds = clampDurationSeconds(nextBreakingSec, 12);
-      const liveDurationSeconds = clampDurationSeconds(nextLiveSec, 12);
+      const breakingTickerSpeedSeconds = clampDurationSeconds(nextBreakingSec, 12);
+      const liveTickerSpeedSeconds = clampDurationSeconds(nextLiveSec, 12);
 
-      const savedKey = serializeSaveKey(nextSettings, breakingDurationSeconds, liveDurationSeconds);
+      const savedKey = serializeSaveKey(nextSettings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
 
       // Canonical payload: keep it small and merge-safe.
       // Items are managed via their dedicated CRUD endpoints; do not ship item arrays in config saves.
       const payload = {
         breaking: {
           enabled: !!nextSettings.breakingEnabled,
-          mode: nextSettings.breakingMode,
-          durationSec: breakingDurationSeconds,
-          // Compatibility alias (backend commonly returns this name)
-          tickerSpeedSeconds: breakingDurationSeconds,
+          mode: toBackendMode(nextSettings.breakingMode),
+          // Backends vary in naming; send both.
+          tickerSpeedSeconds: breakingTickerSpeedSeconds,
+          tickerDurationSeconds: breakingTickerSpeedSeconds,
         },
         live: {
           enabled: !!nextSettings.liveEnabled,
-          mode: nextSettings.liveMode,
-          durationSec: liveDurationSeconds,
-          tickerSpeedSeconds: liveDurationSeconds,
+          mode: toBackendMode(nextSettings.liveMode),
+          tickerSpeedSeconds: liveTickerSpeedSeconds,
+          tickerDurationSeconds: liveTickerSpeedSeconds,
         },
+
+        // Canonical contract used by some backends
+        breakingSpeedSec: breakingTickerSpeedSeconds,
+        liveSpeedSec: liveTickerSpeedSeconds,
+
+        // Also include flat fields for legacy backends that don't store nested objects.
+        breakingEnabled: !!nextSettings.breakingEnabled,
+        breakingMode: toBackendMode(nextSettings.breakingMode),
+        breakingTickerSpeedSeconds,
+        breakingTickerDurationSeconds: breakingTickerSpeedSeconds,
+        liveEnabled: !!nextSettings.liveEnabled,
+        liveMode: toBackendMode(nextSettings.liveMode),
+        liveTickerSpeedSeconds,
+        liveTickerDurationSeconds: liveTickerSpeedSeconds,
       };
 
       await apiSaveBroadcastConfig(payload);
@@ -619,36 +643,28 @@ export default function BroadcastCenter() {
         const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
 
         const breakingEnabled = pickBoolean(
-          rawSettings?.breakingEnabled,
           rawSettings?.breaking?.enabled,
-          (broadcastObj as any)?.breakingEnabled,
+          rawSettings?.breakingEnabled,
           (broadcastObj as any)?.breaking?.enabled,
-          (broadcastObj as any)?.settings?.breakingEnabled,
-          (broadcastObj as any)?.settings?.breaking?.enabled,
+          (broadcastObj as any)?.breakingEnabled,
         );
         const liveEnabled = pickBoolean(
-          rawSettings?.liveEnabled,
           rawSettings?.live?.enabled,
-          (broadcastObj as any)?.liveEnabled,
+          rawSettings?.liveEnabled,
           (broadcastObj as any)?.live?.enabled,
-          (broadcastObj as any)?.settings?.liveEnabled,
-          (broadcastObj as any)?.settings?.live?.enabled,
+          (broadcastObj as any)?.liveEnabled,
         );
         const breakingMode = pickMode(
-          rawSettings?.breakingMode,
           rawSettings?.breaking?.mode,
-          (broadcastObj as any)?.breakingMode,
+          rawSettings?.breakingMode,
           (broadcastObj as any)?.breaking?.mode,
-          (broadcastObj as any)?.settings?.breakingMode,
-          (broadcastObj as any)?.settings?.breaking?.mode,
+          (broadcastObj as any)?.breakingMode,
         );
         const liveMode = pickMode(
-          rawSettings?.liveMode,
           rawSettings?.live?.mode,
-          (broadcastObj as any)?.liveMode,
+          rawSettings?.liveMode,
           (broadcastObj as any)?.live?.mode,
-          (broadcastObj as any)?.settings?.liveMode,
-          (broadcastObj as any)?.settings?.live?.mode,
+          (broadcastObj as any)?.liveMode,
         );
 
         const settingsObj: BroadcastSettings = {
@@ -661,19 +677,19 @@ export default function BroadcastCenter() {
         const fromBroadcastBreaking = pickDurationSeconds(broadcastObj, 'breaking') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'breaking');
         const fromBroadcastLive = pickDurationSeconds(broadcastObj, 'live') ?? pickDurationSeconds((broadcastObj as any)?.settings, 'live');
 
-        const nextBreaking = clampDurationSeconds(typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : breakingDurationSeconds, 12);
-        const nextLive = clampDurationSeconds(typeof fromBroadcastLive === 'number' ? fromBroadcastLive : liveDurationSeconds, 12);
+        const nextBreaking = clampDurationSeconds(typeof fromBroadcastBreaking === 'number' ? fromBroadcastBreaking : breakingTickerSpeedSeconds, 12);
+        const nextLive = clampDurationSeconds(typeof fromBroadcastLive === 'number' ? fromBroadcastLive : liveTickerSpeedSeconds, 12);
 
         setSettings(settingsObj);
-        setBreakingSpeedSeconds(nextBreaking);
-        setLiveSpeedSeconds(nextLive);
+        setBreakingTickerSpeedSeconds(nextBreaking);
+        setLiveTickerSpeedSeconds(nextLive);
         lastSavedRef.current = serializeSaveKey(settingsObj, nextBreaking, nextLive);
         setLastRefreshAt(new Date().toISOString());
       } catch {
         // If refresh fails, keep the optimistic UI state.
         setSettings(nextSettings);
-        setBreakingSpeedSeconds(breakingDurationSeconds);
-        setLiveSpeedSeconds(liveDurationSeconds);
+        setBreakingTickerSpeedSeconds(breakingTickerSpeedSeconds);
+        setLiveTickerSpeedSeconds(liveTickerSpeedSeconds);
         lastSavedRef.current = savedKey;
       }
 
@@ -686,53 +702,45 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
-
-      if (isRewriteMissing(e)) {
-        showProxyMissingToastOnce();
-        return;
-      }
       if (isMethodNotAllowed(e)) {
         notifyRef.current.err('Save failed', 'Backend method not allowed (405). Expected PUT/POST /api/admin/broadcast.');
-        return;
-      }
-      if (isNetworkError(e)) {
-        notifyRef.current.err('Save failed', networkDetails(e, '/admin-api/admin/broadcast'));
         return;
       }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
         return;
       }
-      if (isNotFound(e)) {
-        notifyRef.current.err('Save failed', 'Backend route missing, deploy backend update');
-        return;
-      }
+
+      // Only show proxy missing if the real health check fails.
+      const ok = await ensureProxyHealthy({ force: true });
+      if (!ok) return;
+
       notifyRef.current.err('Save failed', apiErrorDetails(e, 'API error'));
     } finally {
       setSaving(false);
     }
-  }, [saving]);
+  }, [saving, ensureProxyHealthy]);
 
   const dirty = useMemo(() => {
-    if (!settings) return false;
-    const nowKey = serializeSaveKey(settings, breakingSpeedSeconds, liveSpeedSeconds);
+    const nowKey = serializeSaveKey(settings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
     return !!nowKey && nowKey !== lastSavedRef.current;
-  }, [settings, breakingSpeedSeconds, liveSpeedSeconds]);
+  }, [settings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds]);
 
   const refreshAll = useCallback(async () => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     setIsRefreshing(true);
     try {
+      // Never assume rewrites are missing. Only warn if /admin-api/system/health fails.
+      const ok = await ensureProxyHealthy({ force: true });
+      if (!ok) return;
       await loadAll();
       setLastRefreshAt(new Date().toISOString());
     } catch (e: any) {
-      if (isRewriteMissing(e)) {
-        showProxyMissingToastOnce();
-      } else if (isMethodNotAllowed(e)) {
+      const ok = await ensureProxyHealthy({ force: true });
+      if (!ok) return;
+      if (isMethodNotAllowed(e)) {
         notifyRef.current.err('Refresh failed', 'Backend method not allowed (405).');
-      } else if (isNetworkError(e)) {
-        notifyRef.current.err('Refresh failed', networkDetails(e, '/admin-api/admin/broadcast'));
       } else {
         notifyRef.current.err('Refresh failed', apiErrorDetails(e, 'API error'));
       }
@@ -740,7 +748,7 @@ export default function BroadcastCenter() {
       refreshInFlight.current = false;
       setIsRefreshing(false);
     }
-  }, [loadAll]);
+  }, [loadAll, ensureProxyHealthy]);
 
   useEffect(() => {
     let mounted = true;
@@ -750,12 +758,8 @@ export default function BroadcastCenter() {
       try {
         await refreshAll();
       } catch (e: any) {
-        if (isRewriteMissing(e)) {
-          showProxyMissingToastOnce();
-        } else if (isMethodNotAllowed(e)) {
+        if (isMethodNotAllowed(e)) {
           notifyRef.current.err('Load failed', 'Backend method not allowed (405).');
-        } else if (isNetworkError(e)) {
-          notifyRef.current.err('Load failed', networkDetails(e, '/admin-api/admin/broadcast'));
         } else if (isUnauthorized(e)) {
           notifyRef.current.err('Session expired — please login again');
         } else {
@@ -782,7 +786,7 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdItem = await apiAddBroadcastItem(type, text, { lang: 'en', autoTranslate: false });
+      const createdItem = await apiAddBroadcastItem(type, text);
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
 
@@ -803,21 +807,8 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
-
-      if (isRewriteMissing(e)) {
-        showProxyMissingToastOnce();
-        return;
-      }
-      if (isNetworkError(e)) {
-        notifyRef.current.err('Add failed', networkDetails(e, '/admin-api/admin/broadcast/items'));
-        return;
-      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
-        return;
-      }
-      if (isNotFound(e)) {
-        notifyRef.current.err('Add failed', 'Backend route missing, deploy backend update');
         return;
       }
       if (isMethodNotAllowed(e)) {
@@ -857,21 +848,8 @@ export default function BroadcastCenter() {
           error: e,
         });
       } catch {}
-
-      if (isRewriteMissing(e)) {
-        showProxyMissingToastOnce();
-        return;
-      }
-      if (isNetworkError(e)) {
-        notifyRef.current.err('Delete failed', networkDetails(e, `/admin-api/admin/broadcast/items/${encodeURIComponent(id)}`));
-        return;
-      }
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
-        return;
-      }
-      if (isNotFound(e)) {
-        notifyRef.current.err('Delete failed', 'Backend route missing, deploy backend update');
         return;
       }
       notifyRef.current.err('Delete failed', apiErrorDetails(e, 'API error'));
@@ -892,14 +870,9 @@ export default function BroadcastCenter() {
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            disabled={loading || saving || !settings}
+            disabled={loading || saving || !dirty}
             onClick={() => {
-              if (!settings) return;
-              if (!dirty) {
-                notifyRef.current.ok('No changes to save');
-                return;
-              }
-              void doSave(settings, breakingSpeedSeconds, liveSpeedSeconds);
+              void doSave(settings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
             }}
           >
             {saving ? 'Saving…' : 'Save'}
@@ -924,16 +897,22 @@ export default function BroadcastCenter() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           title="🔥 Breaking"
-          enabled={!!settings?.breakingEnabled}
+          disabled={loading}
+          enabled={settings.breakingEnabled}
           onEnabledChange={(next) => {
-            setSettings((prev) => (prev ? { ...prev, breakingEnabled: next } : prev));
+            // Backend treats mode=force_on as always-on; if user disables, also move to Auto.
+            setSettings((prev) => ({
+              ...prev,
+              breakingEnabled: next,
+              ...(next ? null : { breakingMode: 'auto' }),
+            }));
           }}
-          mode={(settings?.breakingMode || 'manual') as 'manual' | 'auto'}
-          onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, breakingMode: next } : prev))}
-          durationSec={breakingSpeedSeconds}
-          onDurationChange={(next) => setBreakingSpeedSeconds(clampDurationSeconds(next, 12))}
-          defaultDurationSec={12}
-          onDurationReset={() => setBreakingSpeedSeconds(12)}
+          mode={settings.breakingMode}
+          onModeChange={(next) => setSettings((prev) => ({ ...prev, breakingMode: next }))}
+          tickerSpeedSeconds={breakingTickerSpeedSeconds}
+          onTickerSpeedSecondsChange={(next) => setBreakingTickerSpeedSeconds(clampDurationSeconds(next, 12))}
+          defaultTickerSpeedSeconds={12}
+          onTickerSpeedSecondsReset={() => setBreakingTickerSpeedSeconds(12)}
           inputValue={breakingText}
           onInputChange={setBreakingText}
           addDisabled={loading || addingType === 'breaking'}
@@ -945,16 +924,21 @@ export default function BroadcastCenter() {
 
         <SectionCard
           title="🔵 Live Updates"
-          enabled={!!settings?.liveEnabled}
+          disabled={loading}
+          enabled={settings.liveEnabled}
           onEnabledChange={(next) => {
-            setSettings((prev) => (prev ? { ...prev, liveEnabled: next } : prev));
+            setSettings((prev) => ({
+              ...prev,
+              liveEnabled: next,
+              ...(next ? null : { liveMode: 'auto' }),
+            }));
           }}
-          mode={(settings?.liveMode || 'manual') as 'manual' | 'auto'}
-          onModeChange={(next) => setSettings((prev) => (prev ? { ...prev, liveMode: next } : prev))}
-          durationSec={liveSpeedSeconds}
-          onDurationChange={(next) => setLiveSpeedSeconds(clampDurationSeconds(next, 12))}
-          defaultDurationSec={12}
-          onDurationReset={() => setLiveSpeedSeconds(12)}
+          mode={settings.liveMode}
+          onModeChange={(next) => setSettings((prev) => ({ ...prev, liveMode: next }))}
+          tickerSpeedSeconds={liveTickerSpeedSeconds}
+          onTickerSpeedSecondsChange={(next) => setLiveTickerSpeedSeconds(clampDurationSeconds(next, 12))}
+          defaultTickerSpeedSeconds={12}
+          onTickerSpeedSecondsReset={() => setLiveTickerSpeedSeconds(12)}
           inputValue={liveText}
           onInputChange={setLiveText}
           addDisabled={loading || addingType === 'live'}
