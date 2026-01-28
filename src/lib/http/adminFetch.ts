@@ -121,45 +121,31 @@ async function probeAdminProxyHealth(): Promise<boolean> {
   if (lastMisrouteHealthOkAt && (now - lastMisrouteHealthOkAt) < MISROUTE_HEALTH_OK_COOLDOWN_MS) return true;
 
   try {
-    const probe = async (url: string): Promise<{ ok: boolean; status: number }> => {
-      const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 2500);
-      const res = await fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-        signal: ac.signal,
-      });
-      clearTimeout(t);
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 2500);
+    const res = await fetch('/admin-api/system/health', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      signal: ac.signal,
+    });
+    clearTimeout(t);
 
-      // Auth-gated endpoints still imply the proxy is reachable.
-      if (res.status === 401 || res.status === 403) return { ok: true, status: res.status };
-
-      const ctype = (res.headers.get('content-type') || '').toLowerCase();
-      // Avoid false positives: if we got HTML, it's likely SPA fallback (proxy misroute).
-      if (res.status === 200 && ctype.includes('text/html')) return { ok: false, status: 502 };
-
-      return { ok: !!res.ok, status: res.status };
-    };
-
-    const health = await probe('/admin-api/system/health');
-    if (health.ok) {
+    // Auth-gated health endpoints still imply proxy is reachable.
+    if (res.status === 401 || res.status === 403) {
       lastMisrouteHealthOkAt = now;
       return true;
     }
 
-    // Some deployments may not expose /system/health yet; avoid false proxy-missing toasts
-    // if a known admin endpoint is still reachable.
-    if (health.status === 404) {
-      const fallback = await probe('/admin-api/admin/broadcast');
-      if (fallback.ok) {
-        lastMisrouteHealthOkAt = now;
-        return true;
-      }
-    }
+    if (!res.ok) return false;
 
-    return false;
+    const ctype = (res.headers.get('content-type') || '').toLowerCase();
+    // Avoid false positives: if we got HTML, it's likely SPA fallback (proxy misroute).
+    if (res.status === 200 && ctype.includes('text/html')) return false;
+
+    lastMisrouteHealthOkAt = now;
+    return true;
   } catch {
     return false;
   }
