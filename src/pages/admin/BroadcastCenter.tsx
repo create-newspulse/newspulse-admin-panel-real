@@ -15,9 +15,10 @@ import {
 } from '@/api/broadcast';
 
 const PROXY_MISSING_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
-const PROXY_MISSING_TOAST_ID = 'np-admin-proxy-missing';
 const PROXY_HEALTH_URL = '/admin-api/system/health';
 const PROXY_BROADCAST_URL = '/admin-api/admin/broadcast';
+
+let didShowProxyMissingToast = false;
 
 const DEFAULT_TICKER_SPEED_SECONDS = 12;
 const DEFAULT_SETTINGS: BroadcastSettings = {
@@ -67,7 +68,9 @@ function isMethodNotAllowed(e: unknown): boolean {
 }
 
 function notifyProxyMissingOnce(notify: ReturnType<typeof useNotify>) {
-  notify.err(PROXY_MISSING_TOAST, undefined, { id: PROXY_MISSING_TOAST_ID, duration: 12_000 });
+  if (didShowProxyMissingToast) return;
+  didShowProxyMissingToast = true;
+  notify.err(PROXY_MISSING_TOAST);
 }
 
 async function checkProxyHealth(): Promise<{ ok: boolean; status?: number }> {
