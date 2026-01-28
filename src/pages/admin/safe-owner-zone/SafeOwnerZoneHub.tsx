@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { translationUiEnabled } from '@/config/featureFlags';
 import { useNotify } from '@/components/ui/toast-bridge';
+import { adminJson } from '@/lib/http/adminFetch';
 import type { OwnerZoneShellContext } from './SafeOwnerZoneShell';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import ownerPasskeyApi from '@/lib/ownerPasskeyApi';
@@ -17,6 +18,37 @@ type AuditRow = {
 };
 
 type ToggleState = { value: boolean | undefined; label: string; statusText: string; disabled: boolean };
+
+type TranslationHealthState = {
+  status: 'idle' | 'loading' | 'ok' | 'error';
+  checkedAt?: string;
+  ok?: boolean;
+  provider?: string;
+  googleKeyConfigured?: boolean;
+  safeMode?: boolean;
+  cacheEnabled?: boolean;
+  error?: string;
+};
+
+function pickBoolean(...values: any[]): boolean | undefined {
+  for (const v of values) {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v !== 0;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+      if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
+    }
+  }
+  return undefined;
+}
+
+function pickString(...values: any[]): string | undefined {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return undefined;
+}
 
 function formatWhen(ts: string | null | undefined) {
   if (!ts) return '—';
@@ -71,9 +103,15 @@ export default function SafeOwnerZoneHub() {
     audit,
     canUseDangerActions,
     busy,
+    updateAdminSettings,
     doSnapshot,
     openRollback,
+    openEmergencyLockdown,
   } = useOutletContext<OwnerZoneShellContext>();
+
+  const [timelineFilter, setTimelineFilter] = useState<'All' | 'Security' | 'AI' | 'Settings' | 'Revenue'>('All');
+
+  const [translationHealth, setTranslationHealth] = useState<TranslationHealthState>({ status: 'idle' });
 
   const [hasPasskey, setHasPasskey] = useState(false);
   const [passkeyKnown, setPasskeyKnown] = useState(false);
@@ -95,6 +133,71 @@ export default function SafeOwnerZoneHub() {
         setPasskeyKnown(false);
       }
     })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      setTranslationHealth((prev) => ({ ...prev, status: 'loading' }));
+      try {
+        const raw = await adminJson<any>('/admin-api/public/translation/health', { method: 'GET', cache: 'no-store' } as any);
+        const obj = (raw && typeof raw === 'object' && (raw as any).data && typeof (raw as any).data === 'object') ? (raw as any).data : raw;
+
+        const ok = pickBoolean((obj as any)?.ok, (obj as any)?.success, (obj as any)?.healthy, (obj as any)?.health?.ok);
+        const providerRaw = pickString((obj as any)?.provider, (obj as any)?.engine, (obj as any)?.service);
+        const provider = providerRaw ? providerRaw : undefined;
+
+        const googleKeyConfigured = pickBoolean(
+          (obj as any)?.googleKeyConfigured,
+          (obj as any)?.google_key_configured,
+          (obj as any)?.googleKeyPresent,
+          (obj as any)?.hasGoogleKey,
+          (obj as any)?.google?.keyConfigured,
+          (obj as any)?.google?.configured,
+          (obj as any)?.google?.enabled,
+        );
+
+        const safeMode = pickBoolean(
+          (obj as any)?.safeMode,
+          (obj as any)?.safe_mode,
+          (obj as any)?.safe?.mode,
+          (obj as any)?.safe?.enabled,
+          (obj as any)?.translationSafeMode,
+        );
+
+        const cacheEnabled = pickBoolean(
+          (obj as any)?.cacheEnabled,
+          (obj as any)?.cache_enabled,
+          (obj as any)?.cacheOn,
+          (obj as any)?.cache_on,
+          (obj as any)?.cache?.enabled,
+          (obj as any)?.cache?.on,
+        );
+
+        if (!mounted) return;
+        setTranslationHealth({
+          status: 'ok',
+          checkedAt: new Date().toISOString(),
+          ok: typeof ok === 'boolean' ? ok : true,
+          provider,
+          googleKeyConfigured,
+          safeMode,
+          cacheEnabled,
+        });
+      } catch (e: any) {
+        if (!mounted) return;
+        setTranslationHealth({
+          status: 'error',
+          checkedAt: new Date().toISOString(),
+          ok: false,
+          error: e?.message || 'Health check failed',
+        });
+      }
+    };
+    void run();
     return () => {
       mounted = false;
     };
@@ -403,6 +506,121 @@ export default function SafeOwnerZoneHub() {
             {health?.proxied === false
               ? 'ADMIN_BACKEND_URL not configured for proxy health.'
               : 'Health is derived from /system/health.'}
+          </div>
+        </div>
+
+        {/* Translation Health (non-intrusive) */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold">Translation Status</div>
+              <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Quick health check (no workflow UI).</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+              disabled={translationHealth.status === 'loading'}
+              onClick={async () => {
+                setTranslationHealth((prev) => ({ ...prev, status: 'loading' }));
+                try {
+                  const raw = await adminJson<any>('/admin-api/public/translation/health', { method: 'GET', cache: 'no-store' } as any);
+                  const obj = (raw && typeof raw === 'object' && (raw as any).data && typeof (raw as any).data === 'object') ? (raw as any).data : raw;
+
+                  const ok = pickBoolean((obj as any)?.ok, (obj as any)?.success, (obj as any)?.healthy, (obj as any)?.health?.ok);
+                  const providerRaw = pickString((obj as any)?.provider, (obj as any)?.engine, (obj as any)?.service);
+                  const provider = providerRaw ? providerRaw : undefined;
+
+                  const googleKeyConfigured = pickBoolean(
+                    (obj as any)?.googleKeyConfigured,
+                    (obj as any)?.google_key_configured,
+                    (obj as any)?.googleKeyPresent,
+                    (obj as any)?.hasGoogleKey,
+                    (obj as any)?.google?.keyConfigured,
+                    (obj as any)?.google?.configured,
+                    (obj as any)?.google?.enabled,
+                  );
+
+                  const safeMode = pickBoolean(
+                    (obj as any)?.safeMode,
+                    (obj as any)?.safe_mode,
+                    (obj as any)?.safe?.mode,
+                    (obj as any)?.safe?.enabled,
+                    (obj as any)?.translationSafeMode,
+                  );
+
+                  const cacheEnabled = pickBoolean(
+                    (obj as any)?.cacheEnabled,
+                    (obj as any)?.cache_enabled,
+                    (obj as any)?.cacheOn,
+                    (obj as any)?.cache_on,
+                    (obj as any)?.cache?.enabled,
+                    (obj as any)?.cache?.on,
+                  );
+
+                  setTranslationHealth({
+                    status: 'ok',
+                    checkedAt: new Date().toISOString(),
+                    ok: typeof ok === 'boolean' ? ok : true,
+                    provider,
+                    googleKeyConfigured,
+                    safeMode,
+                    cacheEnabled,
+                  });
+                } catch (e: any) {
+                  setTranslationHealth({
+                    status: 'error',
+                    checkedAt: new Date().toISOString(),
+                    ok: false,
+                    error: e?.message || 'Health check failed',
+                  });
+                }
+              }}
+            >
+              {translationHealth.status === 'loading' ? 'Checking…' : 'Refresh'}
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">Health</div>
+              <div className="text-sm text-slate-700 dark:text-slate-200">
+                {translationHealth.status === 'loading'
+                  ? 'Checking…'
+                  : translationHealth.status === 'error'
+                    ? 'Unavailable'
+                    : translationHealth.ok
+                      ? 'OK'
+                      : 'Degraded'}
+              </div>
+            </div>
+
+            {[
+              { k: 'Google key configured', v: translationHealth.googleKeyConfigured },
+              { k: 'Safe Mode', v: translationHealth.safeMode },
+              { k: 'Cache', v: translationHealth.cacheEnabled },
+            ].map((row) => (
+              <div key={row.k} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">{row.k}</div>
+                <div className="text-sm text-slate-700 dark:text-slate-200">
+                  {typeof row.v === 'boolean' ? (row.v ? 'On' : 'Off') : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+            <div>
+              {(() => {
+                const provider = translationHealth.provider ? String(translationHealth.provider) : 'Google';
+                const mode = translationHealth.safeMode === true ? 'Safe Mode ON' : translationHealth.safeMode === false ? 'Safe Mode OFF' : 'Safe Mode —';
+                const enabled = translationHealth.googleKeyConfigured === false ? 'OFF' : 'ON';
+                return `Translation: ${enabled} (${provider}) / ${mode}`;
+              })()}
+            </div>
+            {translationHealth.checkedAt ? <div>Last checked {formatWhen(translationHealth.checkedAt)}</div> : null}
+            {translationHealth.status === 'error' && translationHealth.error ? (
+              <div className="mt-1">{translationHealth.error}</div>
+            ) : null}
           </div>
         </div>
       </div>

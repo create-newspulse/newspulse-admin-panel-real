@@ -51,6 +51,13 @@ try {
       const msg = ev?.detail?.message || devHint;
       toast.error(msg, { id: 'np-backend-offline', duration: 12_000 });
     });
+
+    // Fired by adminFetch() when /admin-api requests return SPA HTML (rewrite missing).
+    // Use a stable toast id to avoid duplicates.
+    window.addEventListener('np:admin-proxy-missing', (ev: any) => {
+      const msg = ev?.detail?.message || 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
+      toast.error(msg, { id: 'np-admin-proxy-missing', duration: 12_000 });
+    });
   }
 } catch {
   // ignore
