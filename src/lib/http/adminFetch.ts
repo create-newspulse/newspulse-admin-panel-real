@@ -54,7 +54,7 @@ const RAW_ADMIN_BASE = (
 
 export const ADMIN_API_BASE = normalizeAdminApiBase(RAW_ADMIN_BASE || '/admin-api');
 
-const HTML_MISROUTE_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
+const HTML_MISROUTE_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
 
 function stripTrailingSlashOnce(s: string): string {
   return (s || '').replace(/\/+$/, '');
@@ -100,6 +100,76 @@ function looksLikeSpaHtml(body: string): boolean {
   if (!t) return false;
   if (t.includes('enable javascript to run this app')) return true;
   return t.startsWith('<!doctype html') || t.startsWith('<html') || t.includes('<head') || t.includes('<body');
+}
+
+function containsSpaHtmlMisrouteMarker(body: string): boolean {
+  const t = (body || '').toLowerCase();
+  return !!t && t.includes('enable javascript to run this app');
+}
+
+// Throttle rewrite-misroute warnings to avoid toast spam when multiple requests
+// fail in quick succession (e.g., page boot loads).
+let lastMisrouteWarnAt = 0;
+const MISROUTE_WARN_COOLDOWN_MS = 30_000;
+
+let lastMisrouteHealthOkAt = 0;
+const MISROUTE_HEALTH_OK_COOLDOWN_MS = 30_000;
+
+async function probeAdminProxyHealth(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const now = Date.now();
+  if (lastMisrouteHealthOkAt && (now - lastMisrouteHealthOkAt) < MISROUTE_HEALTH_OK_COOLDOWN_MS) return true;
+
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 2500);
+    const res = await fetch('/admin-api/system/health', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      signal: ac.signal,
+    });
+    clearTimeout(t);
+
+    // Auth-gated health endpoints still imply proxy is reachable.
+    if (res.status === 401 || res.status === 403) {
+      lastMisrouteHealthOkAt = now;
+      return true;
+    }
+
+    if (!res.ok) return false;
+
+    const ctype = (res.headers.get('content-type') || '').toLowerCase();
+    // Avoid false positives: if we got HTML, it's likely SPA fallback (proxy misroute).
+    if (res.status === 200 && ctype.includes('text/html')) return false;
+
+    lastMisrouteHealthOkAt = now;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function maybeNotifyProxyMissingOnce() {
+  if (typeof window === 'undefined') return;
+  const now = Date.now();
+  if (lastMisrouteWarnAt && (now - lastMisrouteWarnAt) < MISROUTE_WARN_COOLDOWN_MS) return;
+  lastMisrouteWarnAt = now;
+
+  // Only surface this toast when a real proxy health probe fails.
+  // This prevents false positives when an endpoint legitimately responds with HTML.
+  void (async () => {
+    const ok = await probeAdminProxyHealth();
+    if (ok) return;
+    try {
+      window.dispatchEvent(new CustomEvent('np:admin-proxy-missing', {
+        detail: { message: HTML_MISROUTE_TOAST },
+      }));
+    } catch {
+      // ignore
+    }
+  })();
 }
 
 export class AdminApiError extends Error {
@@ -343,10 +413,16 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     );
   }
 
-  // CRITICAL: If /admin-api rewrites are missing/misconfigured, Vercel may return the SPA HTML.
-  // Detect it and throw a clear error instead of letting callers try to JSON.parse HTML.
+  // DEV-only: If /admin-api rewrites are missing/misconfigured, Vite may return the SPA HTML.
+  // Convert that into a proper (synthetic) 502 so callers can treat it like an API failure.
   try {
-    if (typeof normalizedPath === 'string' && (normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/'))) {
+    const isAdminApiCall = typeof normalizedPath === 'string' && (
+      normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/')
+    );
+
+    // Production-safe rule: only treat it as a rewrite-missing SPA fallback when the response is 200
+    // AND includes the well-known CRA/Vite SPA marker string. This avoids misclassifying legit HTML.
+    if (isAdminApiCall) {
       const ctype = (res.headers.get('content-type') || '').toLowerCase();
       // Only treat this as a rewrite-missing SPA fallback when the request *succeeds* (200)
       // but returns HTML. Backends can legitimately return HTML on 401/403/500; we must not
@@ -354,8 +430,11 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
       if (res.status === 200 && (ctype.includes('text/html') || !ctype.includes('application/json'))) {
         const preview = await res.clone().text().catch(() => '');
         const snippet = (preview || '').slice(0, 4000);
-        if (looksLikeSpaHtml(snippet)) {
-          throw new AdminApiError(HTML_MISROUTE_TOAST, {
+        const shouldRunDevHeuristics = import.meta.env.DEV && isLocalUiHost();
+        const isMisroute = containsSpaHtmlMisrouteMarker(snippet) || (shouldRunDevHeuristics && looksLikeSpaHtml(snippet));
+        if (isMisroute) {
+          maybeNotifyProxyMissingOnce();
+          throw new AdminApiError('API error (proxy misroute)', {
             // If we got HTML for an /admin-api call, we did not reach the backend.
             // Treat this as a proxy failure (non-2xx) even if the HTTP status was 200.
             status: res.ok ? 502 : (res.status || 502),

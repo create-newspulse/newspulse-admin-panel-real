@@ -17,6 +17,7 @@ import {
 const PROXY_MISSING_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
 const PROXY_MISSING_TOAST_ID = 'np-admin-proxy-missing';
 const PROXY_HEALTH_URL = '/admin-api/system/health';
+const PROXY_BROADCAST_URL = '/admin-api/admin/broadcast';
 
 const DEFAULT_TICKER_SPEED_SECONDS = 12;
 const DEFAULT_SETTINGS: BroadcastSettings = {
@@ -71,19 +72,37 @@ function notifyProxyMissingOnce(notify: ReturnType<typeof useNotify>) {
 
 async function checkProxyHealth(): Promise<{ ok: boolean; status?: number }> {
   try {
-    const res = await fetch(PROXY_HEALTH_URL, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+    const probe = async (url: string) => {
+      const res = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-    // If health is auth-gated, proxy is still reachable.
-    if (res.status === 401 || res.status === 403) return { ok: true, status: res.status };
+      // If the endpoint is auth-gated, proxy is still reachable.
+      if (res.status === 401 || res.status === 403) return { ok: true, status: res.status };
 
-    return { ok: res.ok, status: res.status };
+      // A common false positive: 200 OK but SPA HTML was returned (rewrite misroute).
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      if (res.status === 200 && ctype.includes('text/html')) return { ok: false, status: 502 };
+
+      return { ok: res.ok, status: res.status };
+    };
+
+    // Prefer a stable health probe when available.
+    const health = await probe(PROXY_HEALTH_URL);
+    if (health.ok) return health;
+
+    // If /system/health is missing (404) but admin endpoints work, do NOT show proxy-missing.
+    // Fall back to a known admin endpoint to validate proxy reachability.
+    if (health.status === 404) {
+      return await probe(PROXY_BROADCAST_URL);
+    }
+
+    return health;
   } catch {
     return { ok: false };
   }
@@ -215,12 +234,13 @@ function pickDurationSeconds(input: any, kind: 'breaking' | 'live'): number | un
       nested?.durationSec;
 
     const flatValue =
+      input?.[`${kind}DurationSec`] ??
+      input?.[`${kind}DurationSeconds`] ??
       input?.[`${kind}TickerDurationSeconds`] ??
       input?.[`${kind}TickerDurationSec`] ??
       input?.[`${kind}SpeedSeconds`] ??
       input?.[`${kind}SpeedSec`] ??
-      input?.[`${kind}DurationSeconds`] ??
-      input?.[`${kind}DurationSec`];
+      undefined;
 
     const candidate = typeof nestedValue !== 'undefined' ? nestedValue : flatValue;
     if (typeof candidate === 'undefined') return undefined;
@@ -388,10 +408,10 @@ function SectionCard(props: {
                     display: 'inline-block',
                     whiteSpace: 'nowrap',
                     willChange: 'transform',
-                    animation: `np-marquee ${Math.max(6, duration)}s linear infinite`,
+                    animation: `np-marquee ${duration}s linear infinite`,
                   }}
                 >
-                  line scrolling for preview — edit duration to change speed.
+                  Live preview — Fast (12s) vs Normal (20s) vs Slow (30s) should be obvious • Live preview — Fast (12s) vs Normal (20s) vs Slow (30s) should be obvious • Live preview — Fast (12s) vs Normal (20s) vs Slow (30s) should be obvious.
                 </div>
               </div>
             </div>
@@ -515,6 +535,9 @@ export default function BroadcastCenter() {
     // Load config first; do not fail the whole page if a secondary history endpoint is missing.
     const broadcastRes = await apiGetBroadcastConfig();
 
+    // If this call succeeded, the proxy is definitely reachable.
+    setProxyHealthy(true);
+
     const broadcastObj = unwrapObj(broadcastRes);
     const rawSettings = unwrapObj((broadcastObj as any)?.settings ?? broadcastObj) as any;
 
@@ -603,37 +626,35 @@ export default function BroadcastCenter() {
 
       // Canonical payload: keep it small and merge-safe.
       // Items are managed via their dedicated CRUD endpoints; do not ship item arrays in config saves.
+      // Standardized duration field naming (durationSec). Keep "speedSec" aliases for backends that still expect them.
       const payload = {
         breaking: {
           enabled: !!nextSettings.breakingEnabled,
           mode: toBackendMode(nextSettings.breakingMode),
-          // Backends vary in naming; send both.
-          tickerSpeedSeconds: breakingTickerSpeedSeconds,
-          tickerDurationSeconds: breakingTickerSpeedSeconds,
+          durationSec: breakingTickerSpeedSeconds,
         },
         live: {
           enabled: !!nextSettings.liveEnabled,
           mode: toBackendMode(nextSettings.liveMode),
-          tickerSpeedSeconds: liveTickerSpeedSeconds,
-          tickerDurationSeconds: liveTickerSpeedSeconds,
+          durationSec: liveTickerSpeedSeconds,
         },
 
-        // Canonical contract used by some backends
-        breakingSpeedSec: breakingTickerSpeedSeconds,
-        liveSpeedSec: liveTickerSpeedSeconds,
-
-        // Also include flat fields for legacy backends that don't store nested objects.
         breakingEnabled: !!nextSettings.breakingEnabled,
         breakingMode: toBackendMode(nextSettings.breakingMode),
-        breakingTickerSpeedSeconds,
-        breakingTickerDurationSeconds: breakingTickerSpeedSeconds,
+        breakingDurationSec: breakingTickerSpeedSeconds,
         liveEnabled: !!nextSettings.liveEnabled,
         liveMode: toBackendMode(nextSettings.liveMode),
-        liveTickerSpeedSeconds,
-        liveTickerDurationSeconds: liveTickerSpeedSeconds,
+        liveDurationSec: liveTickerSpeedSeconds,
+
+        // Compatibility aliases
+        breakingSpeedSec: breakingTickerSpeedSeconds,
+        liveSpeedSec: liveTickerSpeedSeconds,
       };
 
       await apiSaveBroadcastConfig(payload);
+
+      // Save succeeded: proxy definitely reachable.
+      setProxyHealthy(true);
 
       // Merge-safe: re-fetch the canonical server config so we don't accidentally
       // reset the other ticker if the backend applies defaults.
