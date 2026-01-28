@@ -14,10 +14,10 @@ import {
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
 
-const PROXY_MISSING_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
-const PROXY_MISSING_TOAST_ID = 'np-admin-proxy-missing';
+const PROXY_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 const PROXY_HEALTH_URL = '/admin-api/system/health';
-const PROXY_BROADCAST_URL = '/admin-api/admin/broadcast';
+
+let didShowProxyMissingToast = false;
 
 const DEFAULT_TICKER_SPEED_SECONDS = 12;
 const DEFAULT_SETTINGS: BroadcastSettings = {
@@ -67,7 +67,10 @@ function isMethodNotAllowed(e: unknown): boolean {
 }
 
 function notifyProxyMissingOnce(notify: ReturnType<typeof useNotify>) {
-  notify.err(PROXY_MISSING_TOAST, undefined, { id: PROXY_MISSING_TOAST_ID, duration: 12_000 });
+  if (didShowProxyMissingToast) return;
+  didShowProxyMissingToast = true;
+  // toast-bridge supports only (title, optionalDesc)
+  notify.err(PROXY_MISSING_TOAST);
 }
 
 async function checkProxyHealth(): Promise<{ ok: boolean; status?: number }> {
@@ -94,17 +97,9 @@ async function checkProxyHealth(): Promise<{ ok: boolean; status?: number }> {
 
     // Prefer a stable health probe when available.
     const health = await probe(PROXY_HEALTH_URL);
-    if (health.ok) return health;
-
-    // If /system/health is missing (404) but admin endpoints work, do NOT show proxy-missing.
-    // Fall back to a known admin endpoint to validate proxy reachability.
-    if (health.status === 404) {
-      return await probe(PROXY_BROADCAST_URL);
-    }
-
     return health;
   } catch {
-    return { ok: false };
+    return { ok: false, status: 0 };
   }
 }
 
@@ -261,10 +256,17 @@ function PresetsRow(props: {
     { key: 'normal', label: 'Normal', value: 20 },
     { key: 'slow', label: 'Slow', value: 30 },
   ];
+
+  // Highlight the closest preset for the current slider value.
+  const nearestValue = presets.reduce((best, p) => {
+    if (typeof best !== 'number') return p.value;
+    return Math.abs(p.value - props.value) < Math.abs(best - props.value) ? p.value : best;
+  }, presets[0]?.value ?? 12);
+
   return (
     <div className="flex flex-wrap gap-2">
       {presets.map((p) => {
-        const active = props.value === p.value;
+        const active = nearestValue === p.value;
         return (
           <button
             key={p.key}
@@ -488,6 +490,7 @@ export default function BroadcastCenter() {
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   const [proxyHealthy, setProxyHealthy] = useState<boolean | null>(null);
+  const [proxyHealthStatus, setProxyHealthStatus] = useState<number | null>(null);
   const proxyHealthyRef = useRef<boolean | null>(proxyHealthy);
   useEffect(() => { proxyHealthyRef.current = proxyHealthy; }, [proxyHealthy]);
 
@@ -497,6 +500,7 @@ export default function BroadcastCenter() {
 
     const health = await checkProxyHealth();
     setProxyHealthy(health.ok);
+    setProxyHealthStatus(typeof health.status === 'number' ? health.status : null);
     if (!health.ok) notifyProxyMissingOnce(notifyRef.current);
     return health.ok;
   }, []);
@@ -624,9 +628,7 @@ export default function BroadcastCenter() {
 
       const savedKey = serializeSaveKey(nextSettings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
 
-      // Canonical payload: keep it small and merge-safe.
-      // Items are managed via their dedicated CRUD endpoints; do not ship item arrays in config saves.
-      // Standardized duration field naming (durationSec). Keep "speedSec" aliases for backends that still expect them.
+      // Normalized backend payload (per contract)
       const payload = {
         breaking: {
           enabled: !!nextSettings.breakingEnabled,
@@ -638,17 +640,6 @@ export default function BroadcastCenter() {
           mode: toBackendMode(nextSettings.liveMode),
           durationSec: liveTickerSpeedSeconds,
         },
-
-        breakingEnabled: !!nextSettings.breakingEnabled,
-        breakingMode: toBackendMode(nextSettings.breakingMode),
-        breakingDurationSec: breakingTickerSpeedSeconds,
-        liveEnabled: !!nextSettings.liveEnabled,
-        liveMode: toBackendMode(nextSettings.liveMode),
-        liveDurationSec: liveTickerSpeedSeconds,
-
-        // Compatibility aliases
-        breakingSpeedSec: breakingTickerSpeedSeconds,
-        liveSpeedSec: liveTickerSpeedSeconds,
       };
 
       await apiSaveBroadcastConfig(payload);
@@ -732,10 +723,8 @@ export default function BroadcastCenter() {
         return;
       }
 
-      // Only show proxy missing if the real health check fails.
-      const ok = await ensureProxyHealthy({ force: true });
-      if (!ok) return;
-
+      // Non-blocking: warn if proxy health check fails, but still show the real error.
+      void ensureProxyHealthy({ force: true });
       notifyRef.current.err('Save failed', apiErrorDetails(e, 'API error'));
     } finally {
       setSaving(false);
@@ -752,14 +741,12 @@ export default function BroadcastCenter() {
     refreshInFlight.current = true;
     setIsRefreshing(true);
     try {
-      // Never assume rewrites are missing. Only warn if /admin-api/system/health fails.
-      const ok = await ensureProxyHealthy({ force: true });
-      if (!ok) return;
+      // Non-blocking warning if /admin-api/system/health fails.
+      void ensureProxyHealthy({ force: true });
       await loadAll();
       setLastRefreshAt(new Date().toISOString());
     } catch (e: any) {
-      const ok = await ensureProxyHealthy({ force: true });
-      if (!ok) return;
+      void ensureProxyHealthy({ force: true });
       if (isMethodNotAllowed(e)) {
         notifyRef.current.err('Refresh failed', 'Backend method not allowed (405).');
       } else {
@@ -881,6 +868,44 @@ export default function BroadcastCenter() {
 
   return (
     <div className="space-y-6">
+      {proxyHealthy === false ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-100">
+          <div className="text-sm font-semibold">Admin API proxy warning</div>
+          <div className="mt-1 text-xs opacity-90">
+            Health probe to <span className="font-mono">/admin-api/system/health</span> failed{typeof proxyHealthStatus === 'number' ? ` (HTTP ${proxyHealthStatus || 0})` : ''}. You can still try Save/Refresh; if this is local dev, ensure the Vite proxy target is set.
+          </div>
+          {(() => {
+            const direct = String(
+              (import.meta as any)?.env?.VITE_BACKEND_URL ||
+              (import.meta as any)?.env?.VITE_PROXY_TARGET ||
+              (import.meta as any)?.env?.VITE_BACKEND_ORIGIN ||
+              ''
+            ).trim();
+            if (!direct) return null;
+            return (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="text-xs">Backend:</div>
+                <div className="rounded-md bg-white/70 px-2 py-1 text-xs font-mono dark:bg-black/30">{direct}</div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950 dark:hover:bg-amber-900/50"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(direct);
+                      notifyRef.current.ok('Copied backend URL');
+                    } catch {
+                      notifyRef.current.err('Copy failed');
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
+
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">📡 Broadcast Center</h1>

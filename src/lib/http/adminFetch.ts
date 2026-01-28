@@ -54,7 +54,7 @@ const RAW_ADMIN_BASE = (
 
 export const ADMIN_API_BASE = normalizeAdminApiBase(RAW_ADMIN_BASE || '/admin-api');
 
-const HTML_MISROUTE_TOAST = 'Admin API rewrite missing. Configure Vercel /admin-api rewrite to backend.';
+const HTML_MISROUTE_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 
 function stripTrailingSlashOnce(s: string): string {
   return (s || '').replace(/\/+$/, '');
