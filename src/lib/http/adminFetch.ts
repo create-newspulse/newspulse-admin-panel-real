@@ -18,6 +18,16 @@ function isLocalUiHost(): boolean {
   }
 }
 
+function isLocalOrigin(input: string): boolean {
+  try {
+    if (!/^https?:\/\//i.test(input || '')) return false;
+    const u = new URL(input);
+    return isLocalHostname(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Admin API contract:
 // - Browser MUST call same-origin '/admin-api/*'
 // - Vite/Vercel rewrites proxy '/admin-api/*' to the backend
@@ -274,6 +284,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   // In production, always treat '/admin-api/*' as a SAME-ORIGIN proxy call.
   // This prevents accidental cross-origin calls (e.g., to Render) when an env var sets
   // an absolute backend base and the browser blocks POST/PUT/DELETE preflights.
+  const proxyMode = true;
   const forceSameOriginProxy = typeof normalizedPath === 'string' && (
     normalizedPath === '/admin-api' || normalizedPath.startsWith('/admin-api/')
   );
