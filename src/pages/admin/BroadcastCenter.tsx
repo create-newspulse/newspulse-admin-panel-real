@@ -27,6 +27,13 @@ const DEFAULT_SETTINGS: BroadcastSettings = {
   liveMode: 'manual',
 };
 
+type SourceLang = 'en' | 'hi' | 'gu';
+const SOURCE_LANG_OPTIONS: Array<{ value: SourceLang; label: string }> = [
+  { value: 'en', label: 'English' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'gu', label: 'Gujarati' },
+];
+
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
 function getBroadcastItemId(item: Partial<BroadcastItem> & Record<string, any>): string {
@@ -306,6 +313,8 @@ function SectionCard(props: {
   onTickerSpeedSecondsReset?: () => void;
   inputValue: string;
   onInputChange: (next: string) => void;
+  sourceLang: SourceLang;
+  onSourceLangChange: (next: SourceLang) => void;
   onAdd: () => void;
   addDisabled: boolean;
   items: BroadcastItem[];
@@ -428,6 +437,21 @@ function SectionCard(props: {
             placeholder="Add story (max 160 chars)"
             className="w-full flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
           />
+
+          <select
+            value={props.sourceLang}
+            onChange={(e) => props.onSourceLangChange(e.target.value as SourceLang)}
+            disabled={props.addDisabled || !!props.disabled}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-44"
+            aria-label="Language"
+          >
+            {SOURCE_LANG_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+
           <button
             type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
@@ -516,6 +540,21 @@ export default function BroadcastCenter() {
 
   const [settings, setSettings] = useState<BroadcastSettings>(() => DEFAULT_SETTINGS);
 
+  const [breakingSourceLang, setBreakingSourceLang] = useState<SourceLang>('en');
+  const [liveSourceLang, setLiveSourceLang] = useState<SourceLang>('en');
+
+  const [publicPreview, setPublicPreview] = useState<{
+    loading: boolean;
+    error?: string | null;
+    breaking: Record<SourceLang, string[]>;
+    live: Record<SourceLang, string[]>;
+  }>(() => ({
+    loading: false,
+    error: null,
+    breaking: { en: [], hi: [], gu: [] },
+    live: { en: [], hi: [], gu: [] },
+  }));
+
   const [breakingTickerSpeedSeconds, setBreakingTickerSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).breakingTickerSpeedSeconds);
   const [liveTickerSpeedSeconds, setLiveTickerSpeedSeconds] = useState<number>(() => normalizeSpeeds(null).liveTickerSpeedSeconds);
 
@@ -527,6 +566,62 @@ export default function BroadcastCenter() {
 
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
+
+  const fetchPublicPreview = useCallback(async () => {
+    setPublicPreview((prev) => ({ ...prev, loading: true, error: null }));
+    try {
+      const fetchOne = async (type: BroadcastType, lang: SourceLang): Promise<string[]> => {
+        const url = `/admin-api/public/broadcast?type=${encodeURIComponent(type)}&lang=${encodeURIComponent(lang)}`;
+        const res = await fetch(url, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${res.statusText}${txt ? ` • ${txt.slice(0, 120)}` : ''}`);
+        }
+
+        const data: any = await res.json().catch(() => null);
+        const items = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data?.items)
+              ? data.data.items
+              : [];
+
+        return (items || [])
+          .map((it: any) => String(it?.text ?? it?.headline ?? it ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 6);
+      };
+
+      const [breakingEn, breakingHi, breakingGu, liveEn, liveHi, liveGu] = await Promise.all([
+        fetchOne('breaking', 'en'),
+        fetchOne('breaking', 'hi'),
+        fetchOne('breaking', 'gu'),
+        fetchOne('live', 'en'),
+        fetchOne('live', 'hi'),
+        fetchOne('live', 'gu'),
+      ]);
+
+      setPublicPreview({
+        loading: false,
+        error: null,
+        breaking: { en: breakingEn, hi: breakingHi, gu: breakingGu },
+        live: { en: liveEn, hi: liveHi, gu: liveGu },
+      });
+    } catch (e: any) {
+      setPublicPreview((prev) => ({
+        ...prev,
+        loading: false,
+        error: e?.message || 'Failed to load public preview',
+      }));
+    }
+  }, []);
 
   const setWorking = useCallback((id: string, next: boolean) => {
     setWorkingIdMap((prev) => {
@@ -706,6 +801,10 @@ export default function BroadcastCenter() {
       }
 
       notifyRef.current.ok(opts?.toast || 'Saved. Live will update within 10 seconds.');
+
+      // Refresh public preview (best-effort). If the backend doesn't support this endpoint yet,
+      // the preview will show an error but the save still succeeded.
+      void fetchPublicPreview();
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Save failed', {
@@ -794,7 +893,8 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const createdItem = await apiAddBroadcastItem(type, text);
+      const sourceLang: SourceLang = type === 'breaking' ? breakingSourceLang : liveSourceLang;
+      const createdItem = await apiAddBroadcastItem(type, text, { sourceLang });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
 
@@ -827,7 +927,7 @@ export default function BroadcastCenter() {
     } finally {
       setAddingType(null);
     }
-  }, [breakingText, liveText]);
+  }, [breakingText, liveText, breakingSourceLang, liveSourceLang]);
 
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
@@ -940,6 +1040,66 @@ export default function BroadcastCenter() {
         <div className="text-xs text-slate-500 dark:text-slate-400">Last refreshed {formatLocalTime(lastRefreshAt)}</div>
       ) : null}
 
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold">Public ticker preview (EN/HI/GU)</div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Fetches <span className="font-mono">/admin-api/public/broadcast</span> for both tickers.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+            disabled={publicPreview.loading}
+            onClick={() => void fetchPublicPreview()}
+          >
+            {publicPreview.loading ? 'Loading…' : 'Refresh preview'}
+          </button>
+        </div>
+
+        {publicPreview.error ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-100">
+            Preview unavailable: {publicPreview.error}
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {(['breaking', 'live'] as const).map((type) => (
+            <div key={type} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {type === 'breaking' ? 'Breaking' : 'Live Updates'}
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {(['en', 'hi', 'gu'] as const).map((lang) => {
+                  const lines = (type === 'breaking' ? publicPreview.breaking : publicPreview.live)[lang];
+                  return (
+                    <div key={lang} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+                      <div className="mb-2 font-semibold text-slate-700 dark:text-slate-200">
+                        {lang === 'en' ? 'English' : lang === 'hi' ? 'Hindi' : 'Gujarati'}
+                      </div>
+                      {lines.length === 0 ? (
+                        <div className="text-slate-500 dark:text-slate-400">No lines</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {lines.map((t, i) => (
+                            <div key={`${lang}-${i}`} className="truncate" title={t}>
+                              {t}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           title="🔥 Breaking"
@@ -961,6 +1121,8 @@ export default function BroadcastCenter() {
           onTickerSpeedSecondsReset={() => setBreakingTickerSpeedSeconds(12)}
           inputValue={breakingText}
           onInputChange={setBreakingText}
+          sourceLang={breakingSourceLang}
+          onSourceLangChange={setBreakingSourceLang}
           addDisabled={loading || addingType === 'breaking'}
           onAdd={() => addItem('breaking')}
           items={breakingItems}
@@ -987,6 +1149,8 @@ export default function BroadcastCenter() {
           onTickerSpeedSecondsReset={() => setLiveTickerSpeedSeconds(12)}
           inputValue={liveText}
           onInputChange={setLiveText}
+          sourceLang={liveSourceLang}
+          onSourceLangChange={setLiveSourceLang}
           addDisabled={loading || addingType === 'live'}
           onAdd={() => addItem('live')}
           items={liveItems}

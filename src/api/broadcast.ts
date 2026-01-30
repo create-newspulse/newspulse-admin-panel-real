@@ -113,13 +113,14 @@ export async function listItems(type: BroadcastType): Promise<BroadcastItem[]> {
 export async function addItem(
   type: BroadcastType,
   text: string,
-  opts?: { lang?: string; autoTranslate?: boolean }
+  opts?: { sourceLang?: 'en' | 'hi' | 'gu'; lang?: string; autoTranslate?: boolean }
 ): Promise<BroadcastItem | null> {
   const raw = await requestJson<any>('/items', {
     method: 'POST',
     json: {
       type,
       text,
+      sourceLang: opts?.sourceLang,
       // requested fields (harmless if backend ignores)
       lang: opts?.lang || 'en',
       autoTranslate: typeof opts?.autoTranslate === 'boolean' ? opts.autoTranslate : undefined,

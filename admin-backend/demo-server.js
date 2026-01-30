@@ -400,9 +400,9 @@ app.put('/api/articles/:id', handlePutArticle);
 app.patch('/api/articles/:id', handlePatchArticle);
 
 let BROADCAST_SETTINGS = {
-  breakingEnabled: true,
+  breakingEnabled: false,
   breakingMode: 'manual',
-  liveEnabled: true,
+  liveEnabled: false,
   liveMode: 'manual',
 };
 
@@ -451,6 +451,8 @@ app.post('/api/broadcast/items', (req, res) => {
   const body = req.body || {};
   const type = String(body.type || '').toLowerCase();
   const text = String(body.text || '').trim();
+  const sourceLangRaw = String(body.sourceLang || body.lang || body.language || 'en').toLowerCase();
+  const sourceLang = sourceLangRaw === 'hi' || sourceLangRaw === 'gu' ? sourceLangRaw : 'en';
   if (type !== 'breaking' && type !== 'live') {
     return res.status(400).json({ error: 'Invalid type. Expected breaking|live' });
   }
@@ -469,11 +471,49 @@ app.post('/api/broadcast/items', (req, res) => {
     isLive: true,
     createdAt,
     expiresAt,
-    language: body.language ? String(body.language) : undefined,
+    // Language fields
+    sourceLang,
+    language: sourceLang,
+    translations: {
+      en: text,
+      hi: text,
+      gu: text,
+    },
     updatedAt: createdAt,
   };
   BROADCAST_ITEMS.push(item);
   return res.status(201).json(item);
+});
+
+// Public ticker endpoint (no auth). In production, your real backend should return
+// translated lines. Demo backend returns a simple { translations } bundle.
+app.get('/api/public/broadcast', (req, res) => {
+  pruneBroadcastItems();
+  const type = String(req.query?.type || '').toLowerCase();
+  const langRaw = String(req.query?.lang || 'en').toLowerCase();
+  const lang = langRaw === 'hi' || langRaw === 'gu' ? langRaw : 'en';
+
+  if (type !== 'breaking' && type !== 'live') {
+    return res.status(400).json({ error: 'Invalid type. Expected breaking|live' });
+  }
+
+  const items = BROADCAST_ITEMS
+    .filter((it) => it.type === type)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .map((it) => {
+      const translated = (it?.translations && it.translations[lang]) ? it.translations[lang] : it.text;
+      return {
+        _id: it._id,
+        type: it.type,
+        text: translated,
+        createdAt: it.createdAt,
+        expiresAt: it.expiresAt,
+        sourceLang: it.sourceLang || it.language || 'en',
+        lang,
+      };
+    });
+
+  return res.status(200).json({ type, lang, items });
 });
 
 app.patch('/api/broadcast/items/:id', (req, res) => {
