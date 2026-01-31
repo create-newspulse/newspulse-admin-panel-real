@@ -3,5 +3,20 @@
     "files.autoSave": "onFocusChange",
     "files.autoSaveDelay": 1000,
     "typescript.tsdk": "newspulse-admin-panel-real-main/node_modules/typescript/lib",
-    "typescript.enablePromptUseWorkspaceTsdk": true
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+
+    // The production backend lives on Render; `admin-backend/` is local/demo only.
+    // Exclude it from editor diagnostics/search to avoid confusing Problems pane noise.
+    "typescript.tsserver.exclude": [
+        "admin-backend/**"
+    ],
+    "javascript.tsserver.exclude": [
+        "admin-backend/**"
+    ],
+    "files.exclude": {
+        "admin-backend/**": true
+    },
+    "search.exclude": {
+        "admin-backend/**": true
+    }
 }

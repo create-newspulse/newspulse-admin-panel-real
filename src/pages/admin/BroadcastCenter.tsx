@@ -28,11 +28,44 @@ const DEFAULT_SETTINGS: BroadcastSettings = {
 };
 
 type SourceLang = 'en' | 'hi' | 'gu';
-const SOURCE_LANG_OPTIONS: Array<{ value: SourceLang; label: string }> = [
+type LangChoice = 'auto' | SourceLang;
+
+const SOURCE_LANG_OPTIONS: Array<{ value: LangChoice; label: string }> = [
+  { value: 'auto', label: 'Auto-detect' },
   { value: 'en', label: 'English' },
   { value: 'hi', label: 'Hindi' },
   { value: 'gu', label: 'Gujarati' },
 ];
+
+function detectLangFromText(input: string): SourceLang {
+  const s = (input || '').trim();
+  if (!s) return 'en';
+  // Gujarati block: U+0A80..U+0AFF
+  if (/[\u0A80-\u0AFF]/.test(s)) return 'gu';
+  // Devanagari block (Hindi): U+0900..U+097F
+  if (/[\u0900-\u097F]/.test(s)) return 'hi';
+  return 'en';
+}
+
+type GlossaryEntry = { id: string; term: string; hi: string; gu: string };
+
+function applyGlossary(text: string, glossary: GlossaryEntry[], to: SourceLang): string {
+  let out = String(text || '');
+  for (const g of glossary || []) {
+    const term = String(g?.term || '').trim();
+    if (!term) continue;
+    const hi = String(g?.hi || '').trim();
+    const gu = String(g?.gu || '').trim();
+    const replacement = to === 'hi' ? hi : to === 'gu' ? gu : term;
+    if (!replacement) continue;
+    // Replace any known variant with the target variant.
+    for (const variant of [term, hi, gu]) {
+      if (!variant) continue;
+      out = out.split(variant).join(replacement);
+    }
+  }
+  return out;
+}
 
 const unwrapObj = (x: any) => (x?.data && typeof x.data === 'object' ? x.data : x);
 
@@ -313,8 +346,12 @@ function SectionCard(props: {
   onTickerSpeedSecondsReset?: () => void;
   inputValue: string;
   onInputChange: (next: string) => void;
-  sourceLang: SourceLang;
-  onSourceLangChange: (next: SourceLang) => void;
+  langChoice: LangChoice;
+  onLangChoiceChange: (next: LangChoice) => void;
+  detectedLang: SourceLang;
+  previewEnabled: boolean;
+  onPreviewEnabledChange: (next: boolean) => void;
+  preview: { en?: string; hi?: string; gu?: string; loading?: boolean; error?: string | null };
   onAdd: () => void;
   addDisabled: boolean;
   items: BroadcastItem[];
@@ -439,11 +476,11 @@ function SectionCard(props: {
           />
 
           <select
-            value={props.sourceLang}
-            onChange={(e) => props.onSourceLangChange(e.target.value as SourceLang)}
+            value={props.langChoice}
+            onChange={(e) => props.onLangChoiceChange(e.target.value as LangChoice)}
             disabled={props.addDisabled || !!props.disabled}
             className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 sm:w-44"
-            aria-label="Language"
+            aria-label="Language of this ticker"
           >
             {SOURCE_LANG_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -461,6 +498,49 @@ function SectionCard(props: {
             Add
           </button>
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Language of this ticker:{' '}
+            <span className="font-semibold text-slate-700 dark:text-slate-200">
+              {props.langChoice === 'auto' ? `Auto (${props.detectedLang.toUpperCase()})` : props.langChoice.toUpperCase()}
+            </span>
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={props.previewEnabled}
+              onChange={(e) => props.onPreviewEnabledChange(e.target.checked)}
+              disabled={!!props.disabled}
+            />
+            Preview translations
+          </label>
+        </div>
+
+        {props.previewEnabled ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+            {props.preview?.error ? (
+              <div className="text-amber-800 dark:text-amber-200">Preview failed: {props.preview.error}</div>
+            ) : props.preview?.loading ? (
+              <div className="text-slate-500 dark:text-slate-400">Translating…</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {(['en', 'hi', 'gu'] as const).map((k) => (
+                  <div key={k} className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900">
+                    <div className="mb-1 font-semibold text-slate-600 dark:text-slate-300">
+                      {k === 'en' ? 'English' : k === 'hi' ? 'Hindi' : 'Gujarati'}
+                    </div>
+                    <div className="text-slate-900 dark:text-white break-words">
+                      {(props.preview as any)?.[k] || '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-700">
           {itemsSorted.length === 0 ? (
@@ -540,8 +620,16 @@ export default function BroadcastCenter() {
 
   const [settings, setSettings] = useState<BroadcastSettings>(() => DEFAULT_SETTINGS);
 
-  const [breakingSourceLang, setBreakingSourceLang] = useState<SourceLang>('en');
-  const [liveSourceLang, setLiveSourceLang] = useState<SourceLang>('en');
+  const [breakingLangChoice, setBreakingLangChoice] = useState<LangChoice>('auto');
+  const [liveLangChoice, setLiveLangChoice] = useState<LangChoice>('auto');
+
+  const [glossary, setGlossary] = useState<GlossaryEntry[]>([]);
+
+  const [breakingPreviewEnabled, setBreakingPreviewEnabled] = useState(false);
+  const [livePreviewEnabled, setLivePreviewEnabled] = useState(false);
+
+  const [breakingPreview, setBreakingPreview] = useState<{ en?: string; hi?: string; gu?: string; loading?: boolean; error?: string | null }>({});
+  const [livePreview, setLivePreview] = useState<{ en?: string; hi?: string; gu?: string; loading?: boolean; error?: string | null }>({});
 
   const [publicPreview, setPublicPreview] = useState<{
     loading: boolean;
@@ -566,6 +654,124 @@ export default function BroadcastCenter() {
 
   const [workingIdMap, setWorkingIdMap] = useState<Record<string, boolean>>({});
   const [addingType, setAddingType] = useState<BroadcastType | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch('/admin-api/admin/translation/glossary', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) return;
+        const data: any = await res.json().catch(() => null);
+        const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+        if (!mounted) return;
+        setGlossary(items);
+      } catch {
+        // non-blocking
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const translatePreview = useCallback(async (text: string, from: SourceLang) => {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return { en: '', hi: '', gu: '' };
+
+    const baseText = applyGlossary(trimmed, glossary, from);
+
+    const translateOne = async (to: SourceLang): Promise<string> => {
+      if (to === from) return baseText;
+      const res = await fetch('/admin-api/language/translate', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ text: baseText, from, to }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} ${res.statusText}${txt ? ` • ${txt.slice(0, 120)}` : ''}`);
+      }
+      const data: any = await res.json().catch(() => null);
+      const translated = String(data?.translated ?? data?.text ?? '').trim();
+      return applyGlossary(translated || baseText, glossary, to);
+    };
+
+    const [en, hi, gu] = await Promise.all([
+      translateOne('en'),
+      translateOne('hi'),
+      translateOne('gu'),
+    ]);
+    return { en, hi, gu };
+  }, [glossary]);
+
+  const breakingDetectedLang = useMemo(() => detectLangFromText(breakingText), [breakingText]);
+  const liveDetectedLang = useMemo(() => detectLangFromText(liveText), [liveText]);
+
+  useEffect(() => {
+    if (!breakingPreviewEnabled) return;
+    const t = breakingText.trim();
+    if (!t) {
+      setBreakingPreview({ en: '', hi: '', gu: '', loading: false, error: null });
+      return;
+    }
+    const from: SourceLang = breakingLangChoice === 'auto' ? breakingDetectedLang : breakingLangChoice;
+    let alive = true;
+    setBreakingPreview((prev) => ({ ...prev, loading: true, error: null }));
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const out = await translatePreview(t, from);
+          if (!alive) return;
+          setBreakingPreview({ ...out, loading: false, error: null });
+        } catch (e: any) {
+          if (!alive) return;
+          setBreakingPreview({ loading: false, error: e?.message || 'Translation failed' });
+        }
+      })();
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [breakingPreviewEnabled, breakingText, breakingLangChoice, breakingDetectedLang, translatePreview]);
+
+  useEffect(() => {
+    if (!livePreviewEnabled) return;
+    const t = liveText.trim();
+    if (!t) {
+      setLivePreview({ en: '', hi: '', gu: '', loading: false, error: null });
+      return;
+    }
+    const from: SourceLang = liveLangChoice === 'auto' ? liveDetectedLang : liveLangChoice;
+    let alive = true;
+    setLivePreview((prev) => ({ ...prev, loading: true, error: null }));
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const out = await translatePreview(t, from);
+          if (!alive) return;
+          setLivePreview({ ...out, loading: false, error: null });
+        } catch (e: any) {
+          if (!alive) return;
+          setLivePreview({ loading: false, error: e?.message || 'Translation failed' });
+        }
+      })();
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [livePreviewEnabled, liveText, liveLangChoice, liveDetectedLang, translatePreview]);
 
   const fetchPublicPreview = useCallback(async () => {
     setPublicPreview((prev) => ({ ...prev, loading: true, error: null }));
@@ -893,7 +1099,9 @@ export default function BroadcastCenter() {
     }
     setAddingType(type);
     try {
-      const sourceLang: SourceLang = type === 'breaking' ? breakingSourceLang : liveSourceLang;
+      const choice: LangChoice = type === 'breaking' ? breakingLangChoice : liveLangChoice;
+      const detected: SourceLang = type === 'breaking' ? detectLangFromText(breakingText) : detectLangFromText(liveText);
+      const sourceLang: SourceLang = choice === 'auto' ? detected : choice;
       const createdItem = await apiAddBroadcastItem(type, text, { sourceLang });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
@@ -927,7 +1135,7 @@ export default function BroadcastCenter() {
     } finally {
       setAddingType(null);
     }
-  }, [breakingText, liveText, breakingSourceLang, liveSourceLang]);
+  }, [breakingText, liveText, breakingLangChoice, liveLangChoice]);
 
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
@@ -1121,8 +1329,12 @@ export default function BroadcastCenter() {
           onTickerSpeedSecondsReset={() => setBreakingTickerSpeedSeconds(12)}
           inputValue={breakingText}
           onInputChange={setBreakingText}
-          sourceLang={breakingSourceLang}
-          onSourceLangChange={setBreakingSourceLang}
+          langChoice={breakingLangChoice}
+          onLangChoiceChange={setBreakingLangChoice}
+          detectedLang={breakingDetectedLang}
+          previewEnabled={breakingPreviewEnabled}
+          onPreviewEnabledChange={setBreakingPreviewEnabled}
+          preview={breakingPreview}
           addDisabled={loading || addingType === 'breaking'}
           onAdd={() => addItem('breaking')}
           items={breakingItems}
@@ -1149,8 +1361,12 @@ export default function BroadcastCenter() {
           onTickerSpeedSecondsReset={() => setLiveTickerSpeedSeconds(12)}
           inputValue={liveText}
           onInputChange={setLiveText}
-          sourceLang={liveSourceLang}
-          onSourceLangChange={setLiveSourceLang}
+          langChoice={liveLangChoice}
+          onLangChoiceChange={setLiveLangChoice}
+          detectedLang={liveDetectedLang}
+          previewEnabled={livePreviewEnabled}
+          onPreviewEnabledChange={setLivePreviewEnabled}
+          preview={livePreview}
           addDisabled={loading || addingType === 'live'}
           onAdd={() => addItem('live')}
           items={liveItems}

@@ -115,6 +115,7 @@ export async function addItem(
   text: string,
   opts?: { sourceLang?: 'en' | 'hi' | 'gu'; lang?: string; autoTranslate?: boolean }
 ): Promise<BroadcastItem | null> {
+  const effectiveLang = (opts?.lang || opts?.sourceLang || 'en') as any;
   const raw = await requestJson<any>('/items', {
     method: 'POST',
     json: {
@@ -122,10 +123,10 @@ export async function addItem(
       text,
       sourceLang: opts?.sourceLang,
       // requested fields (harmless if backend ignores)
-      lang: opts?.lang || 'en',
+      lang: effectiveLang,
       autoTranslate: typeof opts?.autoTranslate === 'boolean' ? opts.autoTranslate : undefined,
       // back-compat
-      language: opts?.lang || 'en',
+      language: effectiveLang,
     },
   });
 

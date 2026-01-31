@@ -52,6 +52,7 @@ function AdminPanelSettingsLayoutInner() {
         <NavLink to="team" className={linkCls}>Team Management</NavLink>
         <NavLink to="security" className={linkCls}>Security</NavLink>
         {canPublish ? <NavLink to="translation" className={linkCls}>Translation</NavLink> : null}
+        {canPublish ? <NavLink to="translation-glossary" className={linkCls}>Glossary / Protected Terms</NavLink> : null}
         <NavLink to="change-password" className={linkCls}>Change Password</NavLink>
         <NavLink to="audit" className={linkCls}>Audit Logs</NavLink>
         <NavLink to="preview" className={linkCls}>Preview</NavLink>

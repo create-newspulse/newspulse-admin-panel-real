@@ -1,3 +1,55 @@
+// Translation glossary / protected terms (demo in-memory store)
+let TRANSLATION_GLOSSARY = [
+  // Example shape:
+  // { id: 'brand-1', term: 'NewsPulse', hi: 'NewsPulse', gu: 'NewsPulse' },
+];
+
+// --- Translation glossary (admin) ---
+app.get('/api/admin/translation/glossary', (req, res) => {
+  res.json({ items: TRANSLATION_GLOSSARY });
+});
+
+app.put('/api/admin/translation/glossary', (req, res) => {
+  const body = req.body || {};
+  const items = Array.isArray(body.items) ? body.items : Array.isArray(body) ? body : [];
+  TRANSLATION_GLOSSARY = items
+    .map((it) => {
+      const term = String(it?.term || '').trim();
+      const hi = String(it?.hi || '').trim();
+      const gu = String(it?.gu || '').trim();
+      if (!term) return null;
+      const id = String(it?.id || `g-${Math.random().toString(16).slice(2)}`);
+      return { id, term, hi, gu };
+    })
+    .filter(Boolean);
+  res.json({ ok: true, items: TRANSLATION_GLOSSARY });
+});
+
+app.post('/api/admin/translation/glossary', (req, res) => {
+  // Fallback for clients that POST instead of PUT
+  const body = req.body || {};
+  const items = Array.isArray(body.items) ? body.items : Array.isArray(body) ? body : [];
+  TRANSLATION_GLOSSARY = items
+    .map((it) => {
+      const term = String(it?.term || '').trim();
+      const hi = String(it?.hi || '').trim();
+      const gu = String(it?.gu || '').trim();
+      if (!term) return null;
+      const id = String(it?.id || `g-${Math.random().toString(16).slice(2)}`);
+      return { id, term, hi, gu };
+    })
+    .filter(Boolean);
+  res.json({ ok: true, items: TRANSLATION_GLOSSARY });
+});
+
+// --- Language (demo translation stub) ---
+app.post('/api/language/translate', (req, res) => {
+  const { text, from, to } = req.body || {};
+  const input = String(text || '');
+  // Demo behavior: return the input unchanged.
+  // The frontend applies glossary substitutions after translation.
+  res.json({ translated: input, from: String(from || ''), to: String(to || '') });
+});
 // 🚀 NewsPulse Admin - Demo Server (Advanced Features Only)
 // Minimal Express server with ONLY the new features (all ESM, no legacy code)
 

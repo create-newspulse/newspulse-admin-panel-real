@@ -97,6 +97,7 @@ import PublicSiteSettingsLayout from '@pages/admin/settings/PublicSiteSettingsLa
 import TeamManagement from '@pages/admin/settings/admin-panel/TeamManagement';
 import SecurityAdmin from '@pages/admin/settings/admin-panel/SecurityAdmin';
 import TranslationSettings from '@pages/admin/settings/admin-panel/TranslationSettings';
+import TranslationGlossary from '@pages/admin/settings/admin-panel/TranslationGlossary';
 import AuditLogsView from '@pages/admin/settings/admin-panel/AuditLogsView';
 import AdminPreview from '@pages/admin/settings/admin-panel/AdminPreview';
 import HomepageModulesSettings from '@pages/admin/settings/public-site/HomepageModulesSettings';
@@ -319,6 +320,7 @@ function App() {
                   <Route path="team" element={<FounderRoute><TeamManagement /></FounderRoute>} />
                   <Route path="security" element={<SecurityAdmin />} />
                   <Route path="translation" element={<TranslationSettings />} />
+                  <Route path="translation-glossary" element={<TranslationGlossary />} />
                   <Route path="change-password" element={<ChangePassword />} />
                   <Route path="audit" element={<AuditLogsView />} />
                   <Route path="preview" element={<AdminPreview />} />
