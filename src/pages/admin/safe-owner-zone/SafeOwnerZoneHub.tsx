@@ -8,6 +8,8 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import ownerPasskeyApi from '@/lib/ownerPasskeyApi';
 import { useOwnerKeyStore } from '@/lib/ownerKeyStore';
 
+type TimelineFilter = 'All' | 'Security' | 'AI' | 'Settings' | 'Revenue';
+
 type AuditRow = {
   ts?: string;
   type?: string;
@@ -71,13 +73,17 @@ export default function SafeOwnerZoneHub() {
     audit,
     canUseDangerActions,
     busy,
+    updateAdminSettings,
     doSnapshot,
     openRollback,
+    openEmergencyLockdown,
   } = useOutletContext<OwnerZoneShellContext>();
 
   const [hasPasskey, setHasPasskey] = useState(false);
   const [passkeyKnown, setPasskeyKnown] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState<'none' | 'setup' | 'unlock'>('none');
+
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('All');
 
   useEffect(() => {
     let mounted = true;
