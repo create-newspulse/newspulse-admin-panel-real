@@ -8,10 +8,49 @@ const TASKS = ['Summarize', 'Rewrite', 'Creative Narrative', '5W1H Story', 'SEO 
 
 type ProviderKey = 'openai' | 'gemini';
 
+type OpenAiModelMode = 'auto' | 'pinned';
+type GeminiModelMode = 'latest' | 'pinned';
+
+type AiModelsStatus = {
+  openaiResolved?: string;
+  geminiResolved?: string;
+  raw?: any;
+};
+
+function pickResolvedModel(data: any, provider: ProviderKey): string {
+  try {
+    const root = data || {};
+    const byProvider = root?.[provider] || root?.providers?.[provider] || root?.status?.[provider] || null;
+    const resolved =
+      byProvider?.resolvedModel ??
+      byProvider?.resolved ??
+      byProvider?.model ??
+      byProvider?.selectedModel ??
+      root?.resolved?.[provider] ??
+      root?.models?.resolved?.[provider] ??
+      '';
+    return typeof resolved === 'string' ? resolved : resolved ? String(resolved) : '';
+  } catch {
+    return '';
+  }
+}
+
+function labelMode(provider: ProviderKey, mode: string): string {
+  if (provider === 'openai') return mode === 'pinned' ? 'Pinned' : 'Auto (Latest)';
+  return mode === 'pinned' ? 'Pinned' : 'Latest';
+}
+
 export default function AIEngine(): JSX.Element {
   const [provider, setProvider] = useState<ProviderKey>('openai');
-  const [model, setModel] = useState<string>('');
-  const [serverModel, setServerModel] = useState<string>('');
+
+  const [openaiMode, setOpenaiMode] = useState<OpenAiModelMode>('auto');
+  const [openaiPinnedModel, setOpenaiPinnedModel] = useState<string>('');
+
+  const [geminiMode, setGeminiMode] = useState<GeminiModelMode>('latest');
+  const [geminiPinnedModel, setGeminiPinnedModel] = useState<string>('');
+
+  const [modelsStatus, setModelsStatus] = useState<AiModelsStatus>({});
+  const [modelsStatusLoading, setModelsStatusLoading] = useState(false);
   const [language, setLanguage] = useState<string>('English');
   const [task, setTask] = useState<string>('Summarize');
   const [founderCommand, setFounderCommand] = useState<string>('');
@@ -20,6 +59,72 @@ export default function AIEngine(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [result, setResult] = useState<any>(null);
+
+  const getProviderSelection = (p: ProviderKey) => {
+    if (p === 'openai') {
+      return {
+        mode: openaiMode,
+        pinnedModel: openaiPinnedModel,
+      };
+    }
+    return {
+      mode: geminiMode,
+      pinnedModel: geminiPinnedModel,
+    };
+  };
+
+  const buildRunPayload = () => {
+    const sel = getProviderSelection(provider);
+    const pinned = (sel.pinnedModel || '').trim();
+    const modelToSend = sel.mode === 'pinned' ? pinned : '';
+
+    return {
+      provider,
+      // Back-compat: backend previously accepted `model`; keep sending it (empty means auto/latest).
+      model: modelToSend,
+      // New: explicit model mode + pinned model (backend may ignore if not implemented yet).
+      modelMode: sel.mode,
+      pinnedModel: pinned,
+      language,
+      taskType: task,
+      founderCommand,
+      sourceText,
+      url: sourceUrl,
+    };
+  };
+
+  const fetchModelsStatus = async () => {
+    setModelsStatusLoading(true);
+    try {
+      const r = await fetch(apiUrl('/ai/models/status'), { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setModelsStatus({
+        openaiResolved: pickResolvedModel(data, 'openai'),
+        geminiResolved: pickResolvedModel(data, 'gemini'),
+        raw: data,
+      });
+    } catch {
+      // keep UI non-blocking
+      setModelsStatus((prev) => ({ ...prev }));
+    } finally {
+      setModelsStatusLoading(false);
+    }
+  };
+
+  const refreshModels = async () => {
+    setModelsStatusLoading(true);
+    try {
+      const r = await fetch(apiUrl('/ai/models/refresh'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } finally {
+      await fetchModelsStatus();
+    }
+  };
 
   const run = async () => {
     setError('');
@@ -30,7 +135,8 @@ export default function AIEngine(): JSX.Element {
     }
     setLoading(true);
     try {
-  const resp = await (apiLib as any).aiEngineRun?.({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl })
+      const payload = buildRunPayload();
+      const resp = await (apiLib as any).aiEngineRun?.(payload)
     .catch(async () => {
       // Fallback POST if helper missing
       try {
@@ -38,7 +144,7 @@ export default function AIEngine(): JSX.Element {
         const fr = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({ provider, model, language, taskType: task, founderCommand, sourceText, url: sourceUrl })
+          body: JSON.stringify(payload)
         });
         if (!fr.ok) throw new Error(`HTTP ${fr.status}`);
         return fr.json();
@@ -54,35 +160,9 @@ export default function AIEngine(): JSX.Element {
     }
   };
 
-  const prettyModel = (m?: string) => {
-    const v = (m || '').toLowerCase();
-    if (v === 'gpt-5' || v === 'gpt5') return 'GPT‑5 Plus';
-    if (v === 'gpt-5-auto') return 'GPT‑5 Auto';
-    if (!v) return 'GPT‑5 Plus';
-    return (m || 'gpt-5')
-      .replace(/^gpt-/, 'GPT-')
-      .replace(/-/g, ' ')
-      .replace(/G P T/, 'GPT');
-  };
-
-  const ProviderButton = ({ label, keyName, hintModel }: { label: string; keyName: ProviderKey; hintModel?: string }) => (
-    <button
-      onClick={() => { setProvider(keyName); setModel(hintModel || ''); }}
-      className={`px-3 py-2 rounded border ${provider === keyName ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200'} hover:border-blue-400`}
-    >
-      {label}
-    </button>
-  );
-
-  // Fetch current backend OpenAI model for display/hint
   useEffect(() => {
-    fetch(apiUrl('/system/ai-health'), { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data) => {
-        const m = (data && (data.model || data.selectedModel)) || '';
-        if (typeof m === 'string' && m) setServerModel(m);
-      })
-      .catch(() => {/* silent fallback */});
+    void fetchModelsStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -95,13 +175,95 @@ export default function AIEngine(): JSX.Element {
       {/* Provider */}
       <div className="mb-4" aria-label="AI Engine Provider">
         <div className="text-sm font-medium mb-1">AI Engine:</div>
-        <div className="flex flex-wrap gap-2">
-          <ProviderButton
-            label={`OpenAI (${prettyModel(serverModel)})`}
-            keyName="openai"
-            hintModel={serverModel || 'gpt-5'}
-          />
-          <ProviderButton label="Gemini 1.5 Pro" keyName="gemini" hintModel="gemini-1.5-pro" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <div className={`rounded border p-3 ${provider === 'openai' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setProvider('openai')}
+                className={`text-left font-semibold ${provider === 'openai' ? 'text-blue-700 dark:text-blue-200' : 'text-slate-800 dark:text-slate-200'}`}
+              >
+                OpenAI
+              </button>
+              <select
+                value={openaiMode}
+                onChange={(e) => setOpenaiMode(e.target.value as OpenAiModelMode)}
+                className="border rounded px-2 py-1 text-sm bg-white dark:bg-slate-800"
+                aria-label="OpenAI model mode"
+              >
+                <option value="auto">Auto</option>
+                <option value="pinned">Pinned</option>
+              </select>
+            </div>
+
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Mode: {labelMode('openai', openaiMode)}
+            </div>
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Resolved: {modelsStatusLoading ? '...' : (modelsStatus.openaiResolved || '-')}
+            </div>
+
+            {openaiMode === 'pinned' ? (
+              <div className="mt-2">
+                <input
+                  value={openaiPinnedModel}
+                  onChange={(e) => setOpenaiPinnedModel(e.target.value)}
+                  className="w-full border rounded px-2 py-1 text-sm bg-white dark:bg-slate-800"
+                  placeholder="Pinned model (e.g., gpt-5.2)"
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <div className={`rounded border p-3 ${provider === 'gemini' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setProvider('gemini')}
+                className={`text-left font-semibold ${provider === 'gemini' ? 'text-blue-700 dark:text-blue-200' : 'text-slate-800 dark:text-slate-200'}`}
+              >
+                Gemini
+              </button>
+              <select
+                value={geminiMode}
+                onChange={(e) => setGeminiMode(e.target.value as GeminiModelMode)}
+                className="border rounded px-2 py-1 text-sm bg-white dark:bg-slate-800"
+                aria-label="Gemini model mode"
+              >
+                <option value="latest">Latest</option>
+                <option value="pinned">Pinned</option>
+              </select>
+            </div>
+
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Mode: {labelMode('gemini', geminiMode)}
+            </div>
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Resolved: {modelsStatusLoading ? '...' : (modelsStatus.geminiResolved || '-')}
+            </div>
+
+            {geminiMode === 'pinned' ? (
+              <div className="mt-2">
+                <input
+                  value={geminiPinnedModel}
+                  onChange={(e) => setGeminiPinnedModel(e.target.value)}
+                  className="w-full border rounded px-2 py-1 text-sm bg-white dark:bg-slate-800"
+                  placeholder="Pinned model (e.g., gemini-pro-latest)"
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-start">
+            <button
+              type="button"
+              disabled={modelsStatusLoading}
+              onClick={() => void refreshModels()}
+              className="rounded border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {modelsStatusLoading ? 'Refreshing...' : 'Refresh models'}
+            </button>
+          </div>
         </div>
       </div>
 
