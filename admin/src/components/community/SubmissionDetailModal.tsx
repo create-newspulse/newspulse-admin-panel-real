@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getCommunitySubmission, updateCommunitySubmissionDecision, CommunitySubmission } from '../../lib/api/communitySubmissions';
+import { formatLocation } from '../../lib/formatLocation';
 
 interface Props {
   id: string | null;
@@ -145,7 +146,7 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange, onE
               </div>
               <div className="space-y-2">
                 <div><span className="font-medium">Name:</span> {item.userName} {item.email && <span className="text-slate-500">({item.email})</span>}</div>
-                <div><span className="font-medium">Location:</span> {item.location || '—'}</div>
+                <div><span className="font-medium">Location:</span> {formatLocation((item as any).location)}</div>
                 <div><span className="font-medium">Category:</span> {item.category || '—'}</div>
                 <div><span className="font-medium">Status:</span> {item.status}</div>
                 {item.rejectReason && <div><span className="font-medium">Reject Reason:</span> {item.rejectReason}</div>}

@@ -33,3 +33,17 @@ export function toneToBadgeClasses(tone: AgeGroupTone): string {
     default: return 'bg-slate-100 text-slate-600 border border-slate-200';
   }
 }
+
+export function formatLocation(location: any): string {
+  if (!location) return '-';
+  if (typeof location === 'string') return location.trim() || '-';
+  if (typeof location === 'object') {
+    const { city, state, country } = location as {
+      city?: string;
+      state?: string;
+      country?: string;
+    };
+    return [city, state, country].filter(Boolean).join(', ') || '-';
+  }
+  return String(location);
+}

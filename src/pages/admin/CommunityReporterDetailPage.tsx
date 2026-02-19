@@ -4,6 +4,7 @@ import { fetchCommunitySubmissionById } from '@/api/adminCommunityReporterApi';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { adminApi } from '@/lib/adminApi';
 import { useNotify } from '@/components/ui/toast-bridge';
+import { formatLocation } from '@/lib/communityReporterUtils';
 
 
 export default function CommunityReporterDetailPage() {
@@ -134,8 +135,9 @@ export default function CommunityReporterDetailPage() {
           })()}
           <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
           <div><span className="font-semibold">Location:</span> {(() => {
-            const parts = [submission.city, submission.state, submission.district, submission.country].filter(Boolean);
-            return parts.length ? parts.join(', ') : (submission.city || submission.location || '—');
+            const preferred = formatLocation((submission as any).location);
+            if (preferred !== '-') return preferred;
+            return formatLocation({ city: submission.city, state: submission.state, country: submission.country });
           })()}</div>
           <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
           <div><span className="font-semibold">Status:</span> {submission.status || '—'}</div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listCommunitySubmissions, CommunitySubmission, CommunitySubmissionPriority } from '../../../lib/api/communitySubmissions';
 import SubmissionDetailModal from '../../../components/community/SubmissionDetailModal';
+import { formatLocation } from '../../../lib/formatLocation';
 
 type StatusFilter = 'ALL' | 'NEW';
 type PriorityFilter = 'ALL' | CommunitySubmissionPriority;
@@ -143,7 +144,7 @@ export default function CommunityReporterPage(){
             <tr key={s._id || s.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=> open(s._id || s.id)}>
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline}</td>
               <td className="p-2" title={s.userName}>{s.userName}</td>
-              <td className="p-2" title={s.location}>{s.location || '—'}</td>
+              <td className="p-2" title={formatLocation(s.location) === '-' ? '' : formatLocation(s.location)}>{formatLocation(s.location)}</td>
               <td className="p-2" title={s.category}>{s.category || '—'}</td>
               <td className="p-2">
                 {s?.aiTipOnlySuggested === true ? (

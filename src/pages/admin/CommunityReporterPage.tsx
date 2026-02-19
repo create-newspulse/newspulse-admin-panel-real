@@ -12,7 +12,7 @@ import {
   CommunityDecisionResponse
 } from '@/types/api';
 import { CommunitySubmission } from '@/types/CommunitySubmission';
-import { getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
+import { formatLocation, getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
 import { Star } from 'lucide-react';
 import { listReporterContacts as listReporterContactsDirectory } from '@/lib/api/reporterDirectory';
@@ -647,6 +647,7 @@ export default function CommunityReporterPage(){
             const tier = getRiskTier(s);
             const isFlagged = Array.isArray(s.flags) && s.flags.length > 0;
             const rowHighlight = tier === 'MEDIUM' ? 'bg-amber-50' : tier === 'HIGH' ? 'bg-red-50' : '';
+            const safeLocation = formatLocation((s as any).location ?? { city: s.city, state: s.state, country: s.country });
             return (
             <tr key={s.id} className={`border-t hover:bg-slate-50 ${rowHighlight}`}> 
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline || '—'}</td>
@@ -658,7 +659,6 @@ export default function CommunityReporterPage(){
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] ${toneToBadgeClasses((() => {
                         const grp = s.reporterAgeGroup || 'Age not provided';
-                        if (grp.startsWith('Under 13')) return 'danger';
                         if (grp.startsWith('13–17')) return 'warning';
                         if (grp.startsWith('18+')) return 'success';
                         return 'neutral';
@@ -690,7 +690,7 @@ export default function CommunityReporterPage(){
                   </div>
                 </div>
               </td>
-              <td className="p-2" title={norm(s.city || s.location)}>{norm(s.city || s.location) || '—'}</td>
+              <td className="p-2" title={safeLocation === '-' ? '' : safeLocation}>{safeLocation}</td>
               <td className="p-2" title={(s.contactEmail || s.contactPhone) ? `${s.contactEmail || ''} ${s.contactPhone || ''}`.trim() : ''}>
                 <div className="flex flex-col gap-1 max-w-[180px]">
                   {s.contactName && <span className="truncate" title={s.contactName}>{s.contactName}</span>}
