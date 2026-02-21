@@ -245,8 +245,41 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   });
   const mutateDeleteHard = useMutation({
     mutationFn: (id: string) => hardDeleteArticle(id),
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: ['articles'] });
+
+      const prev = qc.getQueriesData<ListResponse>({ queryKey: ['articles'] });
+
+      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => {
+        if (!old) return old;
+        const rows: any[] | null = Array.isArray(old?.rows)
+          ? old.rows
+          : (Array.isArray(old?.data) ? old.data : null);
+        if (!rows) return old;
+
+        const nextRows = rows.filter((a) => (a as any)?._id !== id);
+        const removed = rows.length - nextRows.length;
+        if (removed <= 0) return old;
+
+        const next: any = { ...old };
+        if (Array.isArray(old?.rows)) next.rows = nextRows;
+        if (Array.isArray(old?.data)) next.data = nextRows;
+        if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
+        return next;
+      });
+
+      setSelected((cur) => cur.filter((x) => x !== id));
+      return { prev };
+    },
     onSuccess: () => toast.success('Deleted forever'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Hard delete failed').message),
+    onError: (err: any, _id, ctx) => {
+      if (ctx?.prev) {
+        for (const [key, data] of ctx.prev as any[]) {
+          qc.setQueryData(key, data);
+        }
+      }
+      toast.error(normalizeError(err, 'Hard delete failed').message);
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
   });
 
@@ -622,7 +655,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             label="Delete forever"
             tone="red"
             onClick={() => {
-              const ok = confirm('Are you sure? This will permanently delete this article.');
+              const ok = confirm('Delete forever? This will permanently delete this article and cannot be undone.');
               if (ok) mutateDeleteHard.mutate(id);
             }}
           />

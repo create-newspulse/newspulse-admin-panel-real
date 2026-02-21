@@ -161,12 +161,19 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
       // Optimistic removal from current page
       await qc.cancelQueries({ queryKey: ['articles'] });
       const prev = qc.getQueryData<ListResponse>(['articles', params]);
-      if (prev?.data) {
-        qc.setQueryData(['articles', params], {
-          ...prev,
-          data: prev.data.filter((a: Article) => a._id !== id),
-          total: Math.max(0, (prev.total || 1) - 1),
-        });
+      const rows: Article[] | null = Array.isArray((prev as any)?.rows)
+        ? (prev as any).rows
+        : (Array.isArray((prev as any)?.data) ? (prev as any).data : null);
+      if (prev && rows) {
+        const nextRows = rows.filter((a: Article) => a._id !== id);
+        const removed = rows.length - nextRows.length;
+        if (removed > 0) {
+          const next: any = { ...(prev as any) };
+          if (Array.isArray((prev as any).rows)) next.rows = nextRows;
+          if (Array.isArray((prev as any).data)) next.data = nextRows;
+          if (typeof (prev as any).total === 'number') next.total = Math.max(0, (prev as any).total - removed);
+          qc.setQueryData(['articles', params], next);
+        }
       }
       return { prev };
     },

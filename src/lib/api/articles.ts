@@ -282,7 +282,22 @@ export async function deleteArticleHard(id: string) {
 
 // New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
-  // Contract path: use DELETE /articles/:id, optionally with hard=true.
+  const encoded = encodeURIComponent(id);
+
+  // Admin contract (preferred): DELETE /api/admin/articles/:id/forever
+  // Proxy mode:  /admin-api/admin/articles/:id/forever
+  // Uses adminApi so Authorization header is attached when available.
+  try {
+    const res = await adminApi.delete(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}/forever`, {
+      // @ts-expect-error custom flag read by interceptor
+      skipErrorLog: true,
+    });
+    return res.data;
+  } catch (e: any) {
+    if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
+  }
+
+  // Fallback contract: use DELETE /articles/:id with hard=true.
   // Try hard=true first; fall back to plain delete.
   try {
     await deleteArticleHard(id);
@@ -291,7 +306,7 @@ export async function hardDeleteArticle(id: string) {
     const status = e?.response?.status;
     if (status && status !== 404 && status !== 405) throw e;
   }
-  const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`);
+  const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encoded}`);
   const ok = res?.data?.ok === true || res?.data?.success === true || res.status === 200 || res.status === 204;
   if (!ok) throw new Error('Hard delete failed');
 }
