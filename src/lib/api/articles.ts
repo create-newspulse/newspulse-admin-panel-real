@@ -280,6 +280,27 @@ export async function deleteArticleHard(id: string) {
   await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
 }
 
+export async function bulkHardDeleteArticles(ids: string[]) {
+  const cleanIds = Array.isArray(ids) ? ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  if (cleanIds.length === 0) return { ok: true, deletedCount: 0 } as any;
+
+  // Admin contract: POST /api/admin/articles/forever/bulk { ids }
+  // Proxy mode:     POST /admin-api/admin/articles/forever/bulk
+  try {
+    const res = await adminApi.post(`${LEGACY_ADMIN_ARTICLES_PATH}/forever/bulk`, { ids: cleanIds }, {
+      // @ts-expect-error custom flag read by interceptor
+      skipErrorLog: true,
+    });
+    return res.data;
+  } catch (e: any) {
+    if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
+  }
+
+  // Fallback: older backends might not support bulk deletes; do best-effort per-id.
+  await Promise.all(cleanIds.map((id) => hardDeleteArticle(id)));
+  return { ok: true, deletedCount: cleanIds.length } as any;
+}
+
 // New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
   const encoded = encodeURIComponent(id);

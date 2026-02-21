@@ -14,6 +14,7 @@ import {
   scheduleArticle,
   unscheduleArticle,
   hardDeleteArticle,
+  bulkHardDeleteArticles,
   type Article,
   type ListResponse,
 } from '@/lib/api/articles';
@@ -281,6 +282,47 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       toast.error(normalizeError(err, 'Hard delete failed').message);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
+  });
+
+  const [bulkDeleting, setBulkDeleting] = React.useState(false);
+  const mutateDeleteHardBulk = useMutation({
+    mutationFn: (ids: string[]) => bulkHardDeleteArticles(ids),
+    onMutate: async (ids: string[]) => {
+      setBulkDeleting(true);
+      // ensure we don't race with an inflight refetch
+      await qc.cancelQueries({ queryKey: ['articles'] });
+      return { ids };
+    },
+    onSuccess: (_data, ids: string[]) => {
+      const idSet = new Set(ids);
+      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => {
+        if (!old) return old;
+        const rows: any[] | null = Array.isArray(old?.rows)
+          ? old.rows
+          : (Array.isArray(old?.data) ? old.data : null);
+        if (!rows) return old;
+
+        const nextRows = rows.filter((a) => !idSet.has(String((a as any)?._id || '')));
+        const removed = rows.length - nextRows.length;
+        if (removed <= 0) return old;
+
+        const next: any = { ...old };
+        if (Array.isArray(old?.rows)) next.rows = nextRows;
+        if (Array.isArray(old?.data)) next.data = nextRows;
+        if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
+        return next;
+      });
+
+      setSelected([]);
+      toast.success(`Deleted forever (${ids.length})`);
+    },
+    onError: (err: any) => {
+      toast.error(normalizeError(err, 'Bulk hard delete failed').message);
+    },
+    onSettled: () => {
+      setBulkDeleting(false);
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
   });
 
   // Schedule dialog
@@ -672,6 +714,26 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs text-slate-600">Showing {sortedRows.length} of {total} loaded</div>
+        {(params.status === 'deleted' || (params.status as any) === 'trash') && canDelete && selected.length > 0 ? (
+          <button
+            type="button"
+            disabled={bulkDeleting}
+            onClick={() => {
+              const ids = [...selected];
+              const count = ids.length;
+              if (count <= 0) return;
+              const ok = confirm(`Delete ${count} article${count === 1 ? '' : 's'} forever? This cannot be undone.`);
+              if (!ok) return;
+              mutateDeleteHardBulk.mutate(ids);
+            }}
+            className={
+              'rounded-md px-3 py-2 text-xs font-semibold '
+              + (bulkDeleting ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-red-700 text-white hover:bg-red-800')
+            }
+          >
+            {bulkDeleting ? 'Deleting…' : `Delete Selected Forever (${selected.length})`}
+          </button>
+        ) : null}
       </div>
 
       {showSkeleton ? (
