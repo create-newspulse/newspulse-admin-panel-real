@@ -114,6 +114,7 @@ import { RequireRole } from '@/routes/guards';
 import SafeOwnerZoneShell from '@/pages/admin/safe-owner-zone/SafeOwnerZoneShell';
 import SafeOwnerZoneHub from '@/pages/admin/safe-owner-zone/SafeOwnerZoneHub';
 import SafeOwnerZoneModule from '@/pages/admin/safe-owner-zone/SafeOwnerZoneModule';
+import SafeOwnerZoneAiModelLog from '@/pages/admin/safe-owner-zone/SafeOwnerZoneAiModelLog';
 import BroadcastCenter from '@pages/admin/BroadcastCenter';
 import AdminUsersPage from '@pages/AdminUsersPage';
 import AiLogsPage from '@pages/AiLogsPage';
@@ -356,6 +357,7 @@ function App() {
                 <Route path="security-lockdown" element={<SafeOwnerZoneModule slug="security-lockdown" />} />
                 <Route path="compliance" element={<SafeOwnerZoneModule slug="compliance" />} />
                 <Route path="ai-control" element={<SafeOwnerZoneModule slug="ai-control" />} />
+                <Route path="ai-model-log" element={<SafeOwnerZoneAiModelLog />} />
                 <Route path="vaults" element={<SafeOwnerZoneModule slug="vaults" />} />
                 <Route path="operations" element={<SafeOwnerZoneModule slug="operations" />} />
                 <Route path="revenue" element={<SafeOwnerZoneModule slug="revenue" />} />

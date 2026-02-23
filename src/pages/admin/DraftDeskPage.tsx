@@ -17,7 +17,8 @@ type Article = NPArticle & {
   submittedBy?: string;
   isCommunity?: boolean;
   city?: string;
-  location?: string;
+  // Backend sometimes sends a structured location object; keep this flexible.
+  location?: unknown;
   category?: string;
   content?: string;
 };
@@ -49,6 +50,40 @@ function snippet(txt?: string, n = 150) {
   if (!txt) return '';
   const clean = String(txt).replace(/\s+/g, ' ').trim();
   return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
+}
+
+function formatLocation(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    return s ? s : null;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+  if (typeof value === 'object') {
+    const obj = value as any;
+    // Common backend shape: { city, district, state, isUT, country }
+    const parts = [
+      obj?.city,
+      obj?.district,
+      obj?.state,
+      obj?.country,
+    ]
+      .map((p) => (typeof p === 'string' ? p.trim() : ''))
+      .filter(Boolean);
+
+    if (parts.length) return parts.join(', ');
+
+    // Last resort: avoid throwing; provide something readable.
+    try {
+      const json = JSON.stringify(obj);
+      return json && json !== '{}' ? json : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 export default function DraftDeskPage() {
@@ -302,6 +337,11 @@ export default function DraftDeskPage() {
           const isCommunity = sourceKind === 'community';
           const isPro = sourceKind === 'pro';
           const isFounder = sourceKind === 'founder';
+          const locationText =
+            formatLocation(a.city)
+            ?? formatLocation(a.location)
+            ?? formatLocation((a as any)?.reporterLocation)
+            ?? formatLocation((a as any)?.location);
 
           return (
             <div
@@ -333,7 +373,7 @@ export default function DraftDeskPage() {
                     </span>
                   )}
 
-                  {a.city || a.location ? <span>· {a.city || a.location}</span> : null}
+                  {locationText ? <span>· {locationText}</span> : null}
                   {a.language ? <span>· {a.language?.toUpperCase()}</span> : null}
                   {a.category ? <span>· {a.category}</span> : null}
                   {a.createdAt ? (
@@ -464,9 +504,13 @@ export default function DraftDeskPage() {
                 <span>· {preview.language?.toUpperCase()}</span>
               ) : null}
               {preview.category ? <span>· {preview.category}</span> : null}
-              {preview.city || preview.location ? (
-                <span>· {preview.city || preview.location}</span>
-              ) : null}
+              {(() => {
+                const locationText =
+                  formatLocation((preview as any)?.city)
+                  ?? formatLocation((preview as any)?.location)
+                  ?? formatLocation((preview as any)?.reporterLocation);
+                return locationText ? <span>· {locationText}</span> : null;
+              })()}
               {preview.createdAt ? (
                 <span>· {new Date(preview.createdAt).toLocaleString()}</span>
               ) : null}

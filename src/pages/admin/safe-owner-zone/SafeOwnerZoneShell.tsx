@@ -35,6 +35,7 @@ const TABS: ModuleTab[] = [
   { key: 'security', label: 'Security Center', to: '/admin/safe-owner-zone/security-lockdown' },
   { key: 'compliance', label: 'Compliance', to: '/admin/safe-owner-zone/compliance' },
   { key: 'ai', label: 'AI', to: '/admin/safe-owner-zone/ai-control' },
+  { key: 'ai-model-log', label: 'AI Model Log', to: '/admin/safe-owner-zone/ai-model-log' },
   { key: 'vaults', label: 'Vaults', to: '/admin/safe-owner-zone/vaults' },
   { key: 'ops', label: 'Ops', to: '/admin/safe-owner-zone/operations' },
   { key: 'revenue', label: 'Revenue', to: '/admin/safe-owner-zone/revenue' },
