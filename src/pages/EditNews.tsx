@@ -9,6 +9,9 @@ import { guardAction } from '../lib/articleWorkflowGuard';
 import { debug } from '../lib/debug';
 
 import type { WorkflowChecklist, WorkflowState } from '@/types/api';
+import CoverImageUpload from '@/components/articles/CoverImageUpload';
+import { uploadCoverImage } from '@/lib/api/media';
+import { normalizeError } from '@/lib/error';
 
 interface NewsForm {
   title: string;
@@ -43,6 +46,12 @@ export default function EditNews() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Cover image
+  const [coverUrl, setCoverUrl] = useState('');
+  const [coverPublicId, setCoverPublicId] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
+
   // Editorial workflow state
   const [workflow, setWorkflow] = useState<WorkflowState | null>(null);
   const [wfLoading, setWfLoading] = useState(true);
@@ -62,6 +71,25 @@ export default function EditNews() {
         const data = res.data;
         const article = data?.article || data?.data || data;
         if (article && (article._id || article.id)) {
+          const incomingCoverField: any = article?.coverImage;
+          const incomingCoverUrl = (() => {
+            if (incomingCoverField && typeof incomingCoverField === 'object') {
+              return incomingCoverField.url || incomingCoverField.secureUrl || incomingCoverField.secure_url || '';
+            }
+            return (
+              article?.coverImageUrl ||
+              article?.imageUrl ||
+              (typeof incomingCoverField === 'string' ? incomingCoverField : '') ||
+              ''
+            );
+          })();
+          const incomingCoverPid = (() => {
+            if (incomingCoverField && typeof incomingCoverField === 'object') {
+              return incomingCoverField.publicId || incomingCoverField.public_id || '';
+            }
+            return '';
+          })();
+
           setForm({
             title: article.title || '',
             content: article.content || '',
@@ -69,6 +97,9 @@ export default function EditNews() {
             language: article.language || '',
             summary: article.summary || ''
           });
+          setCoverUrl(String(incomingCoverUrl || ''));
+          setCoverPublicId(String(incomingCoverPid || ''));
+          setCoverFile(null);
         } else {
           setError('⚠️ Article not found');
         }
@@ -144,13 +175,36 @@ export default function EditNews() {
     }
 
     try {
-      await api.put(`/articles/${id}`, form);
+      const trimmedCoverUrl = String(coverUrl || '').trim();
+      const trimmedCoverPid = String(coverPublicId || '').trim();
+      const payload: any = {
+        ...form,
+        imageUrl: trimmedCoverUrl || undefined,
+        coverImageUrl: trimmedCoverUrl || undefined,
+        coverImage: trimmedCoverUrl ? { url: trimmedCoverUrl, publicId: trimmedCoverPid || undefined } : undefined,
+      };
+
+      await api.put(`/articles/${id}`, payload);
 
       toast.success('✅ Article updated');
       navigate('/manage-news');
     } catch (err: any) {
       console.error(err);
       toast.error(`❌ Server error: ${err?.message || 'unknown'}`);
+    }
+  };
+
+  const uploadSelectedCover = async (file: File) => {
+    setIsUploadingCover(true);
+    try {
+      const res = await uploadCoverImage(file);
+      setCoverUrl(res.url);
+      setCoverPublicId(res.publicId || '');
+      toast.success('✅ Cover image uploaded');
+    } catch (err: any) {
+      toast.error(normalizeError(err, 'Cover image upload failed').message);
+    } finally {
+      setIsUploadingCover(false);
     }
   };
 
@@ -238,6 +292,23 @@ export default function EditNews() {
           required
           className="w-full border px-4 py-2 rounded"
         />
+
+        <div className="rounded border border-slate-200 bg-white p-3">
+          <CoverImageUpload
+            url={coverUrl}
+            file={coverFile}
+            onChangeFile={(f) => {
+              setCoverFile(f);
+              if (f) void uploadSelectedCover(f);
+            }}
+            onRemove={() => {
+              setCoverFile(null);
+              setCoverUrl('');
+              setCoverPublicId('');
+            }}
+          />
+          {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
+        </div>
 
         <select
           name="category"

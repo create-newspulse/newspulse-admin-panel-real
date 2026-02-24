@@ -28,6 +28,7 @@ function formatBytes(bytes: number): string {
 export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: CoverImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -83,8 +84,37 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     onChangeFile(f);
   };
 
+  const onDropFile = (f: File | null | undefined) => {
+    if (!f) return;
+    onPickFile(f);
+  };
+
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      onDragEnter={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        const f = e.dataTransfer?.files?.[0];
+        onDropFile(f);
+      }}
+    >
       <div className="text-sm font-semibold">Cover Image</div>
 
       <div className="flex items-start gap-3">
@@ -135,11 +165,16 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
         </div>
 
         <div className="w-28 shrink-0">
-          <div className="w-full aspect-video rounded-md border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+          <div
+            className={
+              "w-full aspect-video rounded-md border bg-slate-50 overflow-hidden flex items-center justify-center " +
+              (isDragging ? 'border-slate-400' : 'border-slate-200')
+            }
+          >
             {hasPreview ? (
               <img src={previewSrc} alt="Cover preview" className="w-full h-full object-cover" />
             ) : (
-              <div className="text-[11px] text-slate-500">Preview</div>
+              <div className="text-[11px] text-slate-500">{isDragging ? 'Drop image' : 'Preview'}</div>
             )}
           </div>
         </div>

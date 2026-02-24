@@ -30,6 +30,7 @@
     "@tiptap/react": "^2.3.2",
     "@tiptap/starter-kit": "^2.3.2",
     "axios": "^1.10.0",
+    "busboy": "^1.6.0",
     "chart.js": "^4.5.0",
     "classnames": "^2.5.1",
     "dayjs": "^1.11.10",

@@ -15,8 +15,9 @@ export interface Article {
   translationGroupId?: string;
   // Some environments/public site use coverImageUrl instead of imageUrl.
   coverImageUrl?: string;
-  // Canonical field requested by admin publish contract
-  coverImage?: string;
+  // Canonical field requested by admin publish contract.
+  // Back-compat: some environments store this as a plain string URL.
+  coverImage?: string | { url: string; publicId?: string };
   category?: string;
   status?: ArticleStatus;
   author?: { name?: string };
@@ -41,7 +42,6 @@ export interface Article {
   };
   createdAt?: string;
   updatedAt?: string;
-  publishAt?: string;
   scheduledAt?: string;
 }
 

@@ -4,6 +4,189 @@
 // If ADMIN_JWT_SECRET/JWT_SECRET is provided and the token looks like a JWT, it will be verified.
 // Otherwise, presence of a session token/cookie is accepted (soft mode) to support simpler backends.
 import { jwtVerify } from 'jose';
+import Busboy from 'busboy';
+import crypto from 'crypto';
+
+const MAX_COVER_BYTES = 5 * 1024 * 1024;
+
+function parseCloudinaryConfig() {
+    const rawUrl = (process.env.CLOUDINARY_URL || '').toString().trim();
+    let cloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').toString().trim();
+    let apiKey = (process.env.CLOUDINARY_API_KEY || '').toString().trim();
+    let apiSecret = (process.env.CLOUDINARY_API_SECRET || '').toString().trim();
+
+    if (rawUrl && (!cloudName || !apiKey || !apiSecret)) {
+        try {
+            const u = new URL(rawUrl);
+            // cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+            if (u.username && !apiKey) apiKey = decodeURIComponent(u.username);
+            if (u.password && !apiSecret) apiSecret = decodeURIComponent(u.password);
+            if (u.hostname && !cloudName) cloudName = u.hostname;
+        } catch {
+            // ignore
+        }
+    }
+
+    const folder = (process.env.CLOUDINARY_FOLDER_COVERS || process.env.CLOUDINARY_FOLDER || '').toString().trim();
+
+    if (!cloudName || !apiKey || !apiSecret) return null;
+    return { cloudName, apiKey, apiSecret, folder };
+}
+
+function sha1Hex(input) {
+    return crypto.createHash('sha1').update(input).digest('hex');
+}
+
+function signCloudinaryParams(params, apiSecret) {
+    const keys = Object.keys(params).filter((k) => params[k] != null && String(params[k]).trim() !== '').sort();
+    const toSign = keys.map((k) => `${k}=${params[k]}`).join('&');
+    return sha1Hex(`${toSign}${apiSecret}`);
+}
+
+async function parseMultipartCoverFile(req) {
+    return await new Promise((resolve, reject) => {
+        const bb = Busboy({
+            headers: req.headers,
+            limits: { files: 1, fileSize: MAX_COVER_BYTES },
+        });
+
+        let picked = null;
+        let pickedField = '';
+        let filename = '';
+        let mimeType = '';
+        const chunks = [];
+        let total = 0;
+
+        bb.on('file', (fieldname, file, info) => {
+            const fn = info?.filename || '';
+            const mt = info?.mimeType || info?.mimetype || '';
+
+            const isCandidate = fieldname === 'cover' || fieldname === 'file';
+            if (!isCandidate) {
+                file.resume();
+                return;
+            }
+            if (picked) {
+                file.resume();
+                return;
+            }
+
+            picked = file;
+            pickedField = fieldname;
+            filename = String(fn || 'cover');
+            mimeType = String(mt || 'application/octet-stream');
+
+            file.on('data', (d) => {
+                total += d.length;
+                chunks.push(d);
+            });
+            file.on('limit', () => {
+                reject(Object.assign(new Error('File too large'), { statusCode: 413 }));
+            });
+            file.on('error', reject);
+        });
+
+        bb.on('error', reject);
+        bb.on('finish', () => {
+            if (!picked) {
+                reject(Object.assign(new Error('Missing file field "cover"'), { statusCode: 400 }));
+                return;
+            }
+            resolve({
+                field: pickedField,
+                filename,
+                mimeType,
+                size: total,
+                buffer: Buffer.concat(chunks),
+            });
+        });
+
+        req.pipe(bb);
+    });
+}
+
+async function handleCoverUpload(req, res) {
+    if ((req.method || 'GET').toUpperCase() === 'OPTIONS') {
+        res.setHeader('Allow', 'OPTIONS, POST');
+        return res.status(204).end();
+    }
+    if ((req.method || 'GET').toUpperCase() !== 'POST') {
+        res.setHeader('Allow', 'OPTIONS, POST');
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    const cfg = parseCloudinaryConfig();
+    if (!cfg) {
+        return res.status(500).json({
+            error: 'Cloudinary is not configured',
+            detail: 'Set CLOUDINARY_URL (preferred) or CLOUDINARY_CLOUD_NAME + CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET',
+        });
+    }
+
+    const ctype = String(req.headers['content-type'] || '');
+    if (!ctype.toLowerCase().includes('multipart/form-data')) {
+        return res.status(400).json({ error: 'Expected multipart/form-data' });
+    }
+
+    let filePart;
+    try {
+        filePart = await parseMultipartCoverFile(req);
+    } catch (e) {
+        const status = e?.statusCode || 400;
+        return res.status(status).json({ error: e?.message || 'Invalid upload' });
+    }
+
+    if (!filePart?.buffer || !filePart.buffer.length) {
+        return res.status(400).json({ error: 'Empty file' });
+    }
+    if (filePart.buffer.length > MAX_COVER_BYTES) {
+        return res.status(413).json({ error: 'File too large (max 5MB)' });
+    }
+    if (filePart.mimeType && !String(filePart.mimeType).toLowerCase().startsWith('image/')) {
+        return res.status(400).json({ error: 'Only image uploads are allowed' });
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const paramsToSign = {
+        timestamp,
+        ...(cfg.folder ? { folder: cfg.folder } : {}),
+    };
+    const signature = signCloudinaryParams(paramsToSign, cfg.apiSecret);
+
+    const fd = new FormData();
+    fd.append('file', new Blob([filePart.buffer], { type: filePart.mimeType || 'application/octet-stream' }), filePart.filename || 'cover');
+    fd.append('api_key', cfg.apiKey);
+    fd.append('timestamp', String(timestamp));
+    if (cfg.folder) fd.append('folder', cfg.folder);
+    fd.append('signature', signature);
+
+    const uploadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/upload`;
+
+    let upstream;
+    try {
+        upstream = await fetch(uploadUrl, { method: 'POST', body: fd });
+    } catch (fetchErr) {
+        return res.status(502).json({ error: 'Cloudinary unreachable', detail: fetchErr?.message || String(fetchErr) });
+    }
+
+    let payload;
+    try {
+        payload = await upstream.json();
+    } catch {
+        payload = null;
+    }
+
+    if (!upstream.ok) {
+        const msg = payload?.error?.message || payload?.message || `Cloudinary upload failed (${upstream.status})`;
+        return res.status(502).json({ error: msg, status: upstream.status });
+    }
+
+    const url = String(payload?.secure_url || payload?.url || '').trim();
+    const publicId = String(payload?.public_id || '').trim();
+    if (!url) return res.status(502).json({ error: 'Cloudinary upload succeeded but no URL returned' });
+
+    return res.status(200).json({ url, publicId });
+}
 // Simple cookie parser
 function parseCookies(header) {
     const cookies = {};
@@ -77,6 +260,11 @@ export default async function handler(req, res) {
                     }
                 }
             }
+        }
+
+        // Special-case: cover image uploads are handled at the proxy (Cloudinary).
+        if (joinedPath === 'uploads/cover') {
+            return await handleCoverUpload(req, res);
         }
     // Build target URL, avoiding accidental double "/api" when client paths already include it
     const needsApiPrefix = !/^api\//i.test(joinedPath);

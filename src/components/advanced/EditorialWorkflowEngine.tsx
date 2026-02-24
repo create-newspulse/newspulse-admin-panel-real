@@ -335,7 +335,13 @@ export default function EditorialWorkflowEngine() {
   }, [activeId, items, stateById]);
 
   const activeRisk = deriveRiskLevel(activeFull?.trustScore ?? null);
-  const activeImg = (activeFull?.imageUrl || (activeFull as any)?.coverImageUrl || null) as string | null;
+  const activeImg = (
+    (activeFull as any)?.coverImage?.url ||
+    (typeof (activeFull as any)?.coverImage === 'string' ? (activeFull as any)?.coverImage : null) ||
+    activeFull?.imageUrl ||
+    (activeFull as any)?.coverImageUrl ||
+    null
+  ) as string | null;
   const activeSnippet = String(activeFull?.content || '').slice(0, 650);
 
   return (

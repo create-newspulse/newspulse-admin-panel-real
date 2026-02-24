@@ -13,6 +13,7 @@ export type MediaStatus = {
 
 export type UploadCoverImageResult = {
   url: string;
+  publicId?: string;
 };
 
 async function probeUploadRoute(client: AxiosInstance): Promise<boolean> {
@@ -95,7 +96,11 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
 
 function extractUploadedUrl(raw: any): string {
   const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const coverObj = payload?.coverImage && typeof payload.coverImage === 'object' ? payload.coverImage : null;
   const url =
+    coverObj?.url ||
+    coverObj?.secureUrl ||
+    coverObj?.secure_url ||
     payload?.url ||
     payload?.coverImageUrl ||
     payload?.imageUrl ||
@@ -105,17 +110,34 @@ function extractUploadedUrl(raw: any): string {
   return String(url || '').trim();
 }
 
+function extractUploadedPublicId(raw: any): string {
+  const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const coverObj = payload?.coverImage && typeof payload.coverImage === 'object' ? payload.coverImage : null;
+  const pid =
+    payload?.publicId ||
+    payload?.public_id ||
+    coverObj?.publicId ||
+    coverObj?.public_id ||
+    coverObj?.id;
+  return String(pid || '').trim();
+}
+
 // Upload a cover image and return a usable remote URL.
 // Supports multiple backend contracts:
 // - POST /api/media/upload   (frontend path: /media/upload)
 // - POST /api/uploads/cover  (frontend path: /uploads/cover)
 export async function uploadCoverImage(file: File, client: AxiosInstance = apiClient): Promise<UploadCoverImageResult> {
-  const candidates = ['/media/upload', '/uploads/cover'];
+  // Prefer the contract requested by the admin panel:
+  // POST /admin-api/uploads/cover  (proxy handles Cloudinary)
+  // but keep legacy candidates for local demo backends.
+  const candidates = ['/uploads/cover', '/media/upload'];
   let lastErr: any = null;
 
   for (const url of candidates) {
     const fd = new FormData();
-    // Demo backend + most contracts use field name: file
+    // Admin contract uses field name: cover
+    fd.append('cover', file);
+    // Legacy/demo compatibility
     fd.append('file', file);
     try {
       const res = await client.post(url, fd, {
@@ -126,7 +148,8 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
       });
       const uploadedUrl = extractUploadedUrl(res?.data);
       if (!uploadedUrl) throw new Error('Upload succeeded but no URL was returned');
-      return { url: uploadedUrl };
+      const publicId = extractUploadedPublicId(res?.data);
+      return { url: uploadedUrl, publicId: publicId || undefined };
     } catch (err: any) {
       lastErr = err;
       const status = err?.response?.status;

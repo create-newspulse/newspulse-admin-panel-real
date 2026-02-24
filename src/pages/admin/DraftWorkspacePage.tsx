@@ -25,7 +25,12 @@ type DraftPatch = Partial<Pick<Article,
 >>;
 
 function normalizeImageUrl(a?: Article): string {
-  return String(a?.coverImage || a?.imageUrl || a?.coverImageUrl || '').trim();
+  const cover: any = (a as any)?.coverImage;
+  if (cover && typeof cover === 'object') {
+    const u = cover.url || cover.secureUrl || cover.secure_url || '';
+    return String(u || '').trim();
+  }
+  return String((cover as any) || a?.imageUrl || a?.coverImageUrl || '').trim();
 }
 
 function toTagString(tags?: string[]): string {
@@ -161,7 +166,7 @@ export default function DraftWorkspacePage() {
       const v = value.trim();
       patch.imageUrl = v || undefined;
       patch.coverImageUrl = v || undefined;
-      patch.coverImage = v || undefined;
+      patch.coverImage = v ? ({ url: v } as any) : undefined;
     }
 
     scheduleSave(patch);

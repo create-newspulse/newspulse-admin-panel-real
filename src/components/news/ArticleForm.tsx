@@ -224,6 +224,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   // Cover image (backend-supported field: imageUrl)
   const [imageUrl, setImageUrl] = useState('');
+  const [coverImagePublicId, setCoverImagePublicId] = useState('');
   // Upload-only: selecting a file uploads it and stores a remote URL.
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
@@ -304,7 +305,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         }
         toast.success('Images pasted', { id: toastId });
       } catch (err) {
-        toast.error(normalizeError(err), { id: toastId });
+        toast.error(normalizeError(err).message, { id: toastId });
         // If upload fails, remove unresolved tokens so content stays clean.
         setContent((curr) => {
           let cleaned = String(curr || '');
@@ -484,6 +485,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     status: 'draft' | 'scheduled' | 'published';
     tags: string[];
     coverImage: string;
+    coverImagePublicId: string;
     isBreaking: boolean;
     publishedAt: string;
     state: string;
@@ -503,6 +505,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     status: 'draft',
     tags: [],
     coverImage: '',
+    coverImagePublicId: '',
     isBreaking: false,
     publishedAt: '',
     state: '',
@@ -542,6 +545,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setChecks({ seo: null, compliance: null, duplicate: null });
     setSlugCheck({ status: 'idle' });
     setImageUrl('');
+    setCoverImagePublicId('');
     setCoverImageFile(null);
     setLastSavedSnapshot(EMPTY_SNAPSHOT);
     setLastSavedAt(null);
@@ -565,6 +569,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       status: (next?.status ?? status) as Snapshot['status'],
       tags: Array.isArray(next?.tags) ? (next?.tags as string[]) : tags,
       coverImage: (next?.coverImage ?? imageUrl ?? '').toString(),
+      coverImagePublicId: (next?.coverImagePublicId ?? coverImagePublicId ?? '').toString(),
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
       publishedAt: (next?.publishedAt ?? publishedAt ?? '').toString(),
       state: (next?.state ?? state ?? '').toString(),
@@ -586,6 +591,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       status: (s.status || 'draft'),
       tags: (Array.isArray(s.tags) ? s.tags : []).map((t) => String(t || '').trim()).filter(Boolean),
       coverImage: (s.coverImage || ''),
+      coverImagePublicId: (s.coverImagePublicId || ''),
       isBreaking: !!s.isBreaking,
       publishedAt: (s.publishedAt || ''),
       state: (s.state || ''),
@@ -813,14 +819,35 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setCity(String((src as any).city || ''));
 
       // Cover image (support both coverImageUrl and imageUrl across environments)
-      const incomingImage =
-        (src as any).coverImageUrl ||
-        (src as any).imageUrl ||
-        (src as any).coverImage ||
-        (src as any).featuredImage ||
-        (src as any).mediaUrl ||
-        '';
-      setImageUrl(String(incomingImage || ''));
+      const incomingCoverField: any = (src as any).coverImage;
+      const incomingCoverUrl = (() => {
+        if (incomingCoverField && typeof incomingCoverField === 'object') {
+          return (
+            incomingCoverField.url ||
+            incomingCoverField.secureUrl ||
+            incomingCoverField.secure_url ||
+            ''
+          );
+        }
+        return (
+          (src as any).coverImageUrl ||
+          (src as any).imageUrl ||
+          (typeof incomingCoverField === 'string' ? incomingCoverField : '') ||
+          (src as any).featuredImage ||
+          (src as any).mediaUrl ||
+          ''
+        );
+      })();
+
+      const incomingCoverPid = (() => {
+        if (incomingCoverField && typeof incomingCoverField === 'object') {
+          return incomingCoverField.publicId || incomingCoverField.public_id || '';
+        }
+        return '';
+      })();
+
+      setImageUrl(String(incomingCoverUrl || ''));
+      setCoverImagePublicId(String(incomingCoverPid || ''));
       setCoverImageFile(null);
 
       // Seed "last saved" hash for edit mode.
@@ -837,7 +864,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
-          coverImage: String(incomingImage || ''),
+          coverImage: String(incomingCoverUrl || ''),
+          coverImagePublicId: String(incomingCoverPid || ''),
           isBreaking: !!(src as any).isBreaking,
           publishedAt: incomingPublishedAt ? new Date(incomingPublishedAt).toISOString() : '',
           state: String((src as any).state || ''),
@@ -1031,7 +1059,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         state?: string;
         district?: string;
         city?: string;
-        coverImage?: string;
+        imageUrl?: string;
+        coverImageUrl?: string;
+        coverImage?: { url: string; publicId?: string };
         tags: string[];
       } => {
         const categoryKeyRaw = (category || '').trim();
@@ -1042,6 +1072,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         const isViralVideo = categoryKey === 'viral-videos';
         const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
+
+        const coverUrl = trimOrUndef(imageUrl);
+        const coverPid = trimOrUndef(coverImagePublicId);
         return {
           title,
           slug: safeSlug,
@@ -1059,7 +1092,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state: trimOrUndef(state),
           district: trimOrUndef(district),
           city: trimOrUndef(city),
-          coverImage: trimOrUndef(imageUrl),
+          imageUrl: coverUrl,
+          coverImageUrl: coverUrl,
+          coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
           tags: Array.isArray(tags) ? tags : [],
         };
       };
@@ -1192,6 +1227,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         status: statusToSend,
         translationGroupId: savedGroupId || translationGroupId,
         coverImage: imageUrl,
+        coverImagePublicId,
         isBreaking,
         publishedAt,
         state,
@@ -1294,6 +1330,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     try {
       const res = await uploadCoverImage(file);
       setImageUrl(res.url);
+      setCoverImagePublicId(res.publicId || '');
       toast.success('Image uploaded');
     } catch (err: any) {
       const n = normalizeError(err, 'Cover image upload failed');
@@ -1359,7 +1396,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, imageUrl, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, imageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(content || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -1392,7 +1429,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, imageUrl, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, imageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -1932,6 +1969,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   onRemove={() => {
                     setCoverImageFile(null);
                     setImageUrl('');
+                    setCoverImagePublicId('');
                   }}
                 />
                 {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
