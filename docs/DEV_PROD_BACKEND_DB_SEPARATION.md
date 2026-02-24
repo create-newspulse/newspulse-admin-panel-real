@@ -1,10 +1,10 @@
 # Dev/Prod Backend + DB Separation (Public Site Settings)
 
-Problem: both the **local public site** (e.g. `http://localhost:3000`) and **production public site** (e.g. `https://www.newspulse.co.in`) read the *same* “Public Site Settings” document when they point at the same backend + MongoDB.
+Problem: both the **local public site** (e.g. `http://localhost:3000`) and **production public site** (e.g. `https://newspulse.co.in`) read the *same* “Public Site Settings” document when they point at the same backend + MongoDB.
 
 Goal:
 - **Local Admin** (`http://localhost:5173`) + **Local Public** (`http://localhost:3000`) → **DEV backend + DEV DB**
-- **Production Admin** (`https://admin.newspulse.co.in`) + **Production Public** (`https://www.newspulse.co.in`) → **PROD backend + PROD DB**
+- **Production Admin** (`https://admin.newspulse.co.in`) + **Production Public** (`https://newspulse.co.in`) → **PROD backend + PROD DB**
 
 ## 1) Create a DEV MongoDB database
 Create a separate database/cluster (recommended) or at minimum a separate database name for DEV.
@@ -61,5 +61,5 @@ For the production public site deployment, configure its API base to the PROD ba
 
 ## Validation checklist
 - Local admin updates “Public Site Settings” and only `localhost:3000` changes.
-- Production admin updates “Public Site Settings” and only `www.newspulse.co.in` changes.
+- Production admin updates “Public Site Settings” and only `newspulse.co.in` changes.
 - `GET /api/system/health` on DEV and PROD show different DB/cluster identifiers (add a non-sensitive marker if needed).
