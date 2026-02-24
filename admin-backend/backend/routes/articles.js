@@ -23,6 +23,16 @@ const ArticleSchemaZ = z.object({
   tags: z.array(z.string()).max(20).optional(),
   status: z.enum(['draft','scheduled','published','archived','deleted']).optional(),
   imageUrl: z.string().url().optional().or(z.literal('')),
+  coverImageUrl: z.string().url().optional().or(z.literal('')),
+  coverImage: z.union([
+    z.string().url(),
+    z.object({
+      url: z.string().url(),
+      publicId: z.string().max(200).optional().or(z.literal('')),
+      public_id: z.string().max(200).optional().or(z.literal('')),
+    }).passthrough(),
+    z.literal(''),
+  ]).optional(),
   sourceName: z.string().max(120).optional().or(z.literal('')),
   sourceUrl: z.string().url().optional().or(z.literal('')),
   authorName: z.string().max(120).optional().or(z.literal('')),
@@ -36,6 +46,51 @@ const ArticleSchemaZ = z.object({
   isFlagged: z.boolean().optional(),
   scheduledAt: z.string().datetime().optional().transform(d=> d ? new Date(d) : undefined),
 });
+
+function normalizeCoverFields(input) {
+  const body = input || {};
+  const coverImageRaw = body.coverImage;
+  const coverImageUrlRaw = body.coverImageUrl;
+  const imageUrlRaw = body.imageUrl;
+
+  const coverUrlFromObj =
+    coverImageRaw && typeof coverImageRaw === 'object'
+      ? String(coverImageRaw.url || coverImageRaw.secure_url || coverImageRaw.secureUrl || '').trim()
+      : '';
+  const coverPidFromObj =
+    coverImageRaw && typeof coverImageRaw === 'object'
+      ? String(coverImageRaw.publicId || coverImageRaw.public_id || '').trim()
+      : '';
+
+  const coverUrlFromString = typeof coverImageRaw === 'string' ? String(coverImageRaw || '').trim() : '';
+  const coverUrl = coverUrlFromObj || coverUrlFromString || String(coverImageUrlRaw || '').trim() || String(imageUrlRaw || '').trim();
+  if (!coverUrl) return { coverImage: undefined, coverImageUrl: undefined, imageUrl: undefined };
+
+  return {
+    coverImage: {
+      url: coverUrl,
+      ...(coverPidFromObj ? { publicId: coverPidFromObj } : {}),
+    },
+    coverImageUrl: coverUrl,
+    imageUrl: coverUrl,
+  };
+}
+
+function withNormalizedCover(doc) {
+  if (!doc) return doc;
+  const raw = doc.toObject ? doc.toObject() : { ...doc };
+  const url =
+    (raw.coverImage && typeof raw.coverImage === 'object' ? String(raw.coverImage.url || '').trim() : '') ||
+    String(raw.coverImageUrl || '').trim() ||
+    String(raw.imageUrl || '').trim();
+  const pid = raw.coverImage && typeof raw.coverImage === 'object' ? String(raw.coverImage.publicId || '').trim() : '';
+  if (url) {
+    raw.coverImage = { url, ...(pid ? { publicId: pid } : {}) };
+    raw.coverImageUrl = raw.coverImageUrl || url;
+    raw.imageUrl = raw.imageUrl || url;
+  }
+  return raw;
+}
 
 const sanitizeContent = (html) => sanitizeHtml(html || '', {
   allowedTags: ['p','h1','h2','h3','h4','a','ul','ol','li','blockquote','img','strong','em','u','code','pre'],
@@ -90,7 +145,7 @@ router.get('/', async (req, res) => {
       cursor.lean(),
       Article.countDocuments(filter),
     ]);
-    res.json({ data: items, page, total, pages: Math.ceil(total / limit), limit });
+    res.json({ data: items.map(withNormalizedCover), page, total, pages: Math.ceil(total / limit), limit });
   } catch (err) {
     console.error('GET /api/articles error', err);
     res.status(500).json({ error: { code: 'LIST_FAILED', message: 'Failed to fetch articles' } });
@@ -117,7 +172,7 @@ router.get('/:idOrSlug', async (req, res) => {
     const { idOrSlug } = req.params;
     const doc = isObjectId(idOrSlug) ? await Article.findById(idOrSlug) : await Article.findOne({ slug: idOrSlug });
     if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Article not found' } });
-    res.json({ data: doc });
+    res.json({ data: withNormalizedCover(doc) });
   } catch (err) {
     res.status(500).json({ error: { code: 'GET_FAILED', message: 'Failed to fetch article' } });
   }
@@ -128,6 +183,11 @@ router.post('/', auth, requireRole('editor','admin','founder'), async (req, res)
   try {
     const parsed = ArticleSchemaZ.parse(req.body);
     parsed.content = sanitizeContent(parsed.content);
+
+    const cover = normalizeCoverFields(parsed);
+    if (cover.coverImage) parsed.coverImage = cover.coverImage;
+    if (cover.coverImageUrl) parsed.coverImageUrl = cover.coverImageUrl;
+    if (cover.imageUrl) parsed.imageUrl = cover.imageUrl;
     
     // Map frontend fields to backend schema
     if (!parsed.language && parsed.lang) parsed.language = parsed.lang;
@@ -148,7 +208,7 @@ router.post('/', auth, requireRole('editor','admin','founder'), async (req, res)
     }
     
     const doc = await Article.create(parsed);
-    res.status(201).json({ data: doc });
+    res.status(201).json({ data: withNormalizedCover(doc) });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: { code: 'VALIDATION', message: 'Invalid input', fields: err.flatten() } });
@@ -164,9 +224,13 @@ router.put('/:id', auth, requireRole('editor','admin','founder'), async (req, re
   try {
     const parsed = ArticleSchemaZ.partial().parse(req.body);
     if (parsed.content) parsed.content = sanitizeContent(parsed.content);
+    const cover = normalizeCoverFields(parsed);
+    if (cover.coverImage) parsed.coverImage = cover.coverImage;
+    if (cover.coverImageUrl) parsed.coverImageUrl = cover.coverImageUrl;
+    if (cover.imageUrl) parsed.imageUrl = cover.imageUrl;
     const doc = await Article.findByIdAndUpdate(req.params.id, parsed, { new: true });
     if (!doc) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Article not found' } });
-    res.json({ data: doc });
+    res.json({ data: withNormalizedCover(doc) });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: { code: 'VALIDATION', message: 'Invalid input', fields: err.flatten() } });
     console.error('PUT /api/articles/:id error', err);

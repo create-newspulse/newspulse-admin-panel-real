@@ -15,6 +15,13 @@ const ArticleSchema = new mongoose.Schema({
   category: { type: String, enum: CATEGORY_ENUM, required: true, index: true },
   tags: { type: [String], default: [], index: true },
   status: { type: String, enum: STATUS_ENUM, default: 'draft', index: true },
+  // Canonical cover image shape used by the public frontend.
+  coverImage: {
+    url: { type: String, default: '' },
+    publicId: { type: String, default: '' },
+  },
+  // Back-compat fields still used by some admin/public endpoints.
+  coverImageUrl: { type: String, default: '' },
   imageUrl: { type: String, default: '' },
   source: { name: { type: String, default: '' }, url: { type: String, default: '' } },
   author: {

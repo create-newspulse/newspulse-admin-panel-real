@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createArticle, updateArticle, getArticle } from '../../lib/api/articles';
 import { verifyLanguage, readability } from '../../lib/api/language';
 import { ptiCheck } from '../../lib/api/compliance';
+import { uploadCoverImage } from '../../lib/api/media';
 import TagInput from '../ui/TagInput';
 import AiAssistantTipBox from './AiAssistantTipBox';
 import { uniqueSlug } from '../../lib/slug';
@@ -18,6 +19,10 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const [summary, setSummary] = useState('');
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [coverImagePublicId, setCoverImagePublicId] = useState('');
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [coverUploadError, setCoverUploadError] = useState<string>('');
   const [category, setCategory] = useState('General');
   const [language, setLanguage] = useState<'en'|'hi'|'gu'>('en');
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
@@ -46,6 +51,10 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         setSlug(art.slug || '');
         setSummary(art.summary || '');
         setContent(art.content || art.body || '');
+        const coverUrl = (art.coverImage && typeof art.coverImage === 'object' ? art.coverImage.url : '') || art.coverImageUrl || art.imageUrl || '';
+        setImageUrl(coverUrl || '');
+        const pid = (art.coverImage && typeof art.coverImage === 'object' ? (art.coverImage.publicId || art.coverImage.public_id) : '') || '';
+        setCoverImagePublicId(pid || '');
         setCategory(art.category || 'General');
         setLanguage((art.language || 'en') as any);
         setStatus((art.status || 'draft') as any);
@@ -109,7 +118,23 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const body = { title, slug, summary, content, category, tags, status, language, scheduledAt: scheduledAt || undefined, ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus };
+      const coverUrl = (imageUrl || '').trim();
+      const coverPid = (coverImagePublicId || '').trim();
+      const body: any = {
+        title,
+        slug,
+        summary,
+        content,
+        category,
+        tags,
+        status,
+        language,
+        scheduledAt: scheduledAt || undefined,
+        ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus,
+        imageUrl: coverUrl || undefined,
+        coverImageUrl: coverUrl || undefined,
+        coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
+      };
       if (mode === 'create') return createArticle(body as any);
       else return updateArticle(articleId!, body as any);
     },
@@ -142,6 +167,22 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
 
   const canPublish = (userRole === 'admin' || userRole === 'founder') && (ptiStatus === 'compliant' || founderOverride) && ['en','hi','gu'].every(l => (langIssues[l]||[]).length === 0 || founderOverride);
 
+  async function onPickCoverFile(file: File | null) {
+    setCoverUploadError('');
+    if (!file) return;
+    setIsUploadingCover(true);
+    try {
+      const res = await uploadCoverImage(file);
+      setImageUrl(res.url);
+      setCoverImagePublicId(res.publicId || '');
+    } catch (err: any) {
+      console.error('[ADMIN][COVER_UPLOAD] Failed', err);
+      setCoverUploadError(err?.message || 'Upload failed');
+    } finally {
+      setIsUploadingCover(false);
+    }
+  }
+
   return (
     <form onSubmit={e=> { e.preventDefault(); mutation.mutate(); }} className="space-y-6">
       <div className="card p-4 space-y-4">
@@ -166,6 +207,42 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
             </label>
           </div>
           <textarea value={summary} onChange={e=> setSummary(e.target.value)} rows={3} className="w-full border px-2 py-2 rounded" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium">Cover Image</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const f = e.target.files?.[0] || null;
+                await onPickCoverFile(f);
+                e.currentTarget.value = '';
+              }}
+              disabled={isUploadingCover}
+              className="text-sm"
+            />
+            {isUploadingCover && <div className="text-xs text-slate-600">Uploading…</div>}
+          </div>
+          <input
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            className="w-full border px-2 py-2 rounded mt-2"
+            placeholder="https://… (optional)"
+          />
+          {coverUploadError && <div className="text-xs text-red-600 mt-1">{coverUploadError}</div>}
+          {imageUrl && (
+            <div className="mt-2">
+              <img
+                src={imageUrl}
+                alt="cover preview"
+                className="w-full max-w-md rounded border"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium">Content</label>

@@ -3,6 +3,57 @@ const Article = require('../models/Article');
 
 const router = express.Router();
 
+function normalizeCoverFields(body) {
+  const coverImageRaw = body?.coverImage;
+  const coverImageUrlRaw = body?.coverImageUrl;
+  const imageUrlRaw = body?.imageUrl;
+
+  const coverUrlFromObj =
+    coverImageRaw && typeof coverImageRaw === 'object'
+      ? String(coverImageRaw.url || coverImageRaw.secure_url || coverImageRaw.secureUrl || '').trim()
+      : '';
+  const coverPidFromObj =
+    coverImageRaw && typeof coverImageRaw === 'object'
+      ? String(coverImageRaw.publicId || coverImageRaw.public_id || '').trim()
+      : '';
+
+  const coverUrlFromString = typeof coverImageRaw === 'string' ? String(coverImageRaw || '').trim() : '';
+  const coverUrl =
+    coverUrlFromObj ||
+    coverUrlFromString ||
+    String(coverImageUrlRaw || '').trim() ||
+    String(imageUrlRaw || '').trim();
+
+  const coverPid = coverPidFromObj || (typeof body?.coverImagePublicId === 'string' ? body.coverImagePublicId.trim() : '');
+
+  if (!coverUrl) return { coverImage: undefined, coverImageUrl: undefined, imageUrl: undefined };
+
+  return {
+    coverImage: {
+      url: coverUrl,
+      ...(coverPid ? { publicId: coverPid } : {}),
+    },
+    coverImageUrl: coverUrl,
+    imageUrl: coverUrl,
+  };
+}
+
+function withNormalizedCover(doc) {
+  if (!doc) return doc;
+  const raw = doc.toObject ? doc.toObject() : { ...doc };
+  const url =
+    (raw.coverImage && typeof raw.coverImage === 'object' ? String(raw.coverImage.url || '').trim() : '') ||
+    String(raw.coverImageUrl || '').trim() ||
+    String(raw.imageUrl || '').trim();
+  const pid = raw.coverImage && typeof raw.coverImage === 'object' ? String(raw.coverImage.publicId || '').trim() : '';
+  if (url) {
+    raw.coverImage = { url, ...(pid ? { publicId: pid } : {}) };
+    raw.coverImageUrl = raw.coverImageUrl || url;
+    raw.imageUrl = raw.imageUrl || url;
+  }
+  return raw;
+}
+
 // Helpers
 const toInt = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
 const pick = (obj, keys) => keys.reduce((acc, k) => {
@@ -14,6 +65,7 @@ const pick = (obj, keys) => keys.reduce((acc, k) => {
 router.post('/articles', async (req, res) => {
   try {
     const body = req.body || {};
+    const cover = normalizeCoverFields(body);
     const doc = await Article.create({
       title: body.title,
       slug: body.slug,
@@ -25,8 +77,11 @@ router.post('/articles', async (req, res) => {
       language: body.language || body.lang || 'en',
       scheduledAt: body.scheduledAt || null,
       ptiCompliance: body.ptiCompliance || 'pending',
+      ...(cover.coverImage ? { coverImage: cover.coverImage } : {}),
+      ...(cover.coverImageUrl ? { coverImageUrl: cover.coverImageUrl } : {}),
+      ...(cover.imageUrl ? { imageUrl: cover.imageUrl } : {}),
     });
-    res.status(201).json({ ok: true, article: doc });
+    res.status(201).json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -37,7 +92,7 @@ router.get('/articles/:id', async (req, res) => {
   try {
     const doc = await Article.findById(req.params.id);
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -47,6 +102,7 @@ router.get('/articles/:id', async (req, res) => {
 router.put('/articles/:id', async (req, res) => {
   try {
     const body = req.body || {};
+    const cover = normalizeCoverFields(body);
     const update = {
       title: body.title,
       slug: body.slug,
@@ -58,11 +114,14 @@ router.put('/articles/:id', async (req, res) => {
       language: body.language || body.lang,
       scheduledAt: body.scheduledAt || body.publishAt || body.publish_at,
       ptiCompliance: body.ptiCompliance,
+      ...(cover.coverImage ? { coverImage: cover.coverImage } : {}),
+      ...(cover.coverImageUrl ? { coverImageUrl: cover.coverImageUrl } : {}),
+      ...(cover.imageUrl ? { imageUrl: cover.imageUrl } : {}),
     };
     Object.keys(update).forEach((k)=> update[k] === undefined && delete update[k]);
     const doc = await Article.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -76,6 +135,7 @@ router.patch('/articles/:id', async (req, res) => {
       'title','slug','summary','content','body','category','tags','status','language','lang','scheduledAt','publishAt','publish_at','ptiCompliance'
     ];
     const src = pick(body, allowed);
+    const cover = normalizeCoverFields(body);
     const update = {
       title: src.title,
       slug: src.slug,
@@ -87,6 +147,9 @@ router.patch('/articles/:id', async (req, res) => {
       language: src.language || src.lang,
       scheduledAt: src.scheduledAt || src.publishAt || src.publish_at,
       ptiCompliance: src.ptiCompliance,
+      ...(cover.coverImage ? { coverImage: cover.coverImage } : {}),
+      ...(cover.coverImageUrl ? { coverImageUrl: cover.coverImageUrl } : {}),
+      ...(cover.imageUrl ? { imageUrl: cover.imageUrl } : {}),
     };
     Object.keys(update).forEach((k)=> update[k] === undefined && delete update[k]);
 
@@ -102,7 +165,7 @@ router.patch('/articles/:id', async (req, res) => {
 
     const doc = await Article.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -115,7 +178,7 @@ router.patch('/articles/:id/status', async (req, res) => {
     if (!status) return res.status(400).json({ ok: false, message: 'status required' });
     const doc = await Article.findByIdAndUpdate(req.params.id, { status }, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -133,7 +196,7 @@ router.patch('/articles/:id/schedule', async (req, res) => {
       { new: true }
     );
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -144,7 +207,7 @@ router.patch('/articles/:id/archive', async (req, res) => {
   try {
     const doc = await Article.findByIdAndUpdate(req.params.id, { status: 'archived' }, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -155,7 +218,7 @@ router.patch('/articles/:id/restore', async (req, res) => {
   try {
     const doc = await Article.findByIdAndUpdate(req.params.id, { status: 'draft', deletedAt: null }, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -172,7 +235,7 @@ router.delete('/articles/:id', async (req, res) => {
     }
     const doc = await Article.findByIdAndUpdate(req.params.id, { status: 'deleted', deletedAt: new Date() }, { new: true });
     if (!doc) return res.status(404).json({ ok: false, message: 'Article not found' });
-    res.json({ ok: true, article: doc });
+    res.json({ ok: true, article: withNormalizedCover(doc) });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }
@@ -201,7 +264,7 @@ router.get('/articles', async (req, res) => {
       Article.find(filter).sort(sort).skip(skip).limit(limit),
       Article.countDocuments(filter),
     ]);
-    res.json({ ok: true, items, total });
+    res.json({ ok: true, items: items.map(withNormalizedCover), total });
   } catch (e) {
     res.status(500).json({ ok: false, message: e.message });
   }

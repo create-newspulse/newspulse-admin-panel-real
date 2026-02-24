@@ -12,6 +12,9 @@ export interface ArticleInput {
   scheduledAt?: string;
   publishedAt?: string;
   ptiCompliance?: string;
+  imageUrl?: string;
+  coverImageUrl?: string;
+  coverImage?: { url: string; publicId?: string };
 }
 
 // Minimal admin-facing article shape used for filtering & actions
