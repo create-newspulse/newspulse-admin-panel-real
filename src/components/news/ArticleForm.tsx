@@ -223,11 +223,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }>(null);
 
   // Cover image (backend-supported field: imageUrl)
-  const [imageUrl, setImageUrl] = useState('');
-  const [coverImagePublicId, setCoverImagePublicId] = useState('');
+  const [coverImage, setCoverImage] = useState<{ url: string; publicId?: string } | null>(null);
   // Upload-only: selecting a file uploads it and stores a remote URL.
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+
+  const coverImageUrl = String(coverImage?.url || '').trim();
+  const coverImagePublicId = String(coverImage?.publicId || '').trim();
 
   const countWords = (input: string): number => {
     const raw = String(input || '');
@@ -544,8 +546,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setTone('neutral');
     setChecks({ seo: null, compliance: null, duplicate: null });
     setSlugCheck({ status: 'idle' });
-    setImageUrl('');
-    setCoverImagePublicId('');
+    setCoverImage(null);
     setCoverImageFile(null);
     setLastSavedSnapshot(EMPTY_SNAPSHOT);
     setLastSavedAt(null);
@@ -568,7 +569,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
       status: (next?.status ?? status) as Snapshot['status'],
       tags: Array.isArray(next?.tags) ? (next?.tags as string[]) : tags,
-      coverImage: (next?.coverImage ?? imageUrl ?? '').toString(),
+      coverImage: (next?.coverImage ?? coverImageUrl ?? '').toString(),
       coverImagePublicId: (next?.coverImagePublicId ?? coverImagePublicId ?? '').toString(),
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
       publishedAt: (next?.publishedAt ?? publishedAt ?? '').toString(),
@@ -846,8 +847,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return '';
       })();
 
-      setImageUrl(String(incomingCoverUrl || ''));
-      setCoverImagePublicId(String(incomingCoverPid || ''));
+      const nextCoverUrl = String(incomingCoverUrl || '').trim();
+      const nextCoverPid = String(incomingCoverPid || '').trim();
+      setCoverImage(nextCoverUrl ? { url: nextCoverUrl, publicId: nextCoverPid || undefined } : null);
       setCoverImageFile(null);
 
       // Seed "last saved" hash for edit mode.
@@ -1091,7 +1093,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const isViralVideo = categoryKey === 'viral-videos';
         const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
 
-        const coverUrl = trimOrUndef(imageUrl);
+        const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
         return {
           title,
@@ -1244,7 +1246,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         slug: safeSlug,
         status: statusToSend,
         translationGroupId: savedGroupId || translationGroupId,
-        coverImage: imageUrl,
+        coverImage: coverImageUrl,
         coverImagePublicId,
         isBreaking,
         publishedAt,
@@ -1347,8 +1349,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setIsUploadingCover(true);
     try {
       const res = await uploadCoverImage(file);
-      setImageUrl(res.url);
-      setCoverImagePublicId(res.publicId || '');
+      setCoverImage({ url: res.url, publicId: res.publicId || undefined });
       toast.success('Image uploaded');
     } catch (err: any) {
       const n = normalizeError(err, 'Cover image upload failed');
@@ -1414,7 +1415,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, imageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(content || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -1447,7 +1448,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, imageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -1978,7 +1979,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               {/* Cover Image (Upload-only) */}
               <div className="pt-3 border-t border-slate-200">
                 <CoverImageUpload
-                  url={imageUrl}
+                  url={coverImageUrl}
                   file={coverImageFile}
                   onChangeFile={(f) => {
                     setCoverImageFile(f);
@@ -1986,8 +1987,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   }}
                   onRemove={() => {
                     setCoverImageFile(null);
-                    setImageUrl('');
-                    setCoverImagePublicId('');
+                    setCoverImage(null);
                   }}
                 />
                 {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
@@ -2029,7 +2029,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           slug,
           summary,
           content,
-          coverImageUrl: (imageUrl || '').trim() || undefined,
+          coverImageUrl: coverImageUrl || undefined,
           category,
           language,
           status,

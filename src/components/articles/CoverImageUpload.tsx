@@ -93,8 +93,9 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     };
   }, []);
 
-  const previewSrc = objectUrl || sanitizeRemoteUrl(url) || '';
-  const hasPreview = !!previewSrc;
+  const remoteSrc = sanitizeRemoteUrl(url);
+  const hasRealPreview = !!(objectUrl || remoteSrc);
+  const previewSrc = objectUrl || remoteSrc || '/fallback.svg';
 
   const fileMeta = useMemo(() => {
     if (!file) return null;
@@ -153,7 +154,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
 
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0 space-y-2">
-          {!hasPreview ? (
+          {!hasRealPreview ? (
             <div className="text-xs text-slate-600">No cover image</div>
           ) : fileMeta ? (
             <div className="text-xs text-slate-600">
@@ -166,10 +167,10 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
 
           <div className="flex items-center gap-2">
             <button type="button" className="btn" onClick={pick}>
-              {hasPreview ? 'Replace' : 'Upload Image'}
+              {hasRealPreview ? 'Replace' : 'Upload Image'}
             </button>
 
-            {hasPreview && (
+            {hasRealPreview && (
               <button
                 type="button"
                 className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
@@ -205,11 +206,11 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
               (isDragging ? 'border-slate-400' : 'border-slate-200')
             }
           >
-            {hasPreview ? (
-              <img src={previewSrc} alt="Cover preview" className="w-full h-full object-cover" />
-            ) : (
-              <div className="text-[11px] text-slate-500">{isDragging ? 'Drop image' : 'Preview'}</div>
-            )}
+            <img
+              src={previewSrc}
+              alt={hasRealPreview ? 'Cover preview' : 'Cover placeholder'}
+              className={"w-full h-full object-cover " + (hasRealPreview ? '' : 'opacity-70')}
+            />
           </div>
         </div>
       </div>
