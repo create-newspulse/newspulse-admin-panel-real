@@ -2,7 +2,7 @@
 // NOTE: This file previously had duplicated sections causing "Cannot redeclare" errors.
 // We merge functionality into a single set of exports using the existing apiClient.
 
-import apiClient, { adminApi } from '@/lib/api';
+import apiClient from '@/lib/api';
 import type { ArticleStatus } from '@/types/articles';
 
 export interface Article {
@@ -54,17 +54,10 @@ export interface ListResponse {
 }
 
 const ADMIN_ARTICLES_PATH = '/articles';
-// Legacy/admin backend shape (some environments expose only /api/admin/articles/* routes)
-const LEGACY_ADMIN_ARTICLES_PATH = '/admin/articles';
 
 function isNotFoundOrMethodNotAllowed(err: any): boolean {
   const status = err?.response?.status;
   return status === 404 || status === 405;
-}
-
-function isAuthDenied(err: any): boolean {
-  const status = err?.response?.status;
-  return status === 401 || status === 403;
 }
 
 async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
@@ -80,11 +73,6 @@ async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
   return res2.data as T;
 }
 
-async function tryLegacyAdminAction(path: string) {
-  // path should be relative to /admin/articles
-  const res = await apiClient.patch(`${LEGACY_ADMIN_ARTICLES_PATH}${path}`);
-  return res.data;
-}
 
 function normalizeListResponse(payload: any, opts: { requestedPage: number; limit: number }): ListResponse {
   const rows: Article[] = Array.isArray(payload?.data)
@@ -167,18 +155,8 @@ export async function listArticles(params: {
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
-  let raw: any;
-  try {
-    const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
-    raw = res.data as any;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-    const res2 = await adminApi.get(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}`, {
-      // @ts-expect-error custom flag read by interceptor
-      skipErrorLog: true,
-    });
-    raw = res2.data as any;
-  }
+  const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
+  const raw: any = res.data as any;
   const ok = raw?.ok === true || raw?.success === true || !!raw?.article || !!raw?.data;
   const article = (raw?.article)
     || (raw?.data?.article)
@@ -191,78 +169,34 @@ export async function getArticle(id: string): Promise<Article> {
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
-  try {
-    return await patchThenPut(url, { status: 'archived' });
-  } catch (e: any) {
-    const status = e?.response?.status;
-    if (status && status !== 404 && status !== 405) throw e;
-  }
-  // Legacy fallback: PATCH /api/admin/articles/:id/archive
-  return tryLegacyAdminAction(`/${encoded}/archive`);
+  return patchThenPut(url, { status: 'archived' });
 }
 export async function restoreArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
-  try {
-    return await patchThenPut(url, { status: 'draft' });
-  } catch (e: any) {
-    const status = e?.response?.status;
-    if (status && status !== 404 && status !== 405) throw e;
-  }
-  // Legacy fallback: PATCH /api/admin/articles/:id/restore
-  return tryLegacyAdminAction(`/${encoded}/restore`);
+  return patchThenPut(url, { status: 'draft' });
 }
 export async function deleteArticle(id: string) {
   // Soft delete in UI: mark as deleted (keeps data recoverable)
   const encoded = encodeURIComponent(id);
   const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
-  try {
-    return await patchThenPut(url, { status: 'deleted' });
-  } catch (e: any) {
-    const status = e?.response?.status;
-    // If backend doesn't support status update on /articles/:id, fall back to legacy admin delete.
-    if (status && status !== 404 && status !== 405) throw e;
-  }
-  // Legacy fallback: DELETE /api/admin/articles/:id
-  const res = await adminApi.delete(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}`, {
-    // @ts-expect-error custom flag read by interceptor
-    skipErrorLog: true,
-  });
-  return res.data;
+  return patchThenPut(url, { status: 'deleted' });
 }
 
 // --- Control tower helpers ---
 export async function updateArticleStatus(id: string, status: ArticleStatus) {
   const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  try {
-    const res = await adminApi.patch(url, { status });
-    return res.data as Article;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
   return patchThenPut<Article>(url, { status });
 }
 
 export async function scheduleArticle(id: string, publishAt: string) {
   const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  try {
-    const res = await adminApi.patch(url, { status: 'scheduled', publishAt });
-    return res.data as Article;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
   return patchThenPut<Article>(url, { status: 'scheduled', publishAt });
 }
 
 export async function unscheduleArticle(id: string) {
   // Clear schedule and revert to draft
   const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  try {
-    const res = await adminApi.patch(url, { status: 'draft', publishAt: null, scheduledAt: null });
-    return res.data as Article;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
   return patchThenPut<Article>(url, { status: 'draft', publishAt: null, scheduledAt: null });
 }
 
@@ -272,7 +206,7 @@ export async function deleteArticleSoft(id: string) {
 
 export async function deleteArticleHard(id: string) {
   try {
-    await adminApi.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
+    await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
     return;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
@@ -284,66 +218,24 @@ export async function bulkHardDeleteArticles(ids: string[]) {
   const cleanIds = Array.isArray(ids) ? ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
   if (cleanIds.length === 0) return { ok: true, deletedCount: 0 } as any;
 
-  // Admin contract: POST /api/admin/articles/forever/bulk { ids }
-  // Proxy mode:     POST /admin-api/admin/articles/forever/bulk
-  try {
-    const res = await adminApi.post(`${LEGACY_ADMIN_ARTICLES_PATH}/forever/bulk`, { ids: cleanIds }, {
-      // @ts-expect-error custom flag read by interceptor
-      skipErrorLog: true,
-    });
-    return res.data;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
-  }
-
-  // Fallback: older backends might not support bulk deletes; do best-effort per-id.
-  await Promise.all(cleanIds.map((id) => hardDeleteArticle(id)));
+  // Standardize on per-id hard deletes via /articles/:id?hard=true.
+  await Promise.all(cleanIds.map((id) => deleteArticleHard(id)));
   return { ok: true, deletedCount: cleanIds.length } as any;
 }
 
 // New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
   const encoded = encodeURIComponent(id);
-
-  // Admin contract (preferred): DELETE /api/admin/articles/:id/forever
-  // Proxy mode:  /admin-api/admin/articles/:id/forever
-  // Uses adminApi so Authorization header is attached when available.
-  try {
-    const res = await adminApi.delete(`${LEGACY_ADMIN_ARTICLES_PATH}/${encoded}/forever`, {
-      // @ts-expect-error custom flag read by interceptor
-      skipErrorLog: true,
-    });
-    return res.data;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e) && !isAuthDenied(e)) throw e;
-  }
-
-  // Fallback contract: use DELETE /articles/:id with hard=true.
-  // Try hard=true first; fall back to plain delete.
-  try {
-    await deleteArticleHard(id);
-    return;
-  } catch (e: any) {
-    const status = e?.response?.status;
-    if (status && status !== 404 && status !== 405) throw e;
-  }
-  const res = await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encoded}`);
-  const ok = res?.data?.ok === true || res?.data?.success === true || res.status === 200 || res.status === 204;
-  if (!ok) throw new Error('Hard delete failed');
+  // Standard contract only.
+  await deleteArticleHard(id);
+  return;
 }
 
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
-  try {
-    // Canonical contract: POST /articles (proxy -> /admin-api/articles)
-    const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
-    return res.data;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-  // Legacy/admin backend fallback: POST /admin/articles (proxy -> /admin-api/admin/articles)
-  const res2 = await adminApi.post(ADMIN_ARTICLES_PATH, data);
-  return res2.data;
+  // Canonical contract: POST /articles (proxy -> /admin-api/articles)
+  const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
+  return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
 export async function createCommunityArticle(data: Partial<Article>) {
@@ -359,50 +251,24 @@ export async function createCommunityArticle(data: Partial<Article>) {
 }
 export async function updateArticle(id: string, data: Partial<Article>) {
   const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  try {
-    // Canonical contract: PUT /articles/:id (proxy -> /admin-api/articles/:id)
-    const res = await apiClient.put(url, data);
-    return res.data;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-  // Legacy/admin backend fallback: PUT /admin/articles/:id (proxy -> /admin-api/admin/articles/:id)
-  const res2 = await adminApi.put(url, data);
-  return res2.data;
+  // Standard contract ONLY: PUT /articles/:id (proxy -> /admin-api/articles/:id)
+  // Do NOT fall back to adminApi here: adminApi rewrites '/articles/*' into '/admin/articles/*'
+  // which causes wrong URLs like '/admin-api/admin/articles/:id'.
+  const res = await apiClient.put(url, data);
+  return res.data;
 }
 
 export async function updateArticlePartial(id: string, patch: Partial<Article>): Promise<Article> {
-  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-
-  // Prefer PATCH for Draft Workspace autosave.
-  try {
-    const res2 = await apiClient.patch(url, patch);
-    const raw2 = res2.data as any;
-    const article2 = raw2?.article || raw2?.data?.article || raw2?.data || raw2;
-    if (article2 && article2._id) return article2 as Article;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-
-  try {
-    const res = await adminApi.patch(url, patch);
-    const raw = res.data as any;
-    const article = raw?.article || raw?.data?.article || raw?.data || raw;
-    if (article && article._id) return article as Article;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-
-  // Fallback: merge with current draft and PUT.
+  // Standardize partial update to the same single endpoint as full updates.
+  // Requirement: ONLY PUT /admin-api/articles/:id (=> apiClient.put('/articles/:id')).
   const current = await getArticle(id);
   const merged = { ...current, ...patch } as Partial<Article>;
   const updated = await updateArticle(id, merged);
-  const raw3 = updated as any;
-  const article3 = raw3?.article || raw3?.data?.article || raw3?.data || raw3;
-  if (article3 && article3._id) return article3 as Article;
-  // If updateArticle already returns the article object
-  if (raw3 && raw3._id) return raw3 as Article;
-  throw new Error('Failed to update draft');
+  const raw = updated as any;
+  const article = raw?.article || raw?.data?.article || raw?.data || raw;
+  if (article && article._id) return article as Article;
+  if (raw && raw._id) return raw as Article;
+  throw new Error('Failed to update article');
 }
 export async function metaCounts(): Promise<{ total: number }> {
   // Use the stable /articles list contract to compute counts without relying on /articles/meta.
