@@ -68,7 +68,7 @@
     "@testing-library/react": "^16.0.0",
     "@types/lodash": "^4.17.17",
     "@types/lodash.debounce": "^4.0.7",
-    "@types/node": "^20.14.8",
+    "@types/node": "20.11.30",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/react-slick": "^0.23.12",
@@ -95,7 +95,7 @@
     "tailwindcss": "3.4.15",
     "ts-morph": "^26.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3",
+    "typescript": "5.4.5",
     "vite": "^6.3.5",
     "vitest": "^4.0.15"
   },
@@ -103,6 +103,7 @@
     "eslint": "^8.57.1",
     "tailwindcss": "3.4.15",
     "path-to-regexp": "^6.2.3",
-    "esbuild": "^0.25.12"
+    "esbuild": "^0.25.12",
+    "@types/node": "20.11.30"
   }
 }

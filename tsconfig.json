@@ -45,6 +45,7 @@
     "pages",
     "src/pages/api",
     "admin-backend",
+    "newspulse-admin-panel-real-main",
     "newspulse-backend",
     "newspulse-backend-real",
     "backend"

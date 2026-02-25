@@ -335,12 +335,14 @@ export async function hardDeleteArticle(id: string) {
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
   try {
-    const res = await adminApi.post(ADMIN_ARTICLES_PATH, data);
+    // Canonical contract: POST /articles (proxy -> /admin-api/articles)
+    const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
     return res.data;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
-  const res2 = await apiClient.post(ADMIN_ARTICLES_PATH, data);
+  // Legacy/admin backend fallback: POST /admin/articles (proxy -> /admin-api/admin/articles)
+  const res2 = await adminApi.post(ADMIN_ARTICLES_PATH, data);
   return res2.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
@@ -358,12 +360,14 @@ export async function createCommunityArticle(data: Partial<Article>) {
 export async function updateArticle(id: string, data: Partial<Article>) {
   const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
   try {
-    const res = await adminApi.put(url, data);
+    // Canonical contract: PUT /articles/:id (proxy -> /admin-api/articles/:id)
+    const res = await apiClient.put(url, data);
     return res.data;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
-  const res2 = await apiClient.put(url, data);
+  // Legacy/admin backend fallback: PUT /admin/articles/:id (proxy -> /admin-api/admin/articles/:id)
+  const res2 = await adminApi.put(url, data);
   return res2.data;
 }
 
@@ -372,19 +376,19 @@ export async function updateArticlePartial(id: string, patch: Partial<Article>):
 
   // Prefer PATCH for Draft Workspace autosave.
   try {
-    const res = await adminApi.patch(url, patch);
-    const raw = res.data as any;
-    const article = raw?.article || raw?.data?.article || raw?.data || raw;
-    if (article && article._id) return article as Article;
+    const res2 = await apiClient.patch(url, patch);
+    const raw2 = res2.data as any;
+    const article2 = raw2?.article || raw2?.data?.article || raw2?.data || raw2;
+    if (article2 && article2._id) return article2 as Article;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }
 
   try {
-    const res2 = await apiClient.patch(url, patch);
-    const raw2 = res2.data as any;
-    const article2 = raw2?.article || raw2?.data?.article || raw2?.data || raw2;
-    if (article2 && article2._id) return article2 as Article;
+    const res = await adminApi.patch(url, patch);
+    const raw = res.data as any;
+    const article = raw?.article || raw?.data?.article || raw?.data || raw;
+    if (article && article._id) return article as Article;
   } catch (e: any) {
     if (!isNotFoundOrMethodNotAllowed(e)) throw e;
   }

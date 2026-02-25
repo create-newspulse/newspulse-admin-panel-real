@@ -2,21 +2,33 @@
     "git.ignoreLimitWarning": true,
     "files.autoSave": "onFocusChange",
     "files.autoSaveDelay": 1000,
-    "typescript.tsdk": "newspulse-admin-panel-real-main/node_modules/typescript/lib",
+    "typescript.tsdk": "node_modules/typescript/lib",
     "typescript.enablePromptUseWorkspaceTsdk": true,
 
     // The production backend lives on Render; `admin-backend/` is local/demo only.
     // Exclude it from editor diagnostics/search to avoid confusing Problems pane noise.
     "typescript.tsserver.exclude": [
-        "admin-backend/**"
+        "admin-backend/**",
+        "**/admin-backend/**",
+        "newspulse-admin-panel-real-main/**",
+        "**/newspulse-admin-panel-real-main/**"
     ],
     "javascript.tsserver.exclude": [
-        "admin-backend/**"
+        "admin-backend/**",
+        "**/admin-backend/**",
+        "newspulse-admin-panel-real-main/**",
+        "**/newspulse-admin-panel-real-main/**"
     ],
+    "files.watcherExclude": {
+        "**/admin-backend/**": true,
+        "**/newspulse-admin-panel-real-main/**": true
+    },
     "files.exclude": {
-        "admin-backend/**": true
+        "admin-backend/**": true,
+        "newspulse-admin-panel-real-main/**": true
     },
     "search.exclude": {
-        "admin-backend/**": true
+        "admin-backend/**": true,
+        "newspulse-admin-panel-real-main/**": true
     }
 }
