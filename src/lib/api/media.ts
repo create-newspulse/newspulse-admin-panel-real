@@ -16,6 +16,26 @@ export type UploadCoverImageResult = {
   publicId?: string;
 };
 
+function extractUploadedUrlFromPayload(raw: any): string {
+  const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const url =
+    root?.url ||
+    root?.secureUrl ||
+    root?.secure_url ||
+    root?.coverImageUrl ||
+    root?.imageUrl ||
+    root?.location ||
+    root?.item?.url ||
+    root?.file?.url;
+  return String(url || '').trim();
+}
+
+function extractUploadedPublicIdFromPayload(raw: any): string {
+  const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const pid = root?.publicId || root?.public_id || root?.id;
+  return String(pid || '').trim();
+}
+
 async function probeUploadRoute(client: AxiosInstance): Promise<boolean> {
   // Support multiple backend contracts:
   // - Newer:  POST /api/media/upload   (frontend path: /media/upload)
@@ -101,12 +121,7 @@ function extractUploadedUrl(raw: any): string {
     coverObj?.url ||
     coverObj?.secureUrl ||
     coverObj?.secure_url ||
-    payload?.url ||
-    payload?.coverImageUrl ||
-    payload?.imageUrl ||
-    payload?.location ||
-    payload?.item?.url ||
-    payload?.file?.url;
+    extractUploadedUrlFromPayload(payload);
   return String(url || '').trim();
 }
 
@@ -118,7 +133,8 @@ function extractUploadedPublicId(raw: any): string {
     payload?.public_id ||
     coverObj?.publicId ||
     coverObj?.public_id ||
-    coverObj?.id;
+    coverObj?.id ||
+    extractUploadedPublicIdFromPayload(payload);
   return String(pid || '').trim();
 }
 
@@ -127,37 +143,50 @@ function extractUploadedPublicId(raw: any): string {
 // - POST /api/media/upload   (frontend path: /media/upload)
 // - POST /api/uploads/cover  (frontend path: /uploads/cover)
 export async function uploadCoverImage(file: File, client: AxiosInstance = apiClient): Promise<UploadCoverImageResult> {
-  // Prefer the contract requested by the admin panel:
-  // POST /admin-api/uploads/cover  (proxy handles Cloudinary)
-  // but keep legacy candidates for local demo backends.
-  const candidates = ['/uploads/cover', '/media/upload'];
-  let lastErr: any = null;
+  // Client param kept for compatibility; cover upload uses the proxy contract explicitly.
+  void client;
 
-  for (const url of candidates) {
-    const fd = new FormData();
-    // Admin contract uses field name: cover
-    fd.append('cover', file);
-    // Legacy/demo compatibility
-    fd.append('file', file);
-    try {
-      const res = await client.post(url, fd, {
-        // Let axios set the correct multipart boundary.
-        headers: { 'Content-Type': 'multipart/form-data' },
-        // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)
-        skipErrorLog: true,
-      });
-      const uploadedUrl = extractUploadedUrl(res?.data);
-      if (!uploadedUrl) throw new Error('Upload succeeded but no URL was returned');
-      const publicId = extractUploadedPublicId(res?.data);
-      return { url: uploadedUrl, publicId: publicId || undefined };
-    } catch (err: any) {
-      lastErr = err;
-      const status = err?.response?.status;
-      if (status === 404) continue;
-      // For non-404 errors (auth, validation, etc.), stop trying other endpoints.
-      throw err;
-    }
+  const fd = new FormData();
+  // Required admin contract field name
+  fd.append('cover', file);
+
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem('np_token');
+  } catch {}
+
+  // NOTE: When using FormData, the browser automatically sends multipart/form-data
+  // with the correct boundary. Do not manually set the boundary header.
+  const resp = await fetch('/admin-api/uploads/cover', {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  let payload: any = null;
+  try {
+    payload = await resp.json();
+  } catch {
+    payload = null;
   }
 
-  throw lastErr || new Error('Upload route not available');
+  if (!resp.ok || payload?.ok === false) {
+    const msg =
+      payload?.error ||
+      payload?.message ||
+      payload?.data?.error ||
+      payload?.data?.message ||
+      `Upload failed (${resp.status})`;
+    throw new Error(String(msg));
+  }
+
+  // Expected: { ok:true, data:{ url, publicId } }
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+  const url = extractUploadedUrl(data);
+  if (!url) throw new Error('Upload succeeded but no URL was returned');
+  const publicId = extractUploadedPublicId(data);
+  return { url, publicId: publicId || undefined };
 }
