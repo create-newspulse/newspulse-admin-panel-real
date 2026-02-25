@@ -996,12 +996,27 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (!title.trim()) return;
     const key = JSON.stringify({ t: title.slice(0, 160), l: language });
     const timer = window.setTimeout(async ()=>{
+      const extractNeutralSummary = (payload: any): string => {
+        // Expected shape: { summary: { neutral: string } }
+        const obj = payload as any;
+        const neutral = obj?.summary?.neutral;
+        if (typeof neutral === 'string' && neutral.trim()) return neutral;
+        // Back-compat: some older contracts may send summary as a string
+        if (typeof obj?.summary === 'string' && obj.summary.trim()) return obj.summary;
+        return '';
+      };
+
       const cached = suggestCacheRef.current.get(key);
       if (cached) {
-        setSuggestions(cached);
-        setChecks({ seo: cached.seo, compliance: cached.compliance, duplicate: cached.duplicate });
-        if (autoSlug && !slug) setSlug(useLatinSlug ? cached.slug.latin : cached.slug.native);
-        if (autoSummary && !summary.trim()) setSummary(cached.summary.neutral);
+        try {
+          setSuggestions(cached);
+          setChecks({ seo: cached.seo, compliance: cached.compliance, duplicate: cached.duplicate });
+          if (autoSlug && !slug) setSlug(useLatinSlug ? cached.slug.latin : cached.slug.native);
+          if (autoSummary && !summary.trim()) {
+            const candidate = extractNeutralSummary(cached);
+            setSummary(candidate || generateSummary(title, content));
+          }
+        } catch {}
         return;
       }
       try {
@@ -1010,7 +1025,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         setSuggestions(res);
         setChecks({ seo: res.seo, compliance: res.compliance, duplicate: res.duplicate });
         if (autoSlug && !slug) setSlug(useLatinSlug ? res.slug.latin : res.slug.native);
-        if (autoSummary && !summary.trim()) setSummary(res.summary.neutral);
+        if (autoSummary && !summary.trim()) {
+          const candidate = extractNeutralSummary(res);
+          setSummary(candidate || generateSummary(title, content));
+        }
       } catch {}
     }, 500);
     return ()=> window.clearTimeout(timer);
