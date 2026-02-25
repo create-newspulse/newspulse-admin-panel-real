@@ -30,6 +30,40 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  const sanitizeRemoteUrl = (raw: string | undefined): string => {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    const stripQueryHash = (v: string) => v.split(/[?#]/)[0];
+    const stripTrailingSlash = (v: string) => v.replace(/\/+$/, '');
+
+    // Never treat upload endpoints as an image URL.
+    const forbiddenPaths = new Set([
+      '/uploads/cover',
+      '/admin-api/uploads/cover',
+      '/api/uploads/cover',
+      '/media/upload',
+      '/admin-api/media/upload',
+      '/api/media/upload',
+    ]);
+
+    const looksLikeAbsolute = /^https?:\/\//i.test(s);
+    if (looksLikeAbsolute) {
+      try {
+        const u = new URL(s);
+        const p = stripTrailingSlash(stripQueryHash(u.pathname || ''));
+        if (forbiddenPaths.has(p)) return '';
+      } catch {
+        // If URL parsing fails, treat as invalid.
+        return '';
+      }
+      return s;
+    }
+
+    const p = stripTrailingSlash(stripQueryHash(s));
+    if (forbiddenPaths.has(p)) return '';
+    return s;
+  };
+
   useEffect(() => {
     if (!file) {
       setObjectUrl((prev) => {
@@ -59,7 +93,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     };
   }, []);
 
-  const previewSrc = objectUrl || (url || '').trim() || '';
+  const previewSrc = objectUrl || sanitizeRemoteUrl(url) || '';
   const hasPreview = !!previewSrc;
 
   const fileMeta = useMemo(() => {

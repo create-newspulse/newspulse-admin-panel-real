@@ -170,6 +170,9 @@ export default function CoverImagePicker({
 
     try {
       const fd = new FormData();
+      // Admin upload contract uses field name: cover
+      fd.append('cover', selectedFile);
+      // Keep legacy compatibility for older/demo backends.
       fd.append('file', selectedFile);
 
       let res: any;
@@ -233,7 +236,7 @@ export default function CoverImagePicker({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         <div className="md:col-span-7">
           <div className="w-full aspect-video rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
-            {!url ? (
+            {!url || !urlValid ? (
               <div className="text-xs text-slate-500 text-center px-3">
                 <div className="font-medium">No image selected</div>
                 <div className="mt-1">Paste an image URL or upload a file.</div>
