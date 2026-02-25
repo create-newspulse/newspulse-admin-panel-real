@@ -8,8 +8,43 @@ import TagInput from '../ui/TagInput';
 import AiAssistantTipBox from './AiAssistantTipBox';
 import { uniqueSlug } from '../../lib/slug';
 import { readingTimeSec } from '../../lib/readtime';
+import toast from 'react-hot-toast';
 
 interface ArticleFormProps { mode: 'create'|'edit'; articleId?: string; userRole?: 'writer'|'editor'|'admin'|'founder'; }
+
+function sanitizeCoverPreviewUrl(raw: string): string {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+
+  const stripQueryHash = (v: string) => v.split(/[?#]/)[0];
+  const stripTrailingSlash = (v: string) => v.replace(/\/+$/, '');
+
+  // Never treat upload endpoints as an image URL.
+  const forbiddenPaths = new Set([
+    '/uploads/cover',
+    '/admin-api/uploads/cover',
+    '/api/uploads/cover',
+    '/media/upload',
+    '/admin-api/media/upload',
+    '/api/media/upload',
+  ]);
+
+  const looksLikeAbsolute = /^https?:\/\//i.test(s);
+  if (looksLikeAbsolute) {
+    try {
+      const u = new URL(s);
+      const p = stripTrailingSlash(stripQueryHash(u.pathname || ''));
+      if (forbiddenPaths.has(p)) return '';
+    } catch {
+      return '';
+    }
+    return s;
+  }
+
+  const p = stripTrailingSlash(stripQueryHash(s));
+  if (forbiddenPaths.has(p)) return '';
+  return s;
+}
 
 export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormProps) {
   const qc = useQueryClient();
@@ -20,6 +55,8 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
+  const [localCoverPreviewUrl, setLocalCoverPreviewUrl] = useState<string | null>(null);
   const [coverImagePublicId, setCoverImagePublicId] = useState('');
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [coverUploadError, setCoverUploadError] = useState<string>('');
@@ -38,6 +75,26 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []); // could be populated if listing all
 
+  useEffect(() => {
+    if (!selectedCoverFile) {
+      setLocalCoverPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      return;
+    }
+
+    const next = URL.createObjectURL(selectedCoverFile);
+    setLocalCoverPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return next;
+    });
+
+    return () => {
+      URL.revokeObjectURL(next);
+    };
+  }, [selectedCoverFile]);
+
   // Load existing article when in edit mode
   useEffect(()=>{
     let ignore = false;
@@ -52,9 +109,10 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         setSummary(art.summary || '');
         setContent(art.content || art.body || '');
         const coverUrl = (art.coverImage && typeof art.coverImage === 'object' ? art.coverImage.url : '') || art.coverImageUrl || art.imageUrl || '';
-        setImageUrl(coverUrl || '');
+        setImageUrl(sanitizeCoverPreviewUrl(coverUrl || ''));
         const pid = (art.coverImage && typeof art.coverImage === 'object' ? (art.coverImage.publicId || art.coverImage.public_id) : '') || '';
         setCoverImagePublicId(pid || '');
+        setSelectedCoverFile(null);
         setCategory(art.category || 'General');
         setLanguage((art.language || 'en') as any);
         setStatus((art.status || 'draft') as any);
@@ -171,17 +229,29 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
     setCoverUploadError('');
     if (!file) return;
     setIsUploadingCover(true);
+
+    // Selecting a file implies replacing the previous cover.
+    // Do NOT keep the old URL if upload fails.
+    setImageUrl('');
+    setCoverImagePublicId('');
     try {
       const res = await uploadCoverImage(file);
-      setImageUrl(res.url);
+      setImageUrl(sanitizeCoverPreviewUrl(res.url));
       setCoverImagePublicId(res.publicId || '');
     } catch (err: any) {
       console.error('[ADMIN][COVER_UPLOAD] Failed', err);
-      setCoverUploadError(err?.message || 'Upload failed');
+      const msg = String(err?.message || 'Upload failed');
+      setCoverUploadError(msg);
+      toast.error(msg);
     } finally {
       setIsUploadingCover(false);
     }
   }
+
+  const savedUrl = sanitizeCoverPreviewUrl(imageUrl);
+  const localPreview = localCoverPreviewUrl;
+  const coverPreviewSrc = savedUrl || localPreview || '/fallback.svg';
+  const hasCoverPreview = !!(savedUrl || localPreview);
 
   return (
     <form onSubmit={e=> { e.preventDefault(); mutation.mutate(); }} className="space-y-6">
@@ -216,6 +286,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
               accept="image/*"
               onChange={async (e) => {
                 const f = e.target.files?.[0] || null;
+                setSelectedCoverFile(f);
                 await onPickCoverFile(f);
                 e.currentTarget.value = '';
               }}
@@ -226,23 +297,25 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
           </div>
           <input
             value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
+            onChange={(e) => setImageUrl(sanitizeCoverPreviewUrl(e.target.value))}
             className="w-full border px-2 py-2 rounded mt-2"
             placeholder="https://… (optional)"
           />
           {coverUploadError && <div className="text-xs text-red-600 mt-1">{coverUploadError}</div>}
-          {imageUrl && (
-            <div className="mt-2">
-              <img
-                src={imageUrl}
-                alt="cover preview"
-                className="w-full max-w-md rounded border"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          )}
+          <div className="mt-2">
+            <img
+              src={coverPreviewSrc}
+              alt={hasCoverPreview ? 'cover preview' : 'cover placeholder'}
+              className="w-full max-w-md rounded border"
+              onError={(e) => {
+                // Avoid repeated requests for a bad stored URL.
+                setImageUrl('');
+                setCoverImagePublicId('');
+                setSelectedCoverFile(null);
+                (e.currentTarget as HTMLImageElement).src = '/fallback.svg';
+              }}
+            />
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium">Content</label>
