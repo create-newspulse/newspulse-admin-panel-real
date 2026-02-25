@@ -227,6 +227,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   // Upload-only: selecting a file uploads it and stores a remote URL.
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [coverUploadOk, setCoverUploadOk] = useState(false);
+  const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
 
   const coverImageUrl = String(coverImage?.url || '').trim();
   const coverImagePublicId = String(coverImage?.publicId || '').trim();
@@ -548,6 +550,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setSlugCheck({ status: 'idle' });
     setCoverImage(null);
     setCoverImageFile(null);
+    setCoverUploadOk(false);
+    setCoverUploadError(null);
     setLastSavedSnapshot(EMPTY_SNAPSHOT);
     setLastSavedAt(null);
     setPublishSuccess(null);
@@ -851,6 +855,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const nextCoverPid = String(incomingCoverPid || '').trim();
       setCoverImage(nextCoverUrl ? { url: nextCoverUrl, publicId: nextCoverPid || undefined } : null);
       setCoverImageFile(null);
+      setCoverUploadOk(false);
+      setCoverUploadError(null);
 
       // Seed "last saved" hash for edit mode.
       try {
@@ -1347,12 +1353,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   // Upload cover image immediately when selected so the article stores a usable URL.
   async function uploadSelectedCover(file: File) {
     setIsUploadingCover(true);
+    setCoverUploadOk(false);
+    setCoverUploadError(null);
+    // Do not keep any old cover image if the user is replacing it.
+    // Only set coverImage after a successful upload response.
+    setCoverImage(null);
     try {
       const res = await uploadCoverImage(file);
       setCoverImage({ url: res.url, publicId: res.publicId || undefined });
+      setCoverImageFile(null);
+      setCoverUploadOk(true);
       toast.success('Image uploaded');
     } catch (err: any) {
       const n = normalizeError(err, 'Cover image upload failed');
+      setCoverImage(null);
+      setCoverImageFile(null);
+      setCoverUploadOk(false);
+      setCoverUploadError(n.message);
       toast.error(n.message);
     } finally {
       setIsUploadingCover(false);
@@ -1982,15 +1999,25 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   url={coverImageUrl}
                   file={coverImageFile}
                   onChangeFile={(f) => {
+                    setCoverUploadOk(false);
+                    setCoverUploadError(null);
                     setCoverImageFile(f);
                     if (f) void uploadSelectedCover(f);
                   }}
                   onRemove={() => {
                     setCoverImageFile(null);
                     setCoverImage(null);
+                    setCoverUploadOk(false);
+                    setCoverUploadError(null);
                   }}
                 />
                 {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
+                {!isUploadingCover && coverUploadOk && coverImageUrl ? (
+                  <div className="mt-1 text-[11px] text-slate-600">Uploaded</div>
+                ) : null}
+                {!isUploadingCover && coverUploadError ? (
+                  <div className="mt-1 text-[11px] text-red-600">{coverUploadError}</div>
+                ) : null}
               </div>
 
               {(userRole==='founder') && (
