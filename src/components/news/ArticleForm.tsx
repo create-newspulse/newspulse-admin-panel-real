@@ -665,15 +665,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const isNationalCategory = useMemo(() => String(category || '').trim() === 'national', [category]);
 
-  // If the user changes away from National, reset back to "All States/UTs".
-  useEffect(() => {
-    if (!isNationalCategory && nationalStateUtSlug) setNationalStateUtSlug('');
-  }, [isNationalCategory, nationalStateUtSlug]);
-
   const indiaStatesUtsQuery = useQuery({
     queryKey: ['meta', 'india-states-uts'],
-    // Load once on mount so the dropdown is instant when Category becomes National.
-    enabled: true,
+    enabled: isNationalCategory,
     queryFn: async () => {
       const res = await apiClient.get('/meta/india-states-uts');
       const raw = res?.data as any;
@@ -873,7 +867,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const nl: any = (src as any).nationalLocation || (src as any).national_location || null;
         const scope = String(nl?.scope || '').trim().toUpperCase();
         const slug0 = String(nl?.stateUtSlug || nl?.state_ut_slug || '').trim();
-        if ((scope === 'STATE_UT' || !scope) && slug0) setNationalStateUtSlug(slug0);
+        if (scope === 'STATE_UT' && slug0) setNationalStateUtSlug(slug0);
         else setNationalStateUtSlug('');
       } catch {
         setNationalStateUtSlug('');
@@ -940,7 +934,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               const nl: any = (src as any).nationalLocation || (src as any).national_location || null;
               const scope = String(nl?.scope || '').trim().toUpperCase();
               const slug0 = String(nl?.stateUtSlug || nl?.state_ut_slug || '').trim();
-              return ((scope === 'STATE_UT' || !scope) && slug0) ? slug0 : '';
+              return (scope === 'STATE_UT' && slug0) ? slug0 : '';
             } catch {
               return '';
             }
