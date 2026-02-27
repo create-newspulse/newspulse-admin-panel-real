@@ -600,6 +600,38 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   };
 
   const LocationBadge = ({ a }: { a: Article }) => {
+    const catKey = norm((a as any)?.category);
+    if (catKey === 'national') {
+      const nl: any = (a as any)?.nationalLocation || (a as any)?.national_location || null;
+      const scope = String(nl?.scope || '').trim().toUpperCase();
+
+      const titleize = (s: string) => String(s || '')
+        .trim()
+        .replace(/[_-]+/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+
+      const label = (() => {
+        if (scope === 'STATE_UT') {
+          const name = String(nl?.stateUtName || nl?.state_ut_name || '').trim();
+          if (name) return name;
+          const slug = String(nl?.stateUtSlug || nl?.state_ut_slug || '').trim();
+          return slug ? titleize(slug) : '';
+        }
+        if (scope === 'ALL_INDIA' || !scope) return 'All India';
+        return '';
+      })();
+
+      if (!label) return <span className="text-slate-500 text-xs">—</span>;
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] border">
+          {label}
+        </span>
+      );
+    }
+
     const loc = getLocationTags(a);
     if (!loc.length) return <span className="text-slate-500 text-xs">—</span>;
     const firstTwo = loc.slice(0, 2);
