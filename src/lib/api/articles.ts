@@ -34,12 +34,6 @@ export interface Article {
   state?: string;
   district?: string;
   city?: string;
-  nationalLocation?: {
-    scope?: 'ALL_INDIA' | 'STATE_UT' | string;
-    stateUtSlug?: string;
-    stateUtName?: string;
-    stateUtType?: string;
-  };
   // Optional editorial workflow state (admin backend may enrich articles with this)
   workflow?: {
     stage?: string;
