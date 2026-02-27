@@ -477,8 +477,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [state, setState] = useState('');
   const [district, setDistrict] = useState('');
   const [city, setCity] = useState('');
-  // National-only selector. Empty string means "All States/UTs".
-  const [nationalStateUtSlug, setNationalStateUtSlug] = useState('');
 
   type Snapshot = {
     title: string;
@@ -497,7 +495,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     state: string;
     district: string;
     city: string;
-    nationalStateUtSlug: string;
   };
 
   // Used for dirty-state + publish reset.
@@ -518,7 +515,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     state: '',
     district: '',
     city: '',
-    nationalStateUtSlug: '',
   };
 
   function resetToNewArticle() {
@@ -542,7 +538,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setState('');
     setDistrict('');
     setCity('');
-    setNationalStateUtSlug('');
     setPtiStatus('pending');
     setPtiReasons([]);
     setLangIssues({});
@@ -585,7 +580,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       state: (next?.state ?? state ?? '').toString(),
       district: (next?.district ?? district ?? '').toString(),
       city: (next?.city ?? city ?? '').toString(),
-      nationalStateUtSlug: (next?.nationalStateUtSlug ?? nationalStateUtSlug ?? '').toString(),
     };
   }
 
@@ -608,47 +602,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       state: (s.state || ''),
       district: (s.district || ''),
       city: (s.city || ''),
-      nationalStateUtSlug: (s.nationalStateUtSlug || ''),
     };
     return JSON.stringify(normalized);
   }
-
-  const isNationalCategory = useMemo(() => String(category || '').trim() === 'national', [category]);
-
-  // Reset selection when leaving National category.
-  useEffect(() => {
-    if (!isNationalCategory && nationalStateUtSlug) setNationalStateUtSlug('');
-  }, [isNationalCategory, nationalStateUtSlug]);
-
-  // Load India states/UTs list on mount (ready when user selects National).
-  const indiaStatesUtsQuery = useQuery({
-    queryKey: ['meta', 'india-states-uts'],
-    enabled: true,
-    queryFn: async () => {
-      const res = await apiClient.get('/meta/india-states-uts');
-      const raw = res?.data as any;
-      const arr = Array.isArray(raw)
-        ? raw
-        : (Array.isArray(raw?.data) ? raw.data
-          : (Array.isArray(raw?.states) ? raw.states
-            : (Array.isArray(raw?.items) ? raw.items : [])));
-
-      const out: Array<{ slug: string; name: string }> = [];
-      const seen = new Set<string>();
-      for (const it of (arr || [])) {
-        const slug = String((it as any)?.slug || (it as any)?.stateUtSlug || (it as any)?.id || (it as any)?._id || '').trim();
-        if (!slug) continue;
-        const key = slug.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const name = String((it as any)?.name || (it as any)?.label || (it as any)?.title || slug).trim();
-        out.push({ slug, name });
-      }
-      out.sort((a, b) => a.name.localeCompare(b.name));
-      return out;
-    },
-    staleTime: 30 * 60 * 1000,
-  });
 
   // NOTE: Cover image upload is implemented via /media/upload (or legacy /uploads/cover).
 
@@ -867,15 +823,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setDistrict(String((src as any).district || ''));
       setCity(String((src as any).city || ''));
 
-      // National state/UT selector
-      try {
-        const nl: any = (src as any).nationalLocation || (src as any).national_location || null;
-        const slug0 = String(nl?.stateUtSlug || nl?.state_ut_slug || '').trim();
-        setNationalStateUtSlug(slug0);
-      } catch {
-        setNationalStateUtSlug('');
-      }
-
       // Cover image (support both coverImageUrl and imageUrl across environments)
       const incomingCoverField: any = (src as any).coverImage;
       const incomingCoverUrl = (() => {
@@ -932,14 +879,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state: String((src as any).state || ''),
           district: String((src as any).district || ''),
           city: String((src as any).city || ''),
-          nationalStateUtSlug: (() => {
-            try {
-              const nl: any = (src as any).nationalLocation || (src as any).national_location || null;
-              return String(nl?.stateUtSlug || nl?.state_ut_slug || '').trim();
-            } catch {
-              return '';
-            }
-          })(),
         });
         setLastSavedSnapshot(s);
         setLastSavedAt(Date.now());
@@ -1146,7 +1085,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         state?: string;
         district?: string;
         city?: string;
-        nationalLocation?: { scope: 'ALL_INDIA' | 'STATE_UT'; stateUtSlug?: string };
         imageUrl?: string;
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
@@ -1160,12 +1098,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         const isViralVideo = categoryKey === 'viral-videos';
         const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
-
-        const nationalLocation = (categoryKey === 'national')
-          ? ((nationalStateUtSlug || '').trim()
-            ? { scope: 'STATE_UT' as const, stateUtSlug: (nationalStateUtSlug || '').trim() }
-            : { scope: 'ALL_INDIA' as const })
-          : undefined;
 
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
@@ -1186,7 +1118,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state: trimOrUndef(state),
           district: trimOrUndef(district),
           city: trimOrUndef(city),
-          nationalLocation,
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
@@ -1534,7 +1465,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city, nationalStateUtSlug]);
+  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -1882,25 +1813,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <div className="mt-1 text-xs text-red-600">Category is not allowed. Please choose a supported category.</div>
                 )}
               </div>
-
-              {isNationalCategory && (
-                <div className="pt-2 border-t border-slate-200">
-                  <label className="block text-xs font-medium">State/UT</label>
-                  <select
-                    value={nationalStateUtSlug}
-                    onChange={(e) => setNationalStateUtSlug(e.target.value)}
-                    className="w-full border px-2 py-2 rounded"
-                  >
-                    <option value="">All States/UTs</option>
-                    {(indiaStatesUtsQuery.data || []).map((it) => (
-                      <option key={it.slug} value={it.slug}>{it.name}</option>
-                    ))}
-                  </select>
-                  {indiaStatesUtsQuery.isError && (
-                    <div className="mt-1 text-[11px] text-amber-700">Could not load states/UTs. You can still publish as All States/UTs.</div>
-                  )}
-                </div>
-              )}
 
               <div className="pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between gap-3 mb-2">
