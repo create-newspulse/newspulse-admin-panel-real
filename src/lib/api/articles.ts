@@ -2,7 +2,7 @@
 // NOTE: This file previously had duplicated sections causing "Cannot redeclare" errors.
 // We merge functionality into a single set of exports using the existing apiClient.
 
-import apiClient from '@/lib/api';
+import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
 
 export interface Article {
@@ -53,23 +53,44 @@ export interface ListResponse {
   pages: number;
 }
 
-const ADMIN_ARTICLES_PATH = '/articles';
+const ARTICLES_PATH = 'articles';
 
 function isNotFoundOrMethodNotAllowed(err: any): boolean {
   const status = err?.response?.status;
   return status === 404 || status === 405;
 }
 
+function isFallbackableHardDeleteError(err: any): boolean {
+  const status = err?.response?.status;
+  // Backends vary: some return 404/405 when the hard-delete route isn't implemented,
+  // others return 400 for an unexpected query param or unsupported action.
+  return status === 404 || status === 405 || status === 400;
+}
+
+async function tryHardDeleteAttempts<T = any>(attempts: Array<() => Promise<T>>): Promise<T> {
+  let lastErr: any = null;
+  for (const attempt of attempts) {
+    try {
+      return await attempt();
+    } catch (e: any) {
+      lastErr = e;
+      if (isFallbackableHardDeleteError(e)) continue;
+      throw e;
+    }
+  }
+  throw lastErr || new Error('Hard delete failed');
+}
+
 async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
   try {
-    const res = await apiClient.patch(url, payload);
+    const res = await adminApiClient.patch(url, payload);
     return res.data as T;
   } catch (e: any) {
     const status = e?.response?.status;
     // Some backends don't implement PATCH; fall back to PUT for status updates.
     if (status && status !== 404 && status !== 405) throw e;
   }
-  const res2 = await apiClient.put(url, payload);
+  const res2 = await adminApiClient.put(url, payload);
   return res2.data as T;
 }
 
@@ -137,25 +158,19 @@ export async function listArticles(params: {
   if (query.status === 'all') delete query.status;
 
   // Some backends restrict the PUBLIC articles list to published-only.
-  // Prefer the admin route whenever we might need non-published items.
-  // - status=draft/deleted/etc -> admin list
-  // - status=all (or omitted)  -> try admin list first, then fall back
-  const requestedStatus = String(query.status || '').toLowerCase();
-  const wantsAll = params.status === 'all' || query.status == null;
-  const preferAdminList = wantsAll || (!!requestedStatus && requestedStatus !== 'published');
+  // We standardize on the canonical admin list route (proxy-safe).
 
   // Some backends use `lang` instead of `language`.
   if (query.language && !query.lang) query.lang = query.language;
 
   // Canonical list endpoint (single source of truth).
-  // Proxy mode:   GET /admin-api/articles
-  // Direct mode:  GET <origin>/api/articles
-  const res = await apiClient.get(ADMIN_ARTICLES_PATH, { params: query });
+  // Browser should call: GET /admin-api/articles
+  const res = await adminApiClient.get(ARTICLES_PATH, { params: query });
   return normalizeListResponse(res.data, { requestedPage, limit });
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
-  const res = await apiClient.get(`${ADMIN_ARTICLES_PATH}/${encoded}`);
+  const res = await adminApiClient.get(`${ARTICLES_PATH}/${encoded}`);
   const raw: any = res.data as any;
   const ok = raw?.ok === true || raw?.success === true || !!raw?.article || !!raw?.data;
   const article = (raw?.article)
@@ -168,35 +183,48 @@ export async function getArticle(id: string): Promise<Article> {
 }
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
-  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  const url = `${ARTICLES_PATH}/${encoded}`;
   return patchThenPut(url, { status: 'archived' });
 }
 export async function restoreArticle(id: string) {
   const encoded = encodeURIComponent(id);
-  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  const url = `${ARTICLES_PATH}/${encoded}`;
   return patchThenPut(url, { status: 'draft' });
 }
 export async function deleteArticle(id: string) {
   // Soft delete in UI: mark as deleted (keeps data recoverable)
   const encoded = encodeURIComponent(id);
-  const url = `${ADMIN_ARTICLES_PATH}/${encoded}`;
+  const url = `${ARTICLES_PATH}/${encoded}`;
   return patchThenPut(url, { status: 'deleted' });
 }
 
 // --- Control tower helpers ---
 export async function updateArticleStatus(id: string, status: ArticleStatus) {
-  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  if (status === 'published') {
+    const publishedAt = new Date().toISOString();
+    // Prefer PUT for publish to avoid accidental calls to a /publish endpoint on the frontend host.
+    const res = await adminApiClient.put(url, { status: 'published', publishedAt });
+    return res.data as any;
+  }
   return patchThenPut<Article>(url, { status });
 }
 
+export async function publishArticle(id: string, publishedAt?: string) {
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  const ts = (publishedAt && String(publishedAt).trim()) ? String(publishedAt).trim() : new Date().toISOString();
+  const res = await adminApiClient.put(url, { status: 'published', publishedAt: ts });
+  return res.data as any;
+}
+
 export async function scheduleArticle(id: string, publishAt: string) {
-  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   return patchThenPut<Article>(url, { status: 'scheduled', publishAt });
 }
 
 export async function unscheduleArticle(id: string) {
   // Clear schedule and revert to draft
-  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   return patchThenPut<Article>(url, { status: 'draft', publishAt: null, scheduledAt: null });
 }
 
@@ -205,13 +233,32 @@ export async function deleteArticleSoft(id: string) {
 }
 
 export async function deleteArticleHard(id: string) {
-  try {
-    await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
-    return;
-  } catch (e: any) {
-    if (!isNotFoundOrMethodNotAllowed(e)) throw e;
-  }
-  await apiClient.delete(`${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`, { params: { hard: true } });
+  const encoded = encodeURIComponent(id);
+
+  // Try multiple common hard-delete contracts for maximum compatibility:
+  // - POST /api/articles/:id/hard-delete
+  // - POST /api/admin/articles/:id/hard-delete
+  // - DELETE /api/articles/:id?hard=true
+  // - DELETE /api/admin/articles/:id?hard=true
+  await tryHardDeleteAttempts([
+    async () => {
+      const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/hard-delete`);
+      return res.data as any;
+    },
+    async () => {
+      const res = await adminApiClient.post(`admin/articles/${encoded}/hard-delete`);
+      return res.data as any;
+    },
+    async () => {
+      const res = await adminApiClient.delete(`${ARTICLES_PATH}/${encoded}`, { params: { hard: 'true' } });
+      return res.data as any;
+    },
+    async () => {
+      const res = await adminApiClient.delete(`admin/articles/${encoded}`, { params: { hard: 'true' } });
+      return res.data as any;
+    },
+  ]);
+  return;
 }
 
 export async function bulkHardDeleteArticles(ids: string[]) {
@@ -219,13 +266,14 @@ export async function bulkHardDeleteArticles(ids: string[]) {
   if (cleanIds.length === 0) return { ok: true, deletedCount: 0 } as any;
 
   // Standardize on per-id hard deletes via /articles/:id?hard=true.
-  await Promise.all(cleanIds.map((id) => deleteArticleHard(id)));
+  for (const id of cleanIds) {
+    await deleteArticleHard(id);
+  }
   return { ok: true, deletedCount: cleanIds.length } as any;
 }
 
 // New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
-  const encoded = encodeURIComponent(id);
   // Standard contract only.
   await deleteArticleHard(id);
   return;
@@ -234,7 +282,7 @@ export async function hardDeleteArticle(id: string) {
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
   // Canonical contract: POST /articles (proxy -> /admin-api/articles)
-  const res = await apiClient.post(ADMIN_ARTICLES_PATH, data);
+  const res = await adminApiClient.post(ARTICLES_PATH, data);
   return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
@@ -250,17 +298,15 @@ export async function createCommunityArticle(data: Partial<Article>) {
   return createArticle(payload);
 }
 export async function updateArticle(id: string, data: Partial<Article>) {
-  const url = `${ADMIN_ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  // Standard contract ONLY: PUT /articles/:id (proxy -> /admin-api/articles/:id)
-  // Do NOT fall back to adminApi here: adminApi rewrites '/articles/*' into '/admin/articles/*'
-  // which causes wrong URLs like '/admin-api/admin/articles/:id'.
-  const res = await apiClient.put(url, data);
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  // Standard contract ONLY: PUT /admin-api/articles/:id
+  const res = await adminApiClient.put(url, data);
   return res.data;
 }
 
 export async function updateArticlePartial(id: string, patch: Partial<Article>): Promise<Article> {
   // Standardize partial update to the same single endpoint as full updates.
-  // Requirement: ONLY PUT /admin-api/articles/:id (=> apiClient.put('/articles/:id')).
+  // Requirement: ONLY PUT /admin-api/articles/:id.
   const current = await getArticle(id);
   const merged = { ...current, ...patch } as Partial<Article>;
   const updated = await updateArticle(id, merged);

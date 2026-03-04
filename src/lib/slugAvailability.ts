@@ -1,4 +1,4 @@
-import apiClient from '@/lib/api';
+import { adminApiClient } from '@/lib/adminApiClient';
 
 export type SlugAvailabilityResult = {
   available: boolean;
@@ -14,7 +14,7 @@ export async function checkSlugAvailability(opts: {
 
   if (!slug) return { available: false, reason: 'Slug is required' };
 
-  const res = await apiClient.get('/articles/slug-availability', {
+  const res = await adminApiClient.get('articles/slug-availability', {
     params: {
       slug,
       ...(excludeId ? { excludeId } : {}),

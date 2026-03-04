@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
+import { adminApiClient as api } from '@/lib/adminApiClient';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { useAuth } from '@/context/AuthContext';
 import { sanitizeBulkRows } from '@/lib/bulkUploadGuard';
@@ -16,7 +16,7 @@ export const UploadCsvDialog: React.FC<Props> = ({ onDone }) => {
 
   const mutate = useMutation<BulkUploadResult, Error, File>({ mutationFn: async (file: File) => {
     const fd = new FormData(); fd.append('file', file);
-    const res = await api.post('/articles/bulk-upload', fd);
+    const res = await api.post('articles/bulk-upload', fd);
     if (!publishEnabled || !isFounder) {
       debug('[UploadCsvDialog] bulk upload performed while publish disabled or user not founder', { publishEnabled, isFounder });
     }

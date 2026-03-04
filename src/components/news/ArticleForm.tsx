@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -270,7 +270,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   // Admin publish contract fields
   const [isBreaking, setIsBreaking] = useState(false);
-  const previousCategoryBeforeBreakingRef = useRef<string>('');
   const [locationSearch, setLocationSearch] = useState('');
   // ISO string (or empty). Set automatically when publishing if empty.
   const [publishedAt, setPublishedAt] = useState('');
@@ -847,8 +846,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }
   function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '…')); }
 
-  const publishBlocked = !founderOverride && ((checks.compliance?.ptiFlags?.length ?? 0) > 0 || (checks.duplicate?.score ?? 0) >= 0.78);
-
   const lastSubmitRef = useRef<null | {
     statusToSend: 'draft'|'published';
     safeSlug: string;
@@ -962,10 +959,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           const updated: any = await updateArticle(idToPublish, publishPayload as any);
           return { ...(updated as any), __npCreatedId: idToPublish };
         } catch {
-          // Fallback: backends that only support /publish endpoint
-          const res = await apiClient.post(`/articles/${encodeURIComponent(idToPublish)}/publish`);
-          const data = (res as any)?.data ?? res;
-          return { data: { ...(data as any), __npCreatedId: idToPublish } };
+          // Fallback: minimal publish contract via admin proxy
+          const published: any = await publishArticle(idToPublish, publishAtToSend);
+          return { data: { ...(published as any), __npCreatedId: idToPublish } };
         }
       }
 

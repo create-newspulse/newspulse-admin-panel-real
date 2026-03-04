@@ -1,5 +1,5 @@
 import { useState } from "react";
-import api from "../lib/api";
+import { adminApiClient as api } from "@/lib/adminApiClient";
 import RichTextEditor from "@/components/editor/RichTextEditor";
 
 export default function ArticleCreate() {
@@ -12,7 +12,7 @@ export default function ArticleCreate() {
   async function save() {
     setMsg("");
     try {
-      const { data } = await api.post("/articles", {
+      const { data } = await api.post("articles", {
         title, language, status, content,
         categories: [], voiceEnabled: false, voiceStyle: "female"
       });

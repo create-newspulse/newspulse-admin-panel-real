@@ -15,6 +15,9 @@ export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const baseLogger = createLogger();
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
+  // Per project convention, allow a non-VITE env var for proxy targeting.
+  // This is used only by Vite dev server (never shipped to the browser).
+  const BACKEND_URL_ENV = stripSlash(env.BACKEND_URL || process.env.BACKEND_URL || '');
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   const adminApiUrl = stripSlash(env.VITE_ADMIN_API_URL || '');
   // IMPORTANT:
@@ -26,7 +29,8 @@ export default defineConfig(({ mode }): UserConfig => {
   // Source of truth for dev proxy:
   // Prefer VITE_BACKEND_ORIGIN (used by older config) but also honor VITE_ADMIN_API_TARGET.
   const rawCandidate = stripSlash(
-    env.VITE_BACKEND_ORIGIN
+    BACKEND_URL_ENV
+    || env.VITE_BACKEND_ORIGIN
     || env.VITE_ADMIN_API_TARGET
     || env.VITE_BACKEND_URL
     || env.VITE_ADMIN_API_ORIGIN
@@ -99,9 +103,9 @@ export default defineConfig(({ mode }): UserConfig => {
   // - or VITE_DEV_PROXY_TARGET=http://localhost:5000
   const LOCAL_BACKEND = 'http://localhost:5000';
   // DEV proxy target (where Vite forwards /admin-api/* and /api/*).
-  // Preferred env var: VITE_PROXY_TARGET
-  // Back-compat: VITE_DEV_PROXY_TARGET
-  const DEV_PROXY_ENV = stripSlash(env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
+  // Preferred env var: BACKEND_URL
+  // Back-compat: VITE_PROXY_TARGET / VITE_DEV_PROXY_TARGET
+  const DEV_PROXY_ENV = stripSlash(BACKEND_URL_ENV || env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
   // Default dev proxy to local backend so no calls ever drift to production origins.
   const DEV_PROXY_TARGET = mode === 'development'
     ? (DEV_PROXY_ENV || LOCAL_BACKEND)

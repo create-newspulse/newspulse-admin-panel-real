@@ -1,6 +1,6 @@
 import { useEffect, useState, PropsWithChildren } from "react";
 import { Navigate, useLocation } from 'react-router-dom';
-import api from "../lib/api"; // ← relative import so it works without alias
+import { adminApiClient as api } from "@/lib/adminApiClient";
 
 export default function RequireAuth({ children }: PropsWithChildren) {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -23,7 +23,7 @@ export default function RequireAuth({ children }: PropsWithChildren) {
 
     // ping a route; if it fails, redirect
     api
-      .get("/articles?limit=1")
+      .get('articles', { params: { limit: 1 } })
       .then(() => setOk(true))
       .catch(() => {
         setOk(false);

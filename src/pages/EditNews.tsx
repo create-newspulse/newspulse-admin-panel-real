@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import RichTextEditor from '@/components/editor/RichTextEditor';
-import api from '../lib/api';
+import { adminApiClient as api } from '@/lib/adminApiClient';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { usePublishFlag } from '../context/PublishFlagContext';
@@ -67,7 +67,7 @@ export default function EditNews() {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const res = await api.get(`/articles/${id}`);
+        const res = await api.get(`articles/${id}`);
         const data = res.data;
         const article = data?.article || data?.data || data;
         if (article && (article._id || article.id)) {
@@ -106,7 +106,7 @@ export default function EditNews() {
       } catch (err) {
         console.warn('Direct fetch failed, attempting fallback list lookup…');
         try {
-          const list = await api.get('/articles');
+          const list = await api.get('articles');
           const items = list.data?.articles || list.data?.items || list.data || [];
           const found = items.find((n: any) => (n._id || n.id) === id);
           if (found) {
@@ -184,7 +184,7 @@ export default function EditNews() {
         coverImage: trimmedCoverUrl ? { url: trimmedCoverUrl, publicId: trimmedCoverPid || undefined } : undefined,
       };
 
-      await api.put(`/articles/${id}`, payload);
+      await api.put(`articles/${id}`, payload);
 
       toast.success('✅ Article updated');
       navigate('/manage-news');
@@ -210,7 +210,7 @@ export default function EditNews() {
 
   const handleAISummary = async () => {
     try {
-      const response = await api.post(`/ai/summarize`, { content: form.content });
+      const response = await api.post('ai/summarize', { content: form.content });
       const data = response.data || {};
       const summary = data.summary || data.data?.summary;
       if (summary) {

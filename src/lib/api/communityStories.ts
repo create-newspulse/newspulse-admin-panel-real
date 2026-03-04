@@ -1,4 +1,5 @@
 import apiClient from '@/lib/api';
+import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
 import type { CommunityStory, CommunityStoryListResponse } from '@/types/community';
 
@@ -40,7 +41,7 @@ export async function getMyStory(id: string): Promise<CommunityStory> {
 
 export async function deleteMyStory(id: string) {
   try {
-    const res = await apiClient.delete(`/articles/${id}`);
+    const res = await adminApiClient.delete(`articles/${id}`);
     return res.data;
   } catch (err) {
     throw err;

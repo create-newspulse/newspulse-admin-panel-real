@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../lib/api";
+import { adminApiClient as api } from "@/lib/adminApiClient";
 
 export default function ArticlesList() {
   const [items, setItems] = useState<any[]>([]);
@@ -7,7 +7,7 @@ export default function ArticlesList() {
 
   useEffect(() => { load(); }, []);
   async function load() {
-    const { data } = await api.get("/articles", { params: { q } });
+    const { data } = await api.get('articles', { params: { q } });
     setItems(data.items);
   }
 
