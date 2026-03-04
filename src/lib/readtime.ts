@@ -1,5 +1,8 @@
+import { stripHtmlToText } from '@/lib/richText';
+
 export function countWords(text: string) {
-  return (text || '').trim().match(/\b\w+\b/g)?.length || 0;
+  const plain = stripHtmlToText(text || '');
+  return plain.match(/\b\w+\b/g)?.length || 0;
 }
 
 export function readingTimeSec(text: string, wpm = 180) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import Editor from '../components/Editor';
+import RichTextEditor from '@/components/editor/RichTextEditor';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -353,9 +353,10 @@ export default function EditNews() {
           onChange={handleChange}
         />
 
-        <Editor
-          content={form.content}
-          onChange={(value) => setForm({ ...form, content: value })}
+        <RichTextEditor
+          value={form.content}
+          onChange={(html) => setForm({ ...form, content: html })}
+          placeholder="Write article content…"
         />
 
         <div className="text-right">

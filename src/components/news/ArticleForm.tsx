@@ -12,6 +12,7 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import { uniqueSlug } from '@/lib/slug';
 import { readingTimeSec } from '@/lib/readtime';
 import AiAssistantTipBox from '@/components/news/AiAssistantTipBox';
+import RichTextEditor from '@/components/editor/RichTextEditor';
 import { assistSuggestV2, type AssistSuggestV2Response } from '@/lib/api/assist';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { normalizeError } from '@/lib/error';
@@ -21,6 +22,7 @@ import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
+import { stripHtmlToText } from '@/lib/richText';
 
 type LangCode = 'en' | 'hi' | 'gu';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
@@ -189,7 +191,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [summary, setSummary] = useState('');
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
-  const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contentPlain = useMemo(() => stripHtmlToText(content), [content]);
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
@@ -256,209 +258,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return cleaned.split(/\s+/).filter(Boolean).length;
   };
 
-  const handleContentPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageFiles: File[] = [];
-
-    for (const item of items) {
-      if (item.kind !== 'file') continue;
-      const f = item.getAsFile();
-      if (!f) continue;
-      if (String(f.type || '').startsWith('image/')) imageFiles.push(f);
-    }
-
-    if (imageFiles.length === 0) return;
-
-    e.preventDefault();
-
-    const target = e.currentTarget;
-    const base = target.value ?? '';
-    const start = typeof target.selectionStart === 'number' ? target.selectionStart : base.length;
-    const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
-
-    const tokens = imageFiles.map((_, idx) => `__np_clip_img_${Date.now()}_${idx}__`);
-    // Insert as HTML so preview can render it (sanitizer allows <img>).
-    const inserted = tokens
-      .map((t) => `\n\n<p><img src="${t}" alt="pasted-image" /></p>\n`)
-      .join('');
-
-    const nextValue = base.slice(0, start) + inserted + base.slice(end);
-    setContent(nextValue);
-
-    const nextCaret = start + inserted.length;
-    requestAnimationFrame(() => {
-      const el = contentTextareaRef.current;
-      if (!el) return;
-      try {
-        el.focus();
-        el.setSelectionRange(nextCaret, nextCaret);
-      } catch {
-        // ignore
-      }
-    });
-
-    const toastId = toast.loading(`Uploading ${imageFiles.length} image${imageFiles.length === 1 ? '' : 's'}...`);
-
-    void (async () => {
-      try {
-        for (let i = 0; i < imageFiles.length; i++) {
-          const file = imageFiles[i];
-          const token = tokens[i];
-          const { url } = await uploadCoverImage(file);
-          setContent((curr) => String(curr || '').replace(token, url));
-        }
-        toast.success('Images pasted', { id: toastId });
-      } catch (err) {
-        toast.error(normalizeError(err).message, { id: toastId });
-        // If upload fails, remove unresolved tokens so content stays clean.
-        setContent((curr) => {
-          let cleaned = String(curr || '');
-          for (const t of tokens) cleaned = cleaned.replaceAll(t, '');
-          return cleaned;
-        });
-      }
-    })();
-  };
-
-  const handleContentPasteWithLinks = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    // 1) Images: upload + insert markdown (existing behavior)
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageFiles: File[] = [];
-    for (const item of items) {
-      if (item.kind !== 'file') continue;
-      const f = item.getAsFile();
-      if (!f) continue;
-      if (String(f.type || '').startsWith('image/')) imageFiles.push(f);
-    }
-    if (imageFiles.length > 0) {
-      handleContentPaste(e);
-      return;
-    }
-
-    // 2) Links / Embeds
-    const rawText = String(e.clipboardData?.getData('text/plain') || '').trim();
-    if (!rawText) return;
-    // If clipboard contains multiple tokens/lines, keep default paste.
-    if (/\s/.test(rawText)) return;
-    if (!/^https?:\/\//i.test(rawText)) return;
-
-    let url: URL | null = null;
-    try {
-      url = new URL(rawText);
-    } catch {
-      url = null;
-    }
-    if (!url) return;
-
-    const escapeHtml = (s: string) =>
-      s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-
-    const getYoutubeId = (u: URL): string | null => {
-      const host = u.hostname.toLowerCase().replace(/^www\./, '');
-      const path = u.pathname || '';
-      if (host === 'youtu.be') {
-        const id = path.split('/').filter(Boolean)[0];
-        return id || null;
-      }
-      if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com') || host === 'm.youtube.com') {
-        if (path.startsWith('/watch')) return u.searchParams.get('v');
-        const m1 = path.match(/^\/(embed|shorts)\/([^/?#]+)/i);
-        if (m1?.[2]) return m1[2];
-      }
-      return null;
-    };
-
-    const getInstagramEmbedSrc = (u: URL): string | null => {
-      const host = u.hostname.toLowerCase().replace(/^www\./, '');
-      if (host !== 'instagram.com') return null;
-      const m = (u.pathname || '').match(/^\/(p|reel|tv)\/([^/?#]+)\/?/i);
-      if (!m?.[1] || !m?.[2]) return null;
-      return `https://www.instagram.com/${m[1]}/${m[2]}/embed`;
-    };
-
-    const getXEmbedSrc = (u: URL): string | null => {
-      const host = u.hostname.toLowerCase().replace(/^www\./, '');
-      if (!(host === 'x.com' || host === 'twitter.com')) return null;
-      // twitframe is a lightweight iframe wrapper for tweets
-      return `https://twitframe.com/show?url=${encodeURIComponent(u.toString())}`;
-    };
-
-    const el = e.currentTarget;
-    const base = el.value ?? '';
-    const start = typeof el.selectionStart === 'number' ? el.selectionStart : base.length;
-    const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : start;
-
-    // If text is selected, paste URL as <a href="...">selected</a>
-    if (start !== end) {
-      const selectedText = base.slice(start, end);
-      if (!selectedText.trim()) return;
-      e.preventDefault();
-      const replacement = `<a href="${escapeHtml(rawText)}">${escapeHtml(selectedText)}</a>`;
-      const nextValue = base.slice(0, start) + replacement + base.slice(end);
-      setContent(nextValue);
-
-      const nextCaret = start + replacement.length;
-      requestAnimationFrame(() => {
-        const node = contentTextareaRef.current;
-        if (!node) return;
-        try {
-          node.focus();
-          node.setSelectionRange(nextCaret, nextCaret);
-        } catch {
-          // ignore
-        }
-      });
-      return;
-    }
-
-    // No selection: only auto-embed when the cursor is on an empty line.
-    const lineStart = base.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
-    const lineEnd = (() => {
-      const idx = base.indexOf('\n', start);
-      return idx === -1 ? base.length : idx;
-    })();
-    const currentLine = base.slice(lineStart, lineEnd);
-    if (currentLine.trim() !== '') return;
-
-    const ytId = getYoutubeId(url);
-    const ytEmbedSrc = ytId ? `https://www.youtube.com/embed/${ytId}` : null;
-    const igEmbedSrc = getInstagramEmbedSrc(url);
-    const xEmbedSrc = getXEmbedSrc(url);
-
-    const embedSrc = ytEmbedSrc || igEmbedSrc || xEmbedSrc;
-    if (!embedSrc) return;
-
-    e.preventDefault();
-
-    const height = ytEmbedSrc ? 315 : igEmbedSrc ? 560 : 600;
-    const allow = ytEmbedSrc
-      ? 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
-      : undefined;
-
-    const iframe = `<div><iframe src="${escapeHtml(embedSrc)}" width="100%" height="${height}" frameborder="0"${allow ? ` allow=\"${escapeHtml(allow)}\"` : ''} allowfullscreen></iframe></div>`;
-    const fallback = `<p><a href="${escapeHtml(rawText)}">${escapeHtml(rawText)}</a></p>`;
-    const inserted = `\n${iframe}\n${fallback}\n`;
-
-    const nextValue = base.slice(0, start) + inserted + base.slice(end);
-    setContent(nextValue);
-
-    const nextCaret = start + inserted.length;
-    requestAnimationFrame(() => {
-      const node = contentTextareaRef.current;
-      if (!node) return;
-      try {
-        node.focus();
-        node.setSelectionRange(nextCaret, nextCaret);
-      } catch {
-        // ignore
-      }
-    });
-  };
+  // Content editing is handled by TipTap RichTextEditor (HTML stored in `content`).
 
   const wordCount = useMemo(() => countWords(content), [content]);
 
@@ -959,7 +759,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   function generateSummary(titleText: string, contentText: string): string {
     const t = (titleText || '').trim();
-    const c = (contentText || '').trim();
+    const c = stripHtmlToText(contentText || '').trim();
     // If there's no content yet, synthesize a 2–3 line summary from the title in chosen language
     if (!c && t) {
       const base = t.replace(/\s+/g, ' ');
@@ -1028,7 +828,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return;
       }
       try {
-        const res = await assistSuggestV2({ title, content: content.slice(0,4000), language });
+        const res = await assistSuggestV2({ title, content: contentPlain.slice(0, 4000), language });
         suggestCacheRef.current.set(key, res);
         setSuggestions(res);
         setChecks({ seo: res.seo, compliance: res.compliance, duplicate: res.duplicate });
@@ -1434,9 +1234,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
   }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
-  async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(content || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
-  async function runPti(){ try { const res = await ptiCheck({ title, content }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
-  async function runReadability(){ try { const res = await readability(content || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
+  async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
+  async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
+  async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
 
   const requiredForPublishOk = useMemo(() => {
     const okTitle = (title || '').trim().length > 0;
@@ -1780,14 +1580,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <label className="block text-sm font-medium">Content</label>
                 <div className="text-xs text-slate-600">Words: {wordCount}</div>
               </div>
-              <textarea
-                ref={contentTextareaRef}
+              <RichTextEditor
                 value={content}
-                onChange={e=> setContent(e.target.value)}
-                onPaste={handleContentPasteWithLinks}
-                rows={14}
-                className="w-full border px-2 py-2 rounded font-mono min-h-[360px]"
-                placeholder="Write article content..."
+                onChange={setContent}
+                placeholder="Write article content…"
               />
             </div>
           </div>

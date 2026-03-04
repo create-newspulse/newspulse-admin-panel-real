@@ -83,6 +83,11 @@
   .ticker-bar-top { @apply top-0; }
   .ticker-bar-bottom { @apply bottom-0; }
 
+  /* 📝 Rich text editor spacing (admin) */
+  .np-rich-editor .ProseMirror p { margin: 0 0 12px 0; }
+  .np-rich-editor .ProseMirror ul,
+  .np-rich-editor .ProseMirror ol { margin: 0 0 12px 18px; }
+
   /* 🎛️ Toggle Switch */
   .toggle { @apply relative inline-block w-12 h-6 transition duration-200 ease-in; }
   .toggle input { @apply sr-only; } /* uses built-in utility, no circular apply */

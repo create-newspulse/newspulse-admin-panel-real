@@ -1,5 +1,6 @@
 import { useState } from "react";
 import api from "../lib/api";
+import RichTextEditor from "@/components/editor/RichTextEditor";
 
 export default function ArticleCreate() {
   const [title, setTitle] = useState("");
@@ -34,7 +35,7 @@ export default function ArticleCreate() {
         <option value="draft">Draft</option>
         <option value="published">Published</option>
       </select>
-      <textarea placeholder="Content" value={content} onChange={e=>setContent(e.target.value)} rows={8}/>
+      <RichTextEditor value={content} onChange={setContent} placeholder="Write article content…" />
       <button onClick={save}>Save</button>
       {msg && <p>{msg}</p>}
     </div>

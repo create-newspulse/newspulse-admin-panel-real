@@ -9,6 +9,8 @@ import AiAssistantTipBox from './AiAssistantTipBox';
 import { uniqueSlug } from '../../lib/slug';
 import { readingTimeSec } from '../../lib/readtime';
 import toast from 'react-hot-toast';
+import RichTextEditor from '../editor/RichTextEditor';
+import { stripHtmlToText } from '../../lib/richText';
 
 interface ArticleFormProps { mode: 'create'|'edit'; articleId?: string; userRole?: 'writer'|'editor'|'admin'|'founder'; }
 
@@ -54,6 +56,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const [summary, setSummary] = useState('');
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
+  const contentPlain = useMemo(() => stripHtmlToText(content), [content]);
   const [imageUrl, setImageUrl] = useState('');
   const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
   const [localCoverPreviewUrl, setLocalCoverPreviewUrl] = useState<string | null>(null);
@@ -135,7 +138,8 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
     }
   }, [title, autoSlug, existingSlugs]);
   function generateSummary(titleText: string, contentText: string): string {
-    const baseline = (contentText && contentText.trim()) ? contentText : titleText;
+    const contentClean = stripHtmlToText(contentText || '');
+    const baseline = (contentClean && contentClean.trim()) ? contentClean : titleText;
     if (!baseline) return '';
     const tLow = (titleText || '').toLowerCase().trim();
     const sentences = baseline.replace(/\n+/g,' ').split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -207,18 +211,18 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   }
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') {
-    const res = await verifyLanguage(content || title, l);
+    const res = await verifyLanguage(contentPlain || title, l);
     setLangIssues(prev => ({ ...prev, [l]: res.issues }));
   }
 
   async function runPti(){
-    const res = await ptiCheck({ title, content });
+    const res = await ptiCheck({ title, content: contentPlain });
     setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review');
     setPtiReasons(res.reasons);
   }
 
   async function runReadability(){
-    const res = await readability(content || title, language);
+    const res = await readability(contentPlain || title, language);
     setReadabilityGrade(res.grade);
     setReadingSeconds(res.readingTimeSec);
   }
@@ -319,7 +323,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         </div>
         <div>
           <label className="block text-sm font-medium">Content</label>
-          <textarea value={content} onChange={e=> setContent(e.target.value)} rows={10} className="w-full border px-2 py-2 rounded font-mono" placeholder="Write article content..." />
+          <RichTextEditor value={content} onChange={setContent} placeholder="Write article content…" />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -382,7 +386,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         <div className="space-y-4">
           <AiAssistantTipBox
             title={title}
-            content={content}
+            content={contentPlain}
             language={language}
             onApplyTitle={(v)=> { setTitle(v); }}
             onApplySlug={(v)=> { setSlug(v); setAutoSlug(false); }}
