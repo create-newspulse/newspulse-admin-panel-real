@@ -10,6 +10,7 @@ export interface Article {
   title: string;
   slug?: string;
   summary?: string;
+  description?: string;
   content?: string;
   imageUrl?: string;
   translationGroupId?: string;
@@ -55,9 +56,14 @@ export interface ListResponse {
 
 const ARTICLES_PATH = 'articles';
 
-function isNotFoundOrMethodNotAllowed(err: any): boolean {
-  const status = err?.response?.status;
-  return status === 404 || status === 405;
+function withDescriptionFallback<T extends Record<string, any>>(data: T): T {
+  if (!data || typeof data !== 'object') return data;
+  const summary = typeof (data as any).summary === 'string' ? String((data as any).summary).trim() : '';
+  const description = typeof (data as any).description === 'string' ? String((data as any).description).trim() : '';
+  if (!description && summary) {
+    return { ...(data as any), description: summary } as T;
+  }
+  return data;
 }
 
 function isFallbackableHardDeleteError(err: any): boolean {
@@ -210,10 +216,11 @@ export async function updateArticleStatus(id: string, status: ArticleStatus) {
   return patchThenPut<Article>(url, { status });
 }
 
-export async function publishArticle(id: string, publishedAt?: string) {
+export async function publishArticle(id: string, publishedAt?: string, extra?: Partial<Article>) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   const ts = (publishedAt && String(publishedAt).trim()) ? String(publishedAt).trim() : new Date().toISOString();
-  const res = await adminApiClient.put(url, { status: 'published', publishedAt: ts });
+  const payload = withDescriptionFallback({ ...(extra || {}), status: 'published', publishedAt: ts } as any);
+  const res = await adminApiClient.put(url, payload);
   return res.data as any;
 }
 
@@ -289,7 +296,7 @@ export async function hardDeleteArticle(id: string) {
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
   // Canonical contract: POST /articles (proxy -> /admin-api/articles)
-  const res = await adminApiClient.post(ARTICLES_PATH, data);
+  const res = await adminApiClient.post(ARTICLES_PATH, withDescriptionFallback(data as any));
   return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
@@ -307,7 +314,7 @@ export async function createCommunityArticle(data: Partial<Article>) {
 export async function updateArticle(id: string, data: Partial<Article>) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   // Standard contract ONLY: PUT /admin-api/articles/:id
-  const res = await adminApiClient.put(url, data);
+  const res = await adminApiClient.put(url, withDescriptionFallback(data as any));
   return res.data;
 }
 

@@ -14,39 +14,38 @@ export async function checkSlugAvailability(opts: {
 
   if (!slug) return { available: false, reason: 'Slug is required' };
 
-  const res = await adminApiClient.get('articles/slug-availability', {
-    params: {
-      slug,
-      ...(excludeId ? { excludeId } : {}),
-    },
-  });
+  const endpoint = `articles/slug/${encodeURIComponent(slug)}`;
 
-  const raw = res?.data as any;
+  try {
+    const res = await adminApiClient.get(endpoint, {
+      params: excludeId ? { excludeId } : undefined,
+    });
 
-  // Tolerate several backend shapes.
-  // Examples:
-  // - { ok: true, available: true }
-  // - { available: false, reason: 'exists' }
-  // - { data: { available: true } }
-  const candidate = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+    const raw = res?.data as any;
+    const candidate = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
 
-  const available =
-    candidate?.available === true ||
-    candidate?.isAvailable === true ||
-    candidate?.ok === true;
+    // Backend-approved route may return:
+    // - 200 with { available: true }
+    // - 200 with { exists: true }
+    // - 200 with { article: {...} } (slug taken)
+    // - 200 with { ok: true } + additional fields
+    const explicitlyAvailable = candidate?.available === true || candidate?.isAvailable === true || candidate?.exists === false;
+    if (explicitlyAvailable) return { available: true };
 
-  const explicitlyUnavailable =
-    candidate?.available === false ||
-    candidate?.isAvailable === false;
+    const explicitlyTaken = candidate?.available === false || candidate?.isAvailable === false || candidate?.exists === true;
+    const hasArticle = Boolean(candidate?.article?._id || candidate?._id || candidate?.id);
+    if (explicitlyTaken || hasArticle) {
+      return { available: false, reason: candidate?.reason || candidate?.message || 'Slug already exists' };
+    }
 
-  if (available && !explicitlyUnavailable) {
-    return { available: true };
+    // Default conservative: if we got a successful response but can't infer, treat as taken.
+    return { available: false, reason: candidate?.reason || candidate?.message || 'Slug already exists' };
+  } catch (e: any) {
+    const status = e?.response?.status;
+    // If endpoint isn't implemented or slug not found (commonly 404 => available), do not block.
+    if (status === 404 || status === 405) return { available: true };
+    throw e;
   }
-
-  return {
-    available: false,
-    reason: candidate?.reason || candidate?.message || 'Slug already exists',
-  };
 }
 
 export function buildSlugSuggestions(baseSlug: string, count = 3): string[] {

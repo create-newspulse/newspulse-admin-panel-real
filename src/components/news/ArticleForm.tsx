@@ -905,6 +905,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         title: string;
         slug: string;
         summary: string;
+        description: string;
         content: string;
         category?: string;
         postType?: string;
@@ -938,6 +939,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           title,
           slug: safeSlug,
           summary,
+          description: summary,
           content,
           category: categoryKey || undefined,
           postType: isViralVideo ? 'video' : undefined,
@@ -996,7 +998,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           return { ...(updated as any), __npCreatedId: idToPublish };
         } catch {
           // Fallback: minimal publish contract via admin proxy
-          const published: any = await publishArticle(idToPublish, publishAtToSend);
+          const published: any = await publishArticle(idToPublish, publishAtToSend, { summary });
           return { data: { ...(published as any), __npCreatedId: idToPublish } };
         }
       }
