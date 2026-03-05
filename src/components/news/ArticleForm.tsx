@@ -570,12 +570,57 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }
 
   function toggleGujaratLocationTag(tag: string) {
-    const willSelect = !hasTag(tag);
-    if (willSelect) {
-      if (!hasTag('state:gujarat')) ensureTag('state:gujarat');
+    const rawTag = String(tag || '').trim();
+    if (!rawTag) return;
+
+    const key = normalizeTagKey(rawTag);
+    const prev = Array.isArray(tags) ? tags : [];
+    const had = prev.some((t) => normalizeTagKey(t) === key);
+
+    let next = had
+      ? prev.filter((t) => normalizeTagKey(t) !== key)
+      : dedupeTags([...prev, rawTag]);
+
+    const isDistrict = key.startsWith('district:');
+    const isCityTag = key.startsWith('city:');
+    const selectingLocation = !had && (isDistrict || isCityTag);
+
+    if (selectingLocation) {
+      const hasState = next.some((t) => normalizeTagKey(t) === 'state:gujarat');
+      if (!hasState) next = dedupeTags([...next, 'state:gujarat']);
       setState('gujarat');
     }
-    toggleTag(tag);
+
+    const nextDistrictSlugs = new Set<string>();
+    const nextCitySlugs = new Set<string>();
+    for (const t of next) {
+      const k = normalizeTagKey(t);
+      if (k.startsWith('district:')) nextDistrictSlugs.add(k.slice('district:'.length));
+      if (k.startsWith('city:')) nextCitySlugs.add(k.slice('city:'.length));
+    }
+
+    const currentDistrictKey = String(district || '').trim().toLowerCase();
+    const currentCityKey = String(city || '').trim().toLowerCase();
+
+    if (!had && isDistrict) {
+      setDistrict(key.slice('district:'.length));
+    } else if (had && isDistrict) {
+      const removed = key.slice('district:'.length);
+      if (currentDistrictKey === removed) {
+        setDistrict(nextDistrictSlugs.has(currentDistrictKey) ? currentDistrictKey : (nextDistrictSlugs.values().next().value || ''));
+      }
+    }
+
+    if (!had && isCityTag) {
+      setCity(key.slice('city:'.length));
+    } else if (had && isCityTag) {
+      const removed = key.slice('city:'.length);
+      if (currentCityKey === removed) {
+        setCity(nextCitySlugs.has(currentCityKey) ? currentCityKey : (nextCitySlugs.values().next().value || ''));
+      }
+    }
+
+    setTags(next);
   }
 
   const selectedDistrictSlugs = useMemo(() => {
@@ -928,6 +973,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         state?: string;
         district?: string;
         city?: string;
+        geo?: {
+          state?: string;
+          district?: string;
+          city?: string;
+        };
         imageUrl?: string;
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
@@ -944,6 +994,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
+
+        const geoState = trimOrUndef(state);
+        const geoDistrict = trimOrUndef(district);
+        const geoCity = trimOrUndef(city);
+        const geo = (geoState || geoDistrict || geoCity)
+          ? { state: geoState, district: geoDistrict, city: geoCity }
+          : undefined;
         return {
           title,
           slug: safeSlug,
@@ -962,6 +1019,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state: trimOrUndef(state),
           district: trimOrUndef(district),
           city: trimOrUndef(city),
+          geo,
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
