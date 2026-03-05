@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL?.toString() || import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '');
+// Admin frontend should always talk to the backend via the Vercel proxy.
+// This keeps auth/cookies consistent and avoids CORS surprises.
+const API_BASE_URL = '/admin-api';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

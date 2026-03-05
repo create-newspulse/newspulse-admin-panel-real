@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, publishArticle, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -31,6 +31,22 @@ function normalizeLang(input: any): LangCode {
   const v = String(input || '').trim().toLowerCase();
   if (v === 'en' || v === 'hi' || v === 'gu') return v;
   return 'en';
+}
+
+function extractTranslationStatus(article: any): string | null {
+  if (!article) return null;
+  const raw =
+    article.translationStatus ??
+    article.translation_status ??
+    article.translationState ??
+    article.translation_state ??
+    article.translation?.status ??
+    article.translations?.status;
+
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && typeof raw.status === 'string') return raw.status;
+  return String(raw);
 }
 
 type ScriptKind = 'latin' | 'devanagari' | 'gujarati';
@@ -196,6 +212,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [category, setCategory] = useState<string>('');
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
+  const [translationStatus, setTranslationStatus] = useState<string | null>(null);
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
   // Keep original status to ensure Save Draft never downgrades/changes live states
   const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
@@ -605,6 +622,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setCategory(normalizedCategory || '');
       setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
       setTranslationGroupId(String((src as any).translationGroupId || ''));
+      setTranslationStatus(extractTranslationStatus(src));
       const incomingStatus = (((src as any).status as any) || 'draft') as 'draft'|'scheduled'|'published';
       setStatus(incomingStatus);
       originalStatusRef.current = incomingStatus;
@@ -688,6 +706,24 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if (sid && sid !== effectiveId) setEffectiveId(String(sid));
     }
   }, [initialValues, data, computedMode]);
+
+  const retryTranslationMutation = useMutation({
+    mutationFn: async () => {
+      if (!effectiveId) throw new Error('Missing article id');
+      return retryArticleTranslation(effectiveId);
+    },
+    onSuccess: (res: any) => {
+      // Best-effort: update local status if backend returns it; otherwise rely on refetch.
+      const raw = res as any;
+      const article = raw?.article || raw?.data?.article || raw?.data || raw;
+      const next = extractTranslationStatus(article);
+      setTranslationStatus(next || 'pending');
+      qc.invalidateQueries({ queryKey: ['articles','one',effectiveId] });
+    },
+    onError: (err: any) => {
+      toast.error(normalizeError(err, 'Retry translation failed').message);
+    },
+  });
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
@@ -1002,6 +1038,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     onSuccess: (result: any) => {
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
+      setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
         (effectiveId ||
@@ -1860,7 +1897,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       {publishSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
-            <div className="text-sm font-semibold text-slate-900">Published successfully</div>
+            <div className="text-sm font-semibold text-slate-900">Published ✅ (Translations pending)</div>
             <div className="mt-1 text-xs text-slate-600">
               {publishSuccess.id ? `Article ID: ${publishSuccess.id}` : 'Article published'}
             </div>
@@ -1949,6 +1986,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {(effectiveId && translationStatus === 'failed') && (
+              <button
+                type="button"
+                onClick={() => retryTranslationMutation.mutate()}
+                className="btn-secondary"
+                disabled={retryTranslationMutation.isPending || isSaving || isPublishing}
+              >
+                {retryTranslationMutation.isPending ? 'Retrying…' : 'Retry Translation'}
+              </button>
+            )}
             <button type="button" onClick={saveDraft} className="btn-secondary" disabled={isSaving || isPublishing || mutation.isPending}>Save Draft</button>
             <button
               type="button"

@@ -29,7 +29,7 @@ const naiveSummary = (text: string, title: string) => {
 
 async function tryAiSuggest(payload: { title: string; content: string; language: 'en'|'hi'|'gu'; }) {
   try {
-    const res = await fetch('/api/assist/suggest', {
+    const res = await fetch('/admin-api/assist/suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

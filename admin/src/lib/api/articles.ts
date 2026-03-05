@@ -79,3 +79,9 @@ export async function hardDeleteArticle(id: string) {
     return data;
   }
 }
+
+export async function retryArticleTranslation(id: string) {
+  // Contract: POST /admin-api/articles/:id/retry-translation
+  const { data } = await api.post(`/articles/${id}/retry-translation`);
+  return data;
+}

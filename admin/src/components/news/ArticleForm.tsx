@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle } from '../../lib/api/articles';
+import { createArticle, updateArticle, getArticle, retryArticleTranslation } from '../../lib/api/articles';
 import { verifyLanguage, readability } from '../../lib/api/language';
 import { ptiCheck } from '../../lib/api/compliance';
 import { uploadCoverImage } from '../../lib/api/media';
@@ -13,6 +13,22 @@ import RichTextEditor from '../editor/RichTextEditor';
 import { stripHtmlToText } from '../../lib/richText';
 
 interface ArticleFormProps { mode: 'create'|'edit'; articleId?: string; userRole?: 'writer'|'editor'|'admin'|'founder'; }
+
+function extractTranslationStatus(article: any): string | null {
+  if (!article) return null;
+  const raw =
+    article.translationStatus ??
+    article.translation_status ??
+    article.translationState ??
+    article.translation_state ??
+    article.translation?.status ??
+    article.translations?.status;
+
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && typeof raw.status === 'string') return raw.status;
+  return String(raw);
+}
 
 function sanitizeCoverPreviewUrl(raw: string): string {
   const s = String(raw || '').trim();
@@ -74,7 +90,10 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const [readabilityGrade, setReadabilityGrade] = useState<number|undefined>();
   const [readingSeconds, setReadingSeconds] = useState<number|undefined>();
   const [founderOverride, setFounderOverride] = useState(false);
+  const [translationStatus, setTranslationStatus] = useState<string | null>(null);
+  const [publishNotice, setPublishNotice] = useState<string>('');
   const autoSaveRef = useRef<number | null>(null);
+  const lastSubmittedStatusRef = useRef<'draft'|'scheduled'|'published'|string>('');
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []); // could be populated if listing all
 
@@ -123,6 +142,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         setScheduledAt(art.scheduledAt || '');
         const pti = art.ptiCompliance || art.ptiStatus;
         if (pti) setPtiStatus(pti);
+        setTranslationStatus(extractTranslationStatus(art));
       } catch (err) {
         console.error('[ADMIN][EDIT_NEWS] Load error', err);
       }
@@ -197,16 +217,49 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         coverImageUrl: coverUrl || undefined,
         coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
       };
+      lastSubmittedStatusRef.current = body.status || '';
       if (mode === 'create') return createArticle(body as any);
       else return updateArticle(articleId!, body as any);
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['articles'] });
+
+      // If publish succeeded (HTTP 200), do not block UI on translations.
+      if (lastSubmittedStatusRef.current === 'published') {
+        setPublishNotice('Published ✅ (Translations pending)');
+      } else {
+        setPublishNotice('');
+      }
+
+      try {
+        const art = (res as any)?.data?.article || (res as any)?.article || (res as any);
+        setTranslationStatus(extractTranslationStatus(art));
+      } catch {
+        // ignore
+      }
     }
+  });
+
+  const retryTranslationMutation = useMutation({
+    mutationFn: async () => {
+      if (!articleId) throw new Error('Missing article id');
+      return retryArticleTranslation(articleId);
+    },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      try {
+        const art = (res as any)?.data?.article || (res as any)?.article || (res as any);
+        setTranslationStatus(extractTranslationStatus(art));
+      } catch {
+        // If backend doesn't return article, pessimistically mark as pending.
+        setTranslationStatus('pending');
+      }
+    },
   });
 
   function saveDraft(){
     if (mutation.isPending) return;
+    setPublishNotice('');
     mutation.mutate();
   }
 
@@ -416,6 +469,19 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
       </div>
 
       <div className="sticky bottom-0 bg-white border-t border-slate-200 py-3 flex gap-3 justify-end">
+        {(mode === 'edit' && articleId && translationStatus === 'failed') && (
+          <button
+            type="button"
+            onClick={() => retryTranslationMutation.mutate()}
+            className="btn-secondary"
+            disabled={retryTranslationMutation.isPending}
+          >
+            {retryTranslationMutation.isPending ? 'Retrying…' : 'Retry Translation'}
+          </button>
+        )}
+        {publishNotice && (
+          <div className="self-center text-sm">{publishNotice}</div>
+        )}
         <button type="button" onClick={saveDraft} className="btn-secondary" disabled={!title}>Save Draft</button>
         <button type="submit" className="btn" disabled={!canPublish}>Publish</button>
       </div>

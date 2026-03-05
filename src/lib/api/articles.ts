@@ -217,6 +217,13 @@ export async function publishArticle(id: string, publishedAt?: string) {
   return res.data as any;
 }
 
+export async function retryArticleTranslation(id: string) {
+  // Contract: POST /admin-api/articles/:id/retry-translation
+  const encoded = encodeURIComponent(id);
+  const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/retry-translation`);
+  return res.data as any;
+}
+
 export async function scheduleArticle(id: string, publishAt: string) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   return patchThenPut<Article>(url, { status: 'scheduled', publishAt });
