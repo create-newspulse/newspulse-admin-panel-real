@@ -569,6 +569,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     removeTag('state:gujarat');
   }
 
+  function toggleGujaratLocationTag(tag: string) {
+    const willSelect = !hasTag(tag);
+    if (willSelect) {
+      if (!hasTag('state:gujarat')) ensureTag('state:gujarat');
+      setState('gujarat');
+    }
+    toggleTag(tag);
+  }
+
   const selectedDistrictSlugs = useMemo(() => {
     const set = new Set<string>();
     for (const t of (tags || [])) {
@@ -1714,7 +1723,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                           <button
                             type="button"
                             key={d.slug}
-                            onClick={() => toggleTag(tag)}
+                            onClick={() => toggleGujaratLocationTag(tag)}
                             className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
                             title={tag}
                           >
@@ -1733,7 +1742,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                           <button
                             type="button"
                             key={c.slug}
-                            onClick={() => toggleTag(tag)}
+                            onClick={() => toggleGujaratLocationTag(tag)}
                             className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
                             title={tag}
                           >
