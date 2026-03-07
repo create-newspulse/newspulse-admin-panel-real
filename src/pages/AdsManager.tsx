@@ -2,6 +2,13 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi } from '@/lib/api';
+import {
+  type AdInquiry,
+  getAdInquiriesUnreadCount,
+  listAdInquiries,
+  markAdInquiryRead,
+  messagePreview,
+} from '@/lib/adsInquiriesApi';
 
 type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE';
 
@@ -124,8 +131,16 @@ function normalizeAd(raw: any): SponsorAd {
 }
 
 export default function AdsManager() {
+  const [tab, setTab] = React.useState<'ads' | 'inquiries'>('ads');
+
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
   const [loading, setLoading] = React.useState(false);
+
+  const [inquiries, setInquiries] = React.useState<AdInquiry[]>([]);
+  const [inquiriesLoading, setInquiriesLoading] = React.useState(false);
+  const [inquiriesUnreadCount, setInquiriesUnreadCount] = React.useState(0);
+  const [inquiryBusy, setInquiryBusy] = React.useState<Record<string, boolean>>({});
+  const lastUnreadRef = React.useRef<number | null>(null);
 
   type PlacementKey = 'HOME_728x90' | 'HOME_RIGHT_300x250';
   type PlacementState = Record<PlacementKey, boolean>;
@@ -210,6 +225,33 @@ export default function AdsManager() {
     }
   }, [slotFilter, activeOnly]);
 
+  const fetchInquiries = React.useCallback(async () => {
+    setInquiriesLoading(true);
+    try {
+      const list = await listAdInquiries({ status: 'new', page: 1, limit: 20 });
+      setInquiries(list);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load ad inquiries');
+    } finally {
+      setInquiriesLoading(false);
+    }
+  }, []);
+
+  const fetchUnreadCount = React.useCallback(async () => {
+    try {
+      const next = await getAdInquiriesUnreadCount();
+      setInquiriesUnreadCount(next);
+
+      const prev = lastUnreadRef.current;
+      if (typeof prev === 'number' && next > prev) {
+        toast('New Ad Inquiry received');
+      }
+      lastUnreadRef.current = next;
+    } catch {
+      // Keep this silent: polling should not spam errors.
+    }
+  }, []);
+
   const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
     const res = await adminApi.get('/admin/ad-settings');
     const raw = res?.data;
@@ -247,6 +289,19 @@ export default function AdsManager() {
   React.useEffect(() => {
     void fetchAds();
   }, [fetchAds]);
+
+  React.useEffect(() => {
+    void fetchUnreadCount();
+    const id = window.setInterval(() => {
+      void fetchUnreadCount();
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [fetchUnreadCount]);
+
+  React.useEffect(() => {
+    if (tab !== 'inquiries') return;
+    void fetchInquiries();
+  }, [tab, fetchInquiries]);
 
   // IMPORTANT: load settings only once on mount.
   // Do NOT include slotEnabled in deps (would overwrite user toggles).
@@ -389,21 +444,135 @@ export default function AdsManager() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Ads Manager</h1>
         <div className="flex flex-wrap gap-2 items-center">
-          <button
-            onClick={() => void fetchAds()}
-            className="px-3 py-1 bg-slate-700 text-white rounded"
-            disabled={loading}
-          >
-            Refresh
-          </button>
-          <button
-            onClick={openCreate}
-            className="px-3 py-1 bg-green-600 text-white rounded"
-          >
-            Create Ad
-          </button>
+          {tab === 'ads' ? (
+            <>
+              <button
+                onClick={() => void fetchAds()}
+                className="px-3 py-1 bg-slate-700 text-white rounded"
+                disabled={loading}
+              >
+                Refresh
+              </button>
+              <button
+                onClick={openCreate}
+                className="px-3 py-1 bg-green-600 text-white rounded"
+              >
+                Create Ad
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setTab('ads')}
+          className={
+            'px-3 py-1.5 rounded border text-sm font-semibold ' +
+            (tab === 'ads' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
+          }
+        >
+          Ads
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('inquiries')}
+          className={
+            'px-3 py-1.5 rounded border text-sm font-semibold inline-flex items-center gap-2 ' +
+            (tab === 'inquiries' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
+          }
+        >
+          Ad Inquiries
+          {inquiriesUnreadCount > 0 ? (
+            <span className={
+              'inline-flex items-center justify-center rounded-full text-xs px-2 py-0.5 ' +
+              (tab === 'inquiries' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
+            }>
+              {inquiriesUnreadCount}
+            </span>
+          ) : null}
+        </button>
+      </div>
+
+      {tab === 'inquiries' ? (
+        <div className="space-y-4">
+          <div className="border rounded p-4 bg-white dark:bg-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Ad Inquiries</h2>
+                <div className="text-sm text-slate-600 dark:text-slate-300">Showing newest inquiries (status: new)</div>
+              </div>
+              <div className="text-sm text-slate-600 dark:text-slate-300">
+                Unread: <span className="font-semibold text-slate-900 dark:text-white">{inquiriesUnreadCount}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-auto border rounded">
+            <table className="min-w-[980px] w-full text-sm">
+              <thead className="bg-slate-100 dark:bg-slate-900">
+                <tr>
+                  <th className="text-left p-2">Name</th>
+                  <th className="text-left p-2">Email</th>
+                  <th className="text-left p-2">Message</th>
+                  <th className="text-left p-2">Created</th>
+                  <th className="text-left p-2">Status</th>
+                  <th className="text-left p-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inquiriesLoading ? (
+                  <tr>
+                    <td className="p-3 text-slate-500" colSpan={6}>Loading…</td>
+                  </tr>
+                ) : inquiries.length === 0 ? (
+                  <tr>
+                    <td className="p-3 text-slate-500" colSpan={6}>No new inquiries.</td>
+                  </tr>
+                ) : (
+                  inquiries.map((inq) => {
+                    const busy = !!inquiryBusy[inq.id];
+                    return (
+                      <tr key={inq.id} className="border-t">
+                        <td className="p-2">{inq.name || '-'}</td>
+                        <td className="p-2">{inq.email || '-'}</td>
+                        <td className="p-2" title={inq.message || ''}>{messagePreview(inq.message || '') || '-'}</td>
+                        <td className="p-2 text-xs text-slate-600 dark:text-slate-300">{safeDateLabel(inq.createdAt)}</td>
+                        <td className="p-2">{inq.status || 'new'}</td>
+                        <td className="p-2">
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded border text-xs"
+                            disabled={busy}
+                            onClick={async () => {
+                              setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                              try {
+                                await markAdInquiryRead(inq.id);
+                                setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
+                                await fetchUnreadCount();
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Failed to mark as read');
+                              } finally {
+                                setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                              }
+                            }}
+                          >
+                            {busy ? 'Working…' : 'Mark as Read'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'ads' ? (
+        <>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-800 border rounded p-3">
@@ -748,6 +917,8 @@ export default function AdsManager() {
           </div>
         </div>
       )}
+        </>
+      ) : null}
     </div>
   );
 }
