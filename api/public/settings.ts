@@ -1,6 +1,41 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { PublicSiteSettingsSchema, DEFAULT_PUBLIC_SITE_SETTINGS } from '../../src/types/publicSiteSettings';
 
+function mergeDefaults(value: any) {
+  return {
+    ...DEFAULT_PUBLIC_SITE_SETTINGS,
+    ...(value || {}),
+    homepage: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.homepage,
+      ...(value?.homepage || {}),
+      modules: {
+        ...DEFAULT_PUBLIC_SITE_SETTINGS.homepage.modules,
+        ...(value?.homepage?.modules || {}),
+      },
+    },
+    tickers: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.tickers,
+      ...(value?.tickers || {}),
+      breaking: {
+        ...DEFAULT_PUBLIC_SITE_SETTINGS.tickers.breaking,
+        ...(value?.tickers?.breaking || {}),
+      },
+      live: {
+        ...DEFAULT_PUBLIC_SITE_SETTINGS.tickers.live,
+        ...(value?.tickers?.live || {}),
+      },
+    },
+    liveTv: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.liveTv,
+      ...(value?.liveTv || {}),
+    },
+    languageTheme: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.languageTheme,
+      ...(value?.languageTheme || {}),
+    },
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
   // Serve the published public-site settings bundle from the backend if present, else fallback to defaults.
@@ -34,10 +69,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })();
 
     const parsed = PublicSiteSettingsSchema.safeParse(picked);
-    const data = parsed.success ? parsed.data : DEFAULT_PUBLIC_SITE_SETTINGS;
+    const data = parsed.success ? mergeDefaults(parsed.data) : DEFAULT_PUBLIC_SITE_SETTINGS;
 
     return res.status(200).json({
-      ...DEFAULT_PUBLIC_SITE_SETTINGS,
       ...data,
       version: typeof (envelope as any)?.version === 'number' ? (envelope as any).version : undefined,
       updatedAt: typeof (envelope as any)?.updatedAt === 'string' ? (envelope as any).updatedAt : undefined,

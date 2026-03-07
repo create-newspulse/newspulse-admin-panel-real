@@ -18,7 +18,8 @@ const HomepageModuleSchema = z
 const TickerSchema = z
   .object({
     enabled: z.boolean().default(false),
-    speedSec: z.number().int().min(1).max(60).optional(),
+    speedSec: z.number().int().min(5).max(300).optional(),
+    maxItems: z.number().int().min(1).max(100).optional(),
   })
   .passthrough();
 
@@ -34,6 +35,7 @@ export const PublicSiteSettingsSchema = z
 
     tickers: z
       .object({
+        pauseOnHover: z.boolean().default(true),
         breaking: TickerSchema.default({}),
         live: TickerSchema.default({}),
       })
@@ -69,8 +71,9 @@ export const DEFAULT_PUBLIC_SITE_SETTINGS: PublicSiteSettings = {
     },
   },
   tickers: {
-    live: { enabled: false, speedSec: 8, order: 4 },
-    breaking: { enabled: false, speedSec: 6, order: 5 },
+    pauseOnHover: true,
+    live: { enabled: false, speedSec: 65, maxItems: 15, order: 4 },
+    breaking: { enabled: false, speedSec: 55, maxItems: 12, order: 5 },
   },
   liveTv: { enabled: false, embedUrl: '' },
   languageTheme: { languages: ['en'], themePreset: 'system' },
