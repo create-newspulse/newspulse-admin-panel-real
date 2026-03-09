@@ -1,12 +1,43 @@
 import axios, { AxiosInstance } from 'axios';
 
-// API base (same-origin only)
-// - All frontend requests MUST go through `/admin-api/*` and rely on proxy/rewrites.
-// - Direct-to-backend absolute URLs are intentionally not supported here.
+// API base
+// - Default/proxy mode: browser requests go through `/admin-api/*` (Vite/Vercel rewrites).
+// - Optional: allow an absolute proxy base like `https://backend.tld/admin-api` when explicitly configured.
 const envAny = import.meta.env as any;
 
 function stripTrailingSlashes(s: string) {
   return (s || '').replace(/\/+$/, '');
+}
+
+function proxyPrefixFromBase(base: string): string {
+  const b = (base || '').toString().trim();
+  if (!b) return '';
+  if (b.startsWith('/')) return stripTrailingSlashes(b);
+
+  // Absolute bases are treated as proxy-mode ONLY when they end with '/admin-api'.
+  if (isAbsoluteHttpUrl(b)) {
+    try {
+      const u = new URL(b);
+      const p = stripTrailingSlashes(u.pathname || '');
+      if (p === '/admin-api' || p.endsWith('/admin-api')) return p;
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+}
+
+function originFromBase(base: string): string {
+  const b = (base || '').toString().trim();
+  if (!b) return '';
+  if (!isAbsoluteHttpUrl(b)) return '';
+  try {
+    return new URL(b).origin;
+  } catch {
+    return '';
+  }
 }
 
 function normalizeLeadingSlash(p: string) {
@@ -76,18 +107,8 @@ function logResolvedBaseOnce(base: string) {
 }
 
 export function getApiBase(): string {
-  // DEV convenience: allow directing the UI to a backend origin without relying on Vite proxy.
-  // This keeps production behavior unchanged (still uses /admin-api rewrites).
-  if (import.meta.env.DEV) {
-    const devOrigin = resolveDevBackendOrigin();
-    if (devOrigin) {
-      logResolvedBaseOnce(devOrigin);
-      return devOrigin;
-    }
-  }
-
-  // Prefer the explicit admin proxy base, then fall back to VITE_API_URL.
-  // Per repo contract for Vercel: this should be a root-relative path ("/admin-api").
+  // Prefer explicit admin base (proxy path like '/admin-api' OR absolute like 'https://.../admin-api').
+  // Fall back to VITE_API_URL (direct mode).
   const raw = (
     envAny.VITE_ADMIN_API_BASE
     || envAny.VITE_ADMIN_API_BASE_URL
@@ -95,17 +116,29 @@ export function getApiBase(): string {
     || ''
   ).toString().trim();
 
+  // DEV convenience: if no explicit base is set, allow directing the UI to a backend origin.
+  // This keeps production behavior unchanged while making local dev easy.
+  if (import.meta.env.DEV && !raw) {
+    const devOrigin = resolveDevBackendOrigin();
+    if (devOrigin) {
+      logResolvedBaseOnce(devOrigin);
+      return devOrigin;
+    }
+  }
+
   let base = stripTrailingSlashes(raw).replace(/\/api$/i, '');
   if (base && !base.startsWith('/') && !isAbsoluteHttpUrl(base)) {
     base = `/${base}`;
   }
 
   if (base && isValidApiBase(base)) {
-    // In this repo, only the proxy base is supported in-browser.
+    // Supported shapes:
+    // - proxy base: '/admin-api'
+    // - absolute proxy base: 'https://backend.tld/admin-api'
+    // - direct base: 'https://backend.tld' (requires CORS)
     if (base === '/admin-api') return '/admin-api';
-    if (import.meta.env.DEV) {
-      try { console.warn('[api] Ignoring API base (only "/admin-api" is supported):', base); } catch {}
-    }
+    if (isAbsoluteHttpUrl(base)) return base;
+    if (base.startsWith('/')) return base;
   }
 
   logResolvedBaseOnce('/admin-api');
@@ -142,7 +175,8 @@ function joinBase(base: string, path: string) {
 
 export function apiUrl(path: string): string {
   const base = getApiBase();
-  const proxyMode = base.startsWith('/') && !base.startsWith('/__np_missing_api_base__');
+  const proxyPrefix = proxyPrefixFromBase(base);
+  const proxyMode = !!proxyPrefix && !proxyPrefix.startsWith('/__np_missing_api_base__');
 
   const p0 = normalizeLeadingSlash(path);
   // Tolerate callers passing '/api/*'
@@ -157,7 +191,8 @@ export function apiUrl(path: string): string {
 
 export function adminUrl(path: string): string {
   const base = getApiBase();
-  const proxyMode = base.startsWith('/') && !base.startsWith('/__np_missing_api_base__');
+  const proxyPrefix = proxyPrefixFromBase(base);
+  const proxyMode = !!proxyPrefix && !proxyPrefix.startsWith('/__np_missing_api_base__');
   const p0 = normalizeLeadingSlash(path);
 
   // Accept callers passing either '/admin/*' or '/api/admin/*' or a bare segment like '/me'.
@@ -238,13 +273,16 @@ export function hasLikelyAdminSession(): boolean {
 }
 
 const INITIAL_BASE = getApiBase();
-const INITIAL_PROXY_MODE = INITIAL_BASE.startsWith('/') && !INITIAL_BASE.startsWith('/__np_missing_api_base__');
+const INITIAL_PROXY_PREFIX = proxyPrefixFromBase(INITIAL_BASE);
+const INITIAL_PROXY_MODE = !!INITIAL_PROXY_PREFIX && !INITIAL_PROXY_PREFIX.startsWith('/__np_missing_api_base__');
 // IMPORTANT:
 // In browsers, URL resolution treats a request URL starting with '/' as root-relative and can
 // effectively ignore a baseURL path prefix (like '.../admin-api'). To avoid accidental requests
 // hitting 'http://localhost:5173/admin/*', keep axios baseURL at the origin in proxy mode and
 // prefix '/admin-api' onto request URLs in the interceptor.
-const AXIOS_BASE = INITIAL_PROXY_MODE ? absolutizeForAxios('') : absolutizeForAxios(INITIAL_BASE);
+const AXIOS_BASE = INITIAL_PROXY_MODE
+  ? (originFromBase(INITIAL_BASE) || absolutizeForAxios(''))
+  : absolutizeForAxios(INITIAL_BASE);
 
 // Extend axios instance with monitorHub helper
 export interface ExtendedApi extends AxiosInstance {
@@ -266,7 +304,9 @@ export const api: ExtendedApi = axios.create({
 
 export const ADMIN_API_BASE = adminUrl('/').replace(/\/+$/, '');
 export const adminApi = axios.create({
-  baseURL: INITIAL_PROXY_MODE ? absolutizeForAxios('') : absolutizeForAxios(INITIAL_BASE),
+  baseURL: INITIAL_PROXY_MODE
+    ? (originFromBase(INITIAL_BASE) || absolutizeForAxios(''))
+    : absolutizeForAxios(INITIAL_BASE),
   withCredentials: true,
 });
 
@@ -398,9 +438,14 @@ api.interceptors.request.use((cfg) => {
     if (url && !url.startsWith('/')) url = `/${url}`;
 
     const resolvedBase = getApiBase();
-    const proxyMode = resolvedBase.startsWith('/') && !resolvedBase.startsWith('/__np_missing_api_base__');
+    const proxyPrefix0 = proxyPrefixFromBase(resolvedBase);
+    const proxyMode = !!proxyPrefix0 && !proxyPrefix0.startsWith('/__np_missing_api_base__');
     if (proxyMode) {
-      const proxyPrefix = stripTrailingSlashes(resolvedBase);
+      // If base is an absolute proxy base (https://.../admin-api), route to its origin.
+      const origin = originFromBase(resolvedBase);
+      if (origin) cfg.baseURL = origin;
+
+      const proxyPrefix = stripTrailingSlashes(proxyPrefix0);
       if (proxyPrefix && !url.startsWith(`${proxyPrefix}/`) && url !== proxyPrefix) {
         url = `${proxyPrefix}${url}`;
       }
@@ -485,8 +530,14 @@ adminApi.interceptors.request.use((cfg) => {
     // Proxy mode uses:   /admin-api/admin/*  (proxy forwards to backend /api/admin/*)
     // Direct mode uses:  <origin>/api/admin/*
     const base = getApiBase();
-    const proxyMode = base.startsWith('/') && !base.startsWith('/__np_missing_api_base__');
-    const proxyPrefix = proxyMode ? stripTrailingSlashes(base) : '';
+    const proxyPrefix0 = proxyPrefixFromBase(base);
+    const proxyMode = !!proxyPrefix0 && !proxyPrefix0.startsWith('/__np_missing_api_base__');
+    const proxyPrefix = proxyMode ? stripTrailingSlashes(proxyPrefix0) : '';
+
+    if (proxyMode) {
+      const origin = originFromBase(base);
+      if (origin) cfg.baseURL = origin;
+    }
 
     let url = (cfg.url || '').toString().trim();
     if (!url) return cfg;
