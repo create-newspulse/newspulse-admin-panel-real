@@ -63,7 +63,22 @@ export async function listAdInquiries(args: {
 
 export async function markAdInquiryRead(id: string): Promise<AdInquiry | { ok: true } | unknown> {
   const safeId = encodeURIComponent(String(id));
-  const raw = await adminJson<any>(`/admin-api/ads/inquiries/${safeId}/read`, { method: 'PATCH' });
+  const raw = await adminJson<any>(`/admin-api/ads/inquiries/${safeId}/mark-read`, { method: 'PATCH' });
+
+  const inquiry = raw?.inquiry ?? raw?.data?.inquiry ?? raw?.data ?? raw;
+  if (inquiry && typeof inquiry === 'object' && (inquiry.id || inquiry._id)) {
+    return normalizeInquiry(inquiry);
+  }
+
+  return raw ?? { ok: true };
+}
+
+export async function setAdInquiryStatus(id: string, status: 'closed' | 'spam' | string): Promise<AdInquiry | { ok: true } | unknown> {
+  const safeId = encodeURIComponent(String(id));
+  const raw = await adminJson<any>(`/admin-api/ads/inquiries/${safeId}/status`, {
+    method: 'PATCH',
+    json: { status },
+  });
 
   const inquiry = raw?.inquiry ?? raw?.data?.inquiry ?? raw?.data ?? raw;
   if (inquiry && typeof inquiry === 'object' && (inquiry.id || inquiry._id)) {

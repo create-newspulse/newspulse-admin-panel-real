@@ -2,11 +2,13 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi } from '@/lib/api';
+import { AdminApiError } from '@/lib/http/adminFetch';
 import {
   type AdInquiry,
   getAdInquiriesUnreadCount,
   listAdInquiries,
   markAdInquiryRead,
+  setAdInquiryStatus,
   messagePreview,
 } from '@/lib/adsInquiriesApi';
 
@@ -140,6 +142,7 @@ export default function AdsManager() {
   const [inquiriesLoading, setInquiriesLoading] = React.useState(false);
   const [inquiriesUnreadCount, setInquiriesUnreadCount] = React.useState(0);
   const [inquiryBusy, setInquiryBusy] = React.useState<Record<string, boolean>>({});
+  const [inquiriesBackendMessage, setInquiriesBackendMessage] = React.useState<string | null>(null);
   const lastUnreadRef = React.useRef<number | null>(null);
 
   type PlacementKey = 'HOME_728x90' | 'HOME_RIGHT_300x250';
@@ -228,10 +231,16 @@ export default function AdsManager() {
   const fetchInquiries = React.useCallback(async () => {
     setInquiriesLoading(true);
     try {
+      setInquiriesBackendMessage(null);
       const list = await listAdInquiries({ status: 'new', page: 1, limit: 20 });
       setInquiries(list);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to load ad inquiries');
+      if (err instanceof AdminApiError && err.status === 404) {
+        setInquiries([]);
+        setInquiriesBackendMessage('Backend not updated yet.');
+      } else {
+        toast.error(err?.message || 'Failed to load ad inquiries');
+      }
     } finally {
       setInquiriesLoading(false);
     }
@@ -241,13 +250,19 @@ export default function AdsManager() {
     try {
       const next = await getAdInquiriesUnreadCount();
       setInquiriesUnreadCount(next);
+      setInquiriesBackendMessage(null);
 
       const prev = lastUnreadRef.current;
       if (typeof prev === 'number' && next > prev) {
         toast('New Ad Inquiry received');
       }
       lastUnreadRef.current = next;
-    } catch {
+    } catch (err: any) {
+      if (err instanceof AdminApiError && err.status === 404) {
+        setInquiriesUnreadCount(0);
+        setInquiriesBackendMessage('Backend not updated yet.');
+        return;
+      }
       // Keep this silent: polling should not spam errors.
     }
   }, []);
@@ -507,6 +522,11 @@ export default function AdsManager() {
                 Unread: <span className="font-semibold text-slate-900 dark:text-white">{inquiriesUnreadCount}</span>
               </div>
             </div>
+            {inquiriesBackendMessage ? (
+              <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                {inquiriesBackendMessage}
+              </div>
+            ) : null}
           </div>
 
           <div className="overflow-auto border rounded">
@@ -526,6 +546,10 @@ export default function AdsManager() {
                   <tr>
                     <td className="p-3 text-slate-500" colSpan={6}>Loading…</td>
                   </tr>
+                ) : inquiries.length === 0 && inquiriesBackendMessage ? (
+                  <tr>
+                    <td className="p-3 text-slate-500" colSpan={6}>{inquiriesBackendMessage}</td>
+                  </tr>
                 ) : inquiries.length === 0 ? (
                   <tr>
                     <td className="p-3 text-slate-500" colSpan={6}>No new inquiries.</td>
@@ -541,25 +565,82 @@ export default function AdsManager() {
                         <td className="p-2 text-xs text-slate-600 dark:text-slate-300">{safeDateLabel(inq.createdAt)}</td>
                         <td className="p-2">{inq.status || 'new'}</td>
                         <td className="p-2">
-                          <button
-                            type="button"
-                            className="px-2 py-1 rounded border text-xs"
-                            disabled={busy}
-                            onClick={async () => {
-                              setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
-                              try {
-                                await markAdInquiryRead(inq.id);
-                                setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
-                                await fetchUnreadCount();
-                              } catch (err: any) {
-                                toast.error(err?.message || 'Failed to mark as read');
-                              } finally {
-                                setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
-                              }
-                            }}
-                          >
-                            {busy ? 'Working…' : 'Mark as Read'}
-                          </button>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded border text-xs"
+                              disabled={busy}
+                              onClick={async () => {
+                                setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                try {
+                                  await markAdInquiryRead(inq.id);
+                                  setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
+                                  await fetchUnreadCount();
+                                } catch (err: any) {
+                                  if (err instanceof AdminApiError && err.status === 404) {
+                                    setInquiriesBackendMessage('Backend not updated yet.');
+                                    toast('Backend not updated yet.');
+                                  } else {
+                                    toast.error(err?.message || 'Failed to mark read');
+                                  }
+                                } finally {
+                                  setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                }
+                              }}
+                            >
+                              {busy ? 'Working…' : 'Mark Read'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded border text-xs"
+                              disabled={busy}
+                              onClick={async () => {
+                                setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                try {
+                                  await setAdInquiryStatus(inq.id, 'closed');
+                                  setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
+                                  await fetchUnreadCount();
+                                } catch (err: any) {
+                                  if (err instanceof AdminApiError && err.status === 404) {
+                                    setInquiriesBackendMessage('Backend not updated yet.');
+                                    toast('Backend not updated yet.');
+                                  } else {
+                                    toast.error(err?.message || 'Failed to close inquiry');
+                                  }
+                                } finally {
+                                  setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                }
+                              }}
+                            >
+                              {busy ? 'Working…' : 'Close'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded border text-xs"
+                              disabled={busy}
+                              onClick={async () => {
+                                setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                try {
+                                  await setAdInquiryStatus(inq.id, 'spam');
+                                  setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
+                                  await fetchUnreadCount();
+                                } catch (err: any) {
+                                  if (err instanceof AdminApiError && err.status === 404) {
+                                    setInquiriesBackendMessage('Backend not updated yet.');
+                                    toast('Backend not updated yet.');
+                                  } else {
+                                    toast.error(err?.message || 'Failed to mark spam');
+                                  }
+                                } finally {
+                                  setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                }
+                              }}
+                            >
+                              {busy ? 'Working…' : 'Spam'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
