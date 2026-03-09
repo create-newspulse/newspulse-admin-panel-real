@@ -132,7 +132,7 @@ async function probeAdminProxyHealth(): Promise<boolean> {
   try {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 2500);
-    const res = await fetch('/admin-api/system/health', {
+    const res = await fetch(adminApiPath('/admin-api/system/health'), {
       method: 'GET',
       cache: 'no-store',
       credentials: 'include',
