@@ -28,9 +28,8 @@ const BASE_IS_ABSOLUTE_ORIGIN = false;
 function normalizeAdminApiBase(input: string): string {
   const s = stripTrailingSlashes((input || '').toString().trim());
   if (!s) return '/admin-api';
-  // Allow absolute bases (e.g. https://backend.tld/admin-api) when explicitly provided.
-  // This is useful for local dev when Vite/Vercel rewrites are not in play.
-  if (/^https?:\/\//i.test(s)) return s;
+  // Enforce proxy-only semantics; ignore absolute origins.
+  if (/^https?:\/\//i.test(s)) return '/admin-api';
   // Otherwise treat it as a root-relative path.
   return s.startsWith('/') ? s : `/${s}`;
 }
@@ -44,24 +43,6 @@ const RAW_ADMIN_BASE = (
 ).toString().trim();
 
 export const ADMIN_API_BASE = normalizeAdminApiBase(RAW_ADMIN_BASE || '/admin-api');
-
-function isAbsoluteHttpUrl(u: string): boolean {
-  return /^https?:\/\//i.test((u || '').toString());
-}
-
-function joinUrl(base: string, rest: string): string {
-  const b = stripTrailingSlashes(base);
-  const r = (rest || '').toString();
-  const p = r.startsWith('/') ? r : `/${r}`;
-  return `${b}${p}`.replace(/([^:]\/)\/+?/g, '$1');
-}
-
-function stripProxyPrefix(path: string): string {
-  const p = (path || '').toString();
-  if (p === '/admin-api') return '/';
-  if (p.startsWith('/admin-api/')) return p.slice('/admin-api'.length) || '/';
-  return p;
-}
 
 const HTML_MISROUTE_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 
@@ -283,18 +264,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
 
   const isPublicProxyEndpoint = (() => {
     try {
-      const rawP = (normalizedPath || '').toString();
-      const pathname = (() => {
-        if (isAbsoluteHttpUrl(rawP)) {
-          try {
-            return new URL(rawP).pathname || '';
-          } catch {
-            return '';
-          }
-        }
-        return rawP;
-      })();
-      const p = pathname.toLowerCase();
+      const p = (normalizedPath || '').toString().toLowerCase();
       return p === '/admin-api/public' || p.startsWith('/admin-api/public/');
     } catch {
       return false;
@@ -593,17 +563,9 @@ function adminApiPath(path: string): string {
   // If caller provided an absolute URL, do not rewrite it.
   if (/^https?:\/\//i.test(raw)) return raw;
 
-  const base = stripTrailingSlashes(ADMIN_API_BASE) || '/admin-api';
-  const baseIsAbsolute = isAbsoluteHttpUrl(base);
-
-  // If caller already provided a proxy-style path:
-  // - relative base: keep as-is (Vite/Vercel rewrites handle it)
-  // - absolute base: rewrite '/admin-api/*' -> '<base>/*'
+  // If caller already provided a proxy-style path, keep it.
   if (raw.startsWith('/admin-api/') || raw === '/admin-api') {
-    const normalized = raw.replace(/\/\/+/, '/');
-    if (!baseIsAbsolute) return normalized;
-    const rest = stripProxyPrefix(normalized);
-    return joinUrl(base, rest);
+    return raw.replace(/\/\/+/, '/');
   }
 
   // If caller accidentally used '/api/*', route it through the proxy base.
@@ -612,6 +574,7 @@ function adminApiPath(path: string): string {
   }
 
   const rest = normalizeAdminRest(path);
+  const base = stripTrailingSlashes(ADMIN_API_BASE) || '/admin-api';
 
   // Proxy/same-origin mode: allow a relative base like '/admin-api'
   // In this mode the browser calls:
@@ -625,15 +588,7 @@ function adminApiPath(path: string): string {
     return joined.replace(/([^:]\/)\/+?/g, '$1');
   }
 
-  // Absolute base: treat it as the proxy base (e.g. https://backend.tld/admin-api)
-  // and join the same proxy contract paths under it.
-  if (baseIsAbsolute) {
-    const hasAdminSuffix = /\/admin$/i.test(base);
-    const prefix = hasAdminSuffix ? '' : '/admin';
-    return joinUrl(base, `${prefix}${rest}`);
-  }
-
-  // Fallback: join like proxy.
+  // Absolute bases are not supported (enforced above); fall back to proxy-style joining.
   const joined = `${base}/admin${rest}`;
   return joined.replace(/([^:]\/)\/+?/g, '$1');
 }
