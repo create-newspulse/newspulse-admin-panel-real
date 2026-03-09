@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@context/AuthContext';
 import OtpModal from '@/components/auth/OtpModal';
-import { adminApiUrl as resolveAdminApiUrl } from '@/lib/http/adminFetch';
 
 export default function SimpleLogin() {
   const navigate = useNavigate();
@@ -35,7 +34,7 @@ export default function SimpleLogin() {
       try {
         const ac = new AbortController();
         const to = setTimeout(() => ac.abort(), 1500);
-        const res = await fetch(resolveAdminApiUrl('/admin-api/system/health'), { cache: 'no-store', signal: ac.signal });
+        const res = await fetch('/admin-api/system/health', { cache: 'no-store', signal: ac.signal });
         clearTimeout(to);
         if (cancelled) return;
         setBackendOffline(!res.ok);
@@ -61,7 +60,7 @@ export default function SimpleLogin() {
     let cancelled = false;
     const probeMe = async () => {
       try {
-        const res = await fetch(resolveAdminApiUrl('/admin-api/admin/me'), { cache: 'no-store', credentials: 'include' });
+        const res = await fetch('/admin-api/admin/me', { cache: 'no-store', credentials: 'include' });
         if (cancelled) return;
         if (res.ok) {
           // Cookie-based sessions may be invisible to JS (httpOnly cookie), so the

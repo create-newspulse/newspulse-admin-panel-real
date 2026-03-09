@@ -5,7 +5,7 @@ import {
   type BroadcastSettings,
   type BroadcastType,
 } from '@/lib/broadcastApi';
-import { AdminApiError, adminApiUrl as resolveAdminApiUrl } from '@/lib/http/adminFetch';
+import { AdminApiError } from '@/lib/http/adminFetch';
 import {
   addItem as apiAddBroadcastItem,
   deleteItem as apiDeleteBroadcastItem,
@@ -15,7 +15,7 @@ import {
 } from '@/api/broadcast';
 
 const PROXY_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
-const PROXY_HEALTH_URL = resolveAdminApiUrl('/admin-api/system/health');
+const PROXY_HEALTH_URL = '/admin-api/system/health';
 
 let didShowProxyMissingToast = false;
 
@@ -659,7 +659,7 @@ export default function BroadcastCenter() {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(resolveAdminApiUrl('/admin-api/admin/translation/glossary'), {
+        const res = await fetch('/admin-api/admin/translation/glossary', {
           method: 'GET',
           cache: 'no-store',
           credentials: 'include',
@@ -687,7 +687,7 @@ export default function BroadcastCenter() {
 
     const translateOne = async (to: SourceLang): Promise<string> => {
       if (to === from) return baseText;
-      const res = await fetch(resolveAdminApiUrl('/admin-api/language/translate'), {
+      const res = await fetch('/admin-api/language/translate', {
         method: 'POST',
         cache: 'no-store',
         credentials: 'include',

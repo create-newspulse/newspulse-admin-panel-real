@@ -1,6 +1,5 @@
 // DEV-only component to test proxy connectivity
 import { useState } from 'react';
-import { adminApiUrl as resolveAdminApiUrl } from '@/lib/http/adminFetch';
 
 export function ProxyHealthCheck() {
   const [result, setResult] = useState<string>('');
@@ -10,7 +9,7 @@ export function ProxyHealthCheck() {
     setLoading(true);
     setResult('Testing...');
     try {
-      const res = await fetch(resolveAdminApiUrl('/admin-api/system/health'), {
+      const res = await fetch('/admin-api/system/health', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -27,7 +26,7 @@ export function ProxyHealthCheck() {
     setLoading(true);
     setResult('Testing settings without auth...');
     try {
-      const res = await fetch(resolveAdminApiUrl('/admin-api/admin/settings/public'), {
+      const res = await fetch('/admin-api/admin/settings/public', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -58,7 +57,7 @@ export function ProxyHealthCheck() {
         return;
       }
 
-      const res = await fetch(resolveAdminApiUrl('/admin-api/admin/settings/public'), {
+      const res = await fetch('/admin-api/admin/settings/public', {
         method: 'GET',
         headers: { 
           Accept: 'application/json',

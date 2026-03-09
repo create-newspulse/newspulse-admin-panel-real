@@ -1,6 +1,5 @@
 import type { AxiosInstance } from 'axios';
 import apiClient from '@/lib/api';
-import { adminApiUrl as resolveAdminApiUrl } from '@/lib/http/adminFetch';
 
 const envAny = import.meta.env as any;
 
@@ -158,7 +157,7 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
 
   // NOTE: When using FormData, the browser automatically sends multipart/form-data
   // with the correct boundary. Do not manually set the boundary header.
-  const resp = await fetch(resolveAdminApiUrl('/admin-api/uploads/cover'), {
+  const resp = await fetch('/admin-api/uploads/cover', {
     method: 'POST',
     body: fd,
     credentials: 'include',
