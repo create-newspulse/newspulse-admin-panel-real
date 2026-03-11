@@ -9,8 +9,10 @@ const __dirname = path.dirname(__filename);
 
 const args = new Set(process.argv.slice(2));
 const useDemo = args.has('--demo');
-const REAL_BACKEND = process.env.NP_REAL_BACKEND || '';
-const DEMO_BACKEND = process.env.NP_DEMO_BACKEND || '';
+const DEFAULT_LOCAL_BACKEND = 'http://localhost:5000';
+const DEFAULT_FRONTEND_PORT = '5173';
+const REAL_BACKEND = process.env.NP_REAL_BACKEND || DEFAULT_LOCAL_BACKEND;
+const DEMO_BACKEND = process.env.NP_DEMO_BACKEND || DEFAULT_LOCAL_BACKEND;
 
 console.log(`🚀 Starting News Pulse Admin Panel (${useDemo ? 'demo backend + frontend' : 'real backend + frontend'})...\n`);
 
@@ -63,18 +65,16 @@ const startBackend = () => {
 const startFrontend = () => {
   console.log('🎨 Starting Frontend Server...');
   const backendTarget = useDemo ? DEMO_BACKEND : REAL_BACKEND;
-  if (!backendTarget) {
-    console.error('❌ Missing backend target. Set env var:');
-    console.error(useDemo ? '   NP_DEMO_BACKEND=<backend origin>' : '   NP_REAL_BACKEND=<backend origin>');
-    process.exit(1);
-  }
+  console.log(`🔌 Frontend proxy target: ${backendTarget}`);
   const frontend = spawn('npm', ['run', 'dev'], {
     cwd: __dirname,
     stdio: 'inherit',
     shell: true,
     env: {
       ...process.env,
+      NP_ADMIN_PORT: process.env.NP_ADMIN_PORT || DEFAULT_FRONTEND_PORT,
       VITE_ADMIN_API_TARGET: process.env.VITE_ADMIN_API_TARGET || backendTarget,
+      VITE_DEV_PROXY_TARGET: process.env.VITE_DEV_PROXY_TARGET || backendTarget,
       VITE_DEMO_MODE: 'false',
       VITE_USE_MOCK: 'false',
     }

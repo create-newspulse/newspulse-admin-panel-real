@@ -1,8 +1,47 @@
+// 🚀 NewsPulse Admin - Demo Server (Advanced Features Only)
+// Minimal Express server with ONLY the new features (all ESM, no legacy code)
+
+import express from 'express';
+import cors from 'cors';
+import crypto from 'crypto';
+import multer from 'multer';
+
 // Translation glossary / protected terms (demo in-memory store)
 let TRANSLATION_GLOSSARY = [
   // Example shape:
   // { id: 'brand-1', term: 'NewsPulse', hi: 'NewsPulse', gu: 'NewsPulse' },
 ];
+
+const app = express();
+const PORT = Number(process.env.PORT) || 5000;
+
+// Demo media upload (in-memory)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+  },
+});
+
+// Middleware
+const DEV_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://admin.newspulse.co.in',
+  'https://newspulse.co.in',
+];
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (DEV_ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // --- Translation glossary (admin) ---
 app.get('/api/admin/translation/glossary', (req, res) => {
@@ -50,44 +89,6 @@ app.post('/api/language/translate', (req, res) => {
   // The frontend applies glossary substitutions after translation.
   res.json({ translated: input, from: String(from || ''), to: String(to || '') });
 });
-// 🚀 NewsPulse Admin - Demo Server (Advanced Features Only)
-// Minimal Express server with ONLY the new features (all ESM, no legacy code)
-
-import express from 'express';
-import cors from 'cors';
-import crypto from 'crypto';
-import multer from 'multer';
-
-const app = express();
-const PORT = Number(process.env.PORT) || 5000;
-
-// Demo media upload (in-memory)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-  },
-});
-
-// Middleware
-const DEV_ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'https://admin.newspulse.co.in',
-  'https://newspulse.co.in',
-];
-app.use(cors({
-  origin(origin, cb) {
-    if (!origin) return cb(null, true);
-    if (DEV_ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error(`CORS blocked for origin ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // ===== Demo Auth (minimal) =====
 // The admin frontend expects these endpoints:
@@ -771,6 +772,110 @@ app.delete('/api/admin/ads/:id', (req, res) => {
   return res.status(200).json({ ok: true });
 });
 
+// ===== Ads Inquiries (demo storage) =====
+// Contract endpoints expected by the admin panel:
+// - GET   /api/ads/inquiries
+// - GET   /api/ads/inquiries/unread-count
+// - PATCH /api/ads/inquiries/:id/mark-read
+// - PATCH /api/ads/inquiries/:id/delete
+// - PATCH /api/ads/inquiries/:id/restore
+// - DELETE /api/ads/inquiries/bulk/permanent
+// - POST  /api/ads/inquiries/:id/reply
+
+/** @type {Array<any>} */
+let AD_INQUIRIES = [];
+
+function normalizeInquiryStatus(s) {
+  const v = String(s || '').toLowerCase();
+  if (v === 'read' || v === 'deleted' || v === 'new') return v;
+  return 'new';
+}
+
+function inquiryMatchesSearch(inq, q) {
+  if (!q) return true;
+  const s = String(q).toLowerCase();
+  const hay = [inq.name, inq.email, inq.message].map((x) => String(x || '').toLowerCase()).join(' ');
+  return hay.includes(s);
+}
+
+function findInquiryIndex(id) {
+  const safe = String(id || '');
+  return AD_INQUIRIES.findIndex((x) => String(x.id || x._id || '') === safe);
+}
+
+app.get('/api/ads/inquiries/unread-count', (_req, res) => {
+  const unread = AD_INQUIRIES.filter((x) => normalizeInquiryStatus(x.status) === 'new').length;
+  return res.status(200).json({ ok: true, count: unread });
+});
+
+app.get('/api/ads/inquiries', (req, res) => {
+  const status = req.query?.status ? normalizeInquiryStatus(req.query.status) : null;
+  const page = clampInt(req.query?.page, 1, 1, 10_000);
+  const limit = clampInt(req.query?.limit, 20, 1, 100);
+  const search = String(req.query?.search || '').trim();
+
+  let rows = AD_INQUIRIES.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  if (status) rows = rows.filter((x) => normalizeInquiryStatus(x.status) === status);
+  if (search) rows = rows.filter((x) => inquiryMatchesSearch(x, search));
+
+  const start = (page - 1) * limit;
+  const paged = rows.slice(start, start + limit);
+  return res.status(200).json({ ok: true, inquiries: paged, page, limit, total: rows.length });
+});
+
+app.patch('/api/ads/inquiries/:id/mark-read', (req, res) => {
+  const idx = findInquiryIndex(req.params.id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+  const prev = AD_INQUIRIES[idx];
+  const next = { ...prev, status: 'read', updatedAt: nowIso() };
+  AD_INQUIRIES[idx] = next;
+  return res.status(200).json({ ok: true, inquiry: next });
+});
+
+app.patch('/api/ads/inquiries/:id/delete', (req, res) => {
+  const idx = findInquiryIndex(req.params.id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+  const prev = AD_INQUIRIES[idx];
+  const next = { ...prev, _prevStatus: normalizeInquiryStatus(prev.status), status: 'deleted', updatedAt: nowIso() };
+  AD_INQUIRIES[idx] = next;
+  return res.status(200).json({ ok: true, inquiry: next });
+});
+
+app.patch('/api/ads/inquiries/:id/restore', (req, res) => {
+  const idx = findInquiryIndex(req.params.id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+  const prev = AD_INQUIRIES[idx];
+  const restored = prev?._prevStatus && normalizeInquiryStatus(prev._prevStatus) !== 'deleted' ? normalizeInquiryStatus(prev._prevStatus) : 'new';
+  const next = { ...prev, status: restored, updatedAt: nowIso() };
+  delete next._prevStatus;
+  AD_INQUIRIES[idx] = next;
+  return res.status(200).json({ ok: true, inquiry: next });
+});
+
+app.delete('/api/ads/inquiries/bulk/permanent', (req, res) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
+  if (!ids.length) return res.status(400).json({ ok: false, message: 'ids are required' });
+
+  const idSet = new Set(ids);
+  const before = AD_INQUIRIES.length;
+  AD_INQUIRIES = AD_INQUIRIES.filter((x) => !idSet.has(String(x?.id || x?._id || '').trim()));
+  return res.status(200).json({ ok: true, deletedCount: before - AD_INQUIRIES.length });
+});
+
+app.post('/api/ads/inquiries/:id/reply', (req, res) => {
+  const idx = findInquiryIndex(req.params.id);
+  if (idx < 0) return res.status(404).json({ ok: false, message: 'Not Found' });
+  const subject = String(req.body?.subject || '').trim();
+  const message = String(req.body?.message || '').trim();
+  if (!subject || !message) return res.status(400).json({ ok: false, message: 'subject and message are required' });
+  const prev = AD_INQUIRIES[idx];
+  const next = { ...prev, lastRepliedAt: nowIso(), updatedAt: nowIso() };
+  AD_INQUIRIES[idx] = next;
+  return res.status(200).json({ ok: true });
+});
+
 // ===== Community Reporter (demo storage) =====
 // Endpoints expected by the admin UI:
 // - GET  /api/admin/community-reporter/queue
@@ -1244,6 +1349,37 @@ app.get('/api/analytics/ab-tests', (req, res) => {
 });
 
 // ===== MISSING LEGACY ENDPOINTS (for compatibility) =====
+
+// Admin dashboard stats (used by /admin/dashboard)
+// Frontend calls (via proxy): GET /admin-api/admin/stats  -> backend GET /api/admin/stats
+app.get('/api/admin/stats', (req, res) => {
+  seedArticlesOnce();
+
+  const rows = Array.isArray(ARTICLES) ? ARTICLES : [];
+  const nonDeleted = rows.filter((a) => String(a?.status || '').toLowerCase() !== 'deleted');
+
+  const categories = new Set(
+    nonDeleted
+      .map((a) => String(a?.category || '').trim())
+      .filter(Boolean)
+  );
+  const languages = new Set(
+    nonDeleted
+      .map((a) => String(a?.language || '').trim())
+      .filter(Boolean)
+  );
+
+  res.json({
+    ok: true,
+    data: {
+      totalNews: nonDeleted.length,
+      categories: categories.size,
+      languages: languages.size,
+      activeUsers: 1,
+      aiLogs: 0,
+    },
+  });
+});
 
 // Dashboard stats
 app.get('/api/dashboard/stats', (req, res) => {
@@ -1788,6 +1924,6 @@ app.listen(PORT, () => {
   console.log('   • SEO Tools');
   console.log('   • Analytics Dashboard');
   console.log('\n🌐 Frontend: http://localhost:5173');
-  console.log('🔧 API Health: http://localhost:3002/api/health');
+  console.log(`🔧 API Health: http://localhost:${PORT}/api/health`);
   console.log('='.repeat(60) + '\n');
 });

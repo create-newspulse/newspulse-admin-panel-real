@@ -58,7 +58,7 @@ Goal: Make rapid, safe changes across the Vite React admin frontend, Vercel serv
 - When adding serverless functions: co-locate under `api/` and keep responses JSON (no HTML fallback) to avoid SPA interference.
 
 ## 9. Testing & Validation
-- Local Dev: Use `start-servers.ps1` for demo backend + frontend; confirm port 5173 and 3002.
+- Local Dev: Use `start-servers.ps1` for demo backend + frontend; confirm frontend port 5173 and backend port 5000.
 - Health: `GET /admin-api/system/health` (proxy path) vs direct `GET <backend>/api/system/health`.
 - Articles: Use `requests/articles.http` examples as baseline; extend with new query params (backend must implement filtering).
 

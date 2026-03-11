@@ -243,7 +243,9 @@ function notifyBackendOfflineOnce() {
   if (lastOfflineBannerAt && (now - lastOfflineBannerAt) < OFFLINE_BANNER_COOLDOWN_MS) return;
   lastOfflineBannerAt = now;
   try {
-    const devMsg = import.meta.env.DEV ? 'Backend offline. Start backend on http://localhost:5000' : 'API unreachable.';
+    const devMsg = import.meta.env.DEV
+      ? 'Backend offline. Start local backend (default: http://localhost:5000) or set VITE_ADMIN_API_TARGET / VITE_DEV_PROXY_TARGET and restart dev server.'
+      : 'API unreachable.';
     window.dispatchEvent(new CustomEvent('np:backend-offline', {
       detail: {
         message: devMsg,

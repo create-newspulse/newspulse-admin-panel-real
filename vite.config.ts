@@ -14,43 +14,58 @@ const isValidAbsoluteUrl = (u?: string) => {
 export default defineConfig(({ mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const baseLogger = createLogger();
+  const DEFAULT_LOCAL_BACKEND = 'http://localhost:5000';
+  const DEV_SERVER_PORT = 5173;
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
+  const proxyDebug = String(env.VITE_PROXY_DEBUG || '').toLowerCase() === 'true';
   // Per project convention, allow a non-VITE env var for proxy targeting.
   // This is used only by Vite dev server (never shipped to the browser).
   const BACKEND_URL_ENV = stripSlash(env.BACKEND_URL || process.env.BACKEND_URL || '');
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   const adminApiUrl = stripSlash(env.VITE_ADMIN_API_URL || '');
+  const rawDevProxyEnv = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_DEV_PROXY_TARGET || '');
+  const normalizedDevProxyEnv = /\/api$/i.test(rawDevProxyEnv)
+    ? rawDevProxyEnv.replace(/\/api$/i, '')
+    : rawDevProxyEnv;
+  const DEV_PROXY_TARGET = (!normalizedDevProxyEnv || hasPlaceholders(normalizedDevProxyEnv) || !isValidAbsoluteUrl(normalizedDevProxyEnv))
+    ? DEFAULT_LOCAL_BACKEND
+    : normalizedDevProxyEnv;
+  const ignoredDevProxyVars = [
+    BACKEND_URL_ENV ? 'BACKEND_URL' : '',
+    stripSlash(env.VITE_BACKEND_ORIGIN || '') ? 'VITE_BACKEND_ORIGIN' : '',
+    stripSlash(env.VITE_PROXY_TARGET || '') ? 'VITE_PROXY_TARGET' : '',
+  ].filter(Boolean);
   // IMPORTANT:
   // - `VITE_API_URL` is for DIRECT mode (frontend talks straight to backend).
   // - Dev proxy targets should NOT depend on it, otherwise a stale VITE_API_URL
   //   can silently redirect Vite's `/api/*` proxy and cause ECONNREFUSED.
   // Use a dedicated variable for proxy targeting.
-  // Prefer dedicated proxy target; fall back to VITE_API_BASE_URL (used by the simple axios client).
-  // Source of truth for dev proxy:
-  // Prefer VITE_BACKEND_ORIGIN (used by older config) but also honor VITE_ADMIN_API_TARGET.
   const rawCandidate = stripSlash(
-    BACKEND_URL_ENV
-    || env.VITE_BACKEND_ORIGIN
-    || env.VITE_ADMIN_API_TARGET
-    || env.VITE_BACKEND_URL
-    || env.VITE_ADMIN_API_ORIGIN
-    || env.VITE_API_BASE_URL
-    || ''
+    mode === 'development'
+      ? DEV_PROXY_TARGET
+      : (
+        BACKEND_URL_ENV
+        || env.VITE_BACKEND_ORIGIN
+        || env.VITE_ADMIN_API_TARGET
+        || env.VITE_DEV_PROXY_TARGET
+        || env.VITE_BACKEND_URL
+        || env.VITE_ADMIN_API_ORIGIN
+        || env.VITE_API_BASE_URL
+        || ''
+      )
   );
-  const useLocalDemo = String(env.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
-  // IMPORTANT: Keep browser API base relative (/admin-api) and avoid hardcoding any production backend origin.
-  // Local dev should rely on Vite proxy. Default to localhost backend unless explicitly overridden.
   const DEFAULT_REAL_BACKEND = '';
   const looksLocalhost = (() => {
     const s = String(rawCandidate || '').toLowerCase();
     return s.includes('localhost:') || s.includes('127.0.0.1:') || s.includes('0.0.0.0:');
   })();
-  const API_TARGET = (!hasPlaceholders(rawCandidate)
-    && isValidAbsoluteUrl(rawCandidate)
-    // Avoid accidental localhost unless explicitly opted-in.
-    && (!looksLocalhost || useLocalDemo))
-    ? rawCandidate
-    : DEFAULT_REAL_BACKEND;
+  const API_TARGET = mode === 'development'
+    ? DEV_PROXY_TARGET
+    : ((!hasPlaceholders(rawCandidate)
+      && isValidAbsoluteUrl(rawCandidate)
+      && !looksLocalhost)
+      ? rawCandidate
+      : DEFAULT_REAL_BACKEND);
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
@@ -60,11 +75,15 @@ export default defineConfig(({ mode }): UserConfig => {
   // Keep /admin-api proxy target consistent with the primary backend origin.
   // (Historically some setups used VITE_BACKEND_URL; keep it as a fallback only.)
   const ADMIN_API_PROXY_TARGET = stripSlash(
-    (adminApiUrl && isValidAbsoluteUrl(adminApiUrl) ? adminApiUrl : '')
-    || BACKEND_ORIGIN
-    || env.VITE_BACKEND_URL
-    || process.env.VITE_BACKEND_URL
-    || ''
+    mode === 'development'
+      ? DEV_PROXY_TARGET
+      : (
+        (adminApiUrl && isValidAbsoluteUrl(adminApiUrl) ? adminApiUrl : '')
+        || BACKEND_ORIGIN
+        || env.VITE_BACKEND_URL
+        || process.env.VITE_BACKEND_URL
+        || ''
+      )
   ) || '';
 
   // If the dev proxy target is the Vercel admin host, DO NOT rewrite '/admin-api/*' to '/api/*'.
@@ -80,40 +99,55 @@ export default defineConfig(({ mode }): UserConfig => {
     }
   })();
 
-  // Dev diagnostic: show current proxy target
-  if (mode === 'development') {
-    const src = (stripSlash(env.VITE_BACKEND_ORIGIN || '') && isValidAbsoluteUrl(env.VITE_BACKEND_ORIGIN))
-      ? 'VITE_BACKEND_ORIGIN'
-      : ((stripSlash(env.VITE_ADMIN_API_TARGET || '') && isValidAbsoluteUrl(env.VITE_ADMIN_API_TARGET)) ? 'VITE_ADMIN_API_TARGET' : 'default');
-    // eslint-disable-next-line no-console
-    console.log('[vite] Resolved backend origin:', BACKEND_ORIGIN, `(source: ${src})`);
-    if (BACKEND_URL) {
-      console.log('[vite] Dev proxy BACKEND_URL:', BACKEND_URL);
-    }
-    console.log('[vite] Dev proxy /admin-api target:', ADMIN_API_PROXY_TARGET);
-    if (API_TARGET && /\/api\/?$/.test(API_TARGET)) {
-      console.warn('[vite] Note: Target ends with /api; using origin for proxy:', BACKEND_ORIGIN);
-    }
-  }
   const proxy: any = {};
   // DEV: proxy common API prefixes to the backend.
-  // Default is the real backend so localhost behaves like production.
-  // To use a local backend, explicitly opt-in via:
-  // - VITE_USE_LOCAL_DEMO_BACKEND=true  (uses http://localhost:5000)
-  // - or VITE_DEV_PROXY_TARGET=http://localhost:5000
-  const LOCAL_BACKEND = 'http://localhost:5000';
-  // DEV proxy target (where Vite forwards /admin-api/* and /api/*).
-  // Preferred env var: BACKEND_URL
-  // Back-compat: VITE_PROXY_TARGET / VITE_DEV_PROXY_TARGET
-  const DEV_PROXY_ENV = stripSlash(BACKEND_URL_ENV || env.VITE_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || '');
-  // Default dev proxy to local backend so no calls ever drift to production origins.
-  const DEV_PROXY_TARGET = mode === 'development'
-    ? (DEV_PROXY_ENV || LOCAL_BACKEND)
-    : (stripSlash(env.VITE_DEV_PROXY_TARGET || '') || BACKEND_ORIGIN);
-  if (mode === 'development') {
-    // eslint-disable-next-line no-console
-    console.log('[vite] VITE_PROXY_TARGET:', DEV_PROXY_TARGET, `(source: ${DEV_PROXY_ENV ? 'env' : 'default'})`);
-  }
+  // Default dev proxy to the local backend so localhost never drifts to another port.
+
+  const attachProxyErrorLogger = (proxyServer: any, kind: 'admin-api' | 'api' | 'settings', targetOrigin: string) => {
+    let last = 0;
+    const mapPath = (inUrl: string) => {
+      let mapped = inUrl;
+      if (kind === 'admin-api') {
+        if (/^\/admin-api\/api\//.test(mapped)) return mapped.replace(/^\/admin-api/, '').replace(/^\/api\/api\//, '/api/');
+        return mapped.replace(/^\/admin-api/, '/api').replace(/^\/api\/api\//, '/api/');
+      }
+      if (kind === 'settings') {
+        return mapped.replace(/^\/settings/, '/api/settings');
+      }
+      return mapped.replace(/^\/api\/api\//, '/api/');
+    };
+    proxyServer.on('proxyRes', (proxyRes: any, req: any) => {
+      try {
+        const status = Number(proxyRes?.statusCode || 0);
+        const inUrl = String(req?.url || '');
+        if (proxyDebug && kind === 'admin-api' && /^\/admin-api\/ads\/inquiries(\/|\?|$)/.test(inUrl)) {
+          const mapped = mapPath(inUrl);
+          // eslint-disable-next-line no-console
+          console.log(`[vite-proxy] ${kind} ${req?.method || 'GET'} ${inUrl} -> ${stripSlash(targetOrigin)}${mapped} (${status || 'unknown'})`);
+        }
+        if (!status || status < 400) return;
+        const now = Date.now();
+        // throttle a bit to avoid noisy logs when the UI retries
+        if (now - last < 500) return;
+        last = now;
+        const mapped = mapPath(inUrl);
+        // eslint-disable-next-line no-console
+        console.warn(`[vite-proxy] ${kind} ${req?.method || 'GET'} ${inUrl} -> ${stripSlash(targetOrigin)}${mapped} (${status})`);
+      } catch {
+        // ignore
+      }
+    });
+    proxyServer.on('error', (err: any, req: any) => {
+      try {
+        const inUrl = String(req?.url || '');
+        const mapped = mapPath(inUrl);
+        // eslint-disable-next-line no-console
+        console.warn(`[vite-proxy] ${kind} ${req?.method || 'GET'} ${inUrl} -> ${stripSlash(targetOrigin)}${mapped} (error: ${err?.code || err?.message || 'unknown'})`);
+      } catch {
+        // ignore
+      }
+    });
+  };
   if (DEV_PROXY_TARGET) {
     proxy['/api'] = {
       target: `${DEV_PROXY_TARGET}`,
@@ -121,6 +155,7 @@ export default defineConfig(({ mode }): UserConfig => {
       secure: false,
       timeout: 120000,
       proxyTimeout: 120000,
+      configure: (p: any) => attachProxyErrorLogger(p, 'api', DEV_PROXY_TARGET),
     };
     // Support public settings in local dev (maps /settings/* -> /api/settings/*)
     proxy['/settings'] = {
@@ -129,10 +164,11 @@ export default defineConfig(({ mode }): UserConfig => {
       secure: false,
       timeout: 120000,
       proxyTimeout: 120000,
+      configure: (p: any) => attachProxyErrorLogger(p, 'settings', DEV_PROXY_TARGET),
       rewrite: (path: string) => path.replace(/^\/settings/, '/api/settings'),
     };
     proxy['/socket.io'] = {
-      target: mode === 'development' ? LOCAL_BACKEND : API_WS,
+      target: mode === 'development' ? DEV_PROXY_TARGET : API_WS,
       ws: true,
       changeOrigin: true,
       secure: false,
@@ -142,7 +178,7 @@ export default defineConfig(({ mode }): UserConfig => {
   // - Dev: default to real backend, unless explicitly pointed to localhost.
   // - Prod: Vercel handles /admin-api via serverless rewrites.
   const ADMIN_PROXY_TARGET = mode === 'development'
-    ? (DEV_PROXY_ENV || LOCAL_BACKEND)
+    ? DEV_PROXY_TARGET
     : ADMIN_API_PROXY_TARGET;
   if (ADMIN_PROXY_TARGET) {
     proxy['/admin-api'] = {
@@ -151,6 +187,7 @@ export default defineConfig(({ mode }): UserConfig => {
       secure: false,
       timeout: 120000,
       proxyTimeout: 120000,
+      configure: (p: any) => attachProxyErrorLogger(p, 'admin-api', ADMIN_PROXY_TARGET),
       rewrite: (path: string) => {
         // DEV: match Vercel behavior so calls like '/admin-api/system/health' hit backend '/api/system/health'.
         if (mode === 'development') {
@@ -189,9 +226,10 @@ export default defineConfig(({ mode }): UserConfig => {
 
       server: {
         host: true,
+        port: DEV_SERVER_PORT,
         open: true,
-        // Prefer the standard Vite port, but don't crash if it's already used.
-        strictPort: false,
+        // Use the fixed local admin port requested by the repo/user.
+        strictPort: true,
       cors: true,
       // Proxy all API + sockets to backend in dev
       proxy: {
@@ -274,9 +312,11 @@ export default defineConfig(({ mode }): UserConfig => {
       ...baseLogger,
       info(msg) {
         baseLogger.info(msg);
-        if (msg.includes('ready in')) {
-          baseLogger.warn('[vite] If you change VITE_ADMIN_API_TARGET or proxy, restart `npm run dev`.');
-          baseLogger.warn('[vite] Admin API dev proxy → ' + (env.VITE_ADMIN_API_TARGET || API_TARGET || '(unset)'));
+        if (mode === 'development' && msg.includes('ready in')) {
+          baseLogger.info(`[vite] Admin dev proxy: /admin-api/* -> ${DEV_PROXY_TARGET}/api/*`);
+          if (ignoredDevProxyVars.length > 0) {
+            baseLogger.warn(`[vite] Ignoring ${ignoredDevProxyVars.join(', ')} in development; use VITE_ADMIN_API_TARGET or VITE_DEV_PROXY_TARGET to override ${DEFAULT_LOCAL_BACKEND}.`);
+          }
         }
       },
       clearScreen(_type) {

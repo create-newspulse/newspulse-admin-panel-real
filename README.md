@@ -108,6 +108,8 @@ npm run dev:full
 
 Open: `http://localhost:5173`
 
+Default frontend dev port in this repo is `5173`.
+
 ### Manage News Module
 
 The admin UI provides a full Manage News panel at `/admin/manage-news` (protected route). An alias is also available at `/manage-news` for convenience. It includes:

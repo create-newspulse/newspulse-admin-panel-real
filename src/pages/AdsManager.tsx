@@ -4,11 +4,21 @@ import toast from 'react-hot-toast';
 import { adminApi } from '@/lib/api';
 import {
   type AdInquiry,
+  type AdInquiryListResult,
+  type AdInquiryStatus,
+  ADS_INQUIRIES_BASE,
+  getAdInquiryStatusCount,
+  logAdsInquiriesDiagnostic,
   getAdInquiriesUnreadCount,
   listAdInquiries,
   markAdInquiryRead,
-  deleteAdInquiry,
+  markAdInquiriesRead,
+  moveAdInquiryToTrash,
+  moveAdInquiriesToTrash,
+  permanentlyDeleteAdInquiries,
+  permanentlyDeleteAdInquiry,
   restoreAdInquiry,
+  restoreAdInquiries,
   messagePreview,
 } from '@/lib/adsInquiriesApi';
 
@@ -75,6 +85,58 @@ function fromDatetimeLocalValue(value: string): string | null {
   return d.toISOString();
 }
 
+type InquiryApiErrorState = {
+  kind: 'offline' | 'db-unavailable' | 'request';
+  message: string;
+  status?: number;
+  url?: string;
+  code?: string;
+};
+
+function isAbortError(err: any): boolean {
+  const name = String(err?.name || '');
+  const message = String(err?.message || '');
+  return name === 'AbortError' || /aborted/i.test(message);
+}
+
+function describeInquiryError(err: any, fallback: string): InquiryApiErrorState {
+  const status = typeof err?.status === 'number'
+    ? err.status
+    : (typeof err?.response?.status === 'number' ? err.response.status : undefined);
+  const code = String(err?.code || err?.response?.data?.code || '').trim().toUpperCase() || undefined;
+  const url = typeof err?.url === 'string'
+    ? err.url
+    : (typeof err?.response?.config?.url === 'string' ? err.response.config.url : undefined);
+
+  if (code === 'BACKEND_OFFLINE' || status === 0) {
+    return {
+      kind: 'offline',
+      status,
+      url,
+      code,
+      message: 'Backend unreachable. Start local backend on http://localhost:5000 or update VITE_ADMIN_API_TARGET / VITE_DEV_PROXY_TARGET, then restart npm run dev.',
+    };
+  }
+
+  if (code === 'DB_UNAVAILABLE' || status === 503) {
+    return {
+      kind: 'db-unavailable',
+      status,
+      url,
+      code,
+      message: 'Database unavailable. Wait for the backend database connection to recover.',
+    };
+  }
+
+  return {
+    kind: 'request',
+    status,
+    url,
+    code,
+    message: String(err?.message || fallback),
+  };
+}
+
 function parseBool(value: any): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -136,6 +198,7 @@ export default function AdsManager() {
   const [tab, setTab] = React.useState<'ads' | 'inquiries'>('ads');
 
   type InquiryStatusTab = 'new' | 'read' | 'deleted';
+  type InquiryTabCounts = Record<InquiryStatusTab, number | null>;
   const [inquiryStatusTab, setInquiryStatusTab] = React.useState<InquiryStatusTab>('new');
   const [inquiryPage, setInquiryPage] = React.useState(1);
   const inquiryLimit = 20;
@@ -146,15 +209,126 @@ export default function AdsManager() {
   const [loading, setLoading] = React.useState(false);
 
   const [inquiries, setInquiries] = React.useState<AdInquiry[]>([]);
+  const [, setInquiriesTotal] = React.useState<number | null>(null);
+  const [inquiryTabCounts, setInquiryTabCounts] = React.useState<InquiryTabCounts>({ new: null, read: null, deleted: null });
   const [inquiriesLoading, setInquiriesLoading] = React.useState(false);
-  const [inquiriesUnreadCount, setInquiriesUnreadCount] = React.useState(0);
+  const [, setInquiriesUnreadCount] = React.useState<number | null>(null);
+  const [inquiriesUnreadError, setInquiriesUnreadError] = React.useState<InquiryApiErrorState | null>(null);
+  const [inquiriesError, setInquiriesError] = React.useState<InquiryApiErrorState | null>(null);
   const [inquiryBusy, setInquiryBusy] = React.useState<Record<string, boolean>>({});
+  const [selectedInquiryIds, setSelectedInquiryIds] = React.useState<string[]>([]);
+  const [bulkAction, setBulkAction] = React.useState<'mark-read' | 'move-to-trash' | 'restore' | 'delete-permanently' | null>(null);
+  const [confirmBulkPermanentDelete, setConfirmBulkPermanentDelete] = React.useState(false);
   const lastUnreadRef = React.useRef<number | null>(null);
+  const selectAllVisibleRef = React.useRef<HTMLInputElement | null>(null);
 
   const [inquiryView, setInquiryView] = React.useState<AdInquiry | null>(null);
 
   const hasNextInquiryPage = inquiries.length === inquiryLimit;
   const hasPrevInquiryPage = inquiryPage > 1;
+
+  const tabLabelMap: Record<InquiryStatusTab, string> = React.useMemo(() => ({
+    new: 'new',
+    read: 'read',
+    deleted: 'deleted',
+  }), []);
+  const activeSubtitle = React.useMemo(() => {
+    return `Showing ${tabLabelMap[inquiryStatusTab]} inquiries`;
+  }, [inquiryStatusTab, tabLabelMap]);
+  const activeCornerCountLabel = React.useMemo(() => {
+    const value = inquiryTabCounts[inquiryStatusTab];
+    return typeof value === 'number' ? String(value) : '—';
+  }, [inquiryStatusTab, inquiryTabCounts]);
+  const activeCornerTitle = React.useMemo(() => {
+    if (inquiryStatusTab === 'new') return 'New inquiries';
+    if (inquiryStatusTab === 'read') return 'Read inquiries';
+    return 'Deleted inquiries';
+  }, [inquiryStatusTab]);
+
+  const emptyInquiriesText = React.useMemo(() => {
+    const base = `No ${tabLabelMap[inquiryStatusTab]} inquiries`;
+    if (inquirySearch) {
+      return `${base} match "${inquirySearch}".`;
+    }
+    if (inquiryPage > 1) {
+      return `${base} on page ${inquiryPage}.`;
+    }
+    return `${base}.`;
+  }, [inquiryPage, inquirySearch, inquiryStatusTab, tabLabelMap]);
+
+  const canEmailFromCurrentTab = inquiryStatusTab !== 'deleted';
+  const visibleInquiryIds = React.useMemo(
+    () => inquiries.map((inq) => String(inq.id || '').trim()).filter(Boolean),
+    [inquiries]
+  );
+  const selectedVisibleInquiryIds = React.useMemo(
+    () => selectedInquiryIds.filter((id) => visibleInquiryIds.includes(id)),
+    [selectedInquiryIds, visibleInquiryIds]
+  );
+  const selectedCount = selectedVisibleInquiryIds.length;
+  const allVisibleSelected = visibleInquiryIds.length > 0 && selectedVisibleInquiryIds.length === visibleInquiryIds.length;
+  const hasSomeVisibleSelected = selectedVisibleInquiryIds.length > 0 && !allVisibleSelected;
+  const bulkBusy = bulkAction !== null;
+
+  const mailtoHref = React.useCallback((email?: string | null) => {
+    const value = String(email || '').trim();
+    return value ? `mailto:${value}` : '';
+  }, []);
+
+  const clearInquirySelection = React.useCallback(() => {
+    setSelectedInquiryIds([]);
+  }, []);
+
+  const toggleInquirySelection = React.useCallback((id: string) => {
+    const safeId = String(id || '').trim();
+    if (!safeId) return;
+    setSelectedInquiryIds((prev) => (
+      prev.includes(safeId)
+        ? prev.filter((value) => value !== safeId)
+        : [...prev, safeId]
+    ));
+  }, []);
+
+  const toggleSelectAllVisible = React.useCallback(() => {
+    if (!visibleInquiryIds.length) return;
+    setSelectedInquiryIds((prev) => {
+      if (visibleInquiryIds.every((id) => prev.includes(id))) {
+        return prev.filter((id) => !visibleInquiryIds.includes(id));
+      }
+      const next = new Set(prev);
+      for (const id of visibleInquiryIds) next.add(id);
+      return Array.from(next);
+    });
+  }, [visibleInquiryIds]);
+
+  const adjustInquiryPageAfterBulk = React.useCallback((removedCount: number) => {
+    const nextVisibleCount = inquiries.length - removedCount;
+    if (inquiryPage > 1 && nextVisibleCount <= 0) {
+      setInquiryPage((prev) => Math.max(1, prev - 1));
+      return true;
+    }
+    return false;
+  }, [inquiries.length, inquiryPage]);
+
+  const refreshInquiryTabCounts = React.useCallback(async () => {
+    try {
+      const [newCount, readCount, deletedCount] = await Promise.all([
+        getAdInquiryStatusCount('new' as AdInquiryStatus),
+        getAdInquiryStatusCount('read' as AdInquiryStatus),
+        getAdInquiryStatusCount('deleted' as AdInquiryStatus),
+      ]);
+      setInquiryTabCounts({ new: newCount, read: readCount, deleted: deletedCount });
+    } catch (err: any) {
+      if (isAbortError(err)) return;
+      if (import.meta.env.DEV) {
+        logAdsInquiriesDiagnostic('counts:failed', {
+          message: err?.message || 'Failed to load inquiry tab counts',
+          status: err?.status,
+          code: err?.code,
+        });
+      }
+    }
+  }, []);
 
   type PlacementKey = 'HOME_728x90' | 'HOME_RIGHT_300x250';
   type PlacementState = Record<PlacementKey, boolean>;
@@ -255,9 +429,39 @@ export default function AdsManager() {
         search: opts.search,
         signal: opts.signal,
       });
-      setInquiries(list);
+      const result = list as AdInquiryListResult;
+      setInquiries(result.items);
+      setInquiriesTotal(typeof result.total === 'number' ? result.total : result.items.length);
+      setInquiryTabCounts((prev) => ({
+        ...prev,
+        [opts.status]: typeof result.total === 'number' ? result.total : result.items.length,
+      }));
+      setInquiriesError(null);
+      if (import.meta.env.DEV) {
+        logAdsInquiriesDiagnostic('list:render-ready', {
+          url: `${ADS_INQUIRIES_BASE}?status=${opts.status}&page=${opts.page}&limit=${opts.limit}&search=${encodeURIComponent(opts.search)}`,
+          message: `Rendering ${result.items.length} rows (tab total: ${typeof result.total === 'number' ? result.total : result.items.length})`,
+          source: result.source,
+          raw: result.raw,
+        });
+      }
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to load ad inquiries');
+      if (isAbortError(err)) return;
+
+      const nextError = describeInquiryError(err, 'Failed to load inquiries');
+      setInquiries([]);
+      setInquiriesTotal(null);
+      setInquiriesUnreadCount(null);
+      setInquiriesUnreadError(nextError);
+      setInquiriesError(nextError);
+      lastUnreadRef.current = null;
+      logAdsInquiriesDiagnostic('list:failed', {
+        url: nextError.url || `${ADS_INQUIRIES_BASE}?status=${opts.status}&page=${opts.page}&limit=${opts.limit}&search=${encodeURIComponent(opts.search)}`,
+        status: nextError.status,
+        message: nextError.message,
+        code: nextError.code,
+      });
+      toast.error(nextError.message);
     } finally {
       setInquiriesLoading(false);
     }
@@ -267,16 +471,85 @@ export default function AdsManager() {
     try {
       const next = await getAdInquiriesUnreadCount();
       setInquiriesUnreadCount(next);
+      setInquiryTabCounts((prev) => ({ ...prev, new: next }));
+      setInquiriesUnreadError(null);
 
       const prev = lastUnreadRef.current;
       if (typeof prev === 'number' && next > prev) {
         toast('New Ad Inquiry received');
       }
       lastUnreadRef.current = next;
-    } catch {
-      // Keep this silent: polling should not spam errors.
+    } catch (err: any) {
+      if (isAbortError(err)) return;
+
+      const nextError = describeInquiryError(err, 'Unread count unavailable');
+      // Polling should not spam errors, but the UI should not lie.
+      setInquiriesUnreadCount(null);
+      setInquiryTabCounts((prev) => ({ ...prev, new: null }));
+      setInquiriesUnreadError(nextError);
+      lastUnreadRef.current = null;
+      logAdsInquiriesDiagnostic('unread-count:failed', {
+        url: nextError.url || `${ADS_INQUIRIES_BASE}/unread-count`,
+        status: nextError.status,
+        message: nextError.message,
+        code: nextError.code,
+      });
     }
   }, []);
+
+  const refreshInquiryDataAfterBulk = React.useCallback(async (removedCount: number) => {
+    const movedToPreviousPage = adjustInquiryPageAfterBulk(removedCount);
+    if (!movedToPreviousPage) {
+      await fetchInquiries({
+        status: inquiryStatusTab,
+        page: inquiryPage,
+        limit: inquiryLimit,
+        search: inquirySearch,
+      });
+    }
+    await Promise.all([fetchUnreadCount(), refreshInquiryTabCounts()]);
+  }, [adjustInquiryPageAfterBulk, fetchInquiries, fetchUnreadCount, inquiryLimit, inquiryPage, inquirySearch, inquiryStatusTab, refreshInquiryTabCounts]);
+
+  const applyBulkInquiryAction = React.useCallback(async (action: 'mark-read' | 'move-to-trash' | 'restore' | 'delete-permanently', ids: string[]) => {
+    const safeIds = ids.map((id) => String(id || '').trim()).filter(Boolean);
+    if (!safeIds.length) return;
+
+    setBulkAction(action);
+    try {
+      if (action === 'delete-permanently') {
+        await permanentlyDeleteAdInquiries(safeIds);
+      }
+      if (action === 'restore') {
+        await restoreAdInquiries(safeIds);
+      }
+      if (action === 'move-to-trash') {
+        await moveAdInquiriesToTrash(safeIds);
+      }
+      if (action === 'mark-read') {
+        await markAdInquiriesRead(safeIds);
+      }
+
+      clearInquirySelection();
+      await refreshInquiryDataAfterBulk(safeIds.length);
+
+      const countLabel = `${safeIds.length} ${safeIds.length === 1 ? 'inquiry' : 'inquiries'}`;
+      if (action === 'restore') toast.success(`${countLabel} restored`);
+      if (action === 'delete-permanently') toast.success(`${countLabel} deleted permanently`);
+      if (action === 'move-to-trash') toast.success(`${countLabel} moved to trash`);
+      if (action === 'mark-read') toast.success(`${countLabel} marked as read`);
+    } catch (err: any) {
+      const fallback = action === 'restore'
+        ? 'Failed to restore selected inquiries'
+        : action === 'delete-permanently'
+          ? 'Failed to permanently delete selected inquiries'
+          : action === 'move-to-trash'
+            ? 'Failed to move selected inquiries to trash'
+            : 'Failed to mark selected inquiries as read';
+      toast.error(err?.message || fallback);
+    } finally {
+      setBulkAction(null);
+    }
+  }, [clearInquirySelection, refreshInquiryDataAfterBulk]);
 
   const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
     const res = await adminApi.get('/admin/ad-settings');
@@ -331,6 +604,7 @@ export default function AdsManager() {
     setInquiryPage(1);
     setInquirySearchInput('');
     setInquirySearch('');
+    clearInquirySelection();
   }, [tab]);
 
   // Debounce search input -> server query.
@@ -355,6 +629,20 @@ export default function AdsManager() {
     });
     return () => ac.abort();
   }, [tab, fetchInquiries, inquiryStatusTab, inquiryPage, inquiryLimit, inquirySearch]);
+
+  React.useEffect(() => {
+    setSelectedInquiryIds((prev) => prev.filter((id) => visibleInquiryIds.includes(id)));
+  }, [visibleInquiryIds]);
+
+  React.useEffect(() => {
+    if (!selectAllVisibleRef.current) return;
+    selectAllVisibleRef.current.indeterminate = hasSomeVisibleSelected;
+  }, [hasSomeVisibleSelected]);
+
+  React.useEffect(() => {
+    if (tab !== 'inquiries') return;
+    void refreshInquiryTabCounts();
+  }, [tab, refreshInquiryTabCounts]);
 
   // IMPORTANT: load settings only once on mount.
   // Do NOT include slotEnabled in deps (would overwrite user toggles).
@@ -532,19 +820,11 @@ export default function AdsManager() {
           type="button"
           onClick={() => setTab('inquiries')}
           className={
-            'px-3 py-1.5 rounded border text-sm font-semibold inline-flex items-center gap-2 ' +
+            'px-3 py-1.5 rounded border text-sm font-semibold ' +
             (tab === 'inquiries' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
           }
         >
           Ad Inquiries
-          {inquiriesUnreadCount > 0 ? (
-            <span className={
-              'inline-flex items-center justify-center rounded-full text-xs px-2 py-0.5 ' +
-              (tab === 'inquiries' ? 'bg-white text-slate-900' : 'bg-slate-900 text-white')
-            }>
-              {inquiriesUnreadCount}
-            </span>
-          ) : null}
         </button>
       </div>
 
@@ -555,12 +835,17 @@ export default function AdsManager() {
               <div>
                 <h2 className="text-lg font-semibold">Ad Inquiries</h2>
                 <div className="text-sm text-slate-600 dark:text-slate-300">
-                  Showing inquiries (status: {inquiryStatusTab})
-                  {inquirySearch ? ` • search: "${inquirySearch}"` : ''}
+                  {activeSubtitle}
                 </div>
               </div>
               <div className="text-sm text-slate-600 dark:text-slate-300">
-                Unread: <span className="font-semibold text-slate-900 dark:text-white">{inquiriesUnreadCount}</span>
+                {activeCornerTitle}:{' '}
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {activeCornerCountLabel}
+                </span>
+                {inquiriesUnreadError ? (
+                  <span className="ml-2 text-xs text-slate-500" title={inquiriesUnreadError.message}>API error</span>
+                ) : null}
               </div>
             </div>
 
@@ -568,31 +853,34 @@ export default function AdsManager() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => { setInquiryStatusTab('new'); setInquiryPage(1); }}
+                  onClick={() => { clearInquirySelection(); setInquiryStatusTab('new'); setInquiryPage(1); }}
                   className={
                     'px-3 py-1.5 rounded border text-sm font-semibold ' +
                     (inquiryStatusTab === 'new' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
                   }
+                  disabled={bulkBusy}
                 >
                   New
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setInquiryStatusTab('read'); setInquiryPage(1); }}
+                  onClick={() => { clearInquirySelection(); setInquiryStatusTab('read'); setInquiryPage(1); }}
                   className={
                     'px-3 py-1.5 rounded border text-sm font-semibold ' +
                     (inquiryStatusTab === 'read' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
                   }
+                  disabled={bulkBusy}
                 >
                   Read
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setInquiryStatusTab('deleted'); setInquiryPage(1); }}
+                  onClick={() => { clearInquirySelection(); setInquiryStatusTab('deleted'); setInquiryPage(1); }}
                   className={
                     'px-3 py-1.5 rounded border text-sm font-semibold ' +
                     (inquiryStatusTab === 'deleted' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
                   }
+                  disabled={bulkBusy}
                 >
                   Deleted
                 </button>
@@ -604,12 +892,14 @@ export default function AdsManager() {
                   onChange={(e) => setInquirySearchInput(e.target.value)}
                   placeholder="Search…"
                   className="border rounded px-3 py-1.5 text-sm bg-white dark:bg-slate-950"
+                  disabled={bulkBusy}
                 />
                 {inquirySearchInput ? (
                   <button
                     type="button"
                     className="px-3 py-1.5 rounded border text-sm"
-                    onClick={() => setInquirySearchInput('')}
+                    onClick={() => { clearInquirySelection(); setInquirySearchInput(''); }}
+                    disabled={bulkBusy}
                   >
                     Clear
                   </button>
@@ -618,10 +908,96 @@ export default function AdsManager() {
             </div>
           </div>
 
+          {selectedCount > 0 ? (
+            <div className="border rounded p-3 bg-slate-50 dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {selectedCount} selected
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {inquiryStatusTab === 'new' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border text-sm"
+                      disabled={bulkBusy}
+                      onClick={() => void applyBulkInquiryAction('mark-read', selectedVisibleInquiryIds)}
+                    >
+                      {bulkAction === 'mark-read' ? 'Working…' : 'Mark Selected Read'}
+                    </button>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border text-sm text-red-700 border-red-300 hover:bg-red-50"
+                      disabled={bulkBusy}
+                      onClick={() => void applyBulkInquiryAction('move-to-trash', selectedVisibleInquiryIds)}
+                    >
+                      {bulkAction === 'move-to-trash' ? 'Working…' : 'Move Selected to Trash'}
+                    </button>
+                  </>
+                ) : null}
+
+                {inquiryStatusTab === 'read' ? (
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded border text-sm text-red-700 border-red-300 hover:bg-red-50"
+                    disabled={bulkBusy}
+                    onClick={() => void applyBulkInquiryAction('move-to-trash', selectedVisibleInquiryIds)}
+                  >
+                    {bulkAction === 'move-to-trash' ? 'Working…' : 'Move Selected to Trash'}
+                  </button>
+                ) : null}
+
+                {inquiryStatusTab === 'deleted' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border text-sm"
+                      disabled={bulkBusy}
+                      onClick={() => void applyBulkInquiryAction('restore', selectedVisibleInquiryIds)}
+                    >
+                      {bulkAction === 'restore' ? 'Working…' : 'Restore Selected'}
+                    </button>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border text-sm text-red-700 border-red-300 hover:bg-red-50"
+                      disabled={bulkBusy}
+                      onClick={() => setConfirmBulkPermanentDelete(true)}
+                    >
+                      Delete Selected Permanently
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {inquiriesError ? (
+            <div className="border rounded p-3 bg-rose-50 text-rose-900 border-rose-200">
+              <div className="text-sm font-semibold">
+                {inquiriesError.kind === 'offline'
+                  ? 'Backend unreachable'
+                  : (inquiriesError.kind === 'db-unavailable' ? 'Database unavailable' : 'Failed to load inquiries')}
+              </div>
+              <div className="text-xs mt-1">
+                {inquiriesError.status ? `HTTP ${inquiriesError.status}: ` : ''}{inquiriesError.message}
+                {inquiriesError.url ? ` • ${inquiriesError.url}` : ''}
+              </div>
+            </div>
+          ) : null}
+
           <div className="overflow-auto border rounded">
             <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-slate-100 dark:bg-slate-900">
                 <tr>
+                  <th className="text-left p-2 w-10">
+                    <input
+                      ref={selectAllVisibleRef}
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      disabled={bulkBusy || visibleInquiryIds.length === 0}
+                      onChange={() => toggleSelectAllVisible()}
+                      aria-label="Select all visible inquiries"
+                    />
+                  </th>
                   <th className="text-left p-2">Name</th>
                   <th className="text-left p-2">Email</th>
                   <th className="text-left p-2">Message</th>
@@ -633,12 +1009,21 @@ export default function AdsManager() {
               <tbody>
                 {inquiriesLoading ? (
                   <tr>
-                    <td className="p-3 text-slate-500" colSpan={6}>Loading…</td>
+                    <td className="p-3 text-slate-500" colSpan={7}>Loading…</td>
+                  </tr>
+                ) : inquiriesError ? (
+                  <tr>
+                    <td className="p-3 text-rose-700" colSpan={7}>
+                      {inquiriesError.kind === 'offline'
+                        ? 'Backend unreachable. '
+                        : (inquiriesError.kind === 'db-unavailable' ? 'Database unavailable. ' : '')}
+                      {inquiriesError.status ? `HTTP ${inquiriesError.status}: ` : ''}{inquiriesError.message}
+                    </td>
                   </tr>
                 ) : inquiries.length === 0 ? (
                   <tr>
-                    <td className="p-3 text-slate-500" colSpan={6}>
-                      {inquiryStatusTab === 'new' ? 'No new inquiries.' : (inquiryStatusTab === 'read' ? 'No read inquiries.' : 'No deleted inquiries.')}
+                    <td className="p-3 text-slate-500" colSpan={7}>
+                      {emptyInquiriesText}
                     </td>
                   </tr>
                 ) : (
@@ -650,103 +1035,155 @@ export default function AdsManager() {
                     const canRestore = isDeleted || inquiryStatusTab === 'deleted';
                     return (
                       <tr key={inq.id} className="border-t">
+                        <td className="p-2 align-top">
+                          <input
+                            type="checkbox"
+                            checked={selectedInquiryIds.includes(inq.id)}
+                            disabled={bulkBusy}
+                            onChange={() => toggleInquirySelection(inq.id)}
+                            aria-label={`Select inquiry ${inq.name || inq.id}`}
+                          />
+                        </td>
                         <td className="p-2">{inq.name || '-'}</td>
-                        <td className="p-2">{inq.email || '-'}</td>
+                        <td className="p-2">
+                          {inq.email ? (
+                            canEmailFromCurrentTab ? (
+                              <a
+                                className="text-blue-600 hover:underline"
+                                href={mailtoHref(inq.email)}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {inq.email}
+                              </a>
+                            ) : (
+                              <span>{inq.email}</span>
+                            )
+                          ) : '-'}
+                        </td>
                         <td className="p-2" title={inq.message || ''}>{messagePreview(inq.message || '') || '-'}</td>
                         <td className="p-2 text-xs text-slate-600 dark:text-slate-300">{safeDateLabel(inq.createdAt)}</td>
                         <td className="p-2">{inq.status || 'new'}</td>
                         <td className="p-2">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="px-2 py-1 rounded border text-xs"
-                              disabled={busy}
-                              onClick={() => setInquiryView(inq)}
-                            >
-                              View
-                            </button>
-
-                            <button
-                              type="button"
-                              className="px-2 py-1 rounded border text-xs"
-                              disabled={busy || isRead || isDeleted}
-                              onClick={async () => {
-                                setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
-                                try {
-                                  await markAdInquiryRead(inq.id);
-                                  if (inquiryStatusTab === 'new') {
-                                    setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
-                                  }
-                                  await fetchUnreadCount();
-                                } catch (err: any) {
-                                  toast.error(err?.message || 'Failed to mark read');
-                                } finally {
-                                  setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
-                                }
-                              }}
-                            >
-                              {busy ? 'Working…' : 'Mark Read'}
-                            </button>
-
-                            <button
-                              type="button"
-                              className="px-2 py-1 rounded border text-xs text-red-700 border-red-300 hover:bg-red-50"
-                              disabled={busy || isDeleted}
-                              onClick={async () => {
-                                setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
-                                try {
-                                  await deleteAdInquiry(inq.id);
-                                  // Remove from current list; caller can switch to Deleted tab to see it.
-                                  setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
-                                  await fetchUnreadCount();
-                                } catch (err: any) {
-                                  toast.error(err?.message || 'Failed to delete inquiry');
-                                } finally {
-                                  setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
-                                }
-                              }}
-                            >
-                              {busy ? 'Working…' : 'Delete'}
-                            </button>
-
-                            {canRestore ? (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
                                 className="px-2 py-1 rounded border text-xs"
-                                disabled={busy || !canRestore}
-                                onClick={async () => {
-                                  setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
-                                  try {
-                                    await restoreAdInquiry(inq.id);
-                                    setInquiries((prev) => prev.filter((x) => x.id !== inq.id));
-                                    await fetchUnreadCount();
-                                  } catch (err: any) {
-                                    toast.error(err?.message || 'Failed to restore inquiry');
-                                  } finally {
-                                    setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
-                                  }
-                                }}
+                                disabled={busy || bulkBusy}
+                                onClick={() => setInquiryView(inq)}
                               >
-                                {busy ? 'Working…' : 'Restore'}
+                                View
                               </button>
-                            ) : null}
 
-                            {inq.email ? (
-                              <a
-                                className="px-2 py-1 rounded border text-xs"
-                                href={`mailto:${String(inq.email).trim()}`}
-                                onClick={(e) => {
-                                  // allow navigation; keep it consistent with button UX
-                                  e.stopPropagation();
-                                }}
-                              >
-                                Mailto
-                              </a>
-                            ) : (
-                              <button type="button" className="px-2 py-1 rounded border text-xs" disabled>
-                                Mailto
-                              </button>
-                            )}
+                              {inquiryStatusTab === 'new' ? (
+                                <button
+                                  type="button"
+                                  className="px-2 py-1 rounded border text-xs"
+                                  disabled={busy || bulkBusy || isRead || isDeleted}
+                                  onClick={async () => {
+                                    setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                    try {
+                                      await markAdInquiryRead(inq.id);
+                                      setSelectedInquiryIds((prev) => prev.filter((id) => id !== inq.id));
+                                      await refreshInquiryDataAfterBulk(1);
+                                    } catch (err: any) {
+                                      toast.error(err?.message || 'Failed to mark read');
+                                    } finally {
+                                      setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                    }
+                                  }}
+                                >
+                                  {busy ? 'Working…' : 'Mark Read'}
+                                </button>
+                              ) : null}
+
+                              {inquiryStatusTab !== 'deleted' ? (
+                                inq.email ? (
+                                  <a
+                                    className="px-2 py-1 rounded border text-xs"
+                                    href={mailtoHref(inq.email)}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Email
+                                  </a>
+                                ) : (
+                                  <button type="button" className="px-2 py-1 rounded border text-xs" disabled>
+                                    Email
+                                  </button>
+                                )
+                              ) : null}
+
+                              {canRestore ? (
+                                <button
+                                  type="button"
+                                  className="px-2 py-1 rounded border text-xs"
+                                  disabled={busy || bulkBusy || !canRestore}
+                                  onClick={async () => {
+                                    setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                    try {
+                                      await restoreAdInquiry(inq.id);
+                                      setSelectedInquiryIds((prev) => prev.filter((id) => id !== inq.id));
+                                      await refreshInquiryDataAfterBulk(1);
+                                    } catch (err: any) {
+                                      toast.error(err?.message || 'Failed to restore inquiry');
+                                    } finally {
+                                      setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                    }
+                                  }}
+                                >
+                                  {busy ? 'Working…' : 'Restore'}
+                                </button>
+                              ) : null}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 border-l border-slate-200 dark:border-slate-700 pl-3">
+                              {inquiryStatusTab !== 'deleted' ? (
+                                <button
+                                  type="button"
+                                  className="px-2 py-1 rounded border text-xs text-red-700 border-red-300 hover:bg-red-50"
+                                  disabled={busy || bulkBusy || isDeleted}
+                                  onClick={async () => {
+                                    setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                    try {
+                                      await moveAdInquiryToTrash(inq.id);
+                                      setSelectedInquiryIds((prev) => prev.filter((id) => id !== inq.id));
+                                      await refreshInquiryDataAfterBulk(1);
+                                    } catch (err: any) {
+                                      toast.error(err?.message || 'Failed to move inquiry to trash');
+                                    } finally {
+                                      setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                    }
+                                  }}
+                                >
+                                  {busy ? 'Working…' : 'Move to Trash'}
+                                </button>
+                              ) : null}
+
+                              {inquiryStatusTab === 'deleted' ? (
+                                <button
+                                  type="button"
+                                  className="px-2 py-1 rounded border text-xs text-red-700 border-red-300 hover:bg-red-50"
+                                  disabled={busy || bulkBusy}
+                                  onClick={async () => {
+                                    const ok = window.confirm('Permanently delete this inquiry? This cannot be undone.');
+                                    if (!ok) return;
+                                    setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
+                                    try {
+                                      await permanentlyDeleteAdInquiry(inq.id);
+                                      setSelectedInquiryIds((prev) => prev.filter((id) => id !== inq.id));
+                                      await refreshInquiryDataAfterBulk(1);
+                                      toast.success('Inquiry permanently deleted');
+                                    } catch (err: any) {
+                                      toast.error(err?.message || 'Failed to permanently delete inquiry');
+                                    } finally {
+                                      setInquiryBusy((m) => ({ ...m, [inq.id]: false }));
+                                    }
+                                  }}
+                                >
+                                  {busy ? 'Working…' : 'Delete Permanently'}
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -783,6 +1220,42 @@ export default function AdsManager() {
         </div>
       ) : null}
 
+      {tab === 'inquiries' && confirmBulkPermanentDelete ? (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded border shadow">
+            <div className="p-4 border-b">
+              <h3 className="text-lg font-semibold">Delete selected inquiries permanently?</h3>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-slate-700 dark:text-slate-300">
+                This will remove the selected inquiries forever and cannot be undone.
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded border"
+                  disabled={bulkBusy}
+                  onClick={() => setConfirmBulkPermanentDelete(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded border bg-red-600 text-white border-red-600 disabled:opacity-60"
+                  disabled={bulkBusy}
+                  onClick={async () => {
+                    setConfirmBulkPermanentDelete(false);
+                    await applyBulkInquiryAction('delete-permanently', selectedVisibleInquiryIds);
+                  }}
+                >
+                  {bulkAction === 'delete-permanently' ? 'Deleting…' : 'Delete Permanently'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Inquiry View Modal */}
       {tab === 'inquiries' && inquiryView ? (
         <div
@@ -811,9 +1284,13 @@ export default function AdsManager() {
                 <div>
                   <div className="text-xs text-slate-500">Email</div>
                   {inquiryView.email ? (
-                    <a className="font-medium underline" href={`mailto:${String(inquiryView.email).trim()}`}>
-                      {inquiryView.email}
-                    </a>
+                    canEmailFromCurrentTab ? (
+                      <a className="font-medium underline text-blue-600" href={mailtoHref(inquiryView.email)}>
+                        {inquiryView.email}
+                      </a>
+                    ) : (
+                      <div className="font-medium">{inquiryView.email}</div>
+                    )
                   ) : (
                     <div className="font-medium">-</div>
                   )}
@@ -833,6 +1310,17 @@ export default function AdsManager() {
                 <div className="mt-1 whitespace-pre-wrap text-sm border rounded p-3 bg-slate-50 dark:bg-slate-950">
                   {inquiryView.message || '-'}
                 </div>
+              </div>
+
+              <div className="flex items-center justify-end pt-2 border-t">
+                {canEmailFromCurrentTab && inquiryView.email ? (
+                  <a
+                    className="px-3 py-1.5 rounded border text-blue-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    href={mailtoHref(inquiryView.email)}
+                  >
+                    Email Advertiser
+                  </a>
+                ) : null}
               </div>
             </div>
           </div>
