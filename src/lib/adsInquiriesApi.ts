@@ -10,6 +10,11 @@ export type AdInquiry = {
   message: string;
   createdAt: string;
   status: string;
+  hasReply?: boolean;
+  lastRepliedAt?: string;
+  lastRepliedBy?: string;
+  replyCount?: number;
+  lastReplySubject?: string;
 };
 
 export type AdInquiryStatus = 'new' | 'read' | 'deleted';
@@ -25,6 +30,11 @@ function asString(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
 }
 
+function asOptionalNumber(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function normalizeInquiry(raw: any): AdInquiry {
   const id = asString(raw?._id ?? raw?.id);
   const name = asString(raw?.name ?? raw?.fullName ?? raw?.full_name);
@@ -32,7 +42,13 @@ function normalizeInquiry(raw: any): AdInquiry {
   const message = asString(raw?.message ?? raw?.body ?? raw?.text);
   const createdAt = asString(raw?.createdAt ?? raw?.created_at ?? raw?.submittedAt ?? raw?.submitted_at);
   const status = asString(raw?.status ?? raw?.state ?? 'new');
-  return { id, name, email, message, createdAt, status };
+  const lastRepliedAt = asString(raw?.lastRepliedAt ?? raw?.last_replied_at);
+  const lastRepliedBy = asString(raw?.lastRepliedBy ?? raw?.last_replied_by ?? raw?.repliedBy ?? raw?.replyBy);
+  const replyCount = asOptionalNumber(raw?.replyCount ?? raw?.reply_count ?? raw?.repliesCount ?? raw?.replies_count);
+  const lastReplySubject = asString(raw?.lastReplySubject ?? raw?.last_reply_subject ?? raw?.replySubject ?? raw?.last_subject);
+  const hasReplyFallback = Boolean(lastRepliedAt || lastReplySubject || ((replyCount ?? 0) > 0));
+  const hasReply = Boolean(raw?.hasReply ?? raw?.has_reply ?? hasReplyFallback);
+  return { id, name, email, message, createdAt, status, hasReply, lastRepliedAt, lastRepliedBy, replyCount, lastReplySubject };
 }
 
 function inquiryUrl(path = ''): string {

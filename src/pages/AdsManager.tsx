@@ -17,6 +17,7 @@ import {
   moveAdInquiriesToTrash,
   permanentlyDeleteAdInquiries,
   permanentlyDeleteAdInquiry,
+  replyToAdInquiry,
   restoreAdInquiry,
   restoreAdInquiries,
   messagePreview,
@@ -83,6 +84,23 @@ function fromDatetimeLocalValue(value: string): string | null {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
+}
+
+function inquiryReplySubject(inquiry: Pick<AdInquiry, 'name'>): string {
+  const name = String(inquiry?.name || '').trim();
+  return name ? `Re: NewsPulse ad inquiry from ${name}` : 'Re: NewsPulse ad inquiry';
+}
+
+function inquiryReplyDraftMessage(inquiry: Pick<AdInquiry, 'name'>): string {
+  const name = String(inquiry?.name || '').trim();
+  return `${name ? `Hello ${name},` : 'Hello,'}\n\n`;
+}
+
+type InquiryReplyMeta = Pick<AdInquiry, 'hasReply' | 'lastRepliedAt' | 'lastRepliedBy' | 'replyCount' | 'lastReplySubject'>;
+
+function applyReplyMeta(inquiry: AdInquiry, meta?: InquiryReplyMeta): AdInquiry {
+  if (!meta) return inquiry;
+  return { ...inquiry, ...meta };
 }
 
 type InquiryApiErrorState = {
@@ -221,8 +239,16 @@ export default function AdsManager() {
   const [confirmBulkPermanentDelete, setConfirmBulkPermanentDelete] = React.useState(false);
   const lastUnreadRef = React.useRef<number | null>(null);
   const selectAllVisibleRef = React.useRef<HTMLInputElement | null>(null);
+  const [inquiryReplyOverrides, setInquiryReplyOverrides] = React.useState<Record<string, InquiryReplyMeta>>({});
+  const inquiryReplyOverridesRef = React.useRef<Record<string, InquiryReplyMeta>>({});
 
   const [inquiryView, setInquiryView] = React.useState<AdInquiry | null>(null);
+  const [inquiryReply, setInquiryReply] = React.useState<{
+    inquiry: AdInquiry;
+    subject: string;
+    message: string;
+  } | null>(null);
+  const [inquiryReplySending, setInquiryReplySending] = React.useState(false);
 
   const hasNextInquiryPage = inquiries.length === inquiryLimit;
   const hasPrevInquiryPage = inquiryPage > 1;
@@ -257,6 +283,11 @@ export default function AdsManager() {
   }, [inquiryPage, inquirySearch, inquiryStatusTab, tabLabelMap]);
 
   const canEmailFromCurrentTab = inquiryStatusTab !== 'deleted';
+
+  React.useEffect(() => {
+    inquiryReplyOverridesRef.current = inquiryReplyOverrides;
+  }, [inquiryReplyOverrides]);
+
   const visibleInquiryIds = React.useMemo(
     () => inquiries.map((inq) => String(inq.id || '').trim()).filter(Boolean),
     [inquiries]
@@ -273,6 +304,84 @@ export default function AdsManager() {
   const mailtoHref = React.useCallback((email?: string | null) => {
     const value = String(email || '').trim();
     return value ? `mailto:${value}` : '';
+  }, []);
+
+  const openInquiryReplyComposer = React.useCallback((inquiry: AdInquiry) => {
+    setInquiryReply({
+      inquiry,
+      subject: inquiryReplySubject(inquiry),
+      message: inquiryReplyDraftMessage(inquiry),
+    });
+  }, []);
+
+  const closeInquiryReplyComposer = React.useCallback(() => {
+    if (inquiryReplySending) return;
+    setInquiryReply(null);
+  }, [inquiryReplySending]);
+
+  const closeInquiryView = React.useCallback(() => {
+    setInquiryReply(null);
+    setInquiryView(null);
+  }, []);
+
+  const sendInquiryReply = React.useCallback(async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    if (!inquiryReply || inquiryReplySending) return;
+
+    const subject = inquiryReply.subject.trim();
+    const message = inquiryReply.message.trim();
+
+    if (!subject) {
+      toast.error('Subject is required');
+      return;
+    }
+
+    if (!message) {
+      toast.error('Message is required');
+      return;
+    }
+
+    setInquiryReplySending(true);
+    try {
+      await replyToAdInquiry(inquiryReply.inquiry.id, { subject, message });
+      const nextReplyMeta: InquiryReplyMeta = {
+        hasReply: true,
+        lastRepliedAt: new Date().toISOString(),
+        lastRepliedBy: inquiryReply.inquiry.lastRepliedBy || 'Admin',
+        replyCount: (typeof inquiryReply.inquiry.replyCount === 'number' ? inquiryReply.inquiry.replyCount : 0) + 1,
+        lastReplySubject: subject,
+      };
+
+      setInquiryReplyOverrides((prev) => ({
+        ...prev,
+        [inquiryReply.inquiry.id]: {
+          ...prev[inquiryReply.inquiry.id],
+          ...nextReplyMeta,
+        },
+      }));
+      setInquiries((prev) => prev.map((item) => (
+        item.id === inquiryReply.inquiry.id ? applyReplyMeta(item, nextReplyMeta) : item
+      )));
+      setInquiryView((prev) => (
+        prev && prev.id === inquiryReply.inquiry.id ? applyReplyMeta(prev, nextReplyMeta) : prev
+      ));
+      toast.success('Reply sent to advertiser');
+      setInquiryReply(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send reply');
+    } finally {
+      setInquiryReplySending(false);
+    }
+  }, [inquiryReply, inquiryReplySending]);
+
+  const removeInquiriesFromState = React.useCallback((ids: string[]) => {
+    const idSet = new Set(ids.map((id) => String(id || '').trim()).filter(Boolean));
+    if (!idSet.size) return;
+
+    setInquiries((prev) => prev.filter((item) => !idSet.has(String(item.id || '').trim())));
+    setSelectedInquiryIds((prev) => prev.filter((id) => !idSet.has(String(id || '').trim())));
+    setInquiryView((prev) => (prev && idSet.has(String(prev.id || '').trim()) ? null : prev));
+    setInquiryReply((prev) => (prev && idSet.has(String(prev.inquiry.id || '').trim()) ? null : prev));
   }, []);
 
   const clearInquirySelection = React.useCallback(() => {
@@ -430,7 +539,7 @@ export default function AdsManager() {
         signal: opts.signal,
       });
       const result = list as AdInquiryListResult;
-      setInquiries(result.items);
+      setInquiries(result.items.map((item) => applyReplyMeta(item, inquiryReplyOverridesRef.current[item.id])));
       setInquiriesTotal(typeof result.total === 'number' ? result.total : result.items.length);
       setInquiryTabCounts((prev) => ({
         ...prev,
@@ -518,6 +627,7 @@ export default function AdsManager() {
     try {
       if (action === 'delete-permanently') {
         await permanentlyDeleteAdInquiries(safeIds);
+        removeInquiriesFromState(safeIds);
       }
       if (action === 'restore') {
         await restoreAdInquiries(safeIds);
@@ -549,7 +659,7 @@ export default function AdsManager() {
     } finally {
       setBulkAction(null);
     }
-  }, [clearInquirySelection, refreshInquiryDataAfterBulk]);
+  }, [clearInquirySelection, refreshInquiryDataAfterBulk, removeInquiriesFromState]);
 
   const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
     const res = await adminApi.get('/admin/ad-settings');
@@ -1033,6 +1143,7 @@ export default function AdsManager() {
                     const isDeleted = statusLower === 'deleted';
                     const isRead = statusLower === 'read';
                     const canRestore = isDeleted || inquiryStatusTab === 'deleted';
+                    const isReplied = Boolean(inq.hasReply);
                     return (
                       <tr key={inq.id} className="border-t">
                         <td className="p-2 align-top">
@@ -1062,7 +1173,21 @@ export default function AdsManager() {
                         </td>
                         <td className="p-2" title={inq.message || ''}>{messagePreview(inq.message || '') || '-'}</td>
                         <td className="p-2 text-xs text-slate-600 dark:text-slate-300">{safeDateLabel(inq.createdAt)}</td>
-                        <td className="p-2">{inq.status || 'new'}</td>
+                        <td className="p-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!isDeleted ? <span>{inq.status || 'new'}</span> : null}
+                            {isDeleted ? (
+                              <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                                Deleted
+                              </span>
+                            ) : null}
+                            {isReplied ? (
+                              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                Replied
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="p-2">
                           <div className="flex flex-wrap items-center gap-3">
                             <div className="flex flex-wrap gap-2">
@@ -1099,16 +1224,17 @@ export default function AdsManager() {
 
                               {inquiryStatusTab !== 'deleted' ? (
                                 inq.email ? (
-                                  <a
+                                  <button
+                                    type="button"
                                     className="px-2 py-1 rounded border text-xs"
-                                    href={mailtoHref(inq.email)}
-                                    onClick={(e) => e.stopPropagation()}
+                                    disabled={busy || bulkBusy}
+                                    onClick={() => openInquiryReplyComposer(inq)}
                                   >
-                                    Email
-                                  </a>
+                                    Reply
+                                  </button>
                                 ) : (
                                   <button type="button" className="px-2 py-1 rounded border text-xs" disabled>
-                                    Email
+                                    Reply
                                   </button>
                                 )
                               ) : null}
@@ -1170,9 +1296,9 @@ export default function AdsManager() {
                                     setInquiryBusy((m) => ({ ...m, [inq.id]: true }));
                                     try {
                                       await permanentlyDeleteAdInquiry(inq.id);
-                                      setSelectedInquiryIds((prev) => prev.filter((id) => id !== inq.id));
+                                      removeInquiriesFromState([inq.id]);
                                       await refreshInquiryDataAfterBulk(1);
-                                      toast.success('Inquiry permanently deleted');
+                                      toast.success('Inquiry deleted permanently');
                                     } catch (err: any) {
                                       toast.error(err?.message || 'Failed to permanently delete inquiry');
                                     } finally {
@@ -1268,7 +1394,7 @@ export default function AdsManager() {
               <h3 className="text-lg font-semibold">Ad Inquiry</h3>
               <button
                 type="button"
-                onClick={() => setInquiryView(null)}
+                onClick={closeInquiryView}
                 className="px-2 py-1 rounded border"
               >
                 Close
@@ -1283,17 +1409,7 @@ export default function AdsManager() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Email</div>
-                  {inquiryView.email ? (
-                    canEmailFromCurrentTab ? (
-                      <a className="font-medium underline text-blue-600" href={mailtoHref(inquiryView.email)}>
-                        {inquiryView.email}
-                      </a>
-                    ) : (
-                      <div className="font-medium">{inquiryView.email}</div>
-                    )
-                  ) : (
-                    <div className="font-medium">-</div>
-                  )}
+                  <div className="font-medium">{inquiryView.email || '-'}</div>
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Created</div>
@@ -1312,17 +1428,130 @@ export default function AdsManager() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end pt-2 border-t">
-                {canEmailFromCurrentTab && inquiryView.email ? (
-                  <a
-                    className="px-3 py-1.5 rounded border text-blue-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    href={mailtoHref(inquiryView.email)}
-                  >
-                    Email Advertiser
-                  </a>
-                ) : null}
+              {inquiryView.hasReply ? (
+                <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950">
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      Replied
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-500">Last replied at</div>
+                      <div className="font-medium">{inquiryView.lastRepliedAt ? safeDateLabel(inquiryView.lastRepliedAt) : '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Last replied by</div>
+                      <div className="font-medium">{inquiryView.lastRepliedBy || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Reply count</div>
+                      <div className="font-medium">{typeof inquiryView.replyCount === 'number' ? inquiryView.replyCount : '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Last reply subject</div>
+                      <div className="font-medium">{inquiryView.lastReplySubject || '-'}</div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t">
+                <div className="text-xs text-slate-500">
+                  Reply here to send a response from inside the admin panel.
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canEmailFromCurrentTab && inquiryView.email ? (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border bg-slate-900 text-white border-slate-900 disabled:opacity-60"
+                      onClick={() => openInquiryReplyComposer(inquiryView)}
+                    >
+                      Reply
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'inquiries' && inquiryReply ? (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded border shadow">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="text-lg font-semibold">Reply to Advertiser</h3>
+                <div className="text-xs text-slate-500">Compose and send your reply from inside the admin panel.</div>
+              </div>
+              <button
+                type="button"
+                onClick={closeInquiryReplyComposer}
+                disabled={inquiryReplySending}
+                className="px-2 py-1 rounded border disabled:opacity-60"
+              >
+                Close
+              </button>
+            </div>
+
+            <form className="p-4 space-y-4" onSubmit={sendInquiryReply}>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">To</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={inquiryReply.inquiry.email || ''}
+                  className="w-full border rounded px-3 py-2 text-sm bg-slate-50 dark:bg-slate-950"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Subject</label>
+                <input
+                  type="text"
+                  value={inquiryReply.subject}
+                  onChange={(e) => setInquiryReply((prev) => (prev ? { ...prev, subject: e.target.value } : prev))}
+                  disabled={inquiryReplySending}
+                  className="w-full border rounded px-3 py-2 text-sm bg-white dark:bg-slate-950"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Message</label>
+                <textarea
+                  rows={8}
+                  value={inquiryReply.message}
+                  onChange={(e) => setInquiryReply((prev) => (prev ? { ...prev, message: e.target.value } : prev))}
+                  disabled={inquiryReplySending}
+                  autoFocus
+                  placeholder="Write your reply to the advertiser"
+                  className="w-full border rounded px-3 py-2 text-sm bg-white dark:bg-slate-950"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded border"
+                  disabled={inquiryReplySending}
+                  onClick={closeInquiryReplyComposer}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded border bg-slate-900 text-white border-slate-900 disabled:opacity-60"
+                  disabled={inquiryReplySending}
+                >
+                  {inquiryReplySending ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}
