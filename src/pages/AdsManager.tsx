@@ -40,11 +40,13 @@ type SponsorAd = {
   createdAt?: string | null;
 };
 
-const SLOT_OPTIONS: AdSlot[] = [
+const SLOT_OPTIONS = [
   'HOME_728x90',
   'HOME_RIGHT_300x250',
   'ARTICLE_INLINE',
-];
+] as const satisfies readonly AdSlot[];
+
+type SlotOption = typeof SLOT_OPTIONS[number];
 
 const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
@@ -52,6 +54,20 @@ const SLOT_LABELS: Record<string, string> = {
   ARTICLE_INLINE: 'Article Inline',
   HOME_RIGHT_RAIL: 'Home Right Rail (legacy)',
 };
+
+function canonicalSlot(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const upper = raw.toUpperCase();
+  // Preserve exact backend enum casing (note the lowercase 'x').
+  if (upper === 'HOME_728X90') return 'HOME_728x90';
+  if (upper === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
+  if (upper === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
+  if (upper === 'ARTICLE_INLINE') return 'ARTICLE_INLINE';
+
+  return raw;
+}
 
 function slotLabel(slot: string): string {
   return SLOT_LABELS[slot] || slot;
@@ -198,7 +214,7 @@ const emptyForm = (): AdFormState => ({
 function normalizeAd(raw: any): SponsorAd {
   return {
     id: String(raw?.id ?? raw?._id ?? ''),
-    slot: String(raw?.slot ?? ''),
+    slot: canonicalSlot(raw?.slot ?? ''),
     title: raw?.title ?? null,
     imageUrl: String(raw?.imageUrl ?? raw?.image_url ?? ''),
     targetUrl: (raw?.targetUrl ?? raw?.target_url ?? null),
@@ -210,6 +226,28 @@ function normalizeAd(raw: any): SponsorAd {
     updatedAt: raw?.updatedAt ?? raw?.updated ?? null,
     createdAt: raw?.createdAt ?? null,
   };
+}
+
+function extractAdsList(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+
+  const direct = payload?.ads;
+  if (Array.isArray(direct)) return direct;
+
+  const data = payload?.data;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.ads)) return data.ads;
+  if (Array.isArray(data?.items)) return data.items;
+
+  const result = payload?.result;
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.ads)) return result.ads;
+  if (Array.isArray(result?.items)) return result.items;
+
+  const items = payload?.items;
+  if (Array.isArray(items)) return items;
+
+  return [];
 }
 
 export default function AdsManager() {
@@ -439,19 +477,19 @@ export default function AdsManager() {
     }
   }, []);
 
-  type PlacementKey = 'HOME_728x90' | 'HOME_RIGHT_300x250';
+  type PlacementKey = SlotOption;
   type PlacementState = Record<PlacementKey, boolean>;
 
-  const [slotEnabled, setSlotEnabled] = React.useState<PlacementState>({
-    HOME_728x90: false,
-    HOME_RIGHT_300x250: false,
-  });
+  const emptyPlacementState = React.useCallback((): PlacementState => {
+    const next = {} as PlacementState;
+    for (const key of SLOT_OPTIONS) next[key] = false;
+    return next;
+  }, []);
+
+  const [slotEnabled, setSlotEnabled] = React.useState<PlacementState>(() => emptyPlacementState());
 
   const [settingsLoading, setSettingsLoading] = React.useState(true);
-  const [placementSaving, setPlacementSaving] = React.useState<Record<PlacementKey, boolean>>({
-    HOME_728x90: false,
-    HOME_RIGHT_300x250: false,
-  });
+  const [placementSaving, setPlacementSaving] = React.useState<Record<PlacementKey, boolean>>(() => emptyPlacementState());
 
   const [slotFilter, setSlotFilter] = React.useState<AdSlot | 'ALL'>('ALL');
   const [activeOnly, setActiveOnly] = React.useState(false);
@@ -462,6 +500,7 @@ export default function AdsManager() {
   const [form, setForm] = React.useState<AdFormState>(emptyForm);
 
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
+  const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
 
   const openCreate = () => {
     setEditingId(null);
@@ -491,25 +530,25 @@ export default function AdsManager() {
     setModalOpen(false);
   };
 
-  const fetchAds = React.useCallback(async () => {
+  const fetchAds = React.useCallback(async (opts?: {
+    slot?: AdSlot | 'ALL';
+    activeOnly?: boolean;
+  }) => {
     setLoading(true);
     try {
       const params: any = {};
-      if (slotFilter !== 'ALL') params.slot = slotFilter;
-      if (activeOnly) params.active = 'true';
+      const nextSlot = opts?.slot ?? slotFilter;
+      const nextActiveOnly = typeof opts?.activeOnly === 'boolean' ? opts.activeOnly : activeOnly;
+
+      if (nextSlot !== 'ALL') params.slot = nextSlot;
+      if (nextActiveOnly) params.active = 'true';
 
       // Backend contract: GET /api/admin/ads
       // Use adminApi so proxy/direct mode is handled and auth headers are attached.
       const res = await adminApi.get('/admin/ads', { params });
       const payload = res?.data;
 
-      const list = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.ads)
-          ? payload.ads
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
+      const list = extractAdsList(payload);
 
       const normalized: SponsorAd[] = (list as any[])
         .map(normalizeAd)
@@ -665,26 +704,28 @@ export default function AdsManager() {
     const res = await adminApi.get('/admin/ad-settings');
     const raw = res?.data;
     const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || {}) as any;
-    return {
-      HOME_728x90: parseBool(enabledRaw.HOME_728x90),
-      HOME_RIGHT_300x250: parseBool(enabledRaw.HOME_RIGHT_300x250),
-    };
-  }, []);
+    const next = emptyPlacementState();
+    for (const key of SLOT_OPTIONS) {
+      next[key] = parseBool(enabledRaw[key]);
+    }
+    return next;
+  }, [emptyPlacementState]);
 
   const updateAdSettings = React.useCallback(async (next: PlacementState): Promise<PlacementState> => {
     const res = await adminApi.put('/admin/ad-settings', { slotEnabled: next });
     const raw = res?.data;
     const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || null) as any;
     if (!enabledRaw) return next;
-    return {
-      HOME_728x90: parseBool(enabledRaw.HOME_728x90),
-      HOME_RIGHT_300x250: parseBool(enabledRaw.HOME_RIGHT_300x250),
-    };
-  }, []);
+    const saved = emptyPlacementState();
+    for (const key of SLOT_OPTIONS) {
+      saved[key] = parseBool(enabledRaw[key]);
+    }
+    return saved;
+  }, [emptyPlacementState]);
 
   const loadSettings = React.useCallback(async () => {
     // IMPORTANT: do not overwrite local state while a save is in progress.
-    if (placementSaving.HOME_728x90 || placementSaving.HOME_RIGHT_300x250) return;
+    if (SLOT_OPTIONS.some((key) => placementSaving[key])) return;
     setSettingsLoading(true);
     try {
       setSlotEnabled(await fetchAdSettings());
@@ -693,7 +734,7 @@ export default function AdsManager() {
     } finally {
       setSettingsLoading(false);
     }
-  }, [fetchAdSettings, placementSaving.HOME_728x90, placementSaving.HOME_RIGHT_300x250]);
+  }, [fetchAdSettings, placementSaving]);
 
   React.useEffect(() => {
     void fetchAds();
@@ -812,32 +853,68 @@ export default function AdsManager() {
       return;
     }
 
+    const startAtIso = fromDatetimeLocalValue(form.startAt);
+    const endAtIso = fromDatetimeLocalValue(form.endAt);
+    if (startAtIso && endAtIso && startAtIso === endAtIso) {
+      const ok = window.confirm(
+        'Warning: Start time and end time are the same. This creates a zero-length schedule window.\n\nSave anyway?'
+      );
+      if (!ok) return;
+    }
+
     setSaving(true);
     try {
       const payload: any = {
-        slot: form.slot,
+        slot: canonicalSlot(form.slot),
         title: form.title.trim() || undefined,
         imageUrl: form.imageUrl.trim(),
         clickable: Boolean(form.clickable),
         targetUrl: form.clickable ? form.targetUrl.trim() : null,
         priority: Number.isFinite(Number(form.priority)) ? Number(form.priority) : 0,
-        startAt: fromDatetimeLocalValue(form.startAt),
-        endAt: fromDatetimeLocalValue(form.endAt),
+        startAt: startAtIso,
+        endAt: endAtIso,
         isActive: Boolean(form.isActive),
+      };
+
+      // Back-compat: some backends use `active` instead of `isActive`.
+      payload.active = payload.isActive;
+
+      const normalizeAndUpsert = (raw: any) => {
+        const next = normalizeAd(raw);
+        if (!next.id) return;
+        setAds((prev) => {
+          const without = prev.filter((a) => a.id !== next.id);
+          return [next, ...without];
+        });
+
+        // Ensure UI filters don't hide the newly created ad.
+        if (slotFilter !== 'ALL' && slotFilter !== (next.slot as any)) {
+          setSlotFilter(next.slot as any);
+        }
+        if (activeOnly && !next.isActive) {
+          setActiveOnly(false);
+        }
       };
 
       if (editingId) {
         // PUT /api/admin/ads/:id
-        await adminApi.put(`/admin/ads/${editingId}`, payload);
+        const res = await adminApi.put(`/admin/ads/${editingId}`, payload);
+        normalizeAndUpsert(res?.data?.ad ?? res?.data);
         toast.success('Ad updated');
       } else {
         // POST /api/admin/ads
-        await adminApi.post('/admin/ads', payload);
+        const res = await adminApi.post('/admin/ads', payload);
+        normalizeAndUpsert(res?.data?.ad ?? res?.data);
         toast.success('Ad created');
       }
 
       setModalOpen(false);
-      await fetchAds();
+
+      const desiredSlot = (slotFilter !== 'ALL' && slotFilter !== (payload.slot as any))
+        ? (payload.slot as any)
+        : slotFilter;
+      const desiredActiveOnly = activeOnly && Boolean(payload.isActive);
+      await fetchAds({ slot: desiredSlot as any, activeOnly: desiredActiveOnly });
     } catch (err: any) {
       toast.error(err?.response?.data?.message || err?.message || 'Save failed');
     } finally {
@@ -1604,37 +1681,26 @@ export default function AdsManager() {
         </div>
 
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium">Home Banner 728×90</div>
-              <div className="text-xs text-slate-500 font-mono">HOME_728x90</div>
-            </div>
-            <button
-              type="button"
-              disabled={settingsLoading || placementSaving.HOME_728x90}
-              onClick={() => void togglePlacement('HOME_728x90')}
-              className={`px-3 py-1 rounded text-xs border min-w-[84px] ${placementSaving.HOME_728x90 ? 'cursor-not-allowed opacity-80' : ''} ${slotEnabled.HOME_728x90 ? 'bg-green-600 text-white border-green-600' : 'bg-slate-200 text-slate-700 border-slate-300'}`}
-              title="Toggle placement"
+          {SLOT_OPTIONS.map((key) => (
+            <div
+              key={key}
+              className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3"
             >
-              {placementSaving.HOME_728x90 ? 'Saving…' : (slotEnabled.HOME_728x90 ? 'ON' : 'OFF')}
-            </button>
-          </div>
-
-          <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium">Home Right Rail 300×250</div>
-              <div className="text-xs text-slate-500 font-mono">HOME_RIGHT_300x250</div>
+              <div>
+                <div className="text-sm font-medium">{slotLabel(key)}</div>
+                <div className="text-xs text-slate-500 font-mono">{key}</div>
+              </div>
+              <button
+                type="button"
+                disabled={settingsLoading || placementSaving[key]}
+                onClick={() => void togglePlacement(key)}
+                className={`px-3 py-1 rounded text-xs border min-w-[84px] ${placementSaving[key] ? 'cursor-not-allowed opacity-80' : ''} ${slotEnabled[key] ? 'bg-green-600 text-white border-green-600' : 'bg-slate-200 text-slate-700 border-slate-300'}`}
+                title="Toggle placement"
+              >
+                {placementSaving[key] ? 'Saving…' : (slotEnabled[key] ? 'ON' : 'OFF')}
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={settingsLoading || placementSaving.HOME_RIGHT_300x250}
-              onClick={() => void togglePlacement('HOME_RIGHT_300x250')}
-              className={`px-3 py-1 rounded text-xs border min-w-[84px] ${placementSaving.HOME_RIGHT_300x250 ? 'cursor-not-allowed opacity-80' : ''} ${slotEnabled.HOME_RIGHT_300x250 ? 'bg-green-600 text-white border-green-600' : 'bg-slate-200 text-slate-700 border-slate-300'}`}
-              title="Toggle placement"
-            >
-              {placementSaving.HOME_RIGHT_300x250 ? 'Saving…' : (slotEnabled.HOME_RIGHT_300x250 ? 'ON' : 'OFF')}
-            </button>
-          </div>
+          ))}
         </div>
       </div>
 
@@ -1667,6 +1733,7 @@ export default function AdsManager() {
                 const busy = Boolean(rowBusy[ad.id]);
                 const updatedLabel = safeDateLabel(ad.updatedAt || ad.createdAt);
                 const scheduleLabel = `${safeDateLabel(ad.startAt)} → ${safeDateLabel(ad.endAt)}`;
+                const isBrokenImage = Boolean(ad.imageUrl) && Boolean(brokenImageByAdId[ad.id]);
 
                 return (
                   <tr key={ad.id} className="border-t">
@@ -1691,12 +1758,22 @@ export default function AdsManager() {
                         <div className="w-[120px] h-[40px] bg-slate-100 dark:bg-slate-900 border rounded overflow-hidden flex items-center justify-center">
                           {ad.imageUrl ? (
                             // eslint-disable-next-line @typescript-eslint/no-misused-promises
-                            <img src={ad.imageUrl} alt={ad.title || ad.slot} className="max-w-full max-h-full object-contain" />
+                            <img
+                              src={ad.imageUrl}
+                              alt={ad.title || ad.slot}
+                              className="max-w-full max-h-full object-contain"
+                              onError={() => setBrokenImageByAdId((prev) => ({ ...prev, [ad.id]: true }))}
+                              onLoad={() => setBrokenImageByAdId((prev) => (prev[ad.id] ? ({ ...prev, [ad.id]: false }) : prev))}
+                            />
                           ) : (
                             <span className="text-xs text-slate-400">No image</span>
                           )}
                         </div>
-                        <span className="text-[11px] text-slate-500">Click target</span>
+                        {isBrokenImage ? (
+                          <span className="text-[11px] text-red-700">Image URL invalid</span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500">Click target</span>
+                        )}
                       </div>
                     </td>
                     <td className="p-2">
