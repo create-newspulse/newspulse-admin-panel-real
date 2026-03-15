@@ -48,11 +48,10 @@ const PLACEMENT_SLOT_OPTIONS = [
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
 
-// Slots that can exist on ads (dropdown + filter). Includes legacy slots for visibility.
+// Slots selectable in the UI (dropdown + filter). Legacy slots are intentionally hidden.
 const SLOT_OPTIONS = [
   'HOME_728x90',
   'HOME_RIGHT_300x250',
-  'HOME_RIGHT_RAIL',
   'ARTICLE_INLINE',
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
@@ -89,6 +88,10 @@ function canonicalSlot(value: unknown): string {
 
 function slotLabel(slot: string): string {
   return SLOT_LABELS[slot] || slot;
+}
+
+function isLegacySlot(slot: string): boolean {
+  return canonicalSlot(slot) === 'HOME_RIGHT_RAIL' || slotLabel(slot).includes('(legacy)');
 }
 
 function safeDateLabel(value?: string | null): string {
@@ -2055,17 +2058,24 @@ export default function AdsManager() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Slot *</label>
-                  <select
-                    className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
-                    value={form.slot}
-                    onChange={(e) => setForm(prev => ({ ...prev, slot: e.target.value as any }))}
-                    required
-                  >
-                    <option value="">Select slot…</option>
-                    {SLOT_OPTIONS.map(s => (
-                      <option key={s} value={s}>{slotLabel(String(s))}</option>
-                    ))}
-                  </select>
+                  {editingId && isLegacySlot(form.slot) ? (
+                    <div className="w-full border rounded px-2 py-2 bg-slate-50 dark:bg-slate-950">
+                      <div className="text-sm">{slotLabel(String(form.slot))}</div>
+                      <div className="text-xs text-slate-500 font-mono">{canonicalSlot(form.slot)}</div>
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
+                      value={form.slot}
+                      onChange={(e) => setForm(prev => ({ ...prev, slot: e.target.value as any }))}
+                      required
+                    >
+                      <option value="">Select slot…</option>
+                      {SLOT_OPTIONS.map(s => (
+                        <option key={s} value={s}>{slotLabel(String(s))}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="space-y-1">
