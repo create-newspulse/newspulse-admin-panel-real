@@ -1,7 +1,7 @@
 import React from 'react';
 import toast from 'react-hot-toast';
 
-import { adminApi } from '@/lib/api';
+import { adminApi, api } from '@/lib/api';
 import {
   type AdInquiry,
   type AdInquiryListResult,
@@ -23,7 +23,7 @@ import {
   messagePreview,
 } from '@/lib/adsInquiriesApi';
 
-type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE';
+type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE' | 'ARTICLE_END';
 
 type SponsorAd = {
   id: string;
@@ -40,18 +40,30 @@ type SponsorAd = {
   createdAt?: string | null;
 };
 
-const SLOT_OPTIONS = [
+// Slots that have placement toggles in the UI.
+const PLACEMENT_SLOT_OPTIONS = [
   'HOME_728x90',
   'HOME_RIGHT_300x250',
   'ARTICLE_INLINE',
+  'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
 
-type SlotOption = typeof SLOT_OPTIONS[number];
+// Slots that can exist on ads (dropdown + filter). Includes legacy slots for visibility.
+const SLOT_OPTIONS = [
+  'HOME_728x90',
+  'HOME_RIGHT_300x250',
+  'HOME_RIGHT_RAIL',
+  'ARTICLE_INLINE',
+  'ARTICLE_END',
+] as const satisfies readonly AdSlot[];
+
+type PlacementSlotOption = typeof PLACEMENT_SLOT_OPTIONS[number];
 
 const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
   HOME_RIGHT_300x250: 'Home Right Rail 300×250',
   ARTICLE_INLINE: 'Article Inline',
+  ARTICLE_END: 'Article End',
   HOME_RIGHT_RAIL: 'Home Right Rail (legacy)',
 };
 
@@ -59,12 +71,18 @@ function canonicalSlot(value: unknown): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
 
-  const upper = raw.toUpperCase();
+  // Normalize common label formats (e.g. "Article End" -> "ARTICLE_END").
+  const normalized = raw
+    .toUpperCase()
+    .replace(/[\s\-]+/g, '_')
+    .replace(/__+/g, '_')
+    .trim();
   // Preserve exact backend enum casing (note the lowercase 'x').
-  if (upper === 'HOME_728X90') return 'HOME_728x90';
-  if (upper === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
-  if (upper === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
-  if (upper === 'ARTICLE_INLINE') return 'ARTICLE_INLINE';
+  if (normalized === 'HOME_728X90') return 'HOME_728x90';
+  if (normalized === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
+  if (normalized === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
+  if (normalized === 'ARTICLE_INLINE') return 'ARTICLE_INLINE';
+  if (normalized === 'ARTICLE_END') return 'ARTICLE_END';
 
   return raw;
 }
@@ -477,12 +495,12 @@ export default function AdsManager() {
     }
   }, []);
 
-  type PlacementKey = SlotOption;
+  type PlacementKey = PlacementSlotOption;
   type PlacementState = Record<PlacementKey, boolean>;
 
   const emptyPlacementState = React.useCallback((): PlacementState => {
     const next = {} as PlacementState;
-    for (const key of SLOT_OPTIONS) next[key] = false;
+    for (const key of PLACEMENT_SLOT_OPTIONS) next[key] = false;
     return next;
   }, []);
 
@@ -498,13 +516,178 @@ export default function AdsManager() {
   const [saving, setSaving] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<AdFormState>(emptyForm);
+  const [adImageFile, setAdImageFile] = React.useState<File | null>(null);
+  const [adImageUploading, setAdImageUploading] = React.useState(false);
+  const [adImageUploadProgress, setAdImageUploadProgress] = React.useState<number | null>(null);
+  const [hostingExternalImage, setHostingExternalImage] = React.useState(false);
+  const [adImagePreviewBroken, setAdImagePreviewBroken] = React.useState(false);
 
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
 
+  React.useEffect(() => {
+    setAdImagePreviewBroken(false);
+  }, [form.imageUrl]);
+
+  const uploadAdImage = React.useCallback(async (file: File) => {
+    const fd = new FormData();
+    // Expected backend contract: field name "file".
+    fd.append('file', file);
+
+    const res = await api.post('/ads/upload-image', fd, {
+      onUploadProgress: (evt) => {
+        const total = typeof evt.total === 'number' ? evt.total : null;
+        const loaded = typeof evt.loaded === 'number' ? evt.loaded : null;
+        if (!total || !loaded) {
+          setAdImageUploadProgress(null);
+          return;
+        }
+        const pct = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
+        setAdImageUploadProgress(pct);
+      },
+    });
+    const payload = res?.data;
+    const hostedUrl = String(
+      payload?.hostedUrl
+      || payload?.hosted_url
+      || payload?.data?.hostedUrl
+      || payload?.data?.hosted_url
+      || payload?.url
+      || payload?.data?.url
+      || ''
+    ).trim();
+
+    if (!hostedUrl) throw new Error('Upload succeeded but no hostedUrl was returned');
+
+    // Prefer absolute https URLs; tolerate root-relative URLs from some backends.
+    if (/^https?:\/\//i.test(hostedUrl)) return hostedUrl;
+    if (hostedUrl.startsWith('/')) {
+      try {
+        if (typeof window !== 'undefined' && window.location?.origin) {
+          return `${window.location.origin}${hostedUrl}`;
+        }
+      } catch {}
+    }
+
+    return hostedUrl;
+  }, []);
+
+  const handleUploadSelectedImage = React.useCallback(async (file?: File | null) => {
+    const f = file || adImageFile;
+    if (!f) {
+      toast.error('Please choose an image file to upload');
+      return;
+    }
+
+    setAdImageUploading(true);
+    setAdImageUploadProgress(null);
+    try {
+      const url = await uploadAdImage(f);
+      setForm((prev) => ({ ...prev, imageUrl: url }));
+      toast.success('Image uploaded');
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.response?.data?.data?.message
+        || err?.message
+        || 'Upload failed';
+      toast.error(String(msg));
+    } finally {
+      setAdImageUploading(false);
+      setAdImageUploadProgress(null);
+    }
+  }, [adImageFile, uploadAdImage]);
+
+  const isExternalImageUrl = React.useCallback((url: string) => {
+    const u = String(url || '').trim();
+    if (!/^https?:\/\//i.test(u)) return false;
+    try {
+      if (typeof window !== 'undefined' && window.location?.origin) {
+        return !u.startsWith(window.location.origin);
+      }
+    } catch {}
+    return true;
+  }, []);
+
+  const hostExternalImageNow = React.useCallback(async () => {
+    if (!editingId) return;
+    const imageUrl = String(form.imageUrl || '').trim();
+    if (!isExternalImageUrl(imageUrl)) return;
+    if (!form.slot) {
+      toast.error('Slot is required');
+      return;
+    }
+    if (!form.title.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+    if (!imageUrl) {
+      toast.error('Image URL is required');
+      return;
+    }
+    if (form.clickable && !form.targetUrl.trim()) {
+      toast.error('Target URL is required when Clickable Ad is enabled');
+      return;
+    }
+    const priorityNum = Number(form.priority);
+    if (!Number.isFinite(priorityNum)) {
+      toast.error('Priority must be a number');
+      return;
+    }
+
+    const startAtIso = fromDatetimeLocalValue(form.startAt);
+    const endAtIso = fromDatetimeLocalValue(form.endAt);
+    if (form.startAt.trim() && !startAtIso) {
+      toast.error('Start At must be a valid date/time');
+      return;
+    }
+    if (form.endAt.trim() && !endAtIso) {
+      toast.error('End At must be a valid date/time');
+      return;
+    }
+    if (startAtIso && endAtIso && new Date(startAtIso).getTime() > new Date(endAtIso).getTime()) {
+      toast.error('Start At must be before End At');
+      return;
+    }
+
+    setHostingExternalImage(true);
+    try {
+      const payload: any = {
+        slot: canonicalSlot(form.slot),
+        title: form.title.trim(),
+        imageUrl,
+        clickable: Boolean(form.clickable),
+        isClickable: Boolean(form.clickable),
+        targetUrl: form.clickable ? form.targetUrl.trim() : null,
+        priority: priorityNum,
+        startAt: startAtIso,
+        endAt: endAtIso,
+        isActive: Boolean(form.isActive),
+      };
+      payload.active = payload.isActive;
+
+      const res = await adminApi.put(`/admin/ads/${editingId}`, payload);
+      const updated = normalizeAd(res?.data?.ad ?? res?.data);
+      if (updated?.imageUrl) {
+        setForm((prev) => ({ ...prev, imageUrl: updated.imageUrl }));
+      }
+      toast.success('Image hosted');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to host image');
+    } finally {
+      setHostingExternalImage(false);
+    }
+  }, [adminApi, editingId, form, isExternalImageUrl]);
+
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm());
+    setAdImageFile(null);
+    setAdImageUploading(false);
+    setAdImageUploadProgress(null);
+    setHostingExternalImage(false);
+    setAdImagePreviewBroken(false);
     setModalOpen(true);
   };
 
@@ -512,7 +695,7 @@ export default function AdsManager() {
     setEditingId(ad.id);
     const clickable = typeof ad.clickable === 'boolean' ? ad.clickable : Boolean((ad.targetUrl || '').toString().trim());
     setForm({
-      slot: (ad.slot as AdSlot) || '',
+      slot: (canonicalSlot(ad.slot) as AdSlot) || '',
       title: String(ad.title ?? ''),
       imageUrl: ad.imageUrl || '',
       targetUrl: String(ad.targetUrl ?? ''),
@@ -522,12 +705,22 @@ export default function AdsManager() {
       endAt: toDatetimeLocalValue(ad.endAt),
       isActive: Boolean(ad.isActive),
     });
+    setAdImageFile(null);
+    setAdImageUploading(false);
+    setAdImageUploadProgress(null);
+    setHostingExternalImage(false);
+    setAdImagePreviewBroken(false);
     setModalOpen(true);
   };
 
   const closeModal = () => {
     if (saving) return;
     setModalOpen(false);
+    setAdImageFile(null);
+    setAdImageUploading(false);
+    setAdImageUploadProgress(null);
+    setHostingExternalImage(false);
+    setAdImagePreviewBroken(false);
   };
 
   const fetchAds = React.useCallback(async (opts?: {
@@ -705,7 +898,7 @@ export default function AdsManager() {
     const raw = res?.data;
     const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || {}) as any;
     const next = emptyPlacementState();
-    for (const key of SLOT_OPTIONS) {
+    for (const key of PLACEMENT_SLOT_OPTIONS) {
       next[key] = parseBool(enabledRaw[key]);
     }
     return next;
@@ -717,7 +910,7 @@ export default function AdsManager() {
     const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || null) as any;
     if (!enabledRaw) return next;
     const saved = emptyPlacementState();
-    for (const key of SLOT_OPTIONS) {
+    for (const key of PLACEMENT_SLOT_OPTIONS) {
       saved[key] = parseBool(enabledRaw[key]);
     }
     return saved;
@@ -725,7 +918,7 @@ export default function AdsManager() {
 
   const loadSettings = React.useCallback(async () => {
     // IMPORTANT: do not overwrite local state while a save is in progress.
-    if (SLOT_OPTIONS.some((key) => placementSaving[key])) return;
+    if (PLACEMENT_SLOT_OPTIONS.some((key) => placementSaving[key])) return;
     setSettingsLoading(true);
     try {
       setSlotEnabled(await fetchAdSettings());
@@ -844,6 +1037,11 @@ export default function AdsManager() {
       toast.error('Slot is required');
       return;
     }
+
+    if (!form.title.trim()) {
+      toast.error('Title is required');
+      return;
+    }
     if (!form.imageUrl.trim()) {
       toast.error('Image URL is required');
       return;
@@ -853,8 +1051,28 @@ export default function AdsManager() {
       return;
     }
 
+    const priorityNum = Number(form.priority);
+    if (!Number.isFinite(priorityNum)) {
+      toast.error('Priority must be a number');
+      return;
+    }
+
     const startAtIso = fromDatetimeLocalValue(form.startAt);
     const endAtIso = fromDatetimeLocalValue(form.endAt);
+
+    if (form.startAt.trim() && !startAtIso) {
+      toast.error('Start At must be a valid date/time');
+      return;
+    }
+    if (form.endAt.trim() && !endAtIso) {
+      toast.error('End At must be a valid date/time');
+      return;
+    }
+    if (startAtIso && endAtIso && new Date(startAtIso).getTime() > new Date(endAtIso).getTime()) {
+      toast.error('Start At must be before End At');
+      return;
+    }
+
     if (startAtIso && endAtIso && startAtIso === endAtIso) {
       const ok = window.confirm(
         'Warning: Start time and end time are the same. This creates a zero-length schedule window.\n\nSave anyway?'
@@ -866,11 +1084,12 @@ export default function AdsManager() {
     try {
       const payload: any = {
         slot: canonicalSlot(form.slot),
-        title: form.title.trim() || undefined,
+        title: form.title.trim(),
         imageUrl: form.imageUrl.trim(),
         clickable: Boolean(form.clickable),
+        isClickable: Boolean(form.clickable),
         targetUrl: form.clickable ? form.targetUrl.trim() : null,
-        priority: Number.isFinite(Number(form.priority)) ? Number(form.priority) : 0,
+        priority: priorityNum,
         startAt: startAtIso,
         endAt: endAtIso,
         isActive: Boolean(form.isActive),
@@ -1681,7 +1900,7 @@ export default function AdsManager() {
         </div>
 
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {SLOT_OPTIONS.map((key) => (
+          {PLACEMENT_SLOT_OPTIONS.map((key) => (
             <div
               key={key}
               className="border rounded p-3 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-3"
@@ -1807,12 +2026,18 @@ export default function AdsManager() {
       {/* Create/Edit Modal */}
       {modalOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center px-3 py-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded border shadow">
-            <div className="flex items-center justify-between p-4 border-b">
+          <div
+            className="bg-white dark:bg-slate-900 rounded border shadow flex flex-col overflow-hidden"
+            style={{
+              maxHeight: 'calc(100vh - 32px)',
+              width: 'min(920px, calc(100vw - 24px))',
+            }}
+          >
+            <div className="flex items-center justify-between p-4 border-b flex-none">
               <h2 className="text-lg font-semibold">{editingId ? 'Edit Ad' : 'Create Ad'}</h2>
               <button
                 type="button"
@@ -1824,8 +2049,10 @@ export default function AdsManager() {
               </button>
             </div>
 
-            <form onSubmit={submit} className="p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form onSubmit={submit} className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 min-h-0 overflow-y-auto py-5 px-6 overscroll-contain">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Slot *</label>
                   <select
@@ -1842,7 +2069,7 @@ export default function AdsManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">Title</label>
+                  <label className="text-sm font-medium">Title *</label>
                   <input
                     className="w-full border rounded px-2 py-2"
                     value={form.title}
@@ -1860,6 +2087,67 @@ export default function AdsManager() {
                     placeholder="https://..."
                     required
                   />
+
+                  {isExternalImageUrl(form.imageUrl) ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                        disabled={saving || hostingExternalImage || !editingId}
+                        onClick={() => void hostExternalImageNow()}
+                        title={editingId ? 'Ask backend to re-host this image' : 'Create the ad first, then you can host the image'}
+                      >
+                        {hostingExternalImage ? 'Hosting…' : 'Host this image'}
+                      </button>
+                      {!editingId ? (
+                        <span className="text-xs text-slate-500">Will be hosted on Create Ad</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="text-sm"
+                      disabled={adImageUploading}
+                      onChange={(e) => {
+                        const f = e.currentTarget.files?.[0] || null;
+                        setAdImageFile(f);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                      disabled={adImageUploading || !adImageFile}
+                      onClick={() => void handleUploadSelectedImage()}
+                      title="Upload selected image"
+                    >
+                      {adImageUploading
+                        ? (typeof adImageUploadProgress === 'number' ? `Uploading… ${adImageUploadProgress}%` : 'Uploading…')
+                        : 'Upload Image'}
+                    </button>
+                    <span className="text-xs text-slate-500">Or paste a URL above</span>
+                  </div>
+
+                  {form.imageUrl ? (
+                    <div className="mt-2 flex items-center gap-3">
+                      <div className="w-[180px] h-[60px] bg-slate-100 dark:bg-slate-900 border rounded overflow-hidden flex items-center justify-center">
+                        {adImagePreviewBroken ? (
+                          <span className="text-xs text-red-700">Preview failed</span>
+                        ) : (
+                          <img
+                            src={form.imageUrl}
+                            alt={form.title || form.slot || 'Ad image'}
+                            className="max-w-full max-h-full object-contain"
+                            onError={() => setAdImagePreviewBroken(true)}
+                            onLoad={() => setAdImagePreviewBroken(false)}
+                          />
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500">Preview</div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="space-y-1 md:col-span-2">
@@ -1937,7 +2225,7 @@ export default function AdsManager() {
                     onChange={(e) => setForm(prev => ({ ...prev, endAt: e.target.value }))}
                   />
                 </div>
-              </div>
+                  </div>
 
               {/* Preview */}
               <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950">
@@ -1958,7 +2246,10 @@ export default function AdsManager() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-white dark:bg-slate-900 py-4 px-6 flex justify-end gap-3 border-t border-slate-200 dark:border-slate-700 z-[2]">
                 <button
                   type="button"
                   onClick={closeModal}
