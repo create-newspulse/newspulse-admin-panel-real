@@ -382,9 +382,31 @@ function toDatetimeLocalValue(value?: string | null): string {
 function fromDatetimeLocalValue(value: string): string | null {
   const v = (value || '').trim();
   if (!v) return null;
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+
+  // `datetime-local` inputs produce local timestamps like: "YYYY-MM-DDTHH:mm".
+  // Convert to a real Date in LOCAL time, then send an ISO timestamp (UTC) to the backend.
+  // This prevents accidentally sending locale-formatted display strings.
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (m) {
+    const yyyy = Number(m[1]);
+    const mm = Number(m[2]);
+    const dd = Number(m[3]);
+    const hh = Number(m[4]);
+    const min = Number(m[5]);
+    const ss = Number(m[6] || 0);
+    const d = new Date(yyyy, mm - 1, dd, hh, min, ss, 0);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  }
+
+  // Fallback: tolerate full ISO strings or other parseable inputs.
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  } catch {
+    return null;
+  }
 }
 
 function inquiryReplySubject(inquiry: Pick<AdInquiry, 'name'>): string {
