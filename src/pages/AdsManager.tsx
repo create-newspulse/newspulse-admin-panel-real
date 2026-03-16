@@ -2,6 +2,7 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi, api } from '@/lib/api';
+import { useAuth } from '@context/AuthContext';
 import {
   type AdInquiry,
   type AdInquiryListResult,
@@ -24,6 +25,199 @@ import {
 } from '@/lib/adsInquiriesApi';
 
 type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE' | 'ARTICLE_END';
+
+type MediaKitSection = {
+  heading: string;
+  bullets: string[];
+};
+
+type MediaKitPrices = {
+  day?: number;
+  week?: number;
+  month?: number;
+};
+
+type MediaKitRateCard = {
+  placementKey: string;
+  placementLabel: string;
+  prices: Required<MediaKitPrices>;
+  includes?: string[];
+  specs?: string[];
+};
+
+type MediaKitBundle = {
+  name: string;
+  prices: MediaKitPrices;
+  billingPeriod: 'day' | 'week' | 'month';
+  includes: string[];
+  notes?: string[];
+};
+
+type MediaKitDoc = {
+  title: string;
+  tagline?: string;
+  contactEmail?: string;
+  currencyCode: string;
+  currencySymbol: string;
+  showUsdApprox?: boolean;
+  fxRateUsdInr?: number;
+  updatedAt?: string;
+  sections: MediaKitSection[];
+  rateCards: MediaKitRateCard[];
+  bundles: MediaKitBundle[];
+  policies?: string[];
+};
+
+function defaultMediaKit(): MediaKitDoc {
+  return {
+    title: 'News Pulse Media Kit (Ad Rates & Sponsorship)',
+    tagline: 'Sponsor placements across homepage and articles',
+    contactEmail: 'newspulse.ads@gmail.com',
+    currencyCode: 'INR',
+    currencySymbol: '₹',
+    showUsdApprox: false,
+    fxRateUsdInr: 83,
+    updatedAt: undefined,
+    sections: [
+      {
+        heading: 'Audience',
+        bullets: [
+          'Digital news readers across web and mobile',
+          'Brand-safe placements next to editorial content',
+          'Campaign reporting available on request',
+        ],
+      },
+      {
+        heading: 'What you get',
+        bullets: [
+          'Guaranteed slot placement for the selected dates',
+          'Click-through linking (optional)',
+          'Creative approval + quick swaps on request',
+        ],
+      },
+      {
+        heading: 'Creative guidance',
+        bullets: [
+          'Use high-contrast imagery and clear CTA text',
+          'Keep file sizes reasonable for fast loading',
+          'UTM parameters supported in destination URL',
+        ],
+      },
+    ],
+    rateCards: [
+      {
+        placementKey: 'HOME_728x90',
+        placementLabel: 'Home Banner 728×90',
+        prices: { day: 500, week: 3000, month: 10000 },
+        includes: ['Homepage banner placement', 'One linked destination'],
+        specs: ['728×90 image'],
+      },
+      {
+        placementKey: 'HOME_RIGHT_300x250',
+        placementLabel: 'Home Right Rail 300×250',
+        prices: { day: 400, week: 2500, month: 8000 },
+        includes: ['Homepage right-rail placement', 'One linked destination'],
+        specs: ['300×250 image'],
+      },
+      {
+        placementKey: 'ARTICLE_INLINE',
+        placementLabel: 'Article Inline',
+        prices: { day: 300, week: 1800, month: 6000 },
+        includes: ['Inline placement within article body'],
+        specs: ['Recommended 728×90 or 300×250'],
+      },
+      {
+        placementKey: 'ARTICLE_END',
+        placementLabel: 'Article End',
+        prices: { day: 200, week: 1200, month: 4000 },
+        includes: ['Placement at the end of articles'],
+        specs: ['Recommended 728×90 or 300×250'],
+      },
+    ],
+    bundles: [
+      {
+        name: 'Article Boost Pack',
+        prices: { day: 450, week: 2700, month: 9000 },
+        billingPeriod: 'week',
+        includes: ['Article Inline placement (7 days)', 'Article End placement (7 days)'],
+        notes: ['Best value for sustained article visibility'],
+      },
+    ],
+    policies: [
+      'All rates in INR (₹). Inventory subject to availability.',
+      'We reserve the right to reject creatives that violate policies or applicable laws.',
+    ],
+  };
+}
+
+function formatMoney(value: number, currencyCode: string): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  const locale = currencyCode === 'INR' ? 'en-IN' : 'en-US';
+  return new Intl.NumberFormat(locale, { style: 'currency', currency: currencyCode || 'INR', maximumFractionDigits: 0 }).format(n);
+}
+
+function formatUsdApproxFromInr(valueInInr: number, fxRateUsdInr?: number): string | null {
+  const inr = Number(valueInInr);
+  const rate = Number(fxRateUsdInr);
+  if (!Number.isFinite(inr) || !Number.isFinite(rate) || rate <= 0) return null;
+  const usd = inr / rate;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(usd);
+}
+
+function formatMediaKitAsText(doc: MediaKitDoc): string {
+  const lines: string[] = [];
+  lines.push(doc.title);
+  if (doc.tagline) lines.push(doc.tagline);
+  lines.push('');
+
+  if (doc.sections?.length) {
+    for (const s of doc.sections) {
+      lines.push(s.heading);
+      for (const b of (s.bullets || [])) lines.push(`- ${b}`);
+      lines.push('');
+    }
+  }
+
+  lines.push('Rates');
+  for (const r of (doc.rateCards || [])) {
+    const day = `${formatMoney(r.prices.day, doc.currencyCode)}/day`;
+    const week = `${formatMoney(r.prices.week, doc.currencyCode)}/week`;
+    const month = `${formatMoney(r.prices.month, doc.currencyCode)}/month`;
+    lines.push(`${r.placementLabel} (${r.placementKey}): ${day}, ${week}, ${month}`);
+    for (const i of (r.includes || [])) lines.push(`  • ${i}`);
+    for (const sp of (r.specs || [])) lines.push(`  • Spec: ${sp}`);
+  }
+  lines.push('');
+
+  if (doc.bundles?.length) {
+    lines.push('Bundles');
+    for (const b of doc.bundles) {
+      const primary = b.billingPeriod;
+      const primaryPrice = b.prices?.[primary];
+      const label = primaryPrice != null
+        ? `${formatMoney(primaryPrice, doc.currencyCode)}/${primary}`
+        : '';
+      const extras: string[] = [];
+      if (b.prices?.day != null && primary !== 'day') extras.push(`${formatMoney(b.prices.day, doc.currencyCode)}/day`);
+      if (b.prices?.week != null && primary !== 'week') extras.push(`${formatMoney(b.prices.week, doc.currencyCode)}/week`);
+      if (b.prices?.month != null && primary !== 'month') extras.push(`${formatMoney(b.prices.month, doc.currencyCode)}/month`);
+      lines.push(`${b.name}: ${label}${extras.length ? ` (also ${extras.join(', ')})` : ''}`);
+      for (const i of (b.includes || [])) lines.push(`  • ${i}`);
+      for (const n of (b.notes || [])) lines.push(`  • ${n}`);
+    }
+    lines.push('');
+  }
+
+  if (doc.policies?.length) {
+    lines.push('Notes');
+    for (const p of doc.policies) lines.push(`- ${p}`);
+    lines.push('');
+  }
+
+  if (doc.contactEmail) lines.push(`Contact: ${doc.contactEmail}`);
+  return lines.join('\n').trim() + '\n';
+}
 
 type SponsorAd = {
   id: string;
@@ -272,7 +466,8 @@ function extractAdsList(payload: any): any[] {
 }
 
 export default function AdsManager() {
-  const [tab, setTab] = React.useState<'ads' | 'inquiries'>('ads');
+  const [tab, setTab] = React.useState<'ads' | 'inquiries' | 'media-kit'>('ads');
+  const { isFounder } = useAuth();
 
   type InquiryStatusTab = 'new' | 'read' | 'deleted';
   type InquiryTabCounts = Record<InquiryStatusTab, number | null>;
@@ -284,6 +479,16 @@ export default function AdsManager() {
 
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
   const [loading, setLoading] = React.useState(false);
+
+  const [mediaKit, setMediaKit] = React.useState<MediaKitDoc>(() => defaultMediaKit());
+  const [mediaKitSource, setMediaKitSource] = React.useState<'default' | 'saved'>('default');
+  const [mediaKitLoading, setMediaKitLoading] = React.useState(false);
+  const [mediaKitError, setMediaKitError] = React.useState<string | null>(null);
+  const [mediaKitPreview, setMediaKitPreview] = React.useState(false);
+  const [mediaKitEditing, setMediaKitEditing] = React.useState(false);
+  const [mediaKitEditorText, setMediaKitEditorText] = React.useState('');
+  const [mediaKitSaving, setMediaKitSaving] = React.useState(false);
+  const [mediaKitResetting, setMediaKitResetting] = React.useState(false);
 
   const [inquiries, setInquiries] = React.useState<AdInquiry[]>([]);
   const [, setInquiriesTotal] = React.useState<number | null>(null);
@@ -364,6 +569,266 @@ export default function AdsManager() {
     const value = String(email || '').trim();
     return value ? `mailto:${value}` : '';
   }, []);
+
+  const normalizeMediaKit = React.useCallback((raw: any): MediaKitDoc | null => {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const base = defaultMediaKit();
+    const title = typeof raw.title === 'string' ? raw.title : base.title;
+    const tagline = typeof raw.tagline === 'string' ? raw.tagline : base.tagline;
+    const contactEmail = typeof raw.contactEmail === 'string' ? raw.contactEmail : base.contactEmail;
+    const currencyCode = typeof raw.currencyCode === 'string'
+      ? raw.currencyCode
+      : (typeof raw.currency_code === 'string' ? raw.currency_code : base.currencyCode);
+    const currencySymbol = typeof raw.currencySymbol === 'string'
+      ? raw.currencySymbol
+      : (typeof raw.currency_symbol === 'string' ? raw.currency_symbol : base.currencySymbol);
+    const showUsdApprox = typeof raw.showUsdApprox === 'boolean'
+      ? raw.showUsdApprox
+      : (typeof raw.show_usd_approx === 'boolean' ? raw.show_usd_approx : base.showUsdApprox);
+    const fxRateUsdInr = Number(
+      raw.fxRateUsdInr
+      ?? raw.fx_rate_usd_inr
+      ?? base.fxRateUsdInr
+    );
+    const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : (typeof raw.updated_at === 'string' ? raw.updated_at : base.updatedAt);
+
+    const sections = Array.isArray(raw.sections)
+      ? raw.sections
+        .filter(Boolean)
+        .map((s: any) => ({
+          heading: String(s?.heading ?? s?.title ?? '').trim() || 'Section',
+          bullets: Array.isArray(s?.bullets) ? s.bullets.map((b: any) => String(b).trim()).filter(Boolean) : [],
+        }))
+      : base.sections;
+
+    const rateCards = Array.isArray(raw.rateCards)
+      ? raw.rateCards
+        .filter(Boolean)
+        .map((r: any) => {
+          const placementKey = String(r?.placementKey ?? r?.key ?? '').trim();
+          const placementLabel = String(r?.placementLabel ?? r?.label ?? '').trim() || placementKey;
+          const baseCard = base.rateCards.find((c) => c.placementKey === placementKey);
+
+          const pricesRaw = r?.prices ?? r?.pricing ?? r?.priceByPeriod ?? r?.price_by_period ?? {};
+          let day = Number(pricesRaw?.day ?? pricesRaw?.daily ?? undefined);
+          let week = Number(pricesRaw?.week ?? pricesRaw?.weekly ?? undefined);
+          let month = Number(pricesRaw?.month ?? pricesRaw?.monthly ?? undefined);
+
+          const price0 = Number(r?.price);
+          const unit0 = String(r?.unit ?? '').toLowerCase();
+          if (Number.isFinite(price0)) {
+            if (unit0.includes('month')) {
+              if (!Number.isFinite(month)) month = price0;
+            } else if (unit0.includes('week')) {
+              if (!Number.isFinite(week)) week = price0;
+            } else {
+              if (!Number.isFinite(day)) day = price0;
+            }
+          }
+
+          const resolved = {
+            day: Number.isFinite(day) ? day : (baseCard?.prices.day ?? 0),
+            week: Number.isFinite(week) ? week : (baseCard?.prices.week ?? 0),
+            month: Number.isFinite(month) ? month : (baseCard?.prices.month ?? 0),
+          };
+
+          return {
+            placementKey,
+            placementLabel,
+            prices: resolved,
+            includes: Array.isArray(r?.includes) ? r.includes.map((i: any) => String(i).trim()).filter(Boolean) : [],
+            specs: Array.isArray(r?.specs) ? r.specs.map((i: any) => String(i).trim()).filter(Boolean) : [],
+          } as MediaKitRateCard;
+        })
+        .filter((r: any) => r.placementKey)
+      : base.rateCards;
+
+    const bundles = Array.isArray(raw.bundles)
+      ? raw.bundles
+        .filter(Boolean)
+        .map((b: any) => {
+          const name = String(b?.name ?? '').trim() || 'Bundle';
+          const baseBundle = base.bundles.find((x) => x.name === name);
+          const pricesRaw = b?.prices ?? b?.pricing ?? b?.priceByPeriod ?? b?.price_by_period ?? {};
+          let day = Number(pricesRaw?.day ?? pricesRaw?.daily ?? undefined);
+          let week = Number(pricesRaw?.week ?? pricesRaw?.weekly ?? undefined);
+          let month = Number(pricesRaw?.month ?? pricesRaw?.monthly ?? undefined);
+
+          const price0 = Number(b?.price);
+          const unit0 = String(b?.unit ?? '').toLowerCase();
+          if (Number.isFinite(price0)) {
+            if (unit0.includes('month')) {
+              if (!Number.isFinite(month)) month = price0;
+            } else if (unit0.includes('week')) {
+              if (!Number.isFinite(week)) week = price0;
+            } else {
+              if (!Number.isFinite(day)) day = price0;
+            }
+          }
+
+          const billingPeriodRaw = String(b?.billingPeriod ?? b?.billing_period ?? '').toLowerCase();
+          const billingPeriod = (billingPeriodRaw === 'day' || billingPeriodRaw === 'week' || billingPeriodRaw === 'month')
+            ? (billingPeriodRaw as any)
+            : (baseBundle?.billingPeriod ?? 'week');
+
+          return {
+            name,
+            prices: {
+              day: Number.isFinite(day) ? day : baseBundle?.prices?.day,
+              week: Number.isFinite(week) ? week : baseBundle?.prices?.week,
+              month: Number.isFinite(month) ? month : baseBundle?.prices?.month,
+            },
+            billingPeriod,
+            includes: Array.isArray(b?.includes) ? b.includes.map((i: any) => String(i).trim()).filter(Boolean) : [],
+            notes: Array.isArray(b?.notes) ? b.notes.map((i: any) => String(i).trim()).filter(Boolean) : [],
+          } as MediaKitBundle;
+        })
+      : base.bundles;
+
+    const policies = Array.isArray(raw.policies)
+      ? raw.policies.map((p: any) => String(p).trim()).filter(Boolean)
+      : base.policies;
+
+    return {
+      title,
+      tagline,
+      contactEmail,
+      currencyCode: String(currencyCode || base.currencyCode || 'INR').toUpperCase(),
+      currencySymbol: String(currencySymbol || base.currencySymbol || '₹'),
+      showUsdApprox: Boolean(showUsdApprox),
+      fxRateUsdInr: Number.isFinite(fxRateUsdInr) && fxRateUsdInr > 0 ? fxRateUsdInr : base.fxRateUsdInr,
+      updatedAt,
+      sections,
+      rateCards,
+      bundles,
+      policies,
+    };
+  }, []);
+
+  const fetchMediaKit = React.useCallback(async () => {
+    setMediaKitLoading(true);
+    setMediaKitError(null);
+    try {
+      const res = await api.get('/media-kit');
+      const payload = res?.data;
+      const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
+      const normalized = normalizeMediaKit(raw);
+      if (normalized) {
+        setMediaKit(normalized);
+        setMediaKitSource('saved');
+      } else {
+        setMediaKit(defaultMediaKit());
+        setMediaKitSource('default');
+      }
+    } catch (err: any) {
+      setMediaKit(defaultMediaKit());
+      setMediaKitSource('default');
+      setMediaKitError(err?.response?.data?.message || err?.message || 'Failed to load media kit');
+    } finally {
+      setMediaKitLoading(false);
+    }
+  }, [normalizeMediaKit]);
+
+  React.useEffect(() => {
+    void fetchMediaKit();
+  }, [fetchMediaKit]);
+
+  const copyMediaKitAsText = React.useCallback(async () => {
+    try {
+      const text = formatMediaKitAsText(mediaKit);
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const el = document.createElement('textarea');
+        el.value = text;
+        el.setAttribute('readonly', 'true');
+        el.style.position = 'fixed';
+        el.style.left = '-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      toast.success('Media Kit copied');
+    } catch (err: any) {
+      toast.error(err?.message || 'Copy failed');
+    }
+  }, [mediaKit]);
+
+  const openMediaKitEditor = React.useCallback(() => {
+    setMediaKitEditorText(JSON.stringify(mediaKit, null, 2));
+    setMediaKitEditing(true);
+    setMediaKitPreview(false);
+  }, [mediaKit]);
+
+  const cancelMediaKitEditor = React.useCallback(() => {
+    if (mediaKitSaving || mediaKitResetting) return;
+    setMediaKitEditing(false);
+  }, [mediaKitSaving, mediaKitResetting]);
+
+  const saveMediaKit = React.useCallback(async () => {
+    if (!isFounder) return;
+    if (mediaKitSaving) return;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(String(mediaKitEditorText || ''));
+    } catch {
+      toast.error('Invalid JSON');
+      return;
+    }
+
+    const normalized = normalizeMediaKit(parsed);
+    if (!normalized) {
+      toast.error('Media Kit JSON is missing required fields');
+      return;
+    }
+
+    setMediaKitSaving(true);
+    try {
+      const res = await api.put('/media-kit', normalized);
+      const payload = res?.data;
+      const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
+      const next = normalizeMediaKit(raw) || normalized;
+      setMediaKit(next);
+      setMediaKitSource('saved');
+      setMediaKitEditing(false);
+      toast.success('Media Kit saved');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Save failed');
+    } finally {
+      setMediaKitSaving(false);
+    }
+  }, [isFounder, mediaKitEditorText, mediaKitSaving, normalizeMediaKit]);
+
+  const resetMediaKit = React.useCallback(async () => {
+    if (!isFounder) return;
+    if (mediaKitResetting) return;
+    setMediaKitResetting(true);
+    try {
+      const res = await api.post('/media-kit/reset');
+      const payload = res?.data;
+      const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
+      const next = normalizeMediaKit(raw);
+      if (next) {
+        setMediaKit(next);
+        setMediaKitSource('saved');
+      } else {
+        await fetchMediaKit();
+      }
+      toast.success('Reset to default');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404 || status === 501) {
+        toast.error('Reset endpoint not available on this backend');
+      } else {
+        toast.error(err?.response?.data?.message || err?.message || 'Reset failed');
+      }
+    } finally {
+      setMediaKitResetting(false);
+    }
+  }, [isFounder, mediaKitResetting, normalizeMediaKit, fetchMediaKit]);
 
   const openInquiryReplyComposer = React.useCallback((inquiry: AdInquiry) => {
     setInquiryReply({
@@ -1211,6 +1676,63 @@ export default function AdsManager() {
               </button>
             </>
           ) : null}
+
+          {tab === 'media-kit' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void fetchMediaKit()}
+                className="px-3 py-1 bg-slate-700 text-white rounded disabled:opacity-60"
+                disabled={mediaKitLoading || mediaKitSaving || mediaKitResetting}
+              >
+                {mediaKitLoading ? 'Loading…' : 'Refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyMediaKitAsText()}
+                className="px-3 py-1 bg-slate-700 text-white rounded"
+              >
+                Copy as Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setMediaKitPreview((p) => !p)}
+                className="px-3 py-1 bg-slate-700 text-white rounded"
+              >
+                {mediaKitPreview ? 'Exit Preview' : 'Preview'}
+              </button>
+              {isFounder ? (
+                mediaKitEditing ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void saveMediaKit()}
+                      className="px-3 py-1 bg-green-600 text-white rounded disabled:opacity-60"
+                      disabled={mediaKitSaving || mediaKitResetting}
+                    >
+                      {mediaKitSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelMediaKitEditor}
+                      className="px-3 py-1 bg-white text-slate-900 rounded border disabled:opacity-60"
+                      disabled={mediaKitSaving || mediaKitResetting}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openMediaKitEditor}
+                    className="px-3 py-1 bg-green-600 text-white rounded"
+                  >
+                    Edit
+                  </button>
+                )
+              ) : null}
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -1234,6 +1756,16 @@ export default function AdsManager() {
           }
         >
           Ad Inquiries
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('media-kit')}
+          className={
+            'px-3 py-1.5 rounded border text-sm font-semibold ' +
+            (tab === 'media-kit' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
+          }
+        >
+          Media Kit
         </button>
       </div>
 
@@ -1852,6 +2384,204 @@ export default function AdsManager() {
               </div>
             </form>
           </div>
+        </div>
+      ) : null}
+
+      {tab === 'media-kit' ? (
+        <div className="space-y-4">
+          <div className="border rounded p-4 bg-white dark:bg-slate-900">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">{mediaKit.title}</h2>
+                {mediaKit.tagline ? (
+                  <div className="text-sm text-slate-600 dark:text-slate-300">{mediaKit.tagline}</div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={
+                    'px-2 py-1 rounded text-xs border ' +
+                    (mediaKitSource === 'saved'
+                      ? 'bg-green-50 text-green-800 border-green-200'
+                      : 'bg-slate-50 text-slate-700 border-slate-200')
+                  }
+                  title={mediaKitSource === 'saved' ? 'Loaded from backend' : 'Using local default fallback'}
+                >
+                  Source: {mediaKitSource === 'saved' ? 'Saved' : 'Default'}
+                </span>
+                {mediaKitError ? (
+                  <span className="px-2 py-1 rounded text-xs border bg-amber-50 text-amber-800 border-amber-200" title={mediaKitError}>
+                    API fallback
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {mediaKitEditing ? (
+            <div className="border rounded p-4 bg-white dark:bg-slate-900 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">Editor (JSON)</div>
+                  <div className="text-xs text-slate-500">Save writes to backend. View mode always falls back to default.</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void resetMediaKit()}
+                    className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                    disabled={mediaKitSaving || mediaKitResetting}
+                    title="Calls POST /api/media-kit/reset (if supported)"
+                  >
+                    {mediaKitResetting ? 'Resetting…' : 'Reset to Default'}
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={mediaKitEditorText}
+                onChange={(e) => setMediaKitEditorText(e.target.value)}
+                rows={20}
+                className="w-full font-mono text-xs border rounded px-3 py-2 bg-white dark:bg-slate-950"
+                spellCheck={false}
+              />
+            </div>
+          ) : (
+            <div className={mediaKitPreview ? 'space-y-4' : 'space-y-4'}>
+              <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                <div className="text-sm font-semibold mb-2">Overview</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(mediaKit.sections || []).map((s, idx) => (
+                    <div key={`${s.heading}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                      <div className="text-sm font-medium">{s.heading}</div>
+                      <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                        {(s.bullets || []).map((b, i) => (
+                          <li key={`${idx}-${i}`}>{b}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                <div className="text-sm font-semibold mb-2">Rate Cards</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(mediaKit.rateCards || []).map((r, idx) => (
+                    <div key={`${r.placementKey}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium">{r.placementLabel}</div>
+                          {!mediaKitPreview ? (
+                            <div className="text-xs text-slate-500 font-mono">{r.placementKey}</div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {(
+                          [
+                            { label: 'Day', period: 'day' as const, value: r.prices.day },
+                            { label: 'Week', period: 'week' as const, value: r.prices.week },
+                            { label: 'Month', period: 'month' as const, value: r.prices.month },
+                          ]
+                        ).map((p) => {
+                          const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(p.value, mediaKit.fxRateUsdInr) : null;
+                          return (
+                            <div key={p.period} className="rounded border px-2 py-1 bg-white dark:bg-slate-900">
+                              <div className="text-[11px] text-slate-500">{p.label}</div>
+                              <div className="text-sm font-semibold">{formatMoney(p.value, mediaKit.currencyCode)}</div>
+                              {usd ? (
+                                <div className="text-[11px] text-slate-500">≈ {usd}</div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {(r.includes?.length || 0) > 0 ? (
+                        <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                          {r.includes!.map((i, j) => (
+                            <li key={`${idx}-inc-${j}`}>{i}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+
+                      {(r.specs?.length || 0) > 0 ? (
+                        <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                          Specs: {r.specs!.join(', ')}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {(mediaKit.bundles?.length || 0) > 0 ? (
+                <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                  <div className="text-sm font-semibold mb-2">Bundles</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {(mediaKit.bundles || []).map((b, idx) => (
+                      <div key={`${b.name}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="text-sm font-medium">{b.name}</div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold">
+                              {b.prices?.[b.billingPeriod] != null ? formatMoney(b.prices[b.billingPeriod] as number, mediaKit.currencyCode) : '—'}
+                            </div>
+                            <div className="text-xs text-slate-500">/{b.billingPeriod}</div>
+                            {mediaKit.showUsdApprox && b.prices?.[b.billingPeriod] != null ? (
+                              <div className="text-[11px] text-slate-500">
+                                ≈ {formatUsdApproxFromInr(b.prices[b.billingPeriod] as number, mediaKit.fxRateUsdInr)}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                          {b.prices?.day != null ? `${formatMoney(b.prices.day, mediaKit.currencyCode)}/day` : null}
+                          {b.prices?.week != null ? `${b.prices?.day != null ? ' • ' : ''}${formatMoney(b.prices.week, mediaKit.currencyCode)}/week` : null}
+                          {b.prices?.month != null ? `${(b.prices?.day != null || b.prices?.week != null) ? ' • ' : ''}${formatMoney(b.prices.month, mediaKit.currencyCode)}/month` : null}
+                        </div>
+                        <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                          {(b.includes || []).map((i, j) => (
+                            <li key={`${idx}-b-${j}`}>{i}</li>
+                          ))}
+                        </ul>
+                        {(b.notes?.length || 0) > 0 ? (
+                          <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                            {b.notes!.join(' ')}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {(mediaKit.policies?.length || 0) > 0 ? (
+                <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                  <div className="text-sm font-semibold mb-2">Notes</div>
+                  <ul className="list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                    {(mediaKit.policies || []).map((p, idx) => (
+                      <li key={`p-${idx}`}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {mediaKit.contactEmail ? (
+                <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                  <div className="text-sm font-semibold mb-2">Contact</div>
+                  <div className="text-sm text-slate-700 dark:text-slate-200">
+                    <span className="font-medium">Email:</span>{' '}
+                    <a className="text-blue-600 underline" href={mailtoHref(mediaKit.contactEmail)}>{mediaKit.contactEmail}</a>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
 
