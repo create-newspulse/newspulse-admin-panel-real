@@ -24,7 +24,16 @@ import {
   messagePreview,
 } from '@/lib/adsInquiriesApi';
 
-type AdSlot = 'HOME_728x90' | 'HOME_RIGHT_300x250' | 'HOME_RIGHT_RAIL' | 'ARTICLE_INLINE' | 'ARTICLE_END';
+type AdSlot =
+  | 'HOME_728x90'
+  | 'FOOTER_BANNER_728x90'
+  | 'HOME_RIGHT_300x250'
+  | 'HOME_RIGHT_300x600'
+  | 'HOME_BILLBOARD_970x250'
+  | 'LIVE_UPDATE_SPONSOR'
+  | 'HOME_RIGHT_RAIL'
+  | 'ARTICLE_INLINE'
+  | 'ARTICLE_END';
 
 type MediaKitSection = {
   heading: string;
@@ -113,11 +122,39 @@ function defaultMediaKit(): MediaKitDoc {
         specs: ['728×90 image'],
       },
       {
+        placementKey: 'FOOTER_BANNER_728x90',
+        placementLabel: 'Footer Banner 728×90',
+        prices: { day: 500, week: 3000, month: 10000 },
+        includes: ['Footer banner placement', 'One linked destination'],
+        specs: ['728×90 image'],
+      },
+      {
         placementKey: 'HOME_RIGHT_300x250',
         placementLabel: 'Home Right Rail 300×250',
         prices: { day: 400, week: 2500, month: 8000 },
         includes: ['Homepage right-rail placement', 'One linked destination'],
         specs: ['300×250 image'],
+      },
+      {
+        placementKey: 'HOME_RIGHT_300x600',
+        placementLabel: 'Home Right Rail 300×600 (Half Page)',
+        prices: { day: 650, week: 3900, month: 13000 },
+        includes: ['Premium sidebar placement', 'One linked destination'],
+        specs: ['300×600 image'],
+      },
+      {
+        placementKey: 'HOME_BILLBOARD_970x250',
+        placementLabel: 'Home Billboard 970×250 (Premium)',
+        prices: { day: 900, week: 5400, month: 18000 },
+        includes: ['Premium homepage billboard placement', 'One linked destination'],
+        specs: ['970×250 image'],
+      },
+      {
+        placementKey: 'LIVE_UPDATE_SPONSOR',
+        placementLabel: 'Live Update Sponsor (Sponsored by <Brand>)',
+        prices: { day: 700, week: 4200, month: 14000 },
+        includes: ['Live update sponsor line (“Sponsored by Brand”)'],
+        specs: ['Brand name text (no image)'],
       },
       {
         placementKey: 'ARTICLE_INLINE',
@@ -141,6 +178,13 @@ function defaultMediaKit(): MediaKitDoc {
         billingPeriod: 'week',
         includes: ['Article Inline placement (7 days)', 'Article End placement (7 days)'],
         notes: ['Best value for sustained article visibility'],
+      },
+      {
+        name: 'Homepage + Live Updates Pack',
+        prices: { day: 1100, week: 6600, month: 22000 },
+        billingPeriod: 'week',
+        includes: ['Home Banner 728×90 (7 days)', 'Live Update Sponsor (7 days)'],
+        notes: ['Bundle mention: combines HOME_728x90 + LIVE_UPDATE_SPONSOR'],
       },
     ],
     policies: [
@@ -237,7 +281,11 @@ type SponsorAd = {
 // Slots that have placement toggles in the UI.
 const PLACEMENT_SLOT_OPTIONS = [
   'HOME_728x90',
+  'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
+  'HOME_RIGHT_300x600',
+  'HOME_BILLBOARD_970x250',
+  'LIVE_UPDATE_SPONSOR',
   'ARTICLE_INLINE',
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
@@ -245,7 +293,11 @@ const PLACEMENT_SLOT_OPTIONS = [
 // Slots selectable in the UI (dropdown + filter). Legacy slots are intentionally hidden.
 const SLOT_OPTIONS = [
   'HOME_728x90',
+  'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
+  'HOME_RIGHT_300x600',
+  'HOME_BILLBOARD_970x250',
+  'LIVE_UPDATE_SPONSOR',
   'ARTICLE_INLINE',
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
@@ -254,11 +306,25 @@ type PlacementSlotOption = typeof PLACEMENT_SLOT_OPTIONS[number];
 
 const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
+  FOOTER_BANNER_728x90: 'Footer Banner 728×90',
   HOME_RIGHT_300x250: 'Home Right Rail 300×250',
+  HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page)',
+  HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Premium)',
+  LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Sponsored by <Brand>)',
   ARTICLE_INLINE: 'Article Inline',
   ARTICLE_END: 'Article End',
   HOME_RIGHT_RAIL: 'Home Right Rail (legacy)',
 };
+
+const SLOT_DROPDOWN_HINT_LABELS: Record<string, string> = {
+  HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page / Premium Sidebar)',
+  HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Billboard / Premium)',
+  LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Ticker / “Sponsored by Brand”)',
+};
+
+function slotDropdownLabel(slot: string): string {
+  return SLOT_DROPDOWN_HINT_LABELS[slot] || slotLabel(slot);
+}
 
 function canonicalSlot(value: unknown): string {
   const raw = String(value ?? '').trim();
@@ -272,7 +338,11 @@ function canonicalSlot(value: unknown): string {
     .trim();
   // Preserve exact backend enum casing (note the lowercase 'x').
   if (normalized === 'HOME_728X90') return 'HOME_728x90';
+  if (normalized === 'FOOTER_BANNER_728X90') return 'FOOTER_BANNER_728x90';
   if (normalized === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
+  if (normalized === 'HOME_RIGHT_300X600') return 'HOME_RIGHT_300x600';
+  if (normalized === 'HOME_BILLBOARD_970X250') return 'HOME_BILLBOARD_970x250';
+  if (normalized === 'LIVE_UPDATE_SPONSOR') return 'LIVE_UPDATE_SPONSOR';
   if (normalized === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
   if (normalized === 'ARTICLE_INLINE') return 'ARTICLE_INLINE';
   if (normalized === 'ARTICLE_END') return 'ARTICLE_END';
@@ -602,7 +672,7 @@ export default function AdsManager() {
         }))
       : base.sections;
 
-    const rateCards = Array.isArray(raw.rateCards)
+    const rateCardsFromRaw = Array.isArray(raw.rateCards)
       ? raw.rateCards
         .filter(Boolean)
         .map((r: any) => {
@@ -610,22 +680,16 @@ export default function AdsManager() {
           const placementLabel = String(r?.placementLabel ?? r?.label ?? '').trim() || placementKey;
           const baseCard = base.rateCards.find((c) => c.placementKey === placementKey);
 
-          const pricesRaw = r?.prices ?? r?.pricing ?? r?.priceByPeriod ?? r?.price_by_period ?? {};
+          const hasExplicitPrices =
+            (r && typeof r === 'object')
+            && (r.prices != null || r.pricing != null || r.priceByPeriod != null || r.price_by_period != null);
+
+          const pricesRaw = hasExplicitPrices
+            ? (r?.prices ?? r?.pricing ?? r?.priceByPeriod ?? r?.price_by_period ?? {})
+            : {};
           let day = Number(pricesRaw?.day ?? pricesRaw?.daily ?? undefined);
           let week = Number(pricesRaw?.week ?? pricesRaw?.weekly ?? undefined);
           let month = Number(pricesRaw?.month ?? pricesRaw?.monthly ?? undefined);
-
-          const price0 = Number(r?.price);
-          const unit0 = String(r?.unit ?? '').toLowerCase();
-          if (Number.isFinite(price0)) {
-            if (unit0.includes('month')) {
-              if (!Number.isFinite(month)) month = price0;
-            } else if (unit0.includes('week')) {
-              if (!Number.isFinite(week)) week = price0;
-            } else {
-              if (!Number.isFinite(day)) day = price0;
-            }
-          }
 
           const resolved = {
             day: Number.isFinite(day) ? day : (baseCard?.prices.day ?? 0),
@@ -642,30 +706,41 @@ export default function AdsManager() {
           } as MediaKitRateCard;
         })
         .filter((r: any) => r.placementKey)
-      : base.rateCards;
+      : null;
 
-    const bundles = Array.isArray(raw.bundles)
+    const rateCards = (() => {
+      if (!rateCardsFromRaw) return base.rateCards;
+
+      const rawByKey = new Map<string, MediaKitRateCard>();
+      for (const r of rateCardsFromRaw) rawByKey.set(r.placementKey, r);
+
+      const merged: MediaKitRateCard[] = [];
+      for (const baseCard of base.rateCards) {
+        merged.push(rawByKey.get(baseCard.placementKey) || baseCard);
+        rawByKey.delete(baseCard.placementKey);
+      }
+
+      // Preserve any custom/unknown cards from backend.
+      for (const leftover of rawByKey.values()) merged.push(leftover);
+      return merged;
+    })();
+
+    const bundlesFromRaw = Array.isArray(raw.bundles)
       ? raw.bundles
         .filter(Boolean)
         .map((b: any) => {
           const name = String(b?.name ?? '').trim() || 'Bundle';
           const baseBundle = base.bundles.find((x) => x.name === name);
-          const pricesRaw = b?.prices ?? b?.pricing ?? b?.priceByPeriod ?? b?.price_by_period ?? {};
+          const hasExplicitPrices =
+            (b && typeof b === 'object')
+            && (b.prices != null || b.pricing != null || b.priceByPeriod != null || b.price_by_period != null);
+
+          const pricesRaw = hasExplicitPrices
+            ? (b?.prices ?? b?.pricing ?? b?.priceByPeriod ?? b?.price_by_period ?? {})
+            : {};
           let day = Number(pricesRaw?.day ?? pricesRaw?.daily ?? undefined);
           let week = Number(pricesRaw?.week ?? pricesRaw?.weekly ?? undefined);
           let month = Number(pricesRaw?.month ?? pricesRaw?.monthly ?? undefined);
-
-          const price0 = Number(b?.price);
-          const unit0 = String(b?.unit ?? '').toLowerCase();
-          if (Number.isFinite(price0)) {
-            if (unit0.includes('month')) {
-              if (!Number.isFinite(month)) month = price0;
-            } else if (unit0.includes('week')) {
-              if (!Number.isFinite(week)) week = price0;
-            } else {
-              if (!Number.isFinite(day)) day = price0;
-            }
-          }
 
           const billingPeriodRaw = String(b?.billingPeriod ?? b?.billing_period ?? '').toLowerCase();
           const billingPeriod = (billingPeriodRaw === 'day' || billingPeriodRaw === 'week' || billingPeriodRaw === 'month')
@@ -684,7 +759,22 @@ export default function AdsManager() {
             notes: Array.isArray(b?.notes) ? b.notes.map((i: any) => String(i).trim()).filter(Boolean) : [],
           } as MediaKitBundle;
         })
-      : base.bundles;
+      : null;
+
+    const bundles = (() => {
+      if (!bundlesFromRaw) return base.bundles;
+      const rawByName = new Map<string, MediaKitBundle>();
+      for (const b of bundlesFromRaw) rawByName.set(b.name, b);
+
+      const merged: MediaKitBundle[] = [];
+      for (const baseBundle of base.bundles) {
+        merged.push(rawByName.get(baseBundle.name) || baseBundle);
+        rawByName.delete(baseBundle.name);
+      }
+
+      for (const leftover of rawByName.values()) merged.push(leftover);
+      return merged;
+    })();
 
     const policies = Array.isArray(raw.policies)
       ? raw.policies.map((p: any) => String(p).trim()).filter(Boolean)
@@ -2802,7 +2892,7 @@ export default function AdsManager() {
                     >
                       <option value="">Select slot…</option>
                       {SLOT_OPTIONS.map(s => (
-                        <option key={s} value={s}>{slotLabel(String(s))}</option>
+                        <option key={s} value={s}>{slotDropdownLabel(String(s))}</option>
                       ))}
                     </select>
                   )}
