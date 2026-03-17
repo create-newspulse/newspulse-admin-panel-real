@@ -31,6 +31,7 @@ type AdSlot =
   | 'HOME_RIGHT_300x600'
   | 'HOME_BILLBOARD_970x250'
   | 'LIVE_UPDATE_SPONSOR'
+  | 'BREAKING_SPONSOR'
   | 'HOME_RIGHT_RAIL'
   | 'ARTICLE_INLINE'
   | 'ARTICLE_END';
@@ -154,6 +155,13 @@ function defaultMediaKit(): MediaKitDoc {
         placementLabel: 'Live Update Sponsor (Sponsored by <Brand>)',
         prices: { day: 700, week: 4200, month: 14000 },
         includes: ['Live update sponsor line (“Sponsored by Brand”)'],
+        specs: ['Brand name text (no image)'],
+      },
+      {
+        placementKey: 'BREAKING_SPONSOR',
+        placementLabel: 'Breaking Sponsor (Sponsored by <Brand>)',
+        prices: { day: 700, week: 4200, month: 14000 },
+        includes: ['Breaking sponsor line (“Sponsored by Brand”)'],
         specs: ['Brand name text (no image)'],
       },
       {
@@ -286,6 +294,7 @@ const PLACEMENT_SLOT_OPTIONS = [
   'HOME_RIGHT_300x600',
   'HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
+  'BREAKING_SPONSOR',
   'ARTICLE_INLINE',
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
@@ -298,11 +307,13 @@ const SLOT_OPTIONS = [
   'HOME_RIGHT_300x600',
   'HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
+  'BREAKING_SPONSOR',
   'ARTICLE_INLINE',
   'ARTICLE_END',
 ] as const satisfies readonly AdSlot[];
 
 type PlacementSlotOption = typeof PLACEMENT_SLOT_OPTIONS[number];
+type PlacementFieldShape = 'boolean' | 'enabled' | 'isEnabled';
 
 const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
@@ -311,6 +322,7 @@ const SLOT_LABELS: Record<string, string> = {
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Sponsored by <Brand>)',
+  BREAKING_SPONSOR: 'Breaking Sponsor (Sponsored by <Brand>)',
   ARTICLE_INLINE: 'Article Inline',
   ARTICLE_END: 'Article End',
   HOME_RIGHT_RAIL: 'Home Right Rail (legacy)',
@@ -320,6 +332,7 @@ const SLOT_DROPDOWN_HINT_LABELS: Record<string, string> = {
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Billboard / Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Ticker / “Sponsored by Brand”)',
+  BREAKING_SPONSOR: 'Breaking Sponsor (Breaking ticker / “Sponsored by Brand”)',
 };
 
 function slotDropdownLabel(slot: string): string {
@@ -343,6 +356,7 @@ function canonicalSlot(value: unknown): string {
   if (normalized === 'HOME_RIGHT_300X600') return 'HOME_RIGHT_300x600';
   if (normalized === 'HOME_BILLBOARD_970X250') return 'HOME_BILLBOARD_970x250';
   if (normalized === 'LIVE_UPDATE_SPONSOR') return 'LIVE_UPDATE_SPONSOR';
+  if (normalized === 'BREAKING_SPONSOR') return 'BREAKING_SPONSOR';
   if (normalized === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
   if (normalized === 'ARTICLE_INLINE') return 'ARTICLE_INLINE';
   if (normalized === 'ARTICLE_END') return 'ARTICLE_END';
@@ -492,6 +506,24 @@ function parseBool(value: any): boolean {
   }
   // Default to false for unknown/undefined shapes to avoid accidental "stuck ON".
   return false;
+}
+
+function parsePlacementEnabled(value: any): boolean {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+      return parseBool(value.enabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'isEnabled')) {
+      return parseBool(value.isEnabled);
+    }
+  }
+  return parseBool(value);
+}
+
+function emptyPlacementFieldShape(): Record<PlacementSlotOption, PlacementFieldShape> {
+  const next = {} as Record<PlacementSlotOption, PlacementFieldShape>;
+  for (const key of PLACEMENT_SLOT_OPTIONS) next[key] = 'boolean';
+  return next;
 }
 
 type AdFormState = {
@@ -1085,6 +1117,7 @@ export default function AdsManager() {
   }, []);
 
   const [slotEnabled, setSlotEnabled] = React.useState<PlacementState>(() => emptyPlacementState());
+  const placementFieldShapeRef = React.useRef<Record<PlacementKey, PlacementFieldShape>>(emptyPlacementFieldShape());
 
   const [settingsLoading, setSettingsLoading] = React.useState(true);
   const [placementSaving, setPlacementSaving] = React.useState<Record<PlacementKey, boolean>>(() => emptyPlacementState());
@@ -1473,28 +1506,70 @@ export default function AdsManager() {
     }
   }, [clearInquirySelection, refreshInquiryDataAfterBulk, removeInquiriesFromState]);
 
-  const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
-    const res = await adminApi.get('/admin/ad-settings');
-    const raw = res?.data;
-    const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || {}) as any;
-    const next = emptyPlacementState();
-    for (const key of PLACEMENT_SLOT_OPTIONS) {
-      next[key] = parseBool(enabledRaw[key]);
+  const normalizePlacementState = React.useCallback((raw: any, fallback?: PlacementState): PlacementState => {
+    const source = raw?.slotEnabled
+      || raw?.data?.slotEnabled
+      || raw?.settings?.slotEnabled
+      || (raw && typeof raw === 'object' ? raw : null);
+
+    if (!source || typeof source !== 'object') {
+      return fallback ? { ...fallback } : emptyPlacementState();
     }
+
+    const next = fallback ? { ...fallback } : emptyPlacementState();
+    const detectedShapes = { ...placementFieldShapeRef.current };
+
+    for (const key of PLACEMENT_SLOT_OPTIONS) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+
+      const value = source[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+          detectedShapes[key] = 'enabled';
+        } else if (Object.prototype.hasOwnProperty.call(value, 'isEnabled')) {
+          detectedShapes[key] = 'isEnabled';
+        } else {
+          detectedShapes[key] = 'boolean';
+        }
+      } else {
+        detectedShapes[key] = 'boolean';
+      }
+
+      next[key] = parsePlacementEnabled(value);
+    }
+
+    placementFieldShapeRef.current = detectedShapes;
     return next;
   }, [emptyPlacementState]);
 
-  const updateAdSettings = React.useCallback(async (next: PlacementState): Promise<PlacementState> => {
-    const res = await adminApi.put('/admin/ad-settings', { slotEnabled: next });
-    const raw = res?.data;
-    const enabledRaw = (raw?.slotEnabled || raw?.data?.slotEnabled || null) as any;
-    if (!enabledRaw) return next;
-    const saved = emptyPlacementState();
+  const buildPlacementPayload = React.useCallback((next: PlacementState) => {
+    const slotEnabledPayload = {} as Record<PlacementKey, boolean | { enabled: boolean } | { isEnabled: boolean }>;
+
     for (const key of PLACEMENT_SLOT_OPTIONS) {
-      saved[key] = parseBool(enabledRaw[key]);
+      const enabled = Boolean(next[key]);
+      const shape = placementFieldShapeRef.current[key];
+
+      if (shape === 'enabled') {
+        slotEnabledPayload[key] = { enabled };
+      } else if (shape === 'isEnabled') {
+        slotEnabledPayload[key] = { isEnabled: enabled };
+      } else {
+        slotEnabledPayload[key] = enabled;
+      }
     }
-    return saved;
-  }, [emptyPlacementState]);
+
+    return { slotEnabled: slotEnabledPayload };
+  }, []);
+
+  const fetchAdSettings = React.useCallback(async (): Promise<PlacementState> => {
+    const res = await adminApi.get('/admin/ad-settings');
+    return normalizePlacementState(res?.data);
+  }, [normalizePlacementState]);
+
+  const updateAdSettings = React.useCallback(async (next: PlacementState): Promise<PlacementState> => {
+    const res = await adminApi.put('/admin/ad-settings', buildPlacementPayload(next));
+    return normalizePlacementState(res?.data, next);
+  }, [buildPlacementPayload, normalizePlacementState]);
 
   const loadSettings = React.useCallback(async () => {
     // IMPORTANT: do not overwrite local state while a save is in progress.
