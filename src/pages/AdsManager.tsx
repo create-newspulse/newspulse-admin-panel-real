@@ -51,6 +51,7 @@ type MediaKitRateCard = {
   placementKey: string;
   placementLabel: string;
   prices: Required<MediaKitPrices>;
+  rate15Days: number;
   includes?: string[];
   specs?: string[];
 };
@@ -63,6 +64,28 @@ type MediaKitBundle = {
   notes?: string[];
 };
 
+type MediaKitTickerPricingPeriod = '1d' | '3d' | '7d' | '15d' | '1m' | '1y';
+
+type MediaKitTickerPricingMap = Record<MediaKitTickerPricingPeriod, number>;
+
+type MediaKitTickerPricingTable = {
+  title: string;
+  subtitle?: string;
+  prices: MediaKitTickerPricingMap;
+  notes?: string[];
+};
+
+type MediaKitTickerScrollAds = {
+  title: string;
+  description: string;
+  placements: string[];
+  rules: string[];
+  scheduling: string[];
+  frequency: string[];
+  pricingTables: MediaKitTickerPricingTable[];
+  bookingEmail?: string;
+};
+
 type MediaKitDoc = {
   title: string;
   tagline?: string;
@@ -73,10 +96,79 @@ type MediaKitDoc = {
   fxRateUsdInr?: number;
   updatedAt?: string;
   sections: MediaKitSection[];
+  tickerScrollAds: MediaKitTickerScrollAds;
   rateCards: MediaKitRateCard[];
   bundles: MediaKitBundle[];
   policies?: string[];
 };
+
+const TICKER_SCROLL_PRICING_PERIODS: Array<{ key: MediaKitTickerPricingPeriod; label: string }> = [
+  { key: '1d', label: '1 Day' },
+  { key: '3d', label: '3 Days' },
+  { key: '7d', label: '7 Days' },
+  { key: '15d', label: '15 Days' },
+  { key: '1m', label: '1 Month' },
+  { key: '1y', label: '1 Year' },
+];
+
+const RATE_CARD_ROUNDING_STEP = 50;
+
+function roundRateCardPrice(value: number, step = RATE_CARD_ROUNDING_STEP): number {
+  const numericValue = Number(value);
+  const numericStep = Number(step);
+  if (!Number.isFinite(numericValue)) return 0;
+  if (!Number.isFinite(numericStep) || numericStep <= 0) return Math.round(numericValue);
+  return Math.round(numericValue / numericStep) * numericStep;
+}
+
+function deriveRateCardPricesFromDay(day: number, step = RATE_CARD_ROUNDING_STEP): { week: number; rate15Days: number; month: number } {
+  const sourceDay = Number(day);
+  if (!Number.isFinite(sourceDay)) {
+    return { week: 0, rate15Days: 0, month: 0 };
+  }
+
+  return {
+    week: roundRateCardPrice(sourceDay * 7 * 0.85, step),
+    rate15Days: roundRateCardPrice(sourceDay * 15 * 0.8, step),
+    month: roundRateCardPrice(sourceDay * 30 * 0.7, step),
+  };
+}
+
+function normalizeRateCard(
+  card: {
+    placementKey: string;
+    placementLabel: string;
+    prices: MediaKitPrices;
+    rate15Days?: number;
+    includes?: string[];
+    specs?: string[];
+  },
+  opts?: {
+    preserveExplicitDerived?: boolean;
+    roundingStep?: number;
+  },
+): MediaKitRateCard {
+  const day = Number(card?.prices?.day);
+  const normalizedDay = Number.isFinite(day) ? day : 0;
+  const derived = deriveRateCardPricesFromDay(normalizedDay, opts?.roundingStep);
+  const explicitWeek = Number(card?.prices?.week);
+  const explicitMonth = Number(card?.prices?.month);
+  const explicit15Days = Number(card?.rate15Days);
+  const preserveExplicit = opts?.preserveExplicitDerived !== false;
+
+  return {
+    placementKey: String(card?.placementKey || '').trim(),
+    placementLabel: String(card?.placementLabel || '').trim() || String(card?.placementKey || '').trim(),
+    prices: {
+      day: normalizedDay,
+      week: preserveExplicit && Number.isFinite(explicitWeek) ? explicitWeek : derived.week,
+      month: preserveExplicit && Number.isFinite(explicitMonth) ? explicitMonth : derived.month,
+    },
+    rate15Days: preserveExplicit && Number.isFinite(explicit15Days) ? explicit15Days : derived.rate15Days,
+    includes: Array.isArray(card?.includes) ? card.includes : [],
+    specs: Array.isArray(card?.specs) ? card.specs : [],
+  };
+}
 
 function defaultMediaKit(): MediaKitDoc {
   return {
@@ -114,70 +206,121 @@ function defaultMediaKit(): MediaKitDoc {
         ],
       },
     ],
+    tickerScrollAds: {
+      title: 'Ticker Scroll Advertisements',
+      description: 'Sponsored messages appear inside marquee-style news tickers with clear Advertisement labeling and optional click-through URLs.',
+      placements: [
+        'Breaking ticker (red)',
+        'Live Updates ticker (blue)',
+        '/breaking page sponsor line',
+      ],
+      rules: [
+        '120-140 characters recommended for best readability',
+        'Optional destination URL supported',
+        'Every paid line is labeled Advertisement',
+      ],
+      scheduling: [
+        'Booking windows: 1d, 3d, 7d, 15d, 1m, 1y',
+        'Daypart targeting available: morning, noon, evening, night',
+      ],
+      frequency: [
+        'Default insertion cadence: every 3 lines',
+        'Higher-frequency upgrades available on request',
+      ],
+      pricingTables: [
+        {
+          title: 'Intro Price (Current)',
+          subtitle: 'Best for early partners',
+          prices: {
+            '1d': 1500,
+            '3d': 4000,
+            '7d': 8500,
+            '15d': 16000,
+            '1m': 28000,
+            '1y': 240000,
+          },
+          notes: ['Default cadence includes one insertion every 3 lines.'],
+        },
+        {
+          title: 'Standard Price (Official)',
+          subtitle: 'Regular rate card',
+          prices: {
+            '1d': 2000,
+            '3d': 5500,
+            '7d': 12000,
+            '15d': 22000,
+            '1m': 40000,
+            '1y': 360000,
+          },
+          notes: ['Upgrade pricing for higher frequency or guaranteed premium rotation is available on request.'],
+        },
+      ],
+      bookingEmail: 'newspulse.ads@gmail.com',
+    },
     rateCards: [
-      {
+      normalizeRateCard({
         placementKey: 'HOME_728x90',
         placementLabel: 'Home Banner 728×90',
-        prices: { day: 500, week: 3000, month: 10000 },
+        prices: { day: 500 },
         includes: ['Homepage banner placement', 'One linked destination'],
         specs: ['728×90 image'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'FOOTER_BANNER_728x90',
         placementLabel: 'Footer Banner 728×90',
-        prices: { day: 500, week: 3000, month: 10000 },
+        prices: { day: 500 },
         includes: ['Footer banner placement', 'One linked destination'],
         specs: ['728×90 image'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'HOME_RIGHT_300x250',
         placementLabel: 'Home Right Rail 300×250',
-        prices: { day: 400, week: 2500, month: 8000 },
+        prices: { day: 400 },
         includes: ['Homepage right-rail placement', 'One linked destination'],
         specs: ['300×250 image'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'HOME_RIGHT_300x600',
         placementLabel: 'Home Right Rail 300×600 (Half Page)',
-        prices: { day: 650, week: 3900, month: 13000 },
+        prices: { day: 650 },
         includes: ['Premium sidebar placement', 'One linked destination'],
         specs: ['300×600 image'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'HOME_BILLBOARD_970x250',
         placementLabel: 'Home Billboard 970×250 (Premium)',
-        prices: { day: 900, week: 5400, month: 18000 },
+        prices: { day: 900 },
         includes: ['Premium homepage billboard placement', 'One linked destination'],
         specs: ['970×250 image'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'LIVE_UPDATE_SPONSOR',
         placementLabel: 'Live Update Sponsor (Sponsored by <Brand>)',
-        prices: { day: 700, week: 4200, month: 14000 },
+        prices: { day: 700 },
         includes: ['Live update sponsor line (“Sponsored by Brand”)'],
         specs: ['Brand name text (no image)'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'BREAKING_SPONSOR',
         placementLabel: 'Breaking Sponsor (Sponsored by <Brand>)',
-        prices: { day: 700, week: 4200, month: 14000 },
+        prices: { day: 700 },
         includes: ['Breaking sponsor line (“Sponsored by Brand”)'],
         specs: ['Brand name text (no image)'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'ARTICLE_INLINE',
         placementLabel: 'Article Inline',
-        prices: { day: 300, week: 1800, month: 6000 },
+        prices: { day: 300 },
         includes: ['Inline placement within article body'],
         specs: ['Recommended 728×90 or 300×250'],
-      },
-      {
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'ARTICLE_END',
         placementLabel: 'Article End',
-        prices: { day: 200, week: 1200, month: 4000 },
+        prices: { day: 200 },
         includes: ['Placement at the end of articles'],
         specs: ['Recommended 728×90 or 300×250'],
-      },
+      }, { preserveExplicitDerived: false }),
     ],
     bundles: [
       {
@@ -217,6 +360,10 @@ function formatUsdApproxFromInr(valueInInr: number, fxRateUsdInr?: number): stri
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(usd);
 }
 
+function formatTickerScrollPeriodLabel(period: MediaKitTickerPricingPeriod): string {
+  return TICKER_SCROLL_PRICING_PERIODS.find((entry) => entry.key === period)?.label || period;
+}
+
 function formatMediaKitAsText(doc: MediaKitDoc): string {
   const lines: string[] = [];
   lines.push(doc.title);
@@ -231,12 +378,37 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
     }
   }
 
+  if (doc.tickerScrollAds) {
+    lines.push(doc.tickerScrollAds.title);
+    if (doc.tickerScrollAds.description) lines.push(doc.tickerScrollAds.description);
+    lines.push('Placements');
+    for (const item of (doc.tickerScrollAds.placements || [])) lines.push(`- ${item}`);
+    lines.push('Rules');
+    for (const item of (doc.tickerScrollAds.rules || [])) lines.push(`- ${item}`);
+    lines.push('Scheduling');
+    for (const item of (doc.tickerScrollAds.scheduling || [])) lines.push(`- ${item}`);
+    lines.push('Frequency');
+    for (const item of (doc.tickerScrollAds.frequency || [])) lines.push(`- ${item}`);
+    lines.push('Pricing');
+    for (const table of (doc.tickerScrollAds.pricingTables || [])) {
+      lines.push(table.subtitle ? `${table.title} - ${table.subtitle}` : table.title);
+      for (const period of TICKER_SCROLL_PRICING_PERIODS) {
+        lines.push(`  • ${formatTickerScrollPeriodLabel(period.key)}: ${formatMoney(table.prices[period.key], doc.currencyCode)}`);
+      }
+      for (const note of (table.notes || [])) lines.push(`  • ${note}`);
+    }
+    const bookingEmail = doc.tickerScrollAds.bookingEmail || doc.contactEmail;
+    if (bookingEmail) lines.push(`Booking: ${bookingEmail}`);
+    lines.push('');
+  }
+
   lines.push('Rates');
   for (const r of (doc.rateCards || [])) {
     const day = `${formatMoney(r.prices.day, doc.currencyCode)}/day`;
     const week = `${formatMoney(r.prices.week, doc.currencyCode)}/week`;
+    const fifteenDays = `${formatMoney(r.rate15Days, doc.currencyCode)}/15 days`;
     const month = `${formatMoney(r.prices.month, doc.currencyCode)}/month`;
-    lines.push(`${r.placementLabel} (${r.placementKey}): ${day}, ${week}, ${month}`);
+    lines.push(`${r.placementLabel} (${r.placementKey}): ${day}, ${week}, ${fifteenDays}, ${month}`);
     for (const i of (r.includes || [])) lines.push(`  • ${i}`);
     for (const sp of (r.specs || [])) lines.push(`  • Spec: ${sp}`);
   }
@@ -716,6 +888,7 @@ export default function AdsManager() {
       ?? base.fxRateUsdInr
     );
     const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : (typeof raw.updated_at === 'string' ? raw.updated_at : base.updatedAt);
+    const rawTickerScrollAds = raw.tickerScrollAds ?? raw.tickerScrollAdvertisements ?? raw.ticker_scroll_ads;
 
     const sections = Array.isArray(raw.sections)
       ? raw.sections
@@ -725,6 +898,73 @@ export default function AdsManager() {
           bullets: Array.isArray(s?.bullets) ? s.bullets.map((b: any) => String(b).trim()).filter(Boolean) : [],
         }))
       : base.sections;
+
+    const tickerScrollAds = (() => {
+      if (!rawTickerScrollAds || typeof rawTickerScrollAds !== 'object') return base.tickerScrollAds;
+
+      const baseTicker = base.tickerScrollAds;
+
+      const normalizeTickerPrices = (rawPrices: any, basePrices: MediaKitTickerPricingMap): MediaKitTickerPricingMap => {
+        const source = rawPrices && typeof rawPrices === 'object' ? rawPrices : {};
+        return {
+          '1d': Number.isFinite(Number(source['1d'] ?? source.oneDay ?? source.day1 ?? source.day ?? undefined)) ? Number(source['1d'] ?? source.oneDay ?? source.day1 ?? source.day) : basePrices['1d'],
+          '3d': Number.isFinite(Number(source['3d'] ?? source.threeDay ?? source.day3 ?? undefined)) ? Number(source['3d'] ?? source.threeDay ?? source.day3) : basePrices['3d'],
+          '7d': Number.isFinite(Number(source['7d'] ?? source.sevenDay ?? source.day7 ?? undefined)) ? Number(source['7d'] ?? source.sevenDay ?? source.day7) : basePrices['7d'],
+          '15d': Number.isFinite(Number(source['15d'] ?? source.fifteenDay ?? source.day15 ?? undefined)) ? Number(source['15d'] ?? source.fifteenDay ?? source.day15) : basePrices['15d'],
+          '1m': Number.isFinite(Number(source['1m'] ?? source.month1 ?? source.month ?? undefined)) ? Number(source['1m'] ?? source.month1 ?? source.month) : basePrices['1m'],
+          '1y': Number.isFinite(Number(source['1y'] ?? source.year1 ?? source.year ?? undefined)) ? Number(source['1y'] ?? source.year1 ?? source.year) : basePrices['1y'],
+        };
+      };
+
+      const rawPricingTables = Array.isArray(rawTickerScrollAds.pricingTables)
+        ? rawTickerScrollAds.pricingTables
+        : [
+            rawTickerScrollAds.introPricing ? {
+              title: 'Intro Price (Current)',
+              subtitle: 'Best for early partners',
+              prices: rawTickerScrollAds.introPricing,
+            } : null,
+            rawTickerScrollAds.standardPricing ? {
+              title: 'Standard Price (Official)',
+              subtitle: 'Regular rate card',
+              prices: rawTickerScrollAds.standardPricing,
+            } : null,
+          ].filter(Boolean);
+
+      const pricingTables = (Array.isArray(rawPricingTables) && rawPricingTables.length > 0)
+        ? baseTicker.pricingTables.map((baseTable) => {
+            const match = rawPricingTables.find((entry: any) => String(entry?.title ?? '').trim() === baseTable.title);
+            const source = match && typeof match === 'object' ? match : null;
+            return {
+              title: String(source?.title ?? baseTable.title).trim() || baseTable.title,
+              subtitle: String(source?.subtitle ?? baseTable.subtitle ?? '').trim() || baseTable.subtitle,
+              prices: normalizeTickerPrices(source?.prices ?? source?.pricing ?? source?.priceByPeriod ?? source?.price_by_period, baseTable.prices),
+              notes: Array.isArray(source?.notes)
+                ? source.notes.map((note: any) => String(note).trim()).filter(Boolean)
+                : (baseTable.notes || []),
+            } as MediaKitTickerPricingTable;
+          })
+        : baseTicker.pricingTables;
+
+      return {
+        title: String(rawTickerScrollAds.title ?? baseTicker.title).trim() || baseTicker.title,
+        description: String(rawTickerScrollAds.description ?? baseTicker.description).trim() || baseTicker.description,
+        placements: Array.isArray(rawTickerScrollAds.placements)
+          ? rawTickerScrollAds.placements.map((item: any) => String(item).trim()).filter(Boolean)
+          : baseTicker.placements,
+        rules: Array.isArray(rawTickerScrollAds.rules)
+          ? rawTickerScrollAds.rules.map((item: any) => String(item).trim()).filter(Boolean)
+          : baseTicker.rules,
+        scheduling: Array.isArray(rawTickerScrollAds.scheduling)
+          ? rawTickerScrollAds.scheduling.map((item: any) => String(item).trim()).filter(Boolean)
+          : baseTicker.scheduling,
+        frequency: Array.isArray(rawTickerScrollAds.frequency)
+          ? rawTickerScrollAds.frequency.map((item: any) => String(item).trim()).filter(Boolean)
+          : baseTicker.frequency,
+        pricingTables,
+        bookingEmail: String(rawTickerScrollAds.bookingEmail ?? rawTickerScrollAds.contactEmail ?? baseTicker.bookingEmail ?? '').trim() || baseTicker.bookingEmail,
+      } as MediaKitTickerScrollAds;
+    })();
 
     const rateCardsFromRaw = Array.isArray(raw.rateCards)
       ? raw.rateCards
@@ -744,20 +984,30 @@ export default function AdsManager() {
           let day = Number(pricesRaw?.day ?? pricesRaw?.daily ?? undefined);
           let week = Number(pricesRaw?.week ?? pricesRaw?.weekly ?? undefined);
           let month = Number(pricesRaw?.month ?? pricesRaw?.monthly ?? undefined);
+          let rate15Days = Number(
+            r?.rate15Days
+            ?? r?.rate_fifteen_days
+            ?? r?.rateFortnight
+            ?? pricesRaw?.rate15Days
+            ?? pricesRaw?.fifteenDays
+            ?? pricesRaw?.fortnight
+            ?? undefined
+          );
 
-          const resolved = {
-            day: Number.isFinite(day) ? day : (baseCard?.prices.day ?? 0),
-            week: Number.isFinite(week) ? week : (baseCard?.prices.week ?? 0),
-            month: Number.isFinite(month) ? month : (baseCard?.prices.month ?? 0),
-          };
-
-          return {
+          return normalizeRateCard({
             placementKey,
             placementLabel,
-            prices: resolved,
+            prices: {
+              day: Number.isFinite(day) ? day : (baseCard?.prices.day ?? 0),
+              ...(Number.isFinite(week) ? { week } : {}),
+              ...(Number.isFinite(month) ? { month } : {}),
+            },
+            ...(Number.isFinite(rate15Days) ? { rate15Days } : {}),
             includes: Array.isArray(r?.includes) ? r.includes.map((i: any) => String(i).trim()).filter(Boolean) : [],
             specs: Array.isArray(r?.specs) ? r.specs.map((i: any) => String(i).trim()).filter(Boolean) : [],
-          } as MediaKitRateCard;
+          }, {
+            preserveExplicitDerived: true,
+          });
         })
         .filter((r: any) => r.placementKey)
       : null;
@@ -844,6 +1094,7 @@ export default function AdsManager() {
       fxRateUsdInr: Number.isFinite(fxRateUsdInr) && fxRateUsdInr > 0 ? fxRateUsdInr : base.fxRateUsdInr,
       updatedAt,
       sections,
+      tickerScrollAds,
       rateCards,
       bundles,
       policies,
@@ -905,6 +1156,38 @@ export default function AdsManager() {
     setMediaKitEditing(true);
     setMediaKitPreview(false);
   }, [mediaKit]);
+
+  const recalculateMediaKitEditorRates = React.useCallback(() => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(String(mediaKitEditorText || ''));
+    } catch {
+      toast.error('Invalid JSON');
+      return;
+    }
+
+    const normalized = normalizeMediaKit(parsed);
+    if (!normalized) {
+      toast.error('Media Kit JSON is missing required fields');
+      return;
+    }
+
+    const next: MediaKitDoc = {
+      ...normalized,
+      rateCards: (normalized.rateCards || []).map((card) => normalizeRateCard({
+        placementKey: card.placementKey,
+        placementLabel: card.placementLabel,
+        prices: { day: card.prices.day },
+        includes: card.includes,
+        specs: card.specs,
+      }, {
+        preserveExplicitDerived: false,
+      })),
+    };
+
+    setMediaKitEditorText(JSON.stringify(next, null, 2));
+    toast.success('Rate cards recalculated from 1 Day');
+  }, [mediaKitEditorText, normalizeMediaKit]);
 
   const cancelMediaKitEditor = React.useCallback(() => {
     if (mediaKitSaving || mediaKitResetting) return;
@@ -2616,6 +2899,15 @@ export default function AdsManager() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
+                    onClick={recalculateMediaKitEditorRates}
+                    className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                    disabled={mediaKitSaving || mediaKitResetting}
+                    title="Recalculate 7-day, 15-day, and 1-month rates from the 1-day price"
+                  >
+                    Recalculate Rates
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void resetMediaKit()}
                     className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
                     disabled={mediaKitSaving || mediaKitResetting}
@@ -2652,6 +2944,77 @@ export default function AdsManager() {
                 </div>
               </div>
 
+              {mediaKit.tickerScrollAds ? (
+                <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold mb-1">{mediaKit.tickerScrollAds.title}</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300">{mediaKit.tickerScrollAds.description}</div>
+                    </div>
+                    <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
+                      Booking: {mediaKit.tickerScrollAds.bookingEmail || mediaKit.contactEmail || 'newspulse.ads@gmail.com'}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                    {[
+                      { heading: 'Placements', items: mediaKit.tickerScrollAds.placements },
+                      { heading: 'Rules', items: mediaKit.tickerScrollAds.rules },
+                      { heading: 'Scheduling', items: mediaKit.tickerScrollAds.scheduling },
+                      { heading: 'Frequency', items: mediaKit.tickerScrollAds.frequency },
+                    ].map((group) => (
+                      <div key={group.heading} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                        <div className="text-sm font-medium">{group.heading}</div>
+                        <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                          {group.items.map((item, index) => (
+                            <li key={`${group.heading}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    {(mediaKit.tickerScrollAds.pricingTables || []).map((table, idx) => (
+                      <div key={`${table.title}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium">{table.title}</div>
+                            {table.subtitle ? (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">{table.subtitle}</div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {TICKER_SCROLL_PRICING_PERIODS.map((period) => {
+                            const value = table.prices[period.key];
+                            const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(value, mediaKit.fxRateUsdInr) : null;
+                            return (
+                              <div key={period.key} className="rounded border px-2 py-2 bg-white dark:bg-slate-900">
+                                <div className="text-[11px] text-slate-500">{period.label}</div>
+                                <div className="text-sm font-semibold">{formatMoney(value, mediaKit.currencyCode)}</div>
+                                {usd ? (
+                                  <div className="text-[11px] text-slate-500">≈ {usd}</div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {(table.notes?.length || 0) > 0 ? (
+                          <ul className="mt-3 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                            {table.notes!.map((note, noteIndex) => (
+                              <li key={`${table.title}-note-${noteIndex}`}>{note}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="border rounded p-4 bg-white dark:bg-slate-900">
                 <div className="text-sm font-semibold mb-2">Rate Cards</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -2666,12 +3029,13 @@ export default function AdsManager() {
                         </div>
                       </div>
 
-                      <div className="mt-2 grid grid-cols-3 gap-2">
+                      <div className="mt-2 grid grid-cols-2 lg:grid-cols-4 gap-2">
                         {(
                           [
-                            { label: 'Day', period: 'day' as const, value: r.prices.day },
-                            { label: 'Week', period: 'week' as const, value: r.prices.week },
-                            { label: 'Month', period: 'month' as const, value: r.prices.month },
+                                { label: '1 Day', period: 'day' as const, value: r.prices.day },
+                                { label: '7 Days', period: 'week' as const, value: r.prices.week },
+                                { label: '15 Days', period: 'rate15Days' as const, value: r.rate15Days },
+                                { label: '1 Month', period: 'month' as const, value: r.prices.month },
                           ]
                         ).map((p) => {
                           const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(p.value, mediaKit.fxRateUsdInr) : null;

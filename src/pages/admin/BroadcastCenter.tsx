@@ -13,6 +13,7 @@ import {
   listItems as apiListBroadcastItems,
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
+import BroadcastCenterTickerAds from './BroadcastCenterTickerAds';
 
 const PROXY_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 const PROXY_HEALTH_URL = '/admin-api/system/health';
@@ -26,6 +27,14 @@ const DEFAULT_SETTINGS: BroadcastSettings = {
   liveEnabled: false,
   liveMode: 'manual',
 };
+
+type BroadcastCenterTab = 'breaking' | 'live' | 'ticker-ads';
+
+const BROADCAST_CENTER_TABS: Array<{ key: BroadcastCenterTab; label: string; note: string }> = [
+  { key: 'breaking', label: 'Breaking', note: 'Existing 24h breaking ticker manager' },
+  { key: 'live', label: 'Live Updates', note: 'Existing 24h live updates manager' },
+  { key: 'ticker-ads', label: 'Ticker Ads', note: 'Paid scroll schedule manager' },
+];
 
 type SourceLang = 'en' | 'hi' | 'gu';
 type LangChoice = 'auto' | SourceLang;
@@ -592,6 +601,7 @@ export default function BroadcastCenter() {
   const notify = useNotify();
   const notifyRef = useRef(notify);
   useEffect(() => { notifyRef.current = notify; }, [notify]);
+  const [activeTab, setActiveTab] = useState<BroadcastCenterTab>('breaking');
 
   const [proxyHealthy, setProxyHealthy] = useState<boolean | null>(null);
   const [proxyHealthStatus, setProxyHealthStatus] = useState<number | null>(null);
@@ -1217,37 +1227,73 @@ export default function BroadcastCenter() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">📡 Broadcast Center</h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">Manage Breaking + Live Updates line-by-line items (last 24h).</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Manage Breaking, Live Updates, and paid ticker ads in separate workflows.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-            disabled={loading || saving || !dirty}
-            onClick={() => {
-              void doSave(settings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
-            }}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
-            disabled={isRefreshing}
-            onClick={() => {
-              void refreshAll();
-            }}
-          >
-            {isRefreshing ? 'Refreshing…' : 'Refresh LIVE'}
-          </button>
+          {activeTab === 'ticker-ads' && dirty ? (
+            <div className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              Breaking/Live changes pending on other tabs
+            </div>
+          ) : null}
+          {activeTab !== 'ticker-ads' ? (
+            <>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                disabled={loading || saving || !dirty}
+                onClick={() => {
+                  void doSave(settings, breakingTickerSpeedSeconds, liveTickerSpeedSeconds);
+                }}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800"
+                disabled={isRefreshing}
+                onClick={() => {
+                  void refreshAll();
+                }}
+              >
+                {isRefreshing ? 'Refreshing…' : 'Refresh LIVE'}
+              </button>
+            </>
+          ) : null}
         </div>
       </header>
 
-      {lastRefreshAt ? (
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-wrap gap-2">
+          {BROADCAST_CENTER_TABS.map((tab) => {
+            const active = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={
+                  'rounded-full border px-4 py-2 text-sm font-semibold transition ' +
+                  (active
+                    ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800')
+                }
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          {BROADCAST_CENTER_TABS.find((tab) => tab.key === activeTab)?.note}
+        </div>
+      </section>
+
+      {activeTab !== 'ticker-ads' && lastRefreshAt ? (
         <div className="text-xs text-slate-500 dark:text-slate-400">Last refreshed {formatLocalTime(lastRefreshAt)}</div>
       ) : null}
 
+      {activeTab !== 'ticker-ads' ? (
       <section className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1307,8 +1353,10 @@ export default function BroadcastCenter() {
           ))}
         </div>
       </section>
+      ) : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {activeTab === 'breaking' ? (
+      <div className="grid grid-cols-1 gap-6">
         <SectionCard
           title="🔥 Breaking"
           disabled={loading}
@@ -1341,7 +1389,11 @@ export default function BroadcastCenter() {
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('breaking', item)}
         />
+      </div>
+      ) : null}
 
+      {activeTab === 'live' ? (
+      <div className="grid grid-cols-1 gap-6">
         <SectionCard
           title="🔵 Live Updates"
           disabled={loading}
@@ -1374,6 +1426,9 @@ export default function BroadcastCenter() {
           onDelete={(item) => deleteItem('live', item)}
         />
       </div>
+      ) : null}
+
+      {activeTab === 'ticker-ads' ? <BroadcastCenterTickerAds /> : null}
     </div>
   );
 }
