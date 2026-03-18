@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import Switch from '@/components/settings/Switch';
 import { useNotify } from '@/components/ui/toast-bridge';
@@ -22,6 +22,7 @@ const CHANNEL_OPTIONS: Array<{ value: TickerAdChannel; label: string }> = [
 ];
 
 const LANGUAGE_OPTIONS: Array<{ value: TickerAdLanguage; label: string }> = [
+  { value: 'all', label: 'All Languages (EN+HI+GU)' },
   { value: 'en', label: 'English' },
   { value: 'hi', label: 'Hindi' },
   { value: 'gu', label: 'Gujarati' },
@@ -36,6 +37,9 @@ const DAY_PART_OPTIONS: Array<{ value: TickerAdDayPart; label: string }> = [
 
 type FormState = {
   message: string;
+  messageEn: string;
+  messageHi: string;
+  messageGu: string;
   url: string;
   channel: TickerAdChannel;
   language: TickerAdLanguage;
@@ -47,7 +51,34 @@ type FormState = {
   active: boolean;
 };
 
-type FormErrors = Partial<Record<'message' | 'url' | 'startAtLocal' | 'endAtLocal', string>>;
+type FormErrors = Partial<Record<'message' | 'messageEn' | 'messageHi' | 'messageGu' | 'url' | 'startAtLocal' | 'endAtLocal', string>>;
+
+function normalizeLanguageCode(value: unknown): TickerAdLanguage {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'all' || normalized === 'all languages' || normalized === 'all-languages' || normalized === 'all_languages') return 'all';
+  if (normalized === 'hindi' || normalized === 'hi') return 'hi';
+  if (normalized === 'gujarati' || normalized === 'gu') return 'gu';
+  return 'en';
+}
+
+function normalizeDayPartCode(value: unknown): TickerAdDayPart | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'morning') return 'morning';
+  if (normalized === 'noon') return 'noon';
+  if (normalized === 'evening') return 'evening';
+  if (normalized === 'night') return 'night';
+  return null;
+}
+
+function normalizeDayPartsCodes(value: unknown): TickerAdDayPart[] {
+  const rawValues = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[|,]/g) : [];
+  const unique = new Set<TickerAdDayPart>();
+  for (const raw of rawValues) {
+    const normalized = normalizeDayPartCode(raw);
+    if (normalized) unique.add(normalized);
+  }
+  return Array.from(unique);
+}
 
 function pad(value: number): string {
   return String(value).padStart(2, '0');
@@ -71,6 +102,9 @@ function createEmptyForm(): FormState {
   const end = new Date(start.getTime() + 60 * 60 * 1000);
   return {
     message: '',
+    messageEn: '',
+    messageHi: '',
+    messageGu: '',
     url: '',
     channel: 'both',
     language: 'en',
@@ -86,12 +120,15 @@ function createEmptyForm(): FormState {
 function formFromAd(ad: TickerAd): FormState {
   return {
     message: ad.message,
+    messageEn: ad.messages?.en || (ad.language === 'en' ? ad.message : ''),
+    messageHi: ad.messages?.hi || (ad.language === 'hi' ? ad.message : ''),
+    messageGu: ad.messages?.gu || (ad.language === 'gu' ? ad.message : ''),
     url: ad.url || '',
     channel: ad.channel,
-    language: ad.language,
+    language: normalizeLanguageCode(ad.language),
     startAtLocal: toLocalInputValue(ad.startAt),
     endAtLocal: toLocalInputValue(ad.endAt),
-    dayParts: ad.dayParts,
+    dayParts: normalizeDayPartsCodes(ad.dayParts),
     priority: String(ad.priority),
     frequency: ad.frequency,
     active: ad.active,
@@ -109,13 +146,23 @@ function isValidUrl(value: string): boolean {
 
 function validateForm(form: FormState): { errors: FormErrors; payload: TickerAdMutation | null } {
   const errors: FormErrors = {};
+  const language = normalizeLanguageCode(form.language);
   const message = form.message.trim();
+  const messageEn = form.messageEn.trim();
+  const messageHi = form.messageHi.trim();
+  const messageGu = form.messageGu.trim();
   const url = form.url.trim();
   const startAt = fromLocalInputValue(form.startAtLocal);
   const endAt = fromLocalInputValue(form.endAtLocal);
 
-  if (!message) {
-    errors.message = 'Message is required.';
+  if (language === 'all') {
+    if (!messageEn) errors.messageEn = 'English message is required.';
+    if (!messageHi) errors.messageHi = 'Hindi message is required.';
+    if (!messageGu) errors.messageGu = 'Gujarati message is required.';
+  } else {
+    if (!message) {
+      errors.message = 'Message is required.';
+    }
   }
   if (url && !isValidUrl(url)) {
     errors.url = 'Enter a valid URL, including http:// or https://.';
@@ -135,20 +182,39 @@ function validateForm(form: FormState): { errors: FormErrors; payload: TickerAdM
   }
 
   const priorityNumber = Number(form.priority);
+  const dayParts = normalizeDayPartsCodes(form.dayParts);
   return {
     errors,
-    payload: {
-      message,
-      ...(url ? { url } : {}),
-      channel: form.channel,
-      language: form.language,
-      startAt,
-      endAt,
-      dayParts: form.dayParts,
-      priority: Number.isFinite(priorityNumber) ? Math.round(priorityNumber) : 0,
-      frequency: Math.min(10, Math.max(1, Math.round(form.frequency))),
-      active: form.active,
-    },
+    payload:
+      language === 'all'
+        ? {
+          ...(url ? { url } : {}),
+          channel: form.channel,
+          language: 'all',
+          messages: {
+            en: messageEn,
+            hi: messageHi,
+            gu: messageGu,
+          },
+          startAt,
+          endAt,
+          dayParts,
+          priority: Number.isFinite(priorityNumber) ? Math.round(priorityNumber) : 0,
+          frequency: Math.min(10, Math.max(1, Math.round(form.frequency))),
+          active: form.active,
+        }
+        : {
+          message,
+          ...(url ? { url } : {}),
+          channel: form.channel,
+          language,
+          startAt,
+          endAt,
+          dayParts,
+          priority: Number.isFinite(priorityNumber) ? Math.round(priorityNumber) : 0,
+          frequency: Math.min(10, Math.max(1, Math.round(form.frequency))),
+          active: form.active,
+        },
   };
 }
 
@@ -211,8 +277,15 @@ function channelMatches(target: 'breaking' | 'live', channel: TickerAdChannel): 
   return channel === 'both' || channel === target;
 }
 
+function adMessageForLanguage(ad: TickerAd, language: 'en' | 'hi' | 'gu'): string {
+  if (ad.language !== 'all') return ad.message;
+  const fromMessages = ad.messages?.[language];
+  return String(fromMessages || ad.message || '').trim();
+}
+
 export default function BroadcastCenterTickerAds() {
   const notify = useNotify();
+  const submitInFlightRef = useRef(false);
   const [ads, setAds] = useState<TickerAd[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -253,23 +326,24 @@ export default function BroadcastCenterTickerAds() {
 
   const previewGroups = useMemo(() => {
     const currentAds = sortAds(ads.filter((ad) => isActiveNow(ad, now)));
+    const matchesLang = (ad: TickerAd, lang: 'en' | 'hi' | 'gu') => ad.language === 'all' || ad.language === lang;
     return {
       breaking: {
-        en: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && ad.language === 'en'),
-        hi: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && ad.language === 'hi'),
-        gu: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && ad.language === 'gu'),
+        en: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && matchesLang(ad, 'en')),
+        hi: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && matchesLang(ad, 'hi')),
+        gu: currentAds.filter((ad) => channelMatches('breaking', ad.channel) && matchesLang(ad, 'gu')),
       },
       live: {
-        en: currentAds.filter((ad) => channelMatches('live', ad.channel) && ad.language === 'en'),
-        hi: currentAds.filter((ad) => channelMatches('live', ad.channel) && ad.language === 'hi'),
-        gu: currentAds.filter((ad) => channelMatches('live', ad.channel) && ad.language === 'gu'),
+        en: currentAds.filter((ad) => channelMatches('live', ad.channel) && matchesLang(ad, 'en')),
+        hi: currentAds.filter((ad) => channelMatches('live', ad.channel) && matchesLang(ad, 'hi')),
+        gu: currentAds.filter((ad) => channelMatches('live', ad.channel) && matchesLang(ad, 'gu')),
       },
     };
   }, [ads, now]);
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
-    if (key === 'message' || key === 'url' || key === 'startAtLocal' || key === 'endAtLocal') {
+    if (key === 'message' || key === 'messageEn' || key === 'messageHi' || key === 'messageGu' || key === 'url' || key === 'startAtLocal' || key === 'endAtLocal') {
       setFormErrors((prev) => {
         const next = { ...prev };
         delete next[key as keyof FormErrors];
@@ -300,9 +374,14 @@ export default function BroadcastCenterTickerAds() {
   }
 
   async function handleSubmit() {
+    if (submitInFlightRef.current || saving) return;
+    submitInFlightRef.current = true;
     const result = validateForm(form);
     setFormErrors(result.errors);
-    if (!result.payload) return;
+    if (!result.payload) {
+      submitInFlightRef.current = false;
+      return;
+    }
 
     setSaving(true);
     try {
@@ -319,6 +398,7 @@ export default function BroadcastCenterTickerAds() {
       notify.err(editingAd ? 'Ticker ad update failed' : 'Ticker ad create failed', apiErrorDetails(error));
     } finally {
       setSaving(false);
+      submitInFlightRef.current = false;
     }
   }
 
@@ -345,18 +425,38 @@ export default function BroadcastCenterTickerAds() {
     if (!ad.id) return;
     setBusyIds((prev) => ({ ...prev, [ad.id]: true }));
     try {
-      await updateTickerAd(ad.id, {
-        message: ad.message,
-        ...(ad.url ? { url: ad.url } : {}),
-        channel: ad.channel,
-        language: ad.language,
-        dayParts: ad.dayParts,
-        startAt: ad.startAt,
-        endAt: ad.endAt,
-        priority: ad.priority,
-        frequency: ad.frequency,
-        active: nextActive,
-      });
+      await updateTickerAd(
+        ad.id,
+        ad.language === 'all'
+          ? {
+            ...(ad.url ? { url: ad.url } : {}),
+            channel: ad.channel,
+            language: 'all',
+            messages: {
+              en: String(ad.messages?.en || ad.message || '').trim(),
+              hi: String(ad.messages?.hi || ad.message || '').trim(),
+              gu: String(ad.messages?.gu || ad.message || '').trim(),
+            },
+            dayParts: ad.dayParts,
+            startAt: ad.startAt,
+            endAt: ad.endAt,
+            priority: ad.priority,
+            frequency: ad.frequency,
+            active: nextActive,
+          }
+          : {
+            message: ad.message,
+            ...(ad.url ? { url: ad.url } : {}),
+            channel: ad.channel,
+            language: ad.language,
+            dayParts: ad.dayParts,
+            startAt: ad.startAt,
+            endAt: ad.endAt,
+            priority: ad.priority,
+            frequency: ad.frequency,
+            active: nextActive,
+          },
+      );
       notify.ok(nextActive ? 'Ticker ad enabled' : 'Ticker ad disabled');
       await loadAds({ silent: true });
     } catch (error) {
@@ -433,7 +533,7 @@ export default function BroadcastCenterTickerAds() {
                         <div className="space-y-2">
                           {items.map((ad) => (
                             <div key={`${channel}-${language}-${ad.id || ad.message}-${ad.startAt}`} className="rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-800 dark:bg-slate-900">
-                              <div className="font-medium text-slate-900 dark:text-white">{ad.message}</div>
+                              <div className="font-medium text-slate-900 dark:text-white">{adMessageForLanguage(ad, language)}</div>
                               <div className="mt-1 text-slate-500 dark:text-slate-400">P{ad.priority} • Every {ad.frequency} items</div>
                             </div>
                           ))}
@@ -571,19 +671,73 @@ export default function BroadcastCenterTickerAds() {
 
             <div className="space-y-5 px-5 py-4">
               <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <label className="text-sm font-semibold text-slate-900 dark:text-white">Message</label>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">{form.message.length}/140</div>
-                </div>
-                <textarea
-                  value={form.message}
-                  maxLength={140}
-                  rows={3}
-                  onChange={(event) => updateForm('message', event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                  placeholder="Sponsored ticker message"
-                />
-                {formErrors.message ? <div className="mt-2 text-xs text-red-600 dark:text-red-300">{formErrors.message}</div> : null}
+                {form.language === 'all' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-semibold text-slate-900 dark:text-white">Message (English)</label>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{form.messageEn.length}/140</div>
+                      </div>
+                      <textarea
+                        value={form.messageEn}
+                        maxLength={140}
+                        rows={3}
+                        onChange={(event) => updateForm('messageEn', event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        placeholder="Sponsored ticker message (EN)"
+                      />
+                      {formErrors.messageEn ? <div className="mt-2 text-xs text-red-600 dark:text-red-300">{formErrors.messageEn}</div> : null}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-semibold text-slate-900 dark:text-white">Message (Hindi)</label>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{form.messageHi.length}/140</div>
+                      </div>
+                      <textarea
+                        value={form.messageHi}
+                        maxLength={140}
+                        rows={3}
+                        onChange={(event) => updateForm('messageHi', event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        placeholder="Sponsored ticker message (HI)"
+                      />
+                      {formErrors.messageHi ? <div className="mt-2 text-xs text-red-600 dark:text-red-300">{formErrors.messageHi}</div> : null}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-semibold text-slate-900 dark:text-white">Message (Gujarati)</label>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{form.messageGu.length}/140</div>
+                      </div>
+                      <textarea
+                        value={form.messageGu}
+                        maxLength={140}
+                        rows={3}
+                        onChange={(event) => updateForm('messageGu', event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                        placeholder="Sponsored ticker message (GU)"
+                      />
+                      {formErrors.messageGu ? <div className="mt-2 text-xs text-red-600 dark:text-red-300">{formErrors.messageGu}</div> : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="text-sm font-semibold text-slate-900 dark:text-white">Message</label>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{form.message.length}/140</div>
+                    </div>
+                    <textarea
+                      value={form.message}
+                      maxLength={140}
+                      rows={3}
+                      onChange={(event) => updateForm('message', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                      placeholder="Sponsored ticker message"
+                    />
+                    {formErrors.message ? <div className="mt-2 text-xs text-red-600 dark:text-red-300">{formErrors.message}</div> : null}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -616,7 +770,43 @@ export default function BroadcastCenterTickerAds() {
                   <label className="mb-2 block text-sm font-semibold text-slate-900 dark:text-white">Language</label>
                   <select
                     value={form.language}
-                    onChange={(event) => updateForm('language', event.target.value as TickerAdLanguage)}
+                    onChange={(event) => {
+                      const nextLanguage = normalizeLanguageCode(event.target.value);
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.message;
+                        delete next.messageEn;
+                        delete next.messageHi;
+                        delete next.messageGu;
+                        return next;
+                      });
+                      setForm((prev) => {
+                        if (nextLanguage === prev.language) return prev;
+
+                        if (nextLanguage === 'all' && prev.language !== 'all') {
+                          return {
+                            ...prev,
+                            language: nextLanguage,
+                            messageEn: prev.messageEn || prev.message,
+                          };
+                        }
+
+                        if (nextLanguage !== 'all' && prev.language === 'all') {
+                          const nextMessage = nextLanguage === 'en'
+                            ? prev.messageEn
+                            : nextLanguage === 'hi'
+                              ? prev.messageHi
+                              : prev.messageGu;
+                          return {
+                            ...prev,
+                            language: nextLanguage,
+                            message: prev.message || nextMessage || prev.messageEn || prev.messageHi || prev.messageGu,
+                          };
+                        }
+
+                        return { ...prev, language: nextLanguage };
+                      });
+                    }}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
                   >
                     {LANGUAGE_OPTIONS.map((option) => (

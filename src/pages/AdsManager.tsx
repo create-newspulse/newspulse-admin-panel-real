@@ -111,6 +111,20 @@ const TICKER_SCROLL_PRICING_PERIODS: Array<{ key: MediaKitTickerPricingPeriod; l
   { key: '1y', label: '1 Year' },
 ];
 
+const TICKER_SCROLL_LANGUAGE_MULTIPLIERS = {
+  single: 1,
+  two: 1.6,
+  allThree: 2.2,
+} as const;
+
+const TICKER_SCROLL_LANGUAGE_PACKAGE_BULLETS: string[] = [
+  'English (EN), Hindi (HI), and Gujarati (GU) are supported.',
+  `Single language (EN or HI or GU): base price × ${TICKER_SCROLL_LANGUAGE_MULTIPLIERS.single}×`,
+  `Two languages (EN+HI / EN+GU / HI+GU): base price × ${TICKER_SCROLL_LANGUAGE_MULTIPLIERS.two}×`,
+  `All three languages (EN+HI+GU): base price × ${TICKER_SCROLL_LANGUAGE_MULTIPLIERS.allThree}×`,
+  'All Languages campaigns show the correct message per site language.',
+];
+
 const RATE_CARD_ROUNDING_STEP = 50;
 
 function roundRateCardPrice(value: number, step = RATE_CARD_ROUNDING_STEP): number {
@@ -389,12 +403,16 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
     for (const item of (doc.tickerScrollAds.scheduling || [])) lines.push(`- ${item}`);
     lines.push('Frequency');
     for (const item of (doc.tickerScrollAds.frequency || [])) lines.push(`- ${item}`);
+    lines.push('Language Packages (Ticker Scroll Ads)');
+    for (const item of TICKER_SCROLL_LANGUAGE_PACKAGE_BULLETS) lines.push(`- ${item}`);
     lines.push('Pricing');
     for (const table of (doc.tickerScrollAds.pricingTables || [])) {
       lines.push(table.subtitle ? `${table.title} - ${table.subtitle}` : table.title);
       for (const period of TICKER_SCROLL_PRICING_PERIODS) {
         lines.push(`  • ${formatTickerScrollPeriodLabel(period.key)}: ${formatMoney(table.prices[period.key], doc.currencyCode)}`);
       }
+      lines.push(`  • Two Languages (EN+HI / EN+GU / HI+GU): base × ${TICKER_SCROLL_LANGUAGE_MULTIPLIERS.two}×`);
+      lines.push(`  • All Three Languages (EN+HI+GU): base × ${TICKER_SCROLL_LANGUAGE_MULTIPLIERS.allThree}×`);
       for (const note of (table.notes || [])) lines.push(`  • ${note}`);
     }
     const bookingEmail = doc.tickerScrollAds.bookingEmail || doc.contactEmail;
@@ -2974,6 +2992,17 @@ export default function AdsManager() {
                     ))}
                   </div>
 
+                  <div className="mt-4">
+                    <div className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                      <div className="text-sm font-medium">Language Packages (Ticker Scroll Ads)</div>
+                      <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                        {TICKER_SCROLL_LANGUAGE_PACKAGE_BULLETS.map((item, index) => (
+                          <li key={`ticker-scroll-language-${index}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
                   <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
                     {(mediaKit.tickerScrollAds.pricingTables || []).map((table, idx) => (
                       <div key={`${table.title}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
@@ -3001,6 +3030,11 @@ export default function AdsManager() {
                             );
                           })}
                         </div>
+
+                        <ul className="mt-3 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                          <li>Two Languages (EN+HI / EN+GU / HI+GU): base × {TICKER_SCROLL_LANGUAGE_MULTIPLIERS.two}×</li>
+                          <li>All Three Languages (EN+HI+GU): base × {TICKER_SCROLL_LANGUAGE_MULTIPLIERS.allThree}×</li>
+                        </ul>
 
                         {(table.notes?.length || 0) > 0 ? (
                           <ul className="mt-3 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">

@@ -1,12 +1,19 @@
 import { AdminApiError, adminFetch } from '@/lib/http/adminFetch';
 
 export type TickerAdChannel = 'breaking' | 'live' | 'both';
-export type TickerAdLanguage = 'en' | 'hi' | 'gu';
+export type TickerAdLanguage = 'en' | 'hi' | 'gu' | 'all';
 export type TickerAdDayPart = 'morning' | 'noon' | 'evening' | 'night';
+
+export type TickerAdMessages = {
+  en: string;
+  hi: string;
+  gu: string;
+};
 
 export type TickerAd = {
   id: string;
   message: string;
+  messages?: Partial<TickerAdMessages>;
   url?: string;
   channel: TickerAdChannel;
   language: TickerAdLanguage;
@@ -20,8 +27,7 @@ export type TickerAd = {
   updatedAt?: string;
 };
 
-export type TickerAdMutation = {
-  message: string;
+type TickerAdMutationCommon = {
   url?: string;
   channel: TickerAdChannel;
   language: TickerAdLanguage;
@@ -32,6 +38,18 @@ export type TickerAdMutation = {
   priority: number;
   frequency: number;
 };
+
+export type TickerAdMutation =
+  | (TickerAdMutationCommon & {
+    language: Exclude<TickerAdLanguage, 'all'>;
+    message: string;
+    messages?: never;
+  })
+  | (TickerAdMutationCommon & {
+    language: 'all';
+    messages: TickerAdMessages;
+    message?: string;
+  });
 
 const BASE = '/admin-api/broadcast/ticker-ads';
 
@@ -75,9 +93,62 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
 
 function normalizeLanguage(value: unknown): TickerAdLanguage {
   const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'all' || normalized === 'all languages' || normalized === 'all-languages' || normalized === 'all_languages') return 'all';
+  if (normalized === 'hindi') return 'hi';
+  if (normalized === 'gujarati') return 'gu';
+  if (normalized === 'english') return 'en';
   if (normalized === 'hi') return 'hi';
   if (normalized === 'gu') return 'gu';
+  if (normalized === 'en') return 'en';
   return 'en';
+}
+
+function serializeTickerAdPayload(payload: TickerAdMutation) {
+  const lang = normalizeLanguage(payload?.language);
+  const dayParts = normalizeDayParts(payload?.dayParts);
+
+  const base = {
+    ...(payload?.url ? { url: String(payload.url).trim() } : {}),
+    channel: payload.channel,
+    lang,
+    ...(dayParts.length > 0 ? { dayParts } : {}),
+    startAt: normalizeIso(payload?.startAt),
+    endAt: normalizeIso(payload?.endAt),
+    active: normalizeBoolean(payload?.active, true),
+    priority: clampInteger(payload?.priority, 0, -999, 999),
+    frequency: clampInteger(payload?.frequency, 1, 1, 10),
+  };
+
+  if (lang === 'all') {
+    const messages = (payload as any)?.messages || {};
+    return {
+      ...base,
+      messages: {
+        en: String(messages?.en || '').trim(),
+        hi: String(messages?.hi || '').trim(),
+        gu: String(messages?.gu || '').trim(),
+      },
+    };
+  }
+
+  return {
+    ...base,
+    message: String((payload as any)?.message || '').trim(),
+  };
+}
+
+function normalizeMessages(value: unknown): Partial<TickerAdMessages> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const anyValue: any = value as any;
+  const en = String(anyValue?.en ?? '').trim();
+  const hi = String(anyValue?.hi ?? '').trim();
+  const gu = String(anyValue?.gu ?? '').trim();
+  if (!en && !hi && !gu) return undefined;
+  return {
+    ...(en ? { en } : {}),
+    ...(hi ? { hi } : {}),
+    ...(gu ? { gu } : {}),
+  };
 }
 
 function normalizeChannel(value: unknown): TickerAdChannel {
@@ -137,12 +208,17 @@ function extractItem(input: any): any | null {
 
 function normalizeTickerAd(raw: any): TickerAd {
   const id = String(raw?.id ?? raw?._id ?? raw?.adId ?? raw?.tickerAdId ?? '');
+  const messages = normalizeMessages(raw?.messages ?? raw?.msgs);
+  const language = normalizeLanguage(raw?.language ?? raw?.lang);
+  const derivedMessage = String(raw?.message ?? raw?.text ?? raw?.copy ?? '').trim();
+  const messageFromMessages = messages?.en || messages?.hi || messages?.gu || '';
   return {
     id,
-    message: String(raw?.message ?? raw?.text ?? raw?.copy ?? '').trim(),
+    message: derivedMessage || messageFromMessages,
+    ...(messages ? { messages } : {}),
     url: String(raw?.url ?? raw?.href ?? '').trim() || undefined,
     channel: normalizeChannel(raw?.channel ?? raw?.placement ?? raw?.type),
-    language: normalizeLanguage(raw?.language ?? raw?.lang),
+    language,
     dayParts: normalizeDayParts(raw?.dayParts ?? raw?.dayparts),
     startAt: normalizeIso(raw?.startAt ?? raw?.start ?? raw?.startsAt ?? raw?.startDate),
     endAt: normalizeIso(raw?.endAt ?? raw?.end ?? raw?.endsAt ?? raw?.endDate),
@@ -194,7 +270,7 @@ export async function listTickerAds(): Promise<TickerAd[]> {
 }
 
 export async function createTickerAd(payload: TickerAdMutation): Promise<TickerAd | null> {
-  const raw = await requestJson<any>(BASE, { method: 'POST', json: payload });
+  const raw = await requestJson<any>(BASE, { method: 'POST', json: serializeTickerAdPayload(payload) });
   const item = extractItem(raw);
   return item ? normalizeTickerAd(item) : null;
 }
@@ -202,14 +278,14 @@ export async function createTickerAd(payload: TickerAdMutation): Promise<TickerA
 export async function updateTickerAd(id: string, payload: TickerAdMutation): Promise<TickerAd | null> {
   const url = `${BASE}/${encodeURIComponent(id)}`;
   try {
-    const raw = await requestJson<any>(url, { method: 'PATCH', json: payload });
+    const raw = await requestJson<any>(url, { method: 'PATCH', json: serializeTickerAdPayload(payload) });
     const item = extractItem(raw);
     return item ? normalizeTickerAd(item) : null;
   } catch (error) {
     if (!(error instanceof AdminApiError) || error.status !== 405) throw error;
   }
 
-  const raw = await requestJson<any>(url, { method: 'PUT', json: payload });
+  const raw = await requestJson<any>(url, { method: 'PUT', json: serializeTickerAdPayload(payload) });
   const item = extractItem(raw);
   return item ? normalizeTickerAd(item) : null;
 }
