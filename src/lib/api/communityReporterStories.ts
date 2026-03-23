@@ -5,10 +5,25 @@ import { adminApi, resolveAdminPath } from '@/lib/adminApi';
 export interface AdminCommunityStory {
   id: string;
   headline: string;
+  // Summary intentionally not used by the Story Desk table, but may exist on the backend.
   summary?: string;
   language?: string;
   category?: string;
   city?: string;
+  district?: string;
+  state?: string;
+  country?: string;
+  reporterName?: string;
+  reporterEmail?: string;
+  reporterPhone?: string;
+  reporterKey?: string;
+  sourceId?: string;
+  linkedArticleId?: string;
+  linkedArticleSlug?: string;
+  linkedArticleStatus?: string;
+  published?: boolean;
+  publishedAt?: string;
+  views?: number;
   status: string;
   createdAt: string;
   updatedAt?: string;
@@ -58,15 +73,33 @@ export async function listAdminCommunityStories(
 
       // Normalize common field names so the table code is simple.
       return raw.map((story: any): AdminCommunityStory => ({
-        id: story.id ?? story._id ?? String(story.refId ?? story.referenceId ?? Math.random()),
-        headline: story.headline ?? story.title ?? '',
+        id: story.id ?? story._id ?? String(story.refId ?? story.referenceId ?? story.sourceId ?? Math.random()),
+        headline: story.headline ?? story.title ?? story.heading ?? '',
         summary: story.summary ?? story.storySummary ?? story.aiSummary ?? '',
-        language: story.language ?? story.lang ?? '',
-        category: story.category ?? story.categorySlug ?? story.topic ?? '',
-        city: story.city ?? story.location?.city ?? story.cityName ?? '',
-        status: story.status ?? story.reviewStatus ?? story.state ?? 'PENDING',
-        createdAt: story.createdAt ?? story.created_at ?? story.created ?? new Date().toISOString(),
-        updatedAt: story.updatedAt ?? story.updated_at ?? story.updated,
+        language: story.language ?? story.lang ?? story.locale ?? '',
+        category: story.category ?? story.categorySlug ?? story.topic ?? story.section ?? '',
+        city: story.city ?? story.location?.city ?? story.location?.town ?? story.cityName ?? '',
+        district: story.district ?? story.location?.district ?? story.location?.area ?? '',
+        state: story.state ?? story.location?.state ?? story.location?.region ?? '',
+        country: story.country ?? story.location?.country ?? story.location?.nation ?? '',
+        reporterName: story.reporterName ?? story.userName ?? story.name ?? story.contactName ?? story.authorName ?? '',
+        reporterEmail: story.contactEmail ?? story.email ?? story.reporterEmail ?? story.authorEmail ?? '',
+        reporterPhone: story.contactPhone ?? story.phone ?? story.whatsapp ?? story.reporterPhone ?? '',
+        reporterKey: story.reporterKey ?? story.userId ?? story.ownerId ?? story.reporterId ?? '',
+        sourceId: story.referenceId ?? story.refId ?? story.sourceId ?? story.externalId ?? '',
+        linkedArticleId: story.linkedArticleId ?? story.articleId ?? story.draftArticleId ?? story.article?._id ?? story.article?.id ?? '',
+        linkedArticleSlug: story.slug ?? story.articleSlug ?? story.article?.slug ?? '',
+        linkedArticleStatus: story.articleStatus ?? story.publicationStatus ?? story.article?.status ?? '',
+        published: Boolean(
+          story.published
+          ?? story.isPublished
+          ?? (String(story.articleStatus ?? story.publicationStatus ?? story.article?.status ?? '').toLowerCase() === 'published')
+        ),
+        publishedAt: story.publishedAt ?? story.article?.publishedAt ?? story.liveAt ?? story.goLiveAt ?? '',
+        views: Number(story.views ?? story.viewCount ?? story.article?.views ?? story.article?.viewCount ?? 0) || 0,
+        status: story.status ?? story.reviewStatus ?? story.state ?? story.workflowStatus ?? 'PENDING',
+        createdAt: story.createdAt ?? story.created_at ?? story.created ?? story.submittedAt ?? new Date().toISOString(),
+        updatedAt: story.updatedAt ?? story.updated_at ?? story.updated ?? story.modifiedAt,
       }));
     } catch (e: any) {
       lastError = e;
