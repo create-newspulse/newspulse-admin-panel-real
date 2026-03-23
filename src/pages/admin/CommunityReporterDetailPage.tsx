@@ -118,6 +118,48 @@ export default function CommunityReporterDetailPage() {
   if (error && !submission) return <div className="max-w-xl"><p className="text-red-600 mb-4">{error}</p><button onClick={goBack} className="px-3 py-1 rounded bg-slate-600 text-white">Back</button></div>;
   if (!submission) return null;
 
+  function getReporterDisplayName(s: CommunitySubmission): string {
+    const preferred = String(((s as any).reporterName || s.userName || s.name || s.contactName || '')).trim();
+    const looksLikeId = /^[a-f0-9]{24}$/i.test(preferred) || /^\d{10,}$/i.test(preferred);
+    if (preferred && !looksLikeId) return preferred;
+    const email = String(((s as any).contactEmail || s.email || '')).trim();
+    const fromEmail = email.includes('@') ? email.split('@')[0].trim() : email.trim();
+    if (fromEmail) return fromEmail;
+    const phone = String(((s as any).contactPhone || (s as any).phone || (s as any).whatsapp || '')).trim();
+    if (phone) return phone;
+    return '—';
+  }
+
+  function deriveLocationParts(s: CommunitySubmission): { city: string; state: string; country: string; district: string } {
+    let city = String(s.city || '').trim();
+    let state = String(s.state || '').trim();
+    let country = String(s.country || '').trim();
+    let district = String(s.district || '').trim();
+
+    const loc: any = (s as any).location;
+    if (loc && typeof loc === 'object' && !Array.isArray(loc)) {
+      city = city || String(loc.city ?? loc.town ?? loc.locality ?? loc.village ?? loc.place ?? loc.district ?? loc.area ?? '').trim();
+      district = district || String(loc.district ?? loc.area ?? '').trim();
+      state = state || String(loc.state ?? loc.region ?? loc.province ?? '').trim();
+      country = country || String(loc.country ?? loc.nation ?? '').trim();
+      return { city, state, country, district };
+    }
+
+    if (typeof loc === 'string') {
+      const parts = loc.split(',').map(p => p.trim()).filter(Boolean);
+      if (!city && parts[0]) city = parts[0];
+      if (!state && parts[1]) state = parts[1];
+      if (!country && parts[2]) country = parts[2];
+    }
+
+    return { city, state, country, district };
+  }
+
+  const reporterDisplayName = getReporterDisplayName(submission);
+  const derivedLoc = deriveLocationParts(submission);
+  const contactEmail = String(((submission as any).contactEmail || submission.email || '')).trim();
+  const contactPhone = String(((submission as any).contactPhone || (submission as any).phone || (submission as any).whatsapp || '')).trim();
+
   return (
     <div className="max-w-5xl">
       <button onClick={goBack} className="mb-4 px-3 py-1 rounded bg-slate-600 text-white">← Back to Reporter stories</button>
@@ -126,18 +168,12 @@ export default function CommunityReporterDetailPage() {
       <div className="border rounded bg-white p-3 mb-6">
         <h3 className="text-sm font-semibold mb-3">Submission Details</h3>
         <div className="space-y-2 text-sm">
-          {(() => {
-            const preferred = (submission as any).reporterName || submission.userName || submission.name || '';
-            const looksLikeId = typeof preferred === 'string' && (/^[a-f0-9]{24}$/i.test(preferred) || /^\d{10,}$/i.test(preferred));
-            const fallback = (submission.email || '').split('@')[0] || '—';
-            const display = preferred && !looksLikeId ? preferred : fallback;
-            return <div><span className="font-semibold">User:</span> {display}</div>;
-          })()}
-          <div><span className="font-semibold">Email:</span> {submission.email || '—'}</div>
+          <div><span className="font-semibold">User:</span> {reporterDisplayName}</div>
+          <div><span className="font-semibold">Email:</span> {contactEmail || '—'}</div>
           <div><span className="font-semibold">Location:</span> {(() => {
             const preferred = formatLocation((submission as any).location);
             if (preferred !== '-') return preferred;
-            return formatLocation({ city: submission.city, state: submission.state, country: submission.country });
+            return formatLocation({ city: derivedLoc.city, district: derivedLoc.district, state: derivedLoc.state, country: derivedLoc.country });
           })()}</div>
           <div><span className="font-semibold">Category:</span> {submission.category || '—'}</div>
           <div><span className="font-semibold">Status:</span> {submission.status || '—'}</div>
@@ -161,33 +197,33 @@ export default function CommunityReporterDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div>
             <div className="font-semibold">City / Town</div>
-            <div className="mt-1">{submission.city || '—'}</div>
+            <div className="mt-1">{derivedLoc.city || '—'}</div>
           </div>
           <div>
             <div className="font-semibold">State / Region</div>
-            <div className="mt-1">{submission.state || '—'}</div>
+            <div className="mt-1">{derivedLoc.state || '—'}</div>
           </div>
           <div>
             <div className="font-semibold">Country</div>
-            <div className="mt-1">{submission.country || '—'}</div>
+            <div className="mt-1">{derivedLoc.country || '—'}</div>
           </div>
           <div>
             <div className="font-semibold">District / Area</div>
-            <div className="mt-1">{submission.district || '—'}</div>
+            <div className="mt-1">{derivedLoc.district || '—'}</div>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div>
             <div className="font-semibold">Reporter Name</div>
-            <div className="mt-1">{submission.contactName || (submission as any).reporterName || submission.userName || submission.name || '—'}</div>
+            <div className="mt-1">{reporterDisplayName}</div>
           </div>
           <div>
             <div className="font-semibold">Email</div>
-            <div className="mt-1">{submission.contactEmail || submission.email || '—'}</div>
+            <div className="mt-1">{contactEmail || '—'}</div>
           </div>
           <div>
             <div className="font-semibold">Phone / WhatsApp</div>
-            <div className="mt-1">{submission.contactPhone || '—'}</div>
+            <div className="mt-1">{contactPhone || '—'}</div>
           </div>
           <div>
             <div className="font-semibold">Preferred Method</div>

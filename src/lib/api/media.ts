@@ -1,14 +1,10 @@
 import type { AxiosInstance } from 'axios';
 import apiClient from '@/lib/api';
 
-const envAny = import.meta.env as any;
-
-function isLocalDemoBackendEnabled(): boolean {
-  return String(envAny?.VITE_USE_LOCAL_DEMO_BACKEND || '').toLowerCase() === 'true';
-}
-
 export type MediaStatus = {
   uploadEnabled: boolean;
+  reason?: string;
+  message?: string;
 };
 
 export type UploadCoverImageResult = {
@@ -36,42 +32,7 @@ function extractUploadedPublicIdFromPayload(raw: any): string {
   return String(pid || '').trim();
 }
 
-async function probeUploadRoute(client: AxiosInstance): Promise<boolean> {
-  // Support multiple backend contracts:
-  // - Newer:  POST /api/media/upload   (frontend path: /media/upload)
-  // - Legacy: POST /api/uploads/cover  (frontend path: /uploads/cover)
-  const candidates = ['/media/upload', '/uploads/cover'];
-
-  for (const url of candidates) {
-    try {
-      // OPTIONS is a safe way to detect route existence without uploading a file.
-      await client.request({
-        url,
-        method: 'OPTIONS',
-        // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)
-        skipErrorLog: true,
-      });
-      return true;
-    } catch (err: any) {
-      const status = err?.response?.status;
-      // 404 => try next candidate
-      if (status === 404) continue;
-      // Any other HTTP response (401/403/405/etc) implies the route exists.
-      if (typeof status === 'number') return true;
-      // Network / CORS / no-response => try next, then ultimately disabled
-      continue;
-    }
-  }
-
-  return false;
-}
-
 export async function getMediaStatus(client: AxiosInstance = apiClient): Promise<MediaStatus> {
-  // Some production backends do not implement media endpoints yet.
-  // Avoid triggering a noisy 404 in the browser console by only probing media status
-  // when running the local demo backend.
-  if (!isLocalDemoBackendEnabled()) return { uploadEnabled: false };
-
   try {
     const res = await client.get('/media/status', {
       // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)
@@ -100,17 +61,35 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
       payload?.storage?.uploadEnabled === true ||
       payload?.storage?.enabled === true;
 
-    // If backend explicitly reports enabled/disabled, trust it.
-    if (hasExplicitFlag) return { uploadEnabled: !!enabled };
+    const reason = typeof payload?.reason === 'string' ? payload.reason : undefined;
+    const message =
+      (typeof payload?.message === 'string' && payload.message.trim())
+        ? payload.message
+        : (typeof payload?.error === 'string' && payload.error.trim())
+          ? payload.error
+          : undefined;
 
-    // Otherwise, treat status response as "unknown" and probe the upload route.
-    return { uploadEnabled: await probeUploadRoute(client) };
+    // If backend explicitly reports enabled/disabled, trust it.
+    if (hasExplicitFlag) return { uploadEnabled: !!enabled, reason, message };
+
+    // If backend returns an unexpected shape, do NOT probe upload routes.
+    // Probing (OPTIONS) can succeed even when the provider is misconfigured, causing confusing UI.
+    return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
   } catch (err: any) {
-    // If endpoint is missing or backend has no storage configured, treat as disabled.
+    // If endpoint is missing or backend errors, treat as disabled.
     const status = err?.response?.status;
-    if (status === 404) return { uploadEnabled: await probeUploadRoute(client) };
+    if (status === 404) return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
+    const rawMsg =
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      err?.message ||
+      '';
+    const msg = String(rawMsg || '').trim();
     // Network/auth errors => safest is disabled.
-    return { uploadEnabled: false };
+    return {
+      uploadEnabled: false,
+      ...(msg ? { reason: 'media_status_unavailable', message: msg } : { reason: 'media_status_unavailable', message: 'Media upload status unavailable' }),
+    };
   }
 }
 

@@ -10,6 +10,8 @@ export type CoverImageUploadProps = {
   file?: File | null; // selected local file (not uploaded yet)
   onChangeFile: (file: File | null) => void;
   onRemove: () => void; // clears both url + file in parent
+  disabled?: boolean;
+  disabledText?: string | null;
 };
 
 function formatBytes(bytes: number): string {
@@ -25,7 +27,7 @@ function formatBytes(bytes: number): string {
   return `${rounded} ${units[idx]}`;
 }
 
-export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: CoverImageUploadProps) {
+export default function CoverImageUpload({ url, file, onChangeFile, onRemove, disabled = false, disabledText = null }: CoverImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -105,9 +107,13 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     };
   }, [file]);
 
-  const pick = () => inputRef.current?.click();
+  const pick = () => {
+    if (disabled) return;
+    inputRef.current?.click();
+  };
 
   const onPickFile = (f: File) => {
+    if (disabled) return;
     if (f.size > MAX_BYTES) {
       toast.error('Image must be 5MB or smaller');
       return;
@@ -128,21 +134,25 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
     <div
       className="space-y-2"
       onDragEnter={(e) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(true);
       }}
       onDragOver={(e) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(true);
       }}
       onDragLeave={(e) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
       }}
       onDrop={(e) => {
+        if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
@@ -166,7 +176,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
           ) : null}
 
           <div className="flex items-center gap-2">
-            <button type="button" className="btn" onClick={pick}>
+            <button type="button" className="btn" onClick={pick} disabled={disabled} title={disabledText || undefined}>
               {hasRealPreview ? 'Replace' : 'Upload Image'}
             </button>
 
@@ -190,6 +200,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
               type="file"
               accept={ACCEPT_ATTR}
               className="hidden"
+              disabled={disabled}
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
@@ -197,6 +208,10 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove }: 
               }}
             />
           </div>
+
+          {disabled && disabledText ? (
+            <div className="text-xs text-slate-600">{disabledText}</div>
+          ) : null}
         </div>
 
         <div className="w-28 shrink-0">

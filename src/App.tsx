@@ -68,6 +68,8 @@ import CommunityReporterPage from '@pages/admin/CommunityReporterPage';
 import CommunityReporterDetailPage from '@pages/admin/CommunityReporterDetailPage';
 import MediaLibrary from '@components/advanced/MediaLibrary';
 import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
+import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
+import CategoriesAnalyticsPage from '@/pages/admin/analytics/CategoriesAnalyticsPage';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
@@ -411,6 +413,9 @@ function App() {
                 }
               />
               <Route path="/admin/media-library" element={<ProtectedRoute><MediaLibrary /></ProtectedRoute>} />
+              {/* Readership analytics (real backend /api/admin/analytics/*) */}
+              <Route path="/admin/analytics/articles" element={<ProtectedRoute><ArticlesAnalyticsPage /></ProtectedRoute>} />
+              <Route path="/admin/analytics/categories" element={<ProtectedRoute><CategoriesAnalyticsPage /></ProtectedRoute>} />
               <Route path="/admin/analytics" element={<ProtectedRoute><AnalyticsDashboard /></ProtectedRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
               <Route path="/admin/web-stories" element={<ProtectedRoute><WebStoriesEditor /></ProtectedRoute>} />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ReporterContact, updateReporterContactNotes } from '@/lib/api/reporterDirectory';
 import { updateReporterStatus } from '@/lib/api/communityAdmin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,10 +23,44 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
   const name = reporter?.name || 'Unknown reporter';
   const maskedPhone = reporter?.phone ? reporter.phone.replace(/(\d{2})\d+(\d{3})/, '$1*****$2') : null;
 
+  type TabKey = 'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'verification' | 'activity';
+  const tabs: Array<{ key: TabKey; label: string }> = useMemo(() => (
+    [
+      { key: 'overview', label: 'Overview' },
+      { key: 'contact', label: 'Contact' },
+      { key: 'coverage', label: 'Coverage' },
+      { key: 'stories', label: 'Stories' },
+      { key: 'notes', label: 'Notes' },
+      { key: 'tasks', label: 'Tasks' },
+      { key: 'verification', label: 'Verification' },
+      { key: 'activity', label: 'Activity' },
+    ]
+  ), []);
+  const [tab, setTab] = useState<TabKey>('overview');
+  useEffect(() => {
+    // Reset to a predictable entry tab when switching between reporters.
+    setTab('overview');
+  }, [reporter?.id, reporter?.email, reporter?.phone]);
+
   const queryClient = useQueryClient();
   const [draftNotes, setDraftNotes] = useState<string>(reporter?.notes || '');
   // Sync when reporter changes
   useEffect(() => { setDraftNotes(reporter?.notes || ''); }, [reporter?.notes, reporter?.id]);
+
+  const [entryKind, setEntryKind] = useState<'NOTE' | 'CALL' | 'EMAIL' | 'TASK' | 'CONTACTED' | 'VERIFY_REQUEST' | 'MERGE_DUPLICATE'>('NOTE');
+  const [entryText, setEntryText] = useState('');
+
+  const appendEntry = (kind: typeof entryKind, text: string) => {
+    const clean = String(text || '').trim();
+    const stamp = new Date().toLocaleString();
+    const line = clean
+      ? `[${stamp}] ${kind}: ${clean}`
+      : `[${stamp}] ${kind}`;
+    setDraftNotes((prev) => {
+      const p = String(prev || '').trimEnd();
+      return p ? `${p}\n${line}` : line;
+    });
+  };
 
   const { mutate: saveNotes, isPending: saving } = useMutation({
     mutationFn: async () => {
@@ -57,6 +91,22 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
       saveNotes();
     }
   };
+
+  const statusBusy = useRef(false);
+  async function applyStatusPatch(patch: Parameters<typeof updateReporterStatus>[1], successMsg: string) {
+    if (!reporter?.id) return;
+    if (statusBusy.current) return;
+    statusBusy.current = true;
+    try {
+      await updateReporterStatus(reporter.id, patch);
+      toast.success(successMsg);
+      queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] });
+    } catch (e: any) {
+      toast.error(e?.message || 'Update failed');
+    } finally {
+      statusBusy.current = false;
+    }
+  }
 
   return (
     <div className={`fixed inset-0 z-40 ${open ? '' : 'pointer-events-none'}`}>
@@ -94,139 +144,223 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
           <button onClick={onClose} className="px-2 py-1 text-sm rounded-md border hover:bg-slate-50">✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-8">
-          {/* Meta badges duplicated in header; keep story count */}
-          {/* Meta */}
-          <div className="flex items-center justify-between">
-            <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
-            <span className="text-xs text-slate-500">Last: {reporter?.lastStoryAt ? new Date(reporter.lastStoryAt).toLocaleString() : '—'}</span>
-          </div>
-
-          {/* Completeness Notice */}
-          {reporter && (!reporter.phone || (!reporter.city && !reporter.state && !reporter.country)) && (
-            <div className="border rounded-md p-3 bg-slate-50 text-xs text-slate-600 space-y-1">
-              <p className="font-medium flex items-center gap-1">Profile incomplete</p>
-              <p>This profile is missing contact/location details. Update when reliable information is available.</p>
-              <ul className="list-disc ml-4 space-y-0.5">
-                {!reporter.phone && <li>No phone recorded</li>}
-                {!reporter.city && !reporter.state && !reporter.country && <li>No location (city/state/country)</li>}
-              </ul>
-            </div>
-          )}
-
-          {/* Contact */}
-          <div className="space-y-1">
-            <div className="text-sm"><span className="font-medium">Email:</span> {reporter?.email || '—'}</div>
-            <div className="text-sm"><span className="font-medium">Phone:</span> {maskedPhone || '—'}</div>
-          </div>
-
-          {/* Organisation & Professional */}
-          {(reporter?.organisationName || reporter?.positionTitle || reporter?.beatsProfessional || reporter?.yearsExperience || reporter?.languages || reporter?.websiteOrPortfolio || reporter?.socialLinks) && (
-            <div className="space-y-1">
-              {reporter?.organisationName && (
-                <div className="text-sm"><span className="font-medium">Organisation:</span> {reporter.organisationName} {reporter.organisationType ? `(${reporter.organisationType})` : ''}</div>
-              )}
-              {reporter?.positionTitle && (
-                <div className="text-sm"><span className="font-medium">Position:</span> {reporter.positionTitle}</div>
-              )}
-              {Array.isArray(reporter?.beatsProfessional) && reporter!.beatsProfessional!.length > 0 && (
-                <div className="text-sm"><span className="font-medium">Beats:</span> {reporter!.beatsProfessional!.join(', ')}</div>
-              )}
-              {typeof reporter?.yearsExperience === 'number' && (
-                <div className="text-sm"><span className="font-medium">Experience:</span> {reporter!.yearsExperience} years</div>
-              )}
-              {Array.isArray(reporter?.languages) && reporter!.languages!.length > 0 && (
-                <div className="text-sm"><span className="font-medium">Languages:</span> {reporter!.languages!.join(', ')}</div>
-              )}
-                        {/* Ethics & Behaviour */}
-                        <div className="space-y-1">
-                          {typeof reporter?.ethicsStrikes === 'number' && (
-                            <div className="text-sm"><span className="font-medium">Ethics strikes:</span> {reporter!.ethicsStrikes}</div>
-                          )}
-                          {Array.isArray((reporter as any)?.behaviourNotes) && ((reporter as any).behaviourNotes.length > 0) && (
-                            <div className="text-sm">
-                              <span className="font-medium">Behaviour notes:</span>
-                              <div className="mt-1 space-y-1">
-                                {((reporter as any).behaviourNotes as Array<{ date?: string; note: string }>).map((n, idx) => (
-                                  <div key={idx} className="text-xs text-slate-700">
-                                    <span className="text-slate-500 mr-1">{n.date ? new Date(n.date).toLocaleString() : ''}</span>
-                                    {n.note}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-              {reporter?.websiteOrPortfolio && (
-                <div className="text-sm"><span className="font-medium">Website:</span> <a className="text-blue-600 hover:underline" href={reporter.websiteOrPortfolio} target="_blank" rel="noreferrer">{reporter.websiteOrPortfolio}</a></div>
-              )}
-              {reporter?.socialLinks && (
-                <div className="text-sm"><span className="font-medium">Social:</span> {reporter.socialLinks.linkedin && <a className="text-blue-600 hover:underline mr-2" href={reporter.socialLinks.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>} {reporter.socialLinks.twitter && <a className="text-blue-600 hover:underline" href={reporter.socialLinks.twitter} target="_blank" rel="noreferrer">Twitter/X</a>}</div>
-              )}
-            </div>
-          )}
-
-          {/* Location */}
-          <div className="space-y-1">
-            <div className="text-sm"><span className="font-medium">City:</span> {reporter?.city || '—'}</div>
-            <div className="text-sm"><span className="font-medium">State:</span> {reporter?.state || '—'}</div>
-            <div className="text-sm"><span className="font-medium">Country:</span> {reporter?.country || '—'}</div>
-          </div>
-
-          {/* Activity */}
-          <div className="grid grid-cols-3 gap-2">
-            <Metric label="Total" value={reporter?.totalStories ?? 0} />
-            <Metric label="Approved" value={reporter?.approvedStories ?? 0} />
-            <Metric label="Pending" value={reporter?.pendingStories ?? 0} />
-          </div>
-
-          {/* Private Notes (Admin-only) */}
-          <div className="space-y-2 pt-2">
-            <label className="text-xs font-medium text-slate-600 flex items-center gap-1">
-              Private notes <span className="text-slate-400">(founder/admin)</span>
-            </label>
-            <textarea
-              value={draftNotes}
-              onChange={(e) => setDraftNotes(e.target.value)}
-              onBlur={onBlurSave}
-              placeholder="Add any internal context, sourcing details, risk flags..."
-              className="w-full min-h-[110px] resize-y px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <div className="flex items-center justify-end gap-3">
+        <div className="shrink-0 border-b bg-white px-3 py-2 overflow-x-auto">
+          <div className="flex items-center gap-2">
+            {tabs.map((t) => (
               <button
-                disabled={saving || (reporter?.notes || '') === draftNotes.trim()}
-                onClick={() => saveNotes()}
-                className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-50"
-              >{saving ? 'Saving…' : 'Save notes'}</button>
-            </div>
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={
+                  'px-3 py-1.5 text-xs rounded-md border whitespace-nowrap ' +
+                  (tab === t.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700')
+                }
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          {/* Actions */}
-          <div className="flex flex-wrap items-center gap-2 pt-2">
-            <button
-              disabled={!key}
-              onClick={() => key && onOpenStories(key)}
-              className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
-            >
-              Open My Community Stories
-            </button>
-            <button
-              disabled={!key}
-              onClick={() => key && onOpenQueue(key)}
-              className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
-            >
-              Open in Reporter Queue
-            </button>
-            {/* Quick status actions */}
-            {reporter?.id && (
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { await updateReporterStatus(reporter.id, { status: 'watchlist' }); toast.success('Marked watchlist'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); }}>Mark Watchlist</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { if (window.confirm('Suspend this reporter?')) { await updateReporterStatus(reporter.id, { status: 'suspended' }); toast.success('Suspended'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Suspend</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" onClick={async ()=> { if (window.confirm('Ban this reporter?')) { await updateReporterStatus(reporter.id, { status: 'banned' }); toast.success('Banned'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); } }}>Ban</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" onClick={async ()=> { await updateReporterStatus(reporter.id, { addStrike: true }); toast.success('Ethics strike added'); queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] }); }}>Add strike</button>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-8">
+          {tab === 'overview' ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
+                <span className="text-xs text-slate-500">Last: {reporter?.lastStoryAt ? new Date(reporter.lastStoryAt).toLocaleString() : '—'}</span>
               </div>
-            )}
-          </div>
+
+              {reporter && (!String(reporter.email || '').trim() || !reporter.phone || (!reporter.city && !reporter.state && !reporter.country)) && (
+                <div className="border rounded-md p-3 bg-slate-50 text-xs text-slate-600 space-y-1">
+                  <p className="font-medium">Profile incomplete</p>
+                  <ul className="list-disc ml-4 space-y-0.5">
+                    {!String(reporter.email || '').trim() && <li>No email recorded</li>}
+                    {!reporter.phone && <li>No phone recorded</li>}
+                    {!reporter.city && !reporter.state && !reporter.country && <li>No location (city/state/country)</li>}
+                  </ul>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2">
+                <Metric label="Total" value={reporter?.totalStories ?? 0} />
+                <Metric label="Approved" value={reporter?.approvedStories ?? 0} />
+                <Metric label="Pending" value={reporter?.pendingStories ?? 0} />
+              </div>
+            </>
+          ) : null}
+
+          {tab === 'contact' ? (
+            <div className="space-y-2">
+              <div className="text-sm"><span className="font-medium">Email:</span> {reporter?.email || '—'}</div>
+              <div className="text-sm"><span className="font-medium">Phone:</span> {maskedPhone || '—'}</div>
+              <div className="pt-2 border-t" />
+              <div className="text-sm"><span className="font-medium">City:</span> {reporter?.city || '—'}</div>
+              <div className="text-sm"><span className="font-medium">State:</span> {reporter?.state || '—'}</div>
+              <div className="text-sm"><span className="font-medium">Country:</span> {reporter?.country || '—'}</div>
+            </div>
+          ) : null}
+
+          {tab === 'coverage' ? (
+            <div className="space-y-2">
+              {(reporter?.organisationName || reporter?.positionTitle) ? (
+                <div className="space-y-1">
+                  {reporter?.organisationName && (
+                    <div className="text-sm"><span className="font-medium">Organisation:</span> {reporter.organisationName} {reporter.organisationType ? `(${reporter.organisationType})` : ''}</div>
+                  )}
+                  {reporter?.positionTitle && (
+                    <div className="text-sm"><span className="font-medium">Position:</span> {reporter.positionTitle}</div>
+                  )}
+                </div>
+              ) : null}
+
+              {Array.isArray(reporter?.beatsProfessional) && reporter!.beatsProfessional!.length > 0 ? (
+                <div className="text-sm"><span className="font-medium">Beats:</span> {reporter!.beatsProfessional!.join(', ')}</div>
+              ) : null}
+              {Array.isArray(reporter?.languages) && reporter!.languages!.length > 0 ? (
+                <div className="text-sm"><span className="font-medium">Languages:</span> {reporter!.languages!.join(', ')}</div>
+              ) : null}
+              {typeof reporter?.yearsExperience === 'number' ? (
+                <div className="text-sm"><span className="font-medium">Experience:</span> {reporter!.yearsExperience} years</div>
+              ) : null}
+
+              {(reporter?.websiteOrPortfolio || reporter?.socialLinks) ? (
+                <div className="pt-2 border-t space-y-1">
+                  {reporter?.websiteOrPortfolio ? (
+                    <div className="text-sm"><span className="font-medium">Website:</span> <a className="text-blue-600 hover:underline" href={reporter.websiteOrPortfolio} target="_blank" rel="noreferrer">{reporter.websiteOrPortfolio}</a></div>
+                  ) : null}
+                  {reporter?.socialLinks ? (
+                    <div className="text-sm"><span className="font-medium">Social:</span> {reporter.socialLinks.linkedin && <a className="text-blue-600 hover:underline mr-2" href={reporter.socialLinks.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>} {reporter.socialLinks.twitter && <a className="text-blue-600 hover:underline" href={reporter.socialLinks.twitter} target="_blank" rel="noreferrer">Twitter/X</a>}</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {tab === 'stories' ? (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-600">Founder/admin actions</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  disabled={!key}
+                  onClick={() => key && onOpenStories(key)}
+                  className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
+                >
+                  Open reporter stories
+                </button>
+                <button
+                  disabled={!key}
+                  onClick={() => key && onOpenQueue(key)}
+                  className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50"
+                >
+                  Open in queue
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {tab === 'notes' || tab === 'tasks' ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-600 flex items-center gap-1">
+                  Private notes <span className="text-slate-400">(founder/admin)</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={entryKind}
+                    onChange={(e) => setEntryKind(e.target.value as any)}
+                    className="px-2 py-2 border rounded-md text-xs"
+                    title="CRM entry type"
+                  >
+                    <option value="NOTE">Note</option>
+                    <option value="CALL">Log call</option>
+                    <option value="EMAIL">Log email</option>
+                    <option value="TASK">Follow-up task</option>
+                    <option value="CONTACTED">Mark contacted</option>
+                    <option value="VERIFY_REQUEST">Request verification</option>
+                    <option value="MERGE_DUPLICATE">Merge duplicate</option>
+                  </select>
+                  <input
+                    value={entryText}
+                    onChange={(e) => setEntryText(e.target.value)}
+                    placeholder={tab === 'tasks' ? 'Follow-up task details…' : 'Add a short note / call log…'}
+                    className="flex-1 min-w-[180px] px-3 py-2 border rounded-md text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const kind = tab === 'tasks' ? 'TASK' : entryKind;
+                      appendEntry(kind as any, entryText);
+                      setEntryText('');
+                    }}
+                    className="px-3 py-2 text-sm rounded-md border bg-white hover:bg-slate-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={draftNotes}
+                onChange={(e) => setDraftNotes(e.target.value)}
+                onBlur={onBlurSave}
+                placeholder="Add any internal context, sourcing details, risk flags..."
+                className="w-full min-h-[180px] resize-y px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  disabled={saving || (reporter?.notes || '') === draftNotes.trim()}
+                  onClick={() => saveNotes()}
+                  className="px-3 py-1.5 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-50"
+                >{saving ? 'Saving…' : 'Save notes'}</button>
+              </div>
+            </div>
+          ) : null}
+
+          {tab === 'verification' ? (
+            <div className="space-y-3">
+              <div className="text-sm text-slate-700">
+                <span className="font-medium">Verification level:</span> {reporter?.verificationLevel || '—'}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'pending' }, 'Verification requested')}>Request verification</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'verified' }, 'Marked verified')}>Verify</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'limited' }, 'Limited verification')}>Limit</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'revoked' }, 'Verification revoked')}>Revoke</button>
+              </div>
+              <div className="pt-2 border-t" />
+              <div className="text-sm text-slate-700">
+                <span className="font-medium">Status:</span> {reporter?.status || '—'}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'watchlist' }, 'Marked watchlist')}>Mark watchlist</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => { if (window.confirm('Suspend this reporter?')) void applyStatusPatch({ status: 'suspended' }, 'Suspended'); }}>Suspend</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" disabled={!reporter?.id} onClick={() => { if (window.confirm('Ban this reporter?')) void applyStatusPatch({ status: 'banned' }, 'Banned'); }}>Ban</button>
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ addStrike: true }, 'Ethics strike added')}>Add strike</button>
+              </div>
+            </div>
+          ) : null}
+
+          {tab === 'activity' ? (
+            <div className="space-y-3">
+              <div className="text-sm text-slate-700"><span className="font-medium">Ethics strikes:</span> {typeof reporter?.ethicsStrikes === 'number' ? reporter.ethicsStrikes : '—'}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'archived' as any }, 'Archived')}>Archive reporter</button>
+              </div>
+              {Array.isArray((reporter as any)?.behaviourNotes) && ((reporter as any).behaviourNotes.length > 0) ? (
+                <div className="text-sm">
+                  <span className="font-medium">Behaviour notes:</span>
+                  <div className="mt-2 space-y-1">
+                    {((reporter as any).behaviourNotes as Array<{ date?: string; note: string }>).map((n, idx) => (
+                      <div key={idx} className="text-xs text-slate-700">
+                        <span className="text-slate-500 mr-1">{n.date ? new Date(n.date).toLocaleString() : ''}</span>
+                        {n.note}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

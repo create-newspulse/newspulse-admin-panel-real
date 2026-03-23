@@ -23,6 +23,8 @@ import { useAuth } from '@/context/AuthContext';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { ScheduleDialog } from './ScheduleDialog';
 import type { QuickViewCounts, QuickViewKey } from './QuickViewsBar';
+import { listAdminAnalyticsArticles, type ArticlesAnalyticsRow } from '@/lib/api/adminAnalytics';
+import { formatDurationShort, formatNumberCompact, formatPercent } from '@/lib/formatDuration';
 
 function norm(s: any): string {
   return String(s || '').trim().toLowerCase();
@@ -154,6 +156,24 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const { user } = useAuth();
   const role = user?.role || 'editor';
   const { publishEnabled } = usePublishFlag();
+
+  const [showAnalyticsCols, setShowAnalyticsCols] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('np_admin_articles_show_analytics') === 'true'; } catch { return false; }
+  });
+  const [analyticsRange, setAnalyticsRange] = React.useState<'24h' | '7d' | '30d'>(() => {
+    try {
+      const raw = localStorage.getItem('np_admin_articles_analytics_range');
+      if (raw === '24h' || raw === '7d' || raw === '30d') return raw;
+    } catch {}
+    return '30d';
+  });
+
+  React.useEffect(() => {
+    try { localStorage.setItem('np_admin_articles_show_analytics', String(showAnalyticsCols)); } catch {}
+  }, [showAnalyticsCols]);
+  React.useEffect(() => {
+    try { localStorage.setItem('np_admin_articles_analytics_range', analyticsRange); } catch {}
+  }, [analyticsRange]);
 
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
@@ -464,6 +484,48 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     return arr;
   }, [quickFilteredRows]);
 
+  const analyticsQuery = useQuery({
+    queryKey: ['admin', 'analytics', 'articles', 'table', analyticsRange, fetchParams],
+    enabled: showAnalyticsCols,
+    queryFn: async () => {
+      const res = await listAdminAnalyticsArticles({
+        range: analyticsRange,
+        status: fetchParams.status,
+        category: fetchParams.category,
+        language: fetchParams.language,
+        from: fetchParams.from,
+        to: fetchParams.to,
+        page: fetchParams.page,
+        limit: fetchParams.limit,
+        // tolerate search term (backend may ignore)
+        ...(fetchParams.q ? { q: fetchParams.q } as any : {}),
+      } as any);
+      const rows = (res?.rows || res?.items || []) as ArticlesAnalyticsRow[];
+      return rows;
+    },
+    retry: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  React.useEffect(() => {
+    if (!analyticsQuery.isError) return;
+    if (!import.meta.env.DEV) return;
+    try {
+      // eslint-disable-next-line no-console
+      console.error('[NewsTable] analytics columns load failed', analyticsQuery.error);
+    } catch {}
+  }, [analyticsQuery.error, analyticsQuery.isError]);
+
+  const analyticsById = React.useMemo(() => {
+    const m = new Map<string, ArticlesAnalyticsRow>();
+    for (const r of (analyticsQuery.data || [])) {
+      const id = String((r as any)?.articleId || '').trim();
+      if (!id) continue;
+      m.set(id, r);
+    }
+    return m;
+  }, [analyticsQuery.data]);
+
   const visibleIds = React.useMemo(() => sortedRows.map((a) => a._id), [sortedRows]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
   const someVisibleSelected = visibleIds.some((id) => selected.includes(id));
@@ -710,10 +772,45 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const thRight = `${thBase} text-right`;
   const thStyle: React.CSSProperties = { top: effectiveStickyTop };
 
+  const renderAnalyticsCell = (id: string, field: 'views' | 'readers' | 'engaged' | 'avg' | 'completion') => {
+    if (!showAnalyticsCols) return null;
+    if (analyticsQuery.isLoading) return <span className="text-xs text-slate-500">…</span>;
+    if (analyticsQuery.isError) return <span className="text-xs text-slate-500">—</span>;
+    const row = analyticsById.get(id);
+    if (!row) return <span className="text-xs text-slate-500">—</span>;
+    if (field === 'views') return <span className="text-xs font-semibold text-slate-800">{formatNumberCompact(row.views)}</span>;
+    if (field === 'readers') return <span className="text-xs text-slate-700">{formatNumberCompact((row.uniqueReaders ?? row.readers) as any)}</span>;
+    if (field === 'engaged') return <span className="text-xs text-slate-700">{formatNumberCompact(row.engagedReads)}</span>;
+    if (field === 'avg') return <span className="text-xs text-slate-700">{formatDurationShort(row.avgReadTimeSec)}</span>;
+    return <span className="text-xs text-slate-700">{formatPercent(row.completionRate)}</span>;
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs text-slate-600">Showing {sortedRows.length} of {total} loaded</div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={showAnalyticsCols}
+              onChange={(e) => setShowAnalyticsCols(e.target.checked)}
+            />
+            Analytics columns
+          </label>
+          {showAnalyticsCols ? (
+            <select
+              value={analyticsRange}
+              onChange={(e) => setAnalyticsRange(e.target.value as any)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+              title="Analytics range"
+            >
+              <option value="24h">24h</option>
+              <option value="7d">7d</option>
+              <option value="30d">30d</option>
+            </select>
+          ) : null}
+        </div>
         {(params.status === 'deleted' || (params.status as any) === 'trash') && canDelete && selected.length > 0 ? (
           <button
             type="button"
@@ -740,7 +837,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
         <div className="relative isolate rounded-xl border border-slate-200 bg-white">
           <div ref={stickySentinelRef} className="h-0" aria-hidden="true" />
           <div className="overflow-x-auto">
-            <table className="min-w-[1240px] w-full border-separate border-spacing-0">
+            <table className={showAnalyticsCols ? 'min-w-[1500px] w-full border-separate border-spacing-0' : 'min-w-[1240px] w-full border-separate border-spacing-0'}>
               <thead className="bg-slate-50">
                 <tr className="bg-slate-50">
                   <th className={thBase} style={thStyle}>
@@ -753,6 +850,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                   <th className={thBase} style={thStyle}>Category</th>
                   <th className={thBase} style={thStyle}>Status</th>
                   <th className={thBase} style={thStyle}>Lang</th>
+                  {showAnalyticsCols ? (
+                    <>
+                      <th className={thBase} style={thStyle}>Views</th>
+                      <th className={thBase} style={thStyle}>Readers</th>
+                      <th className={thBase} style={thStyle}>Engaged</th>
+                      <th className={thBase} style={thStyle}>Avg Read</th>
+                      <th className={thBase} style={thStyle}>Completion</th>
+                    </>
+                  ) : null}
                   <th className={thBase} style={thStyle}>Location</th>
                   <th className={thBase} style={thStyle}>Updated</th>
                   <th className={thRight} style={thStyle}>Actions</th>
@@ -763,9 +869,18 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                   <tr key={i} className="animate-pulse">
                     <td className="px-3 py-3"><div className="h-4 w-56 rounded bg-slate-100" /></td>
                     <td className="px-3 py-3"><div className="h-4 w-24 rounded bg-slate-100" /></td>
-                    <td className="px-3 py-3"><div className="h-4 w-24 rounded bg-slate-100" /></td>
                     <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
                     <td className="px-3 py-3"><div className="h-4 w-10 rounded bg-slate-100" /></td>
+                    <td className="px-3 py-3"><div className="h-4 w-10 rounded bg-slate-100" /></td>
+                    {showAnalyticsCols ? (
+                      <>
+                        <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                        <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                        <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                        <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                        <td className="px-3 py-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                      </>
+                    ) : null}
                     <td className="px-3 py-3"><div className="h-4 w-24 rounded bg-slate-100" /></td>
                     <td className="px-3 py-3"><div className="h-4 w-28 rounded bg-slate-100" /></td>
                     <td className="px-3 py-3 text-right"><div className="h-4 w-24 ml-auto rounded bg-slate-100" /></td>
@@ -783,7 +898,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <div className="hidden md:block relative isolate rounded-xl border border-slate-200 bg-white">
             <div ref={stickySentinelRef} className="h-0" aria-hidden="true" />
             <div className="overflow-x-auto">
-              <table className="min-w-[1240px] w-full border-separate border-spacing-0">
+              <table className={showAnalyticsCols ? 'min-w-[1500px] w-full border-separate border-spacing-0' : 'min-w-[1240px] w-full border-separate border-spacing-0'}>
                 <thead className="bg-slate-50">
                   <tr className="bg-slate-50">
                     <th className={thBase} style={thStyle}>
@@ -808,6 +923,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     <th className={thBase} style={thStyle}>Category</th>
                     <th className={thBase} style={thStyle}>Status</th>
                     <th className={thBase} style={thStyle}>Lang</th>
+                    {showAnalyticsCols ? (
+                      <>
+                        <th className={thBase} style={thStyle}>Views</th>
+                        <th className={thBase} style={thStyle}>Readers</th>
+                        <th className={thBase} style={thStyle}>Engaged</th>
+                        <th className={thBase} style={thStyle}>Avg Read</th>
+                        <th className={thBase} style={thStyle}>Completion</th>
+                      </>
+                    ) : null}
                     <th className={thBase} style={thStyle}>Location</th>
                     <th className={thBase} style={thStyle}>Updated</th>
                     <th className={thRight} style={thStyle}>Actions</th>
@@ -873,6 +997,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                             <span className="text-xs text-slate-700">—</span>
                           )}
                         </td>
+                        {showAnalyticsCols ? (
+                          <>
+                            <td className="px-3 py-3 align-top">{renderAnalyticsCell(a._id, 'views')}</td>
+                            <td className="px-3 py-3 align-top">{renderAnalyticsCell(a._id, 'readers')}</td>
+                            <td className="px-3 py-3 align-top">{renderAnalyticsCell(a._id, 'engaged')}</td>
+                            <td className="px-3 py-3 align-top">{renderAnalyticsCell(a._id, 'avg')}</td>
+                            <td className="px-3 py-3 align-top">{renderAnalyticsCell(a._id, 'completion')}</td>
+                          </>
+                        ) : null}
                         <td className="px-3 py-3 align-top"><LocationBadge a={a} /></td>
                         <td className="px-3 py-3 align-top text-xs text-slate-700 whitespace-nowrap">{formatUpdatedAt(a)}</td>
                         <td className="px-3 py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
@@ -937,6 +1070,18 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                       <div className="text-[11px] text-slate-500">Location</div>
                       <LocationBadge a={a} />
                     </div>
+
+                    {showAnalyticsCols ? (
+                      <div className="col-span-2">
+                        <div className="text-[11px] text-slate-500">Analytics ({analyticsRange})</div>
+                        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1">
+                          <div><span className="font-semibold">Views:</span> {renderAnalyticsCell(a._id, 'views')}</div>
+                          <div><span className="font-semibold">Readers:</span> {renderAnalyticsCell(a._id, 'readers')}</div>
+                          <div><span className="font-semibold">Avg:</span> {renderAnalyticsCell(a._id, 'avg')}</div>
+                          <div><span className="font-semibold">Comp:</span> {renderAnalyticsCell(a._id, 'completion')}</div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );

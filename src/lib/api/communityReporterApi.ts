@@ -1,4 +1,4 @@
-import { adminApi } from '@/lib/adminApi';
+import apiClient from '@/lib/api';
 
 export type ReporterType = 'community' | 'journalist';
 export type StoryStatus =
@@ -19,6 +19,7 @@ export interface SubmitStoryResult {
 }
 
 export async function submitCommunityStory(payload: any): Promise<SubmitStoryResult> {
-  const res = await adminApi.post<SubmitStoryResult>('/api/community/stories/submit', payload);
+  // Public community endpoint (proxy mode: /admin-api/community/* -> backend /api/community/*)
+  const res = await apiClient.post<SubmitStoryResult>('/community/stories/submit', payload);
   return res.data;
 }

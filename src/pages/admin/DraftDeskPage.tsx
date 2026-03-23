@@ -516,6 +516,104 @@ export default function DraftDeskPage() {
               ) : null}
               {preview.status ? <span>· status: {preview.status}</span> : null}
             </div>
+
+            {(() => {
+              const sourceKind = getSourceKind(preview as Article);
+              const raw: any = preview as any;
+              const contact = raw?.contact || {};
+
+              const reporterName = String(
+                raw?.reporterName ||
+                raw?.contactName ||
+                contact?.name ||
+                raw?.userName ||
+                raw?.name ||
+                ''
+              ).trim();
+              const reporterEmail = String(
+                raw?.reporterEmail ||
+                raw?.contactEmail ||
+                contact?.email ||
+                raw?.email ||
+                ''
+              ).trim();
+              const reporterPhone = String(
+                raw?.reporterPhone ||
+                raw?.contactPhone ||
+                contact?.phone ||
+                ''
+              ).trim();
+
+              const showIdentity = !!(reporterName || reporterEmail || reporterPhone);
+              if (!showIdentity && sourceKind !== 'community') return null;
+
+              return (
+                <div className="mb-3 rounded border bg-slate-50 p-3">
+                  <div className="text-xs font-semibold text-slate-700 mb-2">Reporter identity</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-slate-500">Name</div>
+                      <div className="font-medium text-slate-900">{reporterName || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Email</div>
+                      <div className="font-medium text-slate-900">{reporterEmail || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Phone</div>
+                      <div className="font-medium text-slate-900">{reporterPhone || '—'}</div>
+                    </div>
+                  </div>
+
+                  {sourceKind === 'community' && !reporterEmail ? (
+                    <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      Missing reporter email — contact directory cannot track this reporter.
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 text-xs rounded border bg-white hover:bg-slate-100"
+                      onClick={() => {
+                        const key = (reporterEmail || reporterPhone || reporterName || '').trim();
+                        const q = (reporterEmail || reporterPhone || reporterName || '').trim();
+                        if (!key) {
+                          navigate('/community/reporter-contacts');
+                          return;
+                        }
+                        const sp = new URLSearchParams();
+                        sp.set('reporterKey', key);
+                        sp.set('open', '1');
+                        if (q) sp.set('q', q);
+                        navigate(`/community/reporter-contacts?${sp.toString()}`);
+                      }}
+                      title="Open this contributor in the CRM directory"
+                    >
+                      Open in Contributor Network
+                    </button>
+
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 text-xs rounded border bg-white hover:bg-slate-100"
+                      onClick={() => {
+                        const q = (reporterEmail || reporterPhone || reporterName || '').trim();
+                        if (!q) {
+                          navigate('/community/reporter-contacts');
+                          return;
+                        }
+                        const sp = new URLSearchParams();
+                        sp.set('q', q);
+                        navigate(`/community/reporter-contacts?${sp.toString()}`);
+                      }}
+                      title="Search the directory for this identity"
+                    >
+                      Search directory
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
             <div className="text-sm whitespace-pre-wrap leading-relaxed">
               {String(
                 preview.content ||

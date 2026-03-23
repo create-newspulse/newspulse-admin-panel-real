@@ -1381,6 +1381,291 @@ app.get('/api/admin/stats', (req, res) => {
   });
 });
 
+// ===== Admin Readership Analytics (demo stubs) =====
+// Endpoints expected by the new analytics UI:
+// - GET /api/admin/analytics/dashboard
+// - GET /api/admin/analytics/articles
+// - GET /api/admin/analytics/articles/:articleId
+// - GET /api/admin/analytics/categories
+
+function stableInt(seed, mod) {
+  try {
+    const hex = crypto.createHash('md5').update(String(seed)).digest('hex').slice(0, 8);
+    const n = parseInt(hex, 16);
+    if (!Number.isFinite(n)) return 0;
+    return Math.abs(n) % mod;
+  } catch {
+    return 0;
+  }
+}
+
+function rangeMultiplier(range) {
+  const r = String(range || '').toLowerCase();
+  if (r === '24h') return 0.22;
+  if (r === '7d') return 0.6;
+  return 1.0; // 30d default
+}
+
+function makeArticleMetrics(article, range) {
+  const id = String(article?._id || '');
+  const title = String(article?.title || id);
+  const lang = String(article?.language || '').toLowerCase();
+
+  const mul = rangeMultiplier(range);
+  const base = 1200 + stableInt(id, 5200) + stableInt(title, 900);
+  const views = Math.max(0, Math.round(base * mul));
+  const uniqueReaders = Math.max(0, Math.round(views * (0.55 + stableInt(id + ':r', 25) / 100)));
+  const engagedReads = Math.max(0, Math.round(views * (0.18 + stableInt(id + ':e', 22) / 100)));
+  const avgReadTimeSec = 35 + stableInt(id + ':t', 165);
+  const completionRate = Math.max(0.12, Math.min(0.92, 0.35 + stableInt(id + ':c', 50) / 100));
+
+  const sourcesBase = {
+    Direct: 0.22,
+    Search: 0.34,
+    Social: 0.28,
+    Push: 0.16,
+  };
+  const jitter = (k) => (stableInt(id + ':src:' + k, 21) - 10) / 100;
+  const parts = Object.entries(sourcesBase).map(([k, w]) => ({ k, w: Math.max(0.05, w + jitter(k)) }));
+  const sumW = parts.reduce((a, p) => a + p.w, 0) || 1;
+  const sources = parts
+    .map((p) => ({ source: p.k, views: Math.round((p.w / sumW) * views), readers: Math.round((p.w / sumW) * uniqueReaders) }))
+    .sort((a, b) => b.views - a.views);
+
+  const primary = lang || 'en';
+  const other1 = primary === 'en' ? 'hi' : 'en';
+  const other2 = primary === 'gu' ? 'hi' : 'gu';
+  const l1 = 0.9;
+  const l2 = 0.06;
+  const l3 = 0.04;
+  const languages = [
+    { language: primary, views: Math.round(views * l1), readers: Math.round(uniqueReaders * l1) },
+    { language: other1, views: Math.round(views * l2), readers: Math.round(uniqueReaders * l2) },
+    { language: other2, views: Math.round(views * l3), readers: Math.round(uniqueReaders * l3) },
+  ].filter((x) => x.views > 0);
+
+  // Scroll funnel counts (monotonic)
+  const p25 = Math.round(views * (0.85 + stableInt(id + ':s25', 8) / 100));
+  const p50 = Math.round(views * (0.62 + stableInt(id + ':s50', 10) / 100));
+  const p75 = Math.round(views * (0.44 + stableInt(id + ':s75', 10) / 100));
+  const p100 = Math.round(views * (0.28 + stableInt(id + ':s100', 10) / 100));
+  const scrollFunnel = {
+    p25: Math.min(views, p25),
+    p50: Math.min(p25, p50),
+    p75: Math.min(p50, p75),
+    p100: Math.min(p75, p100),
+  };
+
+  return {
+    articleId: id,
+    title,
+    views,
+    uniqueReaders,
+    engagedReads,
+    avgReadTimeSec,
+    completionRate,
+    sources,
+    languages,
+    scrollFunnel,
+  };
+}
+
+function filterArticlesForAnalytics(query, rows) {
+  const status = String(query?.status || '').trim().toLowerCase();
+  const category = String(query?.category || '').trim().toLowerCase();
+  const language = String(query?.language || '').trim().toLowerCase();
+  const q = String(query?.q || '').trim().toLowerCase();
+
+  return (rows || []).filter((a) => {
+    const st = String(a?.status || 'draft').toLowerCase();
+    if (status && status !== 'all' && st !== status) return false;
+    const cat = String(a?.category || '').trim().toLowerCase();
+    if (category && cat !== category) return false;
+    const lang = String(a?.language || '').trim().toLowerCase();
+    if (language && lang !== language) return false;
+    if (q) {
+      const hay = `${a?.title || ''} ${a?.summary || ''} ${a?.content || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+app.get('/api/admin/analytics/dashboard', (req, res) => {
+  seedArticlesOnce();
+  const range = String(req.query?.range || '30d');
+  const rows = filterArticlesForAnalytics(req.query, ARTICLES).filter((a) => String(a?.status || '').toLowerCase() !== 'deleted');
+  const metrics = rows.map((a) => makeArticleMetrics(a, range));
+
+  const totals = metrics.reduce(
+    (acc, m) => {
+      acc.views += m.views;
+      acc.uniqueReaders += m.uniqueReaders;
+      acc.engagedReads += m.engagedReads;
+      acc.avgReadTimeSecSum += m.avgReadTimeSec * Math.max(1, m.uniqueReaders);
+      acc.readersWeight += Math.max(1, m.uniqueReaders);
+      acc.completionRateSum += m.completionRate * Math.max(1, m.views);
+      acc.viewsWeight += Math.max(1, m.views);
+      return acc;
+    },
+    { views: 0, uniqueReaders: 0, engagedReads: 0, avgReadTimeSecSum: 0, readersWeight: 0, completionRateSum: 0, viewsWeight: 0 },
+  );
+
+  const avgReadTimeSec = totals.readersWeight > 0 ? Math.round(totals.avgReadTimeSecSum / totals.readersWeight) : 0;
+  const completionRate = totals.viewsWeight > 0 ? totals.completionRateSum / totals.viewsWeight : 0;
+
+  const sourceAgg = new Map();
+  for (const m of metrics) {
+    for (const s of m.sources || []) {
+      const key = String(s.source || 'Unknown');
+      const prev = sourceAgg.get(key) || { source: key, views: 0, readers: 0 };
+      prev.views += Number(s.views || 0);
+      prev.readers += Number(s.readers || 0);
+      sourceAgg.set(key, prev);
+    }
+  }
+  const sources = Array.from(sourceAgg.values()).sort((a, b) => b.views - a.views);
+  const topSource = sources[0] || { source: '—', views: 0 };
+
+  const langAgg = new Map();
+  for (const m of metrics) {
+    for (const l of m.languages || []) {
+      const key = String(l.language || 'unknown');
+      const prev = langAgg.get(key) || { language: key, views: 0, readers: 0 };
+      prev.views += Number(l.views || 0);
+      prev.readers += Number(l.readers || 0);
+      langAgg.set(key, prev);
+    }
+  }
+  const languages = Array.from(langAgg.values()).sort((a, b) => b.views - a.views);
+
+  res.json({
+    ok: true,
+    data: {
+      totals: {
+        views: totals.views,
+        uniqueReaders: totals.uniqueReaders,
+        engagedReads: totals.engagedReads,
+        avgReadTimeSec,
+        completionRate,
+      },
+      topSource,
+      sources,
+      languages,
+    },
+  });
+});
+
+app.get('/api/admin/analytics/articles', (req, res) => {
+  seedArticlesOnce();
+  const range = String(req.query?.range || '30d');
+  const page = Math.max(1, Number(req.query?.page || 1) || 1);
+  const limit = Math.min(500, Math.max(1, Number(req.query?.limit || 50) || 50));
+
+  const filtered = filterArticlesForAnalytics(req.query, ARTICLES).filter((a) => String(a?.status || '').toLowerCase() !== 'deleted');
+  const start = (page - 1) * limit;
+  const slice = filtered.slice(start, start + limit);
+  const rows = slice.map((a) => {
+    const m = makeArticleMetrics(a, range);
+    return {
+      articleId: m.articleId,
+      title: m.title,
+      views: m.views,
+      uniqueReaders: m.uniqueReaders,
+      engagedReads: m.engagedReads,
+      avgReadTimeSec: m.avgReadTimeSec,
+      completionRate: m.completionRate,
+    };
+  });
+
+  res.json({ ok: true, data: { rows } });
+});
+
+app.get('/api/admin/analytics/articles/:articleId', (req, res) => {
+  seedArticlesOnce();
+  const id = String(req.params.articleId || '').trim();
+  const a = (ARTICLES || []).find((x) => String(x?._id || '') === id);
+  if (!a) return res.status(404).json({ ok: false, message: 'Not found' });
+
+  const mk = (range) => {
+    const m = makeArticleMetrics(a, range);
+    return {
+      totals: {
+        views: m.views,
+        uniqueReaders: m.uniqueReaders,
+        engagedReads: m.engagedReads,
+        avgReadTimeSec: m.avgReadTimeSec,
+        completionRate: m.completionRate,
+      },
+      scrollFunnel: m.scrollFunnel,
+      sources: m.sources,
+      languages: m.languages,
+    };
+  };
+
+  res.json({
+    ok: true,
+    data: {
+      articleId: id,
+      ranges: {
+        '24h': mk('24h'),
+        '7d': mk('7d'),
+        '30d': mk('30d'),
+      },
+    },
+  });
+});
+
+app.get('/api/admin/analytics/categories', (req, res) => {
+  seedArticlesOnce();
+  const range = String(req.query?.range || '30d');
+  const filtered = filterArticlesForAnalytics(req.query, ARTICLES).filter((a) => String(a?.status || '').toLowerCase() !== 'deleted');
+
+  const byCat = new Map();
+  for (const a of filtered) {
+    const cat = String(a?.category || '').trim() || 'Uncategorized';
+    const m = makeArticleMetrics(a, range);
+    const prev = byCat.get(cat) || {
+      category: cat,
+      views: 0,
+      uniqueReaders: 0,
+      engagedReads: 0,
+      avgReadTimeSecSum: 0,
+      readersWeight: 0,
+      completionRateSum: 0,
+      viewsWeight: 0,
+      topArticles: [],
+    };
+
+    prev.views += m.views;
+    prev.uniqueReaders += m.uniqueReaders;
+    prev.engagedReads += m.engagedReads;
+    prev.avgReadTimeSecSum += m.avgReadTimeSec * Math.max(1, m.uniqueReaders);
+    prev.readersWeight += Math.max(1, m.uniqueReaders);
+    prev.completionRateSum += m.completionRate * Math.max(1, m.views);
+    prev.viewsWeight += Math.max(1, m.views);
+    prev.topArticles.push({ articleId: m.articleId, title: m.title, views: m.views });
+    byCat.set(cat, prev);
+  }
+
+  const rows = Array.from(byCat.values()).map((c) => {
+    const avgReadTimeSec = c.readersWeight > 0 ? Math.round(c.avgReadTimeSecSum / c.readersWeight) : 0;
+    const completionRate = c.viewsWeight > 0 ? c.completionRateSum / c.viewsWeight : 0;
+    const topArticles = (c.topArticles || []).slice().sort((a, b) => Number(b.views || 0) - Number(a.views || 0)).slice(0, 6);
+    return {
+      category: c.category,
+      views: c.views,
+      uniqueReaders: c.uniqueReaders,
+      engagedReads: c.engagedReads,
+      avgReadTimeSec,
+      completionRate,
+      topArticles,
+    };
+  });
+
+  res.json({ ok: true, data: { rows } });
+});
+
 // Dashboard stats
 app.get('/api/dashboard/stats', (req, res) => {
   res.json({

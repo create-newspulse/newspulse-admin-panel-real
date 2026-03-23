@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '@/lib/api/articles';
 import { ArticleForm } from '@/components/news/ArticleForm';
+import { ArticleAnalyticsPanel } from '@/components/analytics/ArticleAnalyticsPanel';
 
 export default function ArticleEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,11 +31,16 @@ export default function ArticleEditPage() {
               const ok = window.confirm('You have unsaved changes. Leave this page?');
               if (!ok) return;
             }
-            navigate('/admin/news');
+            navigate('/admin/articles');
           }}
           className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
         >Back to News</button>
       </div>
+
+        <div className="mb-6">
+          <ArticleAnalyticsPanel articleId={id} />
+        </div>
+
       <ArticleForm
         mode="edit"
         id={id}

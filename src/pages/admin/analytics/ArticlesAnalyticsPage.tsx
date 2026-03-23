@@ -1,0 +1,227 @@
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
+
+import {
+  listAdminAnalyticsArticles,
+  type AnalyticsRangeKey,
+  type ArticlesAnalyticsRow,
+} from '@/lib/api/adminAnalytics';
+import { formatDurationShort, formatNumberCompact, formatPercent } from '@/lib/formatDuration';
+import { ARTICLE_CATEGORY_LABELS, isAllowedArticleCategoryKey } from '@/lib/articleCategories';
+
+type Filters = {
+  range: Exclude<AnalyticsRangeKey, 'custom'>;
+  status: string;
+  category: string;
+  language: string;
+};
+
+function categoryLabel(c: string): string {
+  const key = String(c || '').trim();
+  if (!key) return '—';
+  return isAllowedArticleCategoryKey(key) ? ARTICLE_CATEGORY_LABELS[key] : key;
+}
+
+export default function ArticlesAnalyticsPage() {
+  const navigate = useNavigate();
+
+  const [filters, setFilters] = React.useState<Filters>(() => {
+    try {
+      const raw = localStorage.getItem('np_admin_analytics_articles_filters');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          range: (parsed?.range === '24h' || parsed?.range === '7d' || parsed?.range === '30d') ? parsed.range : '30d',
+          status: typeof parsed?.status === 'string' ? parsed.status : 'all',
+          category: typeof parsed?.category === 'string' ? parsed.category : '',
+          language: typeof parsed?.language === 'string' ? parsed.language : '',
+        };
+      }
+    } catch {}
+    return { range: '30d', status: 'all', category: '', language: '' };
+  });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('np_admin_analytics_articles_filters', JSON.stringify(filters));
+    } catch {}
+  }, [filters]);
+
+  const q = useQuery({
+    queryKey: ['admin', 'analytics', 'articles', filters],
+    queryFn: async () => {
+      const data = await listAdminAnalyticsArticles({
+        range: filters.range,
+        status: filters.status !== 'all' ? filters.status : undefined,
+        category: filters.category || undefined,
+        language: filters.language || undefined,
+        page: 1,
+        limit: 200,
+      });
+      const rows = (data?.rows || data?.items || []) as ArticlesAnalyticsRow[];
+      return rows;
+    },
+    retry: 0,
+    refetchOnWindowFocus: false,
+  });
+
+  React.useEffect(() => {
+    if (!q.isError) return;
+    if (!import.meta.env.DEV) return;
+    try {
+      // eslint-disable-next-line no-console
+      console.error('[ArticlesAnalyticsPage] load failed', q.error);
+    } catch {}
+  }, [q.error, q.isError]);
+
+  const rows = q.data || [];
+
+  return (
+    <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Readership Analytics</h1>
+          <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Article performance by views, readers, engagement, time, and completion.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/admin/analytics/categories')}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Category Analytics
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/admin/dashboard')}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </header>
+
+      <section className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Date range</div>
+            <select
+              value={filters.range}
+              onChange={(e) => setFilters((p) => ({ ...p, range: e.target.value as any }))}
+              className="mt-1 w-full border rounded px-3 py-2 bg-white dark:bg-slate-900"
+            >
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7d</option>
+              <option value="30d">Last 30d</option>
+            </select>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Status</div>
+            <select
+              value={filters.status}
+              onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}
+              className="mt-1 w-full border rounded px-3 py-2 bg-white dark:bg-slate-900"
+            >
+              <option value="all">All</option>
+              <option value="draft">Draft</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="published">Published</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Category</div>
+            <input
+              value={filters.category}
+              onChange={(e) => setFilters((p) => ({ ...p, category: e.target.value }))}
+              placeholder="e.g. breaking"
+              className="mt-1 w-full border rounded px-3 py-2 bg-white dark:bg-slate-900"
+            />
+            <div className="mt-1 text-[11px] text-slate-500">Matches backend category key</div>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Language</div>
+            <select
+              value={filters.language}
+              onChange={(e) => setFilters((p) => ({ ...p, language: e.target.value }))}
+              className="mt-1 w-full border rounded px-3 py-2 bg-white dark:bg-slate-900"
+            >
+              <option value="">All</option>
+              <option value="en">EN</option>
+              <option value="hi">HI</option>
+              <option value="gu">GU</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+          <div className="text-sm font-semibold text-slate-900 dark:text-white">Articles</div>
+          <div className="text-xs text-slate-600 dark:text-slate-300">Range: {filters.range}</div>
+        </div>
+
+        {q.isLoading ? (
+          <div className="p-4 text-sm text-slate-500 animate-pulse">Loading analytics…</div>
+        ) : q.isError ? (
+          <div className="p-4">
+            <div className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-4">
+              <div className="text-sm font-semibold text-red-800 dark:text-red-200">Failed to load analytics</div>
+              <div className="mt-1 text-xs text-red-700/90 dark:text-red-200/80">Check `/api/admin/analytics/articles` and dev console for details.</div>
+            </div>
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="p-4 text-sm text-slate-700 dark:text-slate-200">No analytics rows for these filters.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-800">
+                <tr className="text-left">
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Article</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Category</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Views</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Readers</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Engaged</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Avg Read</th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-200">Completion</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {rows.map((r) => {
+                  const id = String(r.articleId || '');
+                  return (
+                    <tr key={id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900 dark:text-white truncate max-w-[520px]">{r.title || id}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">ID: {id}</div>
+                        <div className="mt-1">
+                          <Link className="text-xs font-semibold text-blue-700 dark:text-blue-300 hover:underline" to={`/admin/articles/${encodeURIComponent(id)}/edit`}>
+                            Open article
+                          </Link>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-700 dark:text-slate-200">{categoryLabel((r as any).category || filters.category || '')}</td>
+                      <td className="px-4 py-3 font-semibold">{formatNumberCompact(r.views)}</td>
+                      <td className="px-4 py-3">{formatNumberCompact(r.uniqueReaders ?? r.readers)}</td>
+                      <td className="px-4 py-3">{formatNumberCompact(r.engagedReads)}</td>
+                      <td className="px-4 py-3">{formatDurationShort(r.avgReadTimeSec)}</td>
+                      <td className="px-4 py-3">{formatPercent(r.completionRate)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <div className="text-xs text-slate-500">
+        Tip: This page is analytics-only. Manage workflow actions (publish/schedule/edit) in <Link to="/admin/articles" className="underline">Manage News</Link>.
+      </div>
+    </div>
+  );
+}

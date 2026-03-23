@@ -4,6 +4,7 @@ import { ContactRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fetchCommunityStats, type CommunityStats } from '@/api/adminCommunityReporterApi';
 import { toast } from 'react-hot-toast';
+import { listReporterContacts } from '@/lib/api/reporterDirectory';
 
 type UiCommunityStats = {
   pendingStories: number;
@@ -20,13 +21,25 @@ export default function CommunityHome() {
     let cancelled = false;
     async function load() {
       try {
-        const s: CommunityStats = await fetchCommunityStats();
+        const [s, allReporters, journalistReporters] = await Promise.all([
+          fetchCommunityStats(),
+          // Use a tiny page to get total reporter count from the backend.
+          listReporterContacts({ page: 1, limit: 1 }).catch(() => null),
+          // Verified journalists aren't exposed as a first-class stats endpoint yet;
+          // approximate by counting in a reasonably sized list.
+          listReporterContacts({ page: 1, limit: 500, type: 'journalist' }).catch(() => null),
+        ]);
+
+        const totalReporters = typeof allReporters?.total === 'number' ? allReporters.total : 0;
+        const journalistRows = (journalistReporters?.rows ?? journalistReporters?.items ?? []) as any[];
+        const verifiedJournalists = journalistRows.filter((r) => String(r?.verificationLevel || '').toLowerCase() === 'verified').length;
+
         const norm: UiCommunityStats = {
           pendingStories: s.pendingCount,
           approvedStories: s.approvedCount,
           rejectedStories: s.rejectedCount,
-          totalReporters: 0,
-          verifiedJournalists: 0,
+          totalReporters,
+          verifiedJournalists,
         };
         if (!cancelled) setStats(norm);
       } catch (e: any) {

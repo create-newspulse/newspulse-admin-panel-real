@@ -4,6 +4,9 @@ export type ConfirmModalProps = {
   description?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirmVariant?: 'primary' | 'danger';
+  confirmDisabled?: boolean;
+  confirmBusyLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -14,10 +17,20 @@ export default function ConfirmModal({
   description,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
+  confirmVariant = 'primary',
+  confirmDisabled = false,
+  confirmBusyLabel,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
   if (!open) return null;
+
+  const isBusy = !!confirmDisabled && !!confirmBusyLabel;
+
+  const confirmClassName =
+    confirmVariant === 'danger'
+      ? 'text-sm px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 inline-flex items-center gap-2'
+      : 'btn inline-flex items-center gap-2';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 p-4" role="dialog" aria-modal="true">
@@ -32,8 +45,14 @@ export default function ConfirmModal({
           <button type="button" className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50 dark:bg-slate-950 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-900" onClick={onCancel}>
             {cancelLabel}
           </button>
-          <button type="button" className="btn" onClick={onConfirm}>
-            {confirmLabel}
+          <button type="button" className={confirmClassName} disabled={confirmDisabled} onClick={onConfirm}>
+            {isBusy ? (
+              <span
+                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                aria-hidden="true"
+              />
+            ) : null}
+            {isBusy ? confirmBusyLabel : confirmLabel}
           </button>
         </div>
       </div>

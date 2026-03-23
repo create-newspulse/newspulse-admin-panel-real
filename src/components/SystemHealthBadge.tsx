@@ -43,10 +43,25 @@ const statusStyle: Record<HealthStatus, { bg: string; text: string; dot: string;
 function deriveStatus(data: HealthPayload): HealthStatus {
   try {
     if (!data) return 'unknown';
+
+    // Common top-level success signals
+    const topOk = (data as any).ok;
+    const topSuccess = (data as any).success;
+    const topStatusStr = ((data as any).statusText || (data as any).health || (data as any).status)
+      ? String((data as any).statusText || (data as any).health || (data as any).status).toLowerCase()
+      : '';
+    if (topOk === true || topSuccess === true) return 'healthy';
+    if (topStatusStr === 'ok' || topStatusStr === 'up' || topStatusStr === 'running') return 'healthy';
+
     const backend = (data as any).backend;
     if (backend && typeof backend === 'object') {
+      const ok = (backend as any).ok;
+      const success = (backend as any).success;
+      if (ok === true || success === true) return 'healthy';
+
       const s = (backend.status || backend.health || '').toString().toLowerCase();
       if (s === 'healthy') return 'healthy';
+      if (s === 'ok' || s === 'up' || s === 'running') return 'healthy';
       if (s === 'warning' || s === 'degraded' || s === 'degrade') return 'warning';
       if (s === 'critical' || s === 'down' || s === 'error') return 'critical';
       const cpu = Number(backend.cpu ?? backend.cpuUsage ?? NaN);

@@ -187,6 +187,31 @@ async function handleCoverUpload(req, res) {
 
     return res.status(200).json({ url, publicId });
 }
+
+async function handleMediaStatus(req, res) {
+    const method = (req.method || 'GET').toUpperCase();
+    if (method === 'OPTIONS') {
+        res.setHeader('Allow', 'OPTIONS, GET');
+        return res.status(204).end();
+    }
+    if (method !== 'GET') {
+        res.setHeader('Allow', 'OPTIONS, GET');
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    const cfg = parseCloudinaryConfig();
+    if (cfg) {
+        return res.status(200).json({ uploadEnabled: true, provider: 'cloudinary' });
+    }
+
+    return res.status(200).json({
+        uploadEnabled: false,
+        provider: 'cloudinary',
+        reason: 'cloudinary_not_configured',
+        message: 'Cloudinary is not configured',
+        detail: 'Set CLOUDINARY_URL (preferred) or CLOUDINARY_CLOUD_NAME + CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET',
+    });
+}
 // Simple cookie parser
 function parseCookies(header) {
     const cookies = {};
@@ -265,6 +290,11 @@ export default async function handler(req, res) {
         // Special-case: cover image uploads are handled at the proxy (Cloudinary).
         if (joinedPath === 'uploads/cover') {
             return await handleCoverUpload(req, res);
+        }
+
+        // Status endpoint for upload availability (Cloudinary envs).
+        if (joinedPath === 'media/status') {
+            return await handleMediaStatus(req, res);
         }
     // Build target URL, avoiding accidental double "/api" when client paths already include it
     const needsApiPrefix = !/^api\//i.test(joinedPath);

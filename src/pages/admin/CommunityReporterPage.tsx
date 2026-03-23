@@ -160,11 +160,11 @@ export default function CommunityReporterPage(){
     const city = norm((raw as any).city ?? (raw as any).town, 'city');
     const state = norm((raw as any).state ?? (raw as any).region, 'state');
     const country = norm((raw as any).country, 'country');
-    const district = (raw as any).district || (raw as any).area || '';
-    const contactName = (raw as any).contactName || undefined;
-    const contactEmail = (raw as any).contactEmail || undefined;
-    const contactPhone = (raw as any).contactPhone || undefined;
-    const contactMethod = (raw as any).contactMethod || undefined;
+    const district = (raw as any).district || (raw as any).area || (raw as any)?.location?.district || '';
+    const contactName = (raw as any).contactName || (raw as any)?.contact?.name || (raw as any)?.identity?.name || undefined;
+    const contactEmail = (raw as any).contactEmail || (raw as any)?.contact?.email || (raw as any)?.identity?.email || undefined;
+    const contactPhone = (raw as any).contactPhone || (raw as any)?.contact?.phone || (raw as any)?.identity?.phone || (raw as any)?.identity?.whatsapp || (raw as any).phone || (raw as any).whatsapp || undefined;
+    const contactMethod = (raw as any).contactMethod || (raw as any)?.contact?.method || (raw as any)?.identity?.contactMethod || undefined;
     const contactOk = (raw as any).contactOk === true || (raw as any).contactOk === 'true';
     const futureContactOk = (raw as any).futureContactOk === true || (raw as any).futureContactOk === 'true';
     const locParts = [city, state, country].map(p => String(p || '').trim()).filter(Boolean);
@@ -209,6 +209,18 @@ export default function CommunityReporterPage(){
       ptiComplianceStatus: (raw as any).ptiComplianceStatus ?? undefined,
       trustScore: typeof (raw as any).trustScore === 'number' ? (raw as any).trustScore : undefined,
     };
+  }
+
+  function getReporterDisplayName(s: CommunitySubmission): string {
+    const preferred = (s.reporterName || s.userName || s.name || s.contactName || '').trim();
+    const looksLikeId = /^[a-f0-9]{24}$/i.test(preferred) || /^\d{10,}$/i.test(preferred);
+    if (preferred && !looksLikeId) return preferred;
+    const email = String((s.contactEmail || s.email || '')).trim();
+    const fromEmail = email.includes('@') ? email.split('@')[0].trim() : email.trim();
+    if (fromEmail) return fromEmail;
+    const phone = String((s.contactPhone || (s as any).phone || (s as any).whatsapp || '')).trim();
+    if (phone) return phone;
+    return 'Unknown reporter';
   }
 
   // React Query based loading for submissions with server-side filters.
@@ -647,13 +659,16 @@ export default function CommunityReporterPage(){
             const tier = getRiskTier(s);
             const isFlagged = Array.isArray(s.flags) && s.flags.length > 0;
             const rowHighlight = tier === 'MEDIUM' ? 'bg-amber-50' : tier === 'HIGH' ? 'bg-red-50' : '';
-            const safeLocation = formatLocation((s as any).location ?? { city: s.city, state: s.state, country: s.country });
+            const safeLocation = formatLocation((s as any).location ?? { city: s.city, district: s.district, state: s.state, country: s.country });
+            const reporterDisplayName = getReporterDisplayName(s);
+            const contactEmail = String((s.contactEmail || s.email || '')).trim();
+            const contactPhone = String((s.contactPhone || (s as any).phone || (s as any).whatsapp || '')).trim();
             return (
             <tr key={s.id} className={`border-t hover:bg-slate-50 ${rowHighlight}`}> 
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline || '—'}</td>
-              <td className="p-2" title={s.reporterName || s.userName || s.name || 'Unknown reporter'}>
+              <td className="p-2" title={reporterDisplayName}>
                 <div className="flex flex-col gap-1 max-w-[240px]">
-                  <span className="font-medium truncate">{s.reporterName || s.userName || s.name || 'Unknown reporter'}</span>
+                  <span className="font-medium truncate">{reporterDisplayName}</span>
                   <div className="flex flex-wrap gap-1 items-center">
                     {/* Age group badge */}
                     <span
@@ -691,12 +706,12 @@ export default function CommunityReporterPage(){
                 </div>
               </td>
               <td className="p-2" title={safeLocation === '-' ? '' : safeLocation}>{safeLocation}</td>
-              <td className="p-2" title={(s.contactEmail || s.contactPhone) ? `${s.contactEmail || ''} ${s.contactPhone || ''}`.trim() : ''}>
+              <td className="p-2" title={(contactEmail || contactPhone) ? `${contactEmail} ${contactPhone}`.trim() : ''}>
                 <div className="flex flex-col gap-1 max-w-[180px]">
                   {s.contactName && <span className="truncate" title={s.contactName}>{s.contactName}</span>}
-                  {(s.contactEmail || s.contactPhone) ? (
-                    <span className="text-[11px] text-slate-600 truncate" title={`${s.contactEmail || ''} ${s.contactPhone || ''}`.trim()}>
-                      {(s.contactEmail || '').trim()}{s.contactEmail && s.contactPhone ? ' · ' : ''}{(s.contactPhone || '').trim()}
+                  {(contactEmail || contactPhone) ? (
+                    <span className="text-[11px] text-slate-600 truncate" title={`${contactEmail} ${contactPhone}`.trim()}>
+                      {contactEmail}{contactEmail && contactPhone ? ' · ' : ''}{contactPhone}
                     </span>
                   ) : <span className="text-[11px] text-slate-400">—</span>}
                   {s.contactMethod && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200 w-max" title="Preferred contact method">{s.contactMethod}</span>}
@@ -814,9 +829,9 @@ export default function CommunityReporterPage(){
         reporter={profileSubmission ? {
           id: profileSubmission.id,
           reporterKey: profileSubmission.email || profileSubmission.contactEmail || profileSubmission.contactPhone || profileSubmission.id,
-            name: profileSubmission.reporterName || profileSubmission.userName || profileSubmission.name || null,
-            email: profileSubmission.email || profileSubmission.contactEmail || null,
-            phone: profileSubmission.contactPhone || null,
+            name: getReporterDisplayName(profileSubmission),
+            email: profileSubmission.contactEmail || profileSubmission.email || null,
+            phone: profileSubmission.contactPhone || (profileSubmission as any).phone || (profileSubmission as any).whatsapp || null,
             city: profileSubmission.city || null,
             state: profileSubmission.state || null,
             country: profileSubmission.country || null,

@@ -101,3 +101,55 @@ export async function listReporterStoriesByEmail(
 
   throw lastErr || new Error('Failed to load reporter stories');
 }
+
+function readableAdminError(err: any, fallback: string) {
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  const msg =
+    (data && (data.message || data.error || data.details))
+    || err?.message
+    || fallback;
+  if (status === 401) return 'Unauthorized. Please log in again.';
+  if (status === 403) return 'Forbidden. You do not have permission to do that.';
+  if (status === 404) return 'Not found. This story may have already been deleted.';
+  if (typeof status === 'number' && status >= 500) return msg || 'Server error. Please try again.';
+  return msg || fallback;
+}
+
+export async function deleteReporterStoryForAdmin(storyId: string) {
+  const id = String(storyId || '').trim();
+  if (!id) throw new Error('Missing story id');
+
+  // Canonical delete contract used elsewhere in the admin.
+  const paths = [
+    `/community-reporter/submissions/${encodeURIComponent(id)}/hard-delete`,
+    // Some deployments might implement DELETE instead.
+    `/admin/community/reporter-stories/${encodeURIComponent(id)}`,
+  ] as const;
+
+  let lastErr: any = null;
+  for (const p of paths) {
+    try {
+      if (p.includes('/hard-delete')) {
+        const res = await adminApi.post<any>(p);
+        const data = res?.data ?? {};
+        if (data?.ok === false) throw new Error(data?.message || 'Delete failed');
+      } else {
+        const res = await adminApi.delete<any>(p);
+        const data = res?.data ?? {};
+        if (data?.ok === false) throw new Error(data?.message || 'Delete failed');
+      }
+      return { ok: true };
+    } catch (e: any) {
+      lastErr = e;
+      const status = e?.response?.status;
+      if (status === 404 || status === 405) continue;
+      throw e;
+    }
+  }
+
+  const msg = readableAdminError(lastErr, 'Failed to delete story');
+  const errOut = new Error(msg) as any;
+  errOut.status = lastErr?.response?.status;
+  throw errOut;
+}

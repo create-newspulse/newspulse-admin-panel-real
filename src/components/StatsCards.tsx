@@ -68,14 +68,14 @@ export default function StatsCards({
         label: 'Categories',
         value: readyVals.categoriesCount,
         helperText: helperText(readyVals.categoriesCount, 'Configured', 'No categories configured'),
-        link: '/admin/settings/public-site/homepage#categories',
+        link: '/add-category',
       },
       {
         key: 'languagesCount',
         label: 'Languages',
         value: readyVals.languagesCount,
-        helperText: helperText(readyVals.languagesCount, 'Detected', 'No language data yet'),
-        link: '/safe-owner/language-settings',
+        helperText: helperText(readyVals.languagesCount, 'Supported', 'No languages configured'),
+        link: '/admin/settings/public-site/language-theme',
       },
       {
         key: 'activeUsersCount',

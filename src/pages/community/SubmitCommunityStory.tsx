@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { createCommunityArticle, updateArticle, getArticle, type Article } from '@/lib/api/articles';
 import { useLocation } from 'react-router-dom';
@@ -27,6 +27,7 @@ interface SubmitStoryFormValues {
 }
 
 export default function SubmitCommunityStory() {
+  const queryClient = useQueryClient();
   const locationHook = useLocation();
   const params = new URLSearchParams(locationHook.search);
   const editingId = params.get('storyId');
@@ -108,6 +109,13 @@ export default function SubmitCommunityStory() {
     return null;
   }
 
+  function validateSubmitForReview(): string | null {
+    const common = validateCommon();
+    if (common) return common;
+    if (!(contactEmail || '').trim()) return 'Email is required to submit for review.';
+    return null;
+  }
+
   // Prefill logic for editing or cloning
   // Editing: storyId param; Cloning: fromStory param
   // For cloning we fetch and set fields but ignore original status
@@ -157,9 +165,14 @@ export default function SubmitCommunityStory() {
   }
 
   async function handleSubmitForReview() {
-    const v = validateCommon();
+    const v = validateSubmitForReview();
     if (v) { toast.error(v); return; }
     if (!confirmGuidelines) { toast.error('Please confirm the guidelines before submitting.'); return; }
+
+    const reporterEmail = (contactEmail || '').trim();
+    const reporterName = (contactName || '').trim();
+    const reporterPhone = (contactPhone || '').trim();
+    const reporterKey = reporterEmail.toLowerCase();
 
     const payload: any = {
       title,
@@ -167,6 +180,23 @@ export default function SubmitCommunityStory() {
       category,
       summary: summary || undefined,
       content: body,
+      // Legacy-compatible top-level contact fields (some backend paths expect these)
+      contactName: reporterName || undefined,
+      contactEmail: reporterEmail || undefined,
+      contactPhone: reporterPhone || undefined,
+      contactMethod: contactMethod || undefined,
+      contactOk: !!contactOk,
+      futureContactOk: !!futureContactOk,
+      // Reporter identity fields (for directory enrichment)
+      reporterName: reporterName || undefined,
+      reporterEmail: reporterEmail || undefined,
+      reporterPhone: reporterPhone || undefined,
+      reporterKey: reporterKey || undefined,
+      // Top-level location fields (legacy + easier indexing)
+      city: city || undefined,
+      state: stateName || undefined,
+      country: country || undefined,
+      district: district || undefined,
       location: {
         city: city || undefined,
         state: stateName || undefined,
@@ -174,9 +204,9 @@ export default function SubmitCommunityStory() {
         district: district || undefined,
       },
       contact: {
-        name: (contactName || '').trim() || undefined,
-        email: (contactEmail || '').trim() || undefined,
-        phone: (contactPhone || '').trim() || undefined,
+        name: reporterName || undefined,
+        email: reporterEmail || undefined,
+        phone: reporterPhone || undefined,
         preferredContact: (contactMethod ? contactMethod : 'no_preference'),
         canContactForThisStory: !!contactOk,
         canContactForFutureStories: !!futureContactOk,
@@ -192,6 +222,8 @@ export default function SubmitCommunityStory() {
       }
       setSubmitResult(res);
       toast.success('Story submitted successfully');
+      // Ensure the Reporter Contact Directory reflects this reporter immediately.
+      queryClient.invalidateQueries({ queryKey: ['reporter-contacts'] });
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || 'Network error while submitting story.');

@@ -1,10 +1,12 @@
-import { useNavigate } from 'react-router-dom';
-import { useMemo, useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Copy as CopyIcon } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Copy as CopyIcon, RefreshCw } from 'lucide-react';
 import { useNotify } from '@/components/ui/toast-bridge';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
-import { listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
+import ReporterStoriesDrawer from '@/components/community/ReporterStoriesDrawer.tsx';
+import { backfillReporterContacts, bulkDeleteReporterContacts, deleteReporterContact, listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
 import { useAuth } from '@/context/AuthContext.tsx';
 import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
@@ -40,6 +42,8 @@ function norm(val: any, prefer?: 'city'|'state'|'country'): string {
 export default function ReporterContactDirectory() {
   const STORAGE_KEY = 'reporterDirectoryPreferences';
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
   // Primary filter states declared first to avoid block-scope usage errors
   const [typeFilter, setTypeFilter] = useState<'all' | 'community' | 'journalist'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked' | 'archived'>('all');
@@ -55,6 +59,59 @@ export default function ReporterContactDirectory() {
   const notify = (useNotify?.() as unknown) as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
   const [sortBy, setSortBy] = useState<undefined | 'name' | 'stories' | 'lastStory' | 'activity'>(undefined);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const { user } = useAuth();
+
+  const resolvedRole = useMemo(() => {
+    const fromUser = String(user?.role || '').trim().toLowerCase();
+    if (fromUser) return fromUser;
+    try {
+      if (typeof window === 'undefined') return '';
+      const raw = window.localStorage.getItem('newsPulseAdminAuth');
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      return String(parsed?.role || '').trim().toLowerCase();
+    } catch {
+      return '';
+    }
+  }, [user?.role]);
+
+  const canDelete = resolvedRole === 'founder' || resolvedRole === 'admin';
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const [backfillOpen, setBackfillOpen] = useState(false);
+  const backfillMutation = useMutation({
+    mutationFn: backfillReporterContacts,
+    onSuccess: async (result) => {
+      const upserted = Number((result as any)?.upserted ?? 0) || 0;
+      const skippedNoEmail = Number((result as any)?.skippedNoEmail ?? 0) || 0;
+      notify?.ok?.(`Backfill completed: ${upserted} reporters updated. Skipped: ${skippedNoEmail}.`);
+      setBackfillOpen(false);
+
+      // Clear selection; ids may change after rebuild.
+      setSelectedIds(new Set());
+
+      // Refresh the directory list immediately.
+      await queryClient.refetchQueries({ queryKey: ['reporter-contacts'], type: 'active' });
+      setRefreshTick((t) => t + 1);
+
+      // If backend still returns 0 rows, log cached query data so we can distinguish backend vs UI issues.
+      if (import.meta.env.DEV) {
+        try {
+          const snapshots = queryClient
+            .getQueriesData({ queryKey: ['reporter-contacts'] })
+            .map(([k, v]) => ({ key: k, total: (v as any)?.total, items: ((v as any)?.items || (v as any)?.rows || [])?.length }));
+          // eslint-disable-next-line no-console
+          console.log('[ReporterContactDirectory] after backfill refetch', snapshots);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    onError: (err: any) => {
+      notify?.error?.(err?.message || 'Backfill failed');
+    },
+  });
 
   // Query backend for reporter contacts (paginated, large page to reduce client fetches)
   const [refreshTick, setRefreshTick] = useState(0);
@@ -71,6 +128,19 @@ export default function ReporterContactDirectory() {
   // Client-side filtered reporters
   const [activityFilter, setActivityFilter] = useState<'all' | 'active' | 'inactive' | 'new' | 'on_leave' | 'blacklisted'>('all');
   const [verificationFilter, setVerificationFilter] = useState<'All'|'Verified'|'Pending'|'Limited'|'Revoked'|'Unverified'|'Community Default'>('All');
+
+  const [viewFilter, setViewFilter] = useState<
+    | 'all'
+    | 'missing_email'
+    | 'missing_phone'
+    | 'missing_location'
+    | 'unresolved_identity'
+    | 'no_stories'
+    | 'inactive_30'
+    | 'inactive_60'
+    | 'inactive_90'
+  >('all');
+
   // Fetch data via useQuery after all filter states are declared
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['reporter-contacts', {
@@ -79,13 +149,67 @@ export default function ReporterContactDirectory() {
       status: statusFilter, activity: activityFilter, hasNotes: hasNotesOnly, searchQuery, refreshTick
     }],
     queryFn: async () => {
-      return await listReporterContacts({ page: 1, limit: 200 });
+      const params: Parameters<typeof listReporterContacts>[0] = {
+        page: 1,
+        limit: 500,
+      };
+
+      const q = String(searchQuery || '').trim();
+      if (q) params.search = q;
+
+      if (countryVal && !isAllFilter(countryVal)) params.country = String(countryVal);
+      if (stateVal && !isAllFilter(stateVal)) params.state = String(stateVal);
+      if (cityVal && !isAllFilter(cityVal)) params.city = String(cityVal);
+
+      if (typeFilter !== 'all') params.type = typeFilter;
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (hasNotesOnly) params.hasNotes = true;
+
+      if (sortBy === 'lastStory') params.sortBy = 'lastStoryAt';
+      if (sortBy === 'stories') params.sortBy = 'totalStories';
+      if (sortBy === 'lastStory' || sortBy === 'stories') params.sortDir = sortDirection;
+
+      return await listReporterContacts(params);
     },
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
   });
   const reporters: ReporterContact[] = (data?.items as ReporterContact[]) ?? (data?.rows as ReporterContact[]) ?? [];
   const items = reporters;
   const total = typeof data?.total === 'number' ? data.total : reporters.length;
   const unauthorized = (error as any)?.isUnauthorized === true || (error as any)?.status === 401;
+
+  // Stories drawer state
+  const [storiesTarget, setStoriesTarget] = useState<ReporterContact | null>(null);
+
+  const bulkDeleteInFlightRef = useRef(false);
+
+  const contactDeleteId = (r: ReporterContact): string => {
+    const raw = (r as any)?._id ?? r.id ?? r.reporterKey;
+    return String(raw || '').trim();
+  };
+
+  // IMPORTANT DEBUG: if Delete Contact button is not visible, log once in DEV.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (typeof window === 'undefined') return;
+    const w: any = window as any;
+    if (w.__npReporterDirectoryDeleteGateLogged) return;
+    if (canDelete) return;
+
+    const first = items?.[0] as any;
+    const rawId = first ? String(first._id || first.id || '').trim() : '';
+    const hasValidId = !!rawId && !rawId.startsWith('tmp_');
+    w.__npReporterDirectoryDeleteGateLogged = true;
+    // eslint-disable-next-line no-console
+    console.log('[ReporterContactDirectory] delete gate', {
+      role: resolvedRole,
+      canDelete,
+      hasValidId,
+      sampleId: rawId || null,
+    });
+  }, [canDelete, resolvedRole, items]);
 
   // Derive unique sets from current dataset (computed after items are defined)
   const uniqueCountries = useMemo(() => ['All countries', ...Array.from(new Set(items.map(i => norm(i.country, 'country')).filter(Boolean))).sort()], [items]);
@@ -127,12 +251,28 @@ export default function ReporterContactDirectory() {
       const data = JSON.parse(raw);
       if (data && typeof data === 'object') {
         if (typeof data.searchQuery === 'string') setSearchQuery(data.searchQuery);
-        if (typeof data.countryVal === 'string' || data.countryVal === undefined) setCountryVal(data.countryVal);
-        if (typeof data.stateVal === 'string' || data.stateVal === undefined) setStateVal(data.stateVal);
-        if (typeof data.cityVal === 'string' || data.cityVal === undefined) setCityVal(data.cityVal);
-        if (typeof data.districtFilter === 'string') setDistrictFilter(data.districtFilter);
+        // Normalize legacy persisted values like "All countries" -> undefined / 'all'
+        if (typeof data.countryVal === 'string' || data.countryVal === undefined) {
+          const v = data.countryVal;
+          setCountryVal(typeof v === 'string' && isAllFilter(v) ? undefined : v);
+        }
+        if (typeof data.stateVal === 'string' || data.stateVal === undefined) {
+          const v = data.stateVal;
+          setStateVal(typeof v === 'string' && isAllFilter(v) ? undefined : v);
+        }
+        if (typeof data.cityVal === 'string' || data.cityVal === undefined) {
+          const v = data.cityVal;
+          setCityVal(typeof v === 'string' && isAllFilter(v) ? undefined : v);
+        }
+        if (typeof data.districtFilter === 'string') {
+          const v = String(data.districtFilter);
+          setDistrictFilter(isAllFilter(v) ? 'all' : v);
+        }
         if (typeof data.areaTypeFilter === 'string') setAreaTypeFilter(data.areaTypeFilter);
-        if (typeof data.beatFilter === 'string') setBeatFilter(data.beatFilter);
+        if (typeof data.beatFilter === 'string') {
+          const v = String(data.beatFilter);
+          setBeatFilter(isAllFilter(v) ? 'all' : v);
+        }
         if (typeof data.hasNotesOnly === 'boolean') setHasNotesOnly(data.hasNotesOnly);
         if (typeof data.activityFilter === 'string') setActivityFilter(data.activityFilter);
         if (typeof data.sortBy === 'string' || data.sortBy === undefined) setSortBy(data.sortBy);
@@ -232,12 +372,12 @@ export default function ReporterContactDirectory() {
   };
 
   const filters: Filters = {
-    country: (countryVal ? String(countryVal).toLowerCase() : 'all'),
-    state: (stateVal ? String(stateVal).toLowerCase() : 'all'),
-    district: (districtFilter ? String(districtFilter).toLowerCase() : 'all'),
-    city: (cityVal ? String(cityVal).toLowerCase() : 'all'),
+    country: (countryVal && !isAllFilter(countryVal) ? String(countryVal).toLowerCase() : 'all'),
+    state: (stateVal && !isAllFilter(stateVal) ? String(stateVal).toLowerCase() : 'all'),
+    district: (!isAllFilter(districtFilter) && String(districtFilter || '').toLowerCase() !== 'all' ? String(districtFilter).toLowerCase() : 'all'),
+    city: (cityVal && !isAllFilter(cityVal) ? String(cityVal).toLowerCase() : 'all'),
     area: (areaTypeFilter ? String(areaTypeFilter).toLowerCase() : 'all'),
-    beat: (beatFilter ? String(beatFilter).toLowerCase() : 'all beats'),
+    beat: (beatFilter && !isAllFilter(beatFilter) ? String(beatFilter).toLowerCase() : 'all'),
     type: typeFilter ?? 'all',
     verification: (String(verificationFilter || 'all')).toLowerCase(),
     status: statusFilter ?? 'all',
@@ -247,19 +387,47 @@ export default function ReporterContactDirectory() {
 
   const filteredReporters = useMemo(() => reporters.filter((r) => reporterMatchesFilters(r, filters, searchQuery)), [reporters, filters, searchQuery]);
 
-  // Debug logs for investigation (will be trimmed later)
-  useEffect(() => {
-    // Raw vs filtered list visibility
-    console.log('[ReporterDirectory] raw reporters', reporters);
-    console.log('[ReporterDirectory] filters', {
-      countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter,
-      typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly,
-    }, 'search', (searchQuery ?? '').toString());
-    console.log('[ReporterDirectory] filtered reporters', filteredReporters);
-  }, [reporters, filteredReporters, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, typeFilter, verificationFilter, statusFilter, activityFilter, hasNotesOnly, searchQuery]);
+  const viewFilteredReporters = useMemo(() => {
+    const now = Date.now();
+    const ageDays = (iso?: string | null) => {
+      const s = String(iso || '').trim();
+      if (!s) return Infinity;
+      const t = new Date(s).getTime();
+      if (!Number.isFinite(t) || t <= 0) return Infinity;
+      return (now - t) / (1000 * 60 * 60 * 24);
+    };
+
+    return filteredReporters.filter((r) => {
+      if (viewFilter === 'all') return true;
+      if (viewFilter === 'missing_email') return !String(r.email || '').trim();
+      if (viewFilter === 'missing_phone') return !String(r.phone || '').trim();
+      if (viewFilter === 'missing_location') return !String(r.city || '').trim() && !String(r.state || '').trim() && !String(r.country || '').trim();
+      if (viewFilter === 'unresolved_identity') {
+        const hasName = !!String(r.name || '').trim();
+        const hasAnyContact = !!String(r.email || '').trim() || !!String(r.phone || '').trim();
+        return !hasName || !hasAnyContact;
+      }
+      if (viewFilter === 'no_stories') return Number(r.totalStories || 0) <= 0;
+      if (viewFilter === 'inactive_30') return ageDays(r.lastStoryAt) >= 30;
+      if (viewFilter === 'inactive_60') return ageDays(r.lastStoryAt) >= 60;
+      if (viewFilter === 'inactive_90') return ageDays(r.lastStoryAt) >= 90;
+      return true;
+    });
+  }, [filteredReporters, viewFilter]);
+
+  const contactsById = useMemo(() => {
+    return new Map(
+      viewFilteredReporters.map((r) => [r.id, { id: r.id, reporterKey: r.reporterKey || null, email: r.email || null }] as const)
+    );
+  }, [viewFilteredReporters]);
+
+  // Intentionally avoid noisy debug logging here; this page is founder/admin-facing.
+
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
 
   const sortedReporters = useMemo(() => {
-    const arr = [...filteredReporters];
+    const arr = [...viewFilteredReporters];
     if (!sortBy) return arr;
     const dir = sortDirection === 'asc' ? 1 : -1;
     if (sortBy === 'name') {
@@ -297,7 +465,7 @@ export default function ReporterContactDirectory() {
       });
     }
     return arr;
-  }, [filteredReporters, sortBy, sortDirection]);
+  }, [viewFilteredReporters, sortBy, sortDirection]);
 
   function handleSortChange(col: 'name' | 'stories' | 'lastStory' | 'activity') {
     if (sortBy === col) {
@@ -331,7 +499,7 @@ export default function ReporterContactDirectory() {
 
   function handleExportCsv() {
     const headers = ['Name', 'Email', 'Phone', 'City', 'State', 'Country', 'Stories', 'Last Story'];
-    const rows = filteredReporters.map(r => {
+    const rows = viewFilteredReporters.map(r => {
       const last = r.lastStoryAt ? new Date(r.lastStoryAt).toLocaleString() : '';
       return [
         r.name || '',
@@ -360,6 +528,43 @@ export default function ReporterContactDirectory() {
     URL.revokeObjectURL(url);
   }
 
+  // Deep-link support: allow story modals/queue to jump into the directory.
+  const appliedQueryRef = useRef<{ q?: string; reporterKey?: string } | null>(null);
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(location.search || '');
+      const q = String(sp.get('q') || '').trim();
+      const reporterKey = String(sp.get('reporterKey') || '').trim();
+      const open = String(sp.get('open') || '').trim();
+
+      const last = appliedQueryRef.current;
+      const changed = (q && q !== last?.q) || (reporterKey && reporterKey !== last?.reporterKey);
+      if (!changed) return;
+
+      appliedQueryRef.current = { q: q || last?.q, reporterKey: reporterKey || last?.reporterKey };
+
+      if (q) setSearchQuery(q);
+
+      // If open=1 and we can resolve a reporter from the loaded dataset, open the profile drawer.
+      if (open === '1' && reporterKey && reporters.length > 0) {
+        const keyLower = reporterKey.toLowerCase();
+        const found = reporters.find((r) => {
+          const id = String((r as any)._id || r.id || r.reporterKey || '').trim().toLowerCase();
+          const email = String(r.email || '').trim().toLowerCase();
+          const phone = String(r.phone || '').trim().toLowerCase();
+          return id === keyLower || email === keyLower || phone === keyLower;
+        });
+        if (found) {
+          setSelectedReporter(found);
+          setIsProfileOpen(true);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, reporters.length]);
+
   // Reset city when state changes if city no longer valid
   useEffect(() => {
     if (cityVal && stateVal) {
@@ -370,7 +575,7 @@ export default function ReporterContactDirectory() {
   const [selectedReporter, setSelectedReporter] = useState<ReporterContact | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showLocationNav, setShowLocationNav] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // moved above (used by backfill/bulk actions)
 
   // Group states with counts (respect country + search so context matches current dataset)
   const stateGroups = useMemo(() => {
@@ -417,8 +622,8 @@ export default function ReporterContactDirectory() {
   return (
     <div className="px-6 py-4 max-w-7xl mx-auto w-full">
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight">Reporter Contact Directory</h1>
-        <p className="text-sm text-slate-600">Secure list of reporter contact & location for follow-up. Founder/Admin only.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Contributor Network</h1>
+        <p className="text-sm text-slate-600">Founder-grade directory for follow-up, verification, and coverage planning. (Path unchanged.)</p>
       </header>
 
       {unauthorized && (
@@ -471,21 +676,21 @@ export default function ReporterContactDirectory() {
         <div className="flex-1 space-y-6">
         {/* Filters Bar */}
         <div className="flex flex-wrap items-center gap-3">
-        <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="px-3 py-2 border rounded-md text-sm">
+        <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
           {uniqueCountries.map(c => <option key={c ?? 'All countries'} value={c === 'All countries' ? '' : (c ?? '')}>{c}</option>)}
         </select>
-        <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); setDistrictFilter('all'); }} className="px-3 py-2 border rounded-md text-sm">
+        <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); setDistrictFilter('all'); }} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
           {uniqueStates.map(s => <option key={s ?? 'All states'} value={s === 'All states' ? '' : (s ?? '')}>{s}</option>)}
         </select>
         {/* District */}
-        <select value={districtFilter} onChange={(e) => setDistrictFilter((e.target.value || 'all') as 'all' | string)} className="px-3 py-2 border rounded-md text-sm">
+        <select value={districtFilter} onChange={(e) => setDistrictFilter((e.target.value || 'all') as 'all' | string)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
           {filteredDistricts.map(d => <option key={d ?? 'All districts'} value={d === 'All districts' ? 'all' : (d ?? '')}>{d}</option>)}
         </select>
-        <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="px-3 py-2 border rounded-md text-sm">
+        <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
           {filteredCities.map(c => <option key={c ?? 'All cities'} value={c === 'All cities' ? '' : (c ?? '')}>{c}</option>)}
         </select>
         {/* Area type */}
-        <select value={areaTypeFilter} onChange={(e) => setAreaTypeFilter((e.target.value || 'all') as any)} className="px-3 py-2 border rounded-md text-sm">
+        <select value={areaTypeFilter} onChange={(e) => setAreaTypeFilter((e.target.value || 'all') as any)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
           <option value="all">All areas</option>
           <option value="metro">Metro city</option>
           <option value="corporation">Municipal corporation</option>
@@ -499,6 +704,23 @@ export default function ReporterContactDirectory() {
           placeholder="Search name, email, or phone…"
           className="w-full sm:w-64 px-3 py-2 border rounded-md text-sm"
         />
+
+        <select
+          value={viewFilter}
+          onChange={(e) => setViewFilter((e.target.value || 'all') as any)}
+          className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm"
+          title="CRM views"
+        >
+          <option value="all">All reporters</option>
+          <option value="unresolved_identity">Unresolved identity</option>
+          <option value="missing_email">Missing email</option>
+          <option value="missing_phone">Missing phone</option>
+          <option value="missing_location">Missing location</option>
+          <option value="no_stories">No stories yet</option>
+          <option value="inactive_30">Inactive 30+ days</option>
+          <option value="inactive_60">Inactive 60+ days</option>
+          <option value="inactive_90">Inactive 90+ days</option>
+        </select>
         <button
           type="button"
           onClick={() => {
@@ -565,20 +787,38 @@ export default function ReporterContactDirectory() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          {/* Use filtered list for shown count to match table */}
-          <span className="text-xs text-slate-500">{filteredReporters.length} / {reporters.length} shown</span>
+          <span className="text-xs text-slate-500">{viewFilteredReporters.length} shown · {total} total</span>
           {(() => {
-            const totalReporters = filteredReporters.length;
-            const completeProfiles = filteredReporters.filter(r => r.phone && (r.city || r.state || r.country)).length;
-            const missingPhone = filteredReporters.filter(r => !r.phone).length;
-            const missingLocation = filteredReporters.filter(r => !r.city && !r.state && !r.country).length;
+            const base = viewFilteredReporters;
+            const totalReporters = base.length;
+            const missingEmail = base.filter(r => !String(r.email || '').trim()).length;
+            const missingPhone = base.filter(r => !String(r.phone || '').trim()).length;
+            const missingLocation = base.filter(r => !String(r.city || '').trim() && !String(r.state || '').trim() && !String(r.country || '').trim()).length;
+            const unresolvedIdentity = base.filter(r => !String(r.name || '').trim() || (!String(r.email || '').trim() && !String(r.phone || '').trim())).length;
+
+            const now = Date.now();
+            const ageDays = (iso?: string | null) => {
+              const s = String(iso || '').trim();
+              if (!s) return Infinity;
+              const t = new Date(s).getTime();
+              if (!Number.isFinite(t) || t <= 0) return Infinity;
+              return (now - t) / (1000 * 60 * 60 * 24);
+            };
+            const inactive30 = base.filter(r => ageDays(r.lastStoryAt) >= 30).length;
+            const inactive60 = base.filter(r => ageDays(r.lastStoryAt) >= 60).length;
+            const inactive90 = base.filter(r => ageDays(r.lastStoryAt) >= 90).length;
+
+            const completeProfiles = base.filter(r => String(r.email || '').trim() && String(r.phone || '').trim() && (String(r.city || '').trim() || String(r.state || '').trim() || String(r.country || '').trim())).length;
             return (
               <span className="text-xs text-slate-500 inline-flex items-center gap-2">
                 {totalReporters > 0 && (
                   <>
                     <span>{completeProfiles} complete</span>
+                    <span>· {unresolvedIdentity} unresolved identity</span>
+                    <span>· {missingEmail} missing email</span>
+                    <span title="Missing phone means the reporter contact record does not yet include a phone number.">· {missingPhone} missing phone</span>
                     <span>· {missingLocation} missing location</span>
-                    <span>· {missingPhone} missing phone</span>
+                    <span title="Computed from last story date (or missing)">· inactive: {inactive30}/{inactive60}/{inactive90} (30/60/90d)</span>
                   </>
                 )}
               </span>
@@ -589,7 +829,30 @@ export default function ReporterContactDirectory() {
             onClick={handleExportCsv}
             className="ml-auto text-xs px-3 py-2 border rounded-md hover:bg-slate-50"
           >Export CSV</button>
+          {canDelete && (
+            <button
+              type="button"
+              disabled={backfillMutation.isPending}
+              onClick={() => setBackfillOpen(true)}
+              className="ml-2 text-xs px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
+              title="Rebuild reporter contacts from existing community submissions"
+            >
+              {backfillMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
+              {backfillMutation.isPending ? 'Backfilling…' : 'Backfill contacts'}
+            </button>
+          )}
           <span className="ml-2 text-xs text-slate-600">{selectedIds.size} selected</span>
+          {canDelete && (
+            <button
+              type="button"
+              disabled={selectedIds.size === 0 || bulkDeleteBusy}
+              onClick={() => setBulkDeleteOpen(true)}
+              className="text-xs px-3 py-2 rounded-md border text-red-700 hover:bg-red-50 disabled:opacity-50"
+              title={selectedIds.size === 0 ? 'Select one or more contacts to delete' : 'Delete selected contacts'}
+            >
+              {bulkDeleteBusy ? 'Deleting…' : 'Delete selected'}
+            </button>
+          )}
           <button
             type="button"
             disabled={selectedIds.size === 0}
@@ -610,6 +873,68 @@ export default function ReporterContactDirectory() {
           >Copy selected emails</button>
       </div>
 
+      <ConfirmModal
+        open={bulkDeleteOpen}
+        title="Delete selected reporter contacts?"
+        description="This will remove the selected reporter contact record(s). This action cannot be undone."
+        confirmLabel={`Delete ${selectedIds.size || ''}`.trim()}
+        confirmVariant="danger"
+        confirmDisabled={bulkDeleteBusy}
+        confirmBusyLabel="Deleting…"
+        onCancel={() => {
+          if (bulkDeleteBusy) return;
+          setBulkDeleteOpen(false);
+        }}
+        onConfirm={async () => {
+          // IMPORTANT: only fires from modal confirm click.
+          if (bulkDeleteBusy) return;
+          if (bulkDeleteInFlightRef.current) return;
+
+          const selectedRows = sortedReporters.filter((r) => selectedIds.has(r.id));
+          const ids = selectedRows
+            .map((r) => contactDeleteId(r))
+            .filter((x) => !!x && !x.startsWith('tmp_'));
+
+          if (ids.length === 0) {
+            notify?.error?.('No valid ids found for selection');
+            return;
+          }
+
+          bulkDeleteInFlightRef.current = true;
+          setBulkDeleteBusy(true);
+          try {
+            const result = await bulkDeleteReporterContacts({ ids, contactsById });
+            notify?.ok?.('Deleted reporter contacts', `${result.deleted} deleted`);
+            setSelectedIds(new Set());
+            setBulkDeleteOpen(false);
+            setRefreshTick((t) => t + 1);
+          } catch (err: any) {
+            notify?.error?.(err?.message || 'Failed to delete selected contacts');
+          } finally {
+            setBulkDeleteBusy(false);
+            bulkDeleteInFlightRef.current = false;
+          }
+        }}
+      />
+
+      <ConfirmModal
+        open={backfillOpen}
+        title="Backfill reporter contacts?"
+        description="This will scan all existing community reporter submissions and rebuild the contact directory. Safe to run multiple times."
+        cancelLabel="Cancel"
+        confirmLabel="Run Backfill"
+        confirmDisabled={backfillMutation.isPending}
+        confirmBusyLabel="Running…"
+        onCancel={() => {
+          if (backfillMutation.isPending) return;
+          setBackfillOpen(false);
+        }}
+        onConfirm={async () => {
+          if (backfillMutation.isPending) return;
+          await backfillMutation.mutateAsync();
+        }}
+      />
+
       {/* Table with data */}
         <DirectoryTable
           isLoading={isLoading}
@@ -618,6 +943,7 @@ export default function ReporterContactDirectory() {
           items={sortedReporters}
           selectedIds={selectedIds}
           notify={notify}
+          canDelete={canDelete}
           onToggleSelect={(id: string) => {
             setSelectedIds(prev => {
               const next = new Set(prev);
@@ -640,6 +966,7 @@ export default function ReporterContactDirectory() {
           }}
           onRequestRefresh={() => setRefreshTick(t => t + 1)}
           onSelect={(r) => { setSelectedReporter(r); setIsProfileOpen(true); }}
+          onOpenStories={(r) => setStoriesTarget(r)}
         />
 
         </div>{/* end main content */}
@@ -657,6 +984,15 @@ export default function ReporterContactDirectory() {
           navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
         }}
         onOpenQueue={(key) => navigate(`/community/reporter?reporterKey=${encodeURIComponent(key)}`)}
+      />
+
+      <ReporterStoriesDrawer
+        open={!!storiesTarget}
+        contactId={String((storiesTarget as any)?._id || storiesTarget?.id || '').trim()}
+        contactName={String(storiesTarget?.name || storiesTarget?.email || '').trim()}
+        canDelete={canDelete}
+        onClose={() => setStoriesTarget(null)}
+        onAfterMutation={() => setRefreshTick((t) => t + 1)}
       />
     </div>
   );
@@ -692,7 +1028,6 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
       {activeState && activeState !== 'All states' && (
         <div className="mt-2 pl-2 border-t pt-2">
           <p className="text-xs font-medium text-slate-500 mb-1">Cities in {activeState}</p>
-                            navigate(`/community/reporter?${qs.toString()}`);
           <div className="space-y-1">
             {cityGroups.map(cg => (
               <button
@@ -714,9 +1049,17 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
   );
 }
 
-function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, onRequestRefresh, notify }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; onRequestRefresh: () => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } }) {
-  const navigate = useNavigate();
+function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, onOpenStories, onRequestRefresh, notify, canDelete }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; onOpenStories: (r: ReporterContact) => void; onRequestRefresh: () => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void }; canDelete: boolean }) {
   const { isFounder } = useAuth();
+
+  const safe = (v: any) => {
+    const s = v == null ? '' : String(v);
+    const t = s.trim();
+    return t ? t : '—';
+  };
+
+  const [deleteTarget, setDeleteTarget] = useState<ReporterContact | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   // For sort indicator, we pull from parent via URL? Simpler: local props not available.
   // We'll read from window state via a tiny hook? Instead, render indicators via a simple context closure.
   // To keep it straightforward, we add minimal inline indicators by querying current sort from the DOM-less vars through closures.
@@ -753,10 +1096,11 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
     );
   }
 
-  if (isError && (error as any)?.isUnauthorized) {
+  if (isError && (((error as any)?.isUnauthorized === true) || ((error as any)?.status === 401))) {
     return (
       <div className="rounded-xl border border-red-300 bg-red-50 p-6 space-y-3">
         <h2 className="text-lg font-semibold text-red-700">Admin session expired</h2>
+        <div className="text-xs text-red-700">Error 401: {String((error as any)?.message || 'Unauthorized')}</div>
         <p className="text-sm text-red-700">For security, reporter contact details are only visible to Founder/Admin.</p>
         <p className="text-sm text-red-700">Please log in again, then reopen this page.</p>
         <button
@@ -770,11 +1114,46 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
   }
 
   if (isError) {
-    return <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">Failed to load reporter contacts.</div>;
+    const status = (error as any)?.status ?? (error as any)?.response?.status;
+    const msg = String((error as any)?.message || 'Failed to load reporter contacts');
+    return (
+      <div className="rounded-xl border border-red-300 bg-red-50 p-6 space-y-2">
+        <div className="text-sm font-semibold text-red-700">Failed to load reporter contacts</div>
+        <div className="text-xs text-red-700">Error {typeof status === 'number' ? status : '—'}: {msg}</div>
+      </div>
+    );
   }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete reporter contact?"
+        description="This will remove the reporter contact record. This action cannot be undone."
+        confirmLabel="Delete Contact"
+        confirmVariant="danger"
+        confirmDisabled={deleteBusy}
+        confirmBusyLabel="Deleting…"
+        onCancel={() => {
+          if (deleteBusy) return;
+          setDeleteTarget(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteTarget || deleteBusy) return;
+          setDeleteBusy(true);
+          try {
+            const id = String((deleteTarget as any)._id || deleteTarget.id || deleteTarget.reporterKey || deleteTarget.email || '').trim();
+            await deleteReporterContact({ id, reporterKey: deleteTarget.reporterKey || null, email: deleteTarget.email || null });
+            notify?.ok?.('Deleted reporter contact');
+            setDeleteTarget(null);
+            onRequestRefresh();
+          } catch (err: any) {
+            notify?.error?.(err?.message || 'Failed to delete reporter contact');
+          } finally {
+            setDeleteBusy(false);
+          }
+        }}
+      />
       <div className="overflow-x-auto w-full">
       <table className="min-w-[960px] w-full divide-y divide-slate-200 whitespace-nowrap">
         <thead className="bg-slate-50">
@@ -824,7 +1203,7 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
         <tbody className="divide-y divide-slate-200 bg-white">
           {items.length === 0 ? (
             <tr>
-              <td colSpan={15} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
+              <td colSpan={17} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
             </tr>
           ) : (
             items.map((rc) => (
@@ -855,6 +1234,24 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                     }
                     return null;
                   })()}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  {rc.email ? (
+                    <div className="flex items-center gap-1 group">
+                      <a className="text-blue-600 hover:underline" href={`mailto:${rc.email}`}>{rc.email}</a>
+                      <button
+                        type="button"
+                        aria-label="Copy email"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center h-6 w-6 text-slate-500 hover:text-slate-700 bg-transparent border-0"
+                        onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(rc.email || ''); notify?.ok?.('Email copied to clipboard'); }}
+                      >
+                        <CopyIcon size={14} />
+                      </button>
+                    </div>
+                  ) : '—'}
+                  {Array.isArray(rc.languages) && rc.languages.length > 0 && (
+                    <div className="mt-1 text-[10px] text-slate-600">{rc.languages.map(l => (l || '').toUpperCase()).join(' · ')}</div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
@@ -920,24 +1317,6 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       </div>
                     );
                   })()}
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  {rc.email ? (
-                    <div className="flex items-center gap-1 group">
-                      <a className="text-blue-600 hover:underline" href={`mailto:${rc.email}`}>{rc.email}</a>
-                      <button
-                        type="button"
-                        aria-label="Copy email"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center h-6 w-6 text-slate-500 hover:text-slate-700 bg-transparent border-0"
-                        onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(rc.email || ''); notify?.ok?.('Email copied to clipboard'); }}
-                      >
-                        <CopyIcon size={14} />
-                      </button>
-                    </div>
-                  ) : '—'}
-                  {Array.isArray(rc.languages) && rc.languages.length > 0 && (
-                    <div className="mt-1 text-[10px] text-slate-600">{rc.languages.map(l => (l || '').toUpperCase()).join(' · ')}</div>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.phone ? (
@@ -1006,13 +1385,12 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const qs = new URLSearchParams();
-                            const key = String(rc.email || rc.phone || id || '').trim();
-                            const name = String(rc.name || '').trim();
-                            if (key) qs.set('reporterKey', key);
-                            if (rc.email) qs.set('email', String(rc.email));
-                            if (name) qs.set('name', name);
-                            navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
+                            const contactId = String((rc as any)?._id || rc.id || '').trim();
+                            if (!contactId || contactId.startsWith('tmp_')) {
+                              notify?.error?.('Missing contact id (cannot load stories)');
+                              return;
+                            }
+                            onOpenStories(rc);
                           }}
                           className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
                         >
@@ -1025,6 +1403,16 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                         >
                           Profile
                         </button>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            disabled={deleteBusy}
+                            onClick={(e) => { e.stopPropagation(); setDeleteTarget(rc); }}
+                            className="text-xs px-2 py-1 rounded-md border text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Delete Contact
+                          </button>
+                        )}
                       </span>
                     );
                   })()}

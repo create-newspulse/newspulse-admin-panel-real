@@ -37,13 +37,36 @@ export function toneToBadgeClasses(tone: AgeGroupTone): string {
 export function formatLocation(location: any): string {
   if (!location) return '-';
   if (typeof location === 'string') return location.trim() || '-';
+  if (Array.isArray(location)) {
+    const parts = location
+      .map((p) => (typeof p === 'string' ? p.trim() : String(p || '').trim()))
+      .filter(Boolean);
+    return parts.join(', ') || '-';
+  }
   if (typeof location === 'object') {
-    const { city, state, country } = location as {
-      city?: string;
-      state?: string;
-      country?: string;
-    };
-    return [city, state, country].filter(Boolean).join(', ') || '-';
+    const obj = location as any;
+
+    const city = String(
+      obj.city ??
+      obj.town ??
+      obj.locality ??
+      obj.village ??
+      obj.place ??
+      obj.district ??
+      obj.area ??
+      ''
+    ).trim();
+    const district = String(obj.district ?? obj.area ?? '').trim();
+    const state = String(obj.state ?? obj.region ?? obj.province ?? '').trim();
+    const country = String(obj.country ?? obj.nation ?? '').trim();
+    const address = typeof obj.address === 'string' ? obj.address.trim() : '';
+
+    const parts: string[] = [];
+    if (city) parts.push(city);
+    if (district && district !== city) parts.push(district);
+    if (state) parts.push(state);
+    if (country) parts.push(country);
+    return parts.join(', ') || address || '-';
   }
   return String(location);
 }

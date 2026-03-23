@@ -19,7 +19,7 @@ import { normalizeError } from '@/lib/error';
 import PreviewModal from '@/components/preview/PreviewModal';
 import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailability';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
-import { uploadCoverImage } from '@/lib/api/media';
+import { getMediaStatus, uploadCoverImage } from '@/lib/api/media';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
@@ -248,6 +248,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [coverUploadOk, setCoverUploadOk] = useState(false);
   const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
+
+  const mediaStatusQuery = useQuery({
+    queryKey: ['media', 'status'],
+    queryFn: () => getMediaStatus(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  const coverUploadEnabled = mediaStatusQuery.data?.uploadEnabled === true;
+  const coverUploadDisabledText = (() => {
+    if (mediaStatusQuery.isLoading) return 'Checking upload availability…';
+    if (coverUploadEnabled) return null;
+
+    // If the status route is missing/errored OR explicitly disabled, keep the UX simple:
+    // disable uploads and show a clear, single inline reason.
+    return 'Cover image upload unavailable: Cloudinary not configured.';
+  })();
 
   const coverImageUrl = String(coverImage?.url || '').trim();
   const coverImagePublicId = String(coverImage?.publicId || '').trim();
@@ -1254,6 +1271,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   // Upload cover image immediately when selected so the article stores a usable URL.
   async function uploadSelectedCover(file: File) {
+    if (!coverUploadEnabled) {
+      setCoverImage(null);
+      setCoverImageFile(null);
+      setCoverUploadOk(false);
+      setCoverUploadError(coverUploadDisabledText || 'Cover image upload is unavailable.');
+      return;
+    }
+
     setIsUploadingCover(true);
     setCoverUploadOk(false);
     setCoverUploadError(null);
@@ -1896,6 +1921,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <CoverImageUpload
                   url={coverImageUrl}
                   file={coverImageFile}
+                  disabled={!coverUploadEnabled || mediaStatusQuery.isLoading}
+                  disabledText={coverUploadDisabledText}
                   onChangeFile={(f) => {
                     setCoverUploadOk(false);
                     setCoverUploadError(null);
