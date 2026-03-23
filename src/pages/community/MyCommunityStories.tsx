@@ -5,12 +5,16 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import StoryDeskSummaryCards, { type StoryDeskSummary } from '@/components/community/StoryDeskSummaryCards';
 import StoryDeskTable, { type StoryDeskColumns, type StoryDeskGroup } from '@/components/community/StoryDeskTable';
 import StoryDeskTimeline from '@/components/community/StoryDeskTimeline';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 import type { AdminCommunityStory } from '@/lib/api/communityReporterStories';
 import { fetchCommunityStories } from '@/lib/communityReporter/api';
-import { restoreCommunitySubmission } from '@/api/adminCommunityReporterApi';
-import { withdrawStory } from '@/lib/api/communityStories';
+import {
+  moveCommunityStoryRecordToDeleted,
+  permanentlyDeleteCommunityStoryRecord,
+  restoreCommunityStoryRecord,
+} from '@/lib/api/communityStoryDeskActions';
 
-type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'withdrawn' | 'published';
+type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected' | 'published';
 type PubStatusFilter = 'all' | 'published' | 'not_published';
 type ViewMode = 'table' | 'timeline' | 'archive';
 type GroupBy = 'none' | 'month' | 'year' | 'reporter' | 'status' | 'category';
@@ -252,8 +256,45 @@ const MyCommunityStoriesPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<AdminCommunityStory | null>(null);
+  const [permanentDeleteTyped, setPermanentDeleteTyped] = useState('');
+  const [permanentDeleteBusy, setPermanentDeleteBusy] = useState(false);
+
   const role = String(user?.role || '').toLowerCase();
   const isFounderOrAdmin = role === 'founder' || role === 'admin';
+
+  function isDeletedLikeStatus(story: AdminCommunityStory): boolean {
+    const explicit = (story as any)?.isDeleted;
+    if (typeof explicit === 'boolean') return explicit;
+
+    const st = String((story as any)._statusNorm ?? (story as any).status ?? '').toLowerCase();
+    return (
+      st.includes('withdrawn') ||
+      st.includes('rejected') ||
+      st.includes('deleted') ||
+      st.includes('removed') ||
+      st.includes('trash') ||
+      st.includes('archived')
+    );
+  }
+
+  function canSoftDeleteRecord(story: AdminCommunityStory): boolean {
+    const v = (story as any)?.canSoftDelete;
+    if (typeof v === 'boolean') return v;
+    return isFounderOrAdmin && !isDeletedLikeStatus(story);
+  }
+
+  function canRestoreRecord(story: AdminCommunityStory): boolean {
+    const v = (story as any)?.canRestore;
+    if (typeof v === 'boolean') return v;
+    return isFounderOrAdmin && isDeletedLikeStatus(story);
+  }
+
+  function canPermanentDeleteRecord(story: AdminCommunityStory): boolean {
+    const v = (story as any)?.canPermanentDelete;
+    if (typeof v === 'boolean') return v;
+    return isFounderOrAdmin && isDeletedLikeStatus(story);
+  }
 
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
@@ -286,7 +327,11 @@ const MyCommunityStoriesPage: React.FC = () => {
     try {
       // Preserve the old working data source for this route:
       // GET /community/my-stories (server decides which reporter based on session).
-      const serverStatus = statusFilter !== 'all' ? statusFilter : undefined;
+      const serverStatus = statusFilter !== 'all'
+        ? statusFilter
+        : viewMode === 'archive'
+          ? 'rejected'
+          : undefined;
       const fetched = await fetchCommunityStories({
         status: serverStatus,
         search: searchQuery || undefined,
@@ -314,6 +359,10 @@ const MyCommunityStoriesPage: React.FC = () => {
         publishedAt: s.publishedAt ?? s.liveAt ?? '',
         views: typeof s.views === 'number' ? s.views : typeof s.viewCount === 'number' ? s.viewCount : undefined,
         status: String(s.status ?? 'submitted'),
+        ...(typeof s.isDeleted === 'boolean' ? { isDeleted: s.isDeleted } : null),
+        ...(typeof s.canSoftDelete === 'boolean' ? { canSoftDelete: s.canSoftDelete } : null),
+        ...(typeof s.canRestore === 'boolean' ? { canRestore: s.canRestore } : null),
+        ...(typeof s.canPermanentDelete === 'boolean' ? { canPermanentDelete: s.canPermanentDelete } : null),
         createdAt: String(s.createdAt ?? new Date().toISOString()),
         updatedAt: s.updatedAt ? String(s.updatedAt) : undefined,
       }));
@@ -607,7 +656,11 @@ const MyCommunityStoriesPage: React.FC = () => {
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Community Story Desk</h1>
-          <p className="mt-1 text-sm text-slate-600">Founder/Admin operations view for Community Reporter submissions.</p>
+          <p className="mt-1 text-sm text-slate-600">Founder/Admin operations view for Community Reporter submissions (record/history management).</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Live site content (publish/unpublish/archive/delete) is managed in{' '}
+            <a href="/admin/manage-news" className="underline hover:text-slate-700">Manage News Articles</a>.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -643,7 +696,7 @@ const MyCommunityStoriesPage: React.FC = () => {
             {([
               { key: 'table', label: 'Table' },
               { key: 'timeline', label: 'Timeline' },
-              { key: 'archive', label: 'Archive' },
+              { key: 'archive', label: 'Deleted' },
             ] as Array<{ key: ViewMode; label: string }>).map((m) => (
               <button
                 key={m.key}
@@ -752,8 +805,7 @@ const MyCommunityStoriesPage: React.FC = () => {
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="withdrawn">Withdrawn</option>
+              <option value="rejected">Deleted</option>
               <option value="published">Published</option>
             </select>
           </div>
@@ -860,6 +912,7 @@ const MyCommunityStoriesPage: React.FC = () => {
               groups={groups}
               columns={columns}
               canMutate={isFounderOrAdmin}
+              canHardDelete={isFounderOrAdmin}
               onAction={async (a) => {
                 const story = a.story;
                 if (a.type === 'view') {
@@ -885,37 +938,49 @@ const MyCommunityStoriesPage: React.FC = () => {
                   window.open(url, '_blank', 'noopener,noreferrer');
                   return;
                 }
-                if (a.type === 'reporterProfile') {
-                  const q = safeText(story.reporterEmail) || safeText(story.reporterName);
-                  const url = q ? `/community/reporter-contacts?search=${encodeURIComponent(q)}` : '/community/reporter-contacts';
-                  window.open(url, '_blank', 'noopener,noreferrer');
-                  return;
-                }
 
                 if (!isFounderOrAdmin) {
                   notify?.error?.('Founder/Admin required for this action');
                   return;
                 }
 
-                if (a.type === 'archive') {
+                if (a.type === 'moveToDeleted') {
+                  if (!canSoftDeleteRecord(story)) {
+                    notify?.error?.('Cannot move this community record to Deleted');
+                    return;
+                  }
                   try {
-                    await withdrawStory(story.id);
-                    notify?.ok?.('Archived', 'Story withdrawn');
+                    await moveCommunityStoryRecordToDeleted(story.id);
+                    notify?.ok?.('Community record moved to Deleted', 'Linked live site visibility is not changed');
                     await loadStories();
                   } catch (e: any) {
-                    notify?.error?.(e?.message || 'Failed to archive story');
+                    notify?.error?.(e?.message || 'Failed to move community record to Deleted');
                   }
                   return;
                 }
 
                 if (a.type === 'restore') {
+                  if (!canRestoreRecord(story)) {
+                    notify?.error?.('Cannot restore this community record');
+                    return;
+                  }
                   try {
-                    await restoreCommunitySubmission(story.id);
-                    notify?.ok?.('Restored', 'Submission restored');
+                    await restoreCommunityStoryRecord(story.id);
+                    notify?.ok?.('Community record restored', 'Linked live site visibility is not changed');
                     await loadStories();
                   } catch (e: any) {
-                    notify?.error?.(e?.message || 'Restore not supported for this story');
+                    notify?.error?.(e?.message || 'Restore not supported for this community record');
                   }
+                  return;
+                }
+
+                if (a.type === 'deletePermanently') {
+                  if (!canPermanentDeleteRecord(story)) {
+                    notify?.error?.('Move the community record to Deleted before permanent delete');
+                    return;
+                  }
+                  setPermanentDeleteTyped('');
+                  setPermanentDeleteTarget(story);
                   return;
                 }
               }}
@@ -928,6 +993,75 @@ const MyCommunityStoriesPage: React.FC = () => {
           )}
         </>
       )}
+
+      <ConfirmModal
+        open={!!permanentDeleteTarget}
+        title="Delete community record permanently?"
+        confirmLabel="Delete Permanently"
+        confirmVariant="danger"
+        confirmDisabled={
+          permanentDeleteBusy ||
+          !permanentDeleteTarget ||
+          String(permanentDeleteTyped || '').trim().toUpperCase() !== 'DELETE'
+        }
+        confirmBusyLabel={permanentDeleteBusy ? 'Deleting…' : undefined}
+        onCancel={() => {
+          if (permanentDeleteBusy) return;
+          setPermanentDeleteTarget(null);
+          setPermanentDeleteTyped('');
+        }}
+        onConfirm={async () => {
+          if (!permanentDeleteTarget || permanentDeleteBusy) return;
+
+          if (!isFounderOrAdmin) {
+            notify?.error?.('Founder/Admin required for this action');
+            return;
+          }
+
+          const canPermanentDelete = canPermanentDeleteRecord(permanentDeleteTarget);
+          if (!canPermanentDelete) {
+            notify?.error?.('Move the community record to Deleted before permanent delete');
+            return;
+          }
+
+          if (String(permanentDeleteTyped || '').trim().toUpperCase() !== 'DELETE') return;
+
+          setPermanentDeleteBusy(true);
+          try {
+            await permanentlyDeleteCommunityStoryRecord(permanentDeleteTarget.id);
+            notify?.ok?.('Community record deleted permanently', 'Linked live site content is not deleted/unpublished');
+            setPermanentDeleteTarget(null);
+            setPermanentDeleteTyped('');
+            await loadStories();
+          } catch (e: any) {
+            notify?.error?.(e?.message || 'Failed to delete permanently');
+          } finally {
+            setPermanentDeleteBusy(false);
+          }
+        }}
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-slate-700">This will permanently remove the community story record from Community Story Desk and cannot be undone.</div>
+          <div className="text-xs text-slate-600">
+            This does <span className="font-semibold">not</span> delete or unpublish any linked live site article. To remove live site content, use{' '}
+            <a href="/admin/manage-news" className="underline hover:text-slate-700">Manage News Articles</a>.
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs text-slate-600">Type <span className="font-semibold">DELETE</span> to confirm</div>
+            <input
+              value={permanentDeleteTyped}
+              onChange={(e) => setPermanentDeleteTyped(e.target.value)}
+              placeholder="DELETE"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              disabled={permanentDeleteBusy}
+            />
+          </div>
+        </div>
+      </ConfirmModal>
     </div>
   );
 };

@@ -25,6 +25,11 @@ export interface AdminCommunityStory {
   publishedAt?: string;
   views?: number;
   status: string;
+  // Optional backend capability/state flags; when present, UI prefers these over status-string heuristics.
+  isDeleted?: boolean;
+  canSoftDelete?: boolean;
+  canRestore?: boolean;
+  canPermanentDelete?: boolean;
   createdAt: string;
   updatedAt?: string;
 }

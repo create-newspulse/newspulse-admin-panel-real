@@ -120,36 +120,18 @@ export async function deleteReporterStoryForAdmin(storyId: string) {
   const id = String(storyId || '').trim();
   if (!id) throw new Error('Missing story id');
 
-  // Canonical delete contract used elsewhere in the admin.
-  const paths = [
-    `/community-reporter/submissions/${encodeURIComponent(id)}/hard-delete`,
-    // Some deployments might implement DELETE instead.
-    `/admin/community/reporter-stories/${encodeURIComponent(id)}`,
-  ] as const;
-
-  let lastErr: any = null;
-  for (const p of paths) {
-    try {
-      if (p.includes('/hard-delete')) {
-        const res = await adminApi.post<any>(p);
-        const data = res?.data ?? {};
-        if (data?.ok === false) throw new Error(data?.message || 'Delete failed');
-      } else {
-        const res = await adminApi.delete<any>(p);
-        const data = res?.data ?? {};
-        if (data?.ok === false) throw new Error(data?.message || 'Delete failed');
-      }
-      return { ok: true };
-    } catch (e: any) {
-      lastErr = e;
-      const status = e?.response?.status;
-      if (status === 404 || status === 405) continue;
-      throw e;
-    }
+  // Canonical permanent-delete contract for community submission records.
+  // Do not guess/try multiple endpoints here.
+  const path = `/community-reporter/submissions/${encodeURIComponent(id)}/hard-delete`;
+  try {
+    const res = await adminApi.post<any>(path);
+    const data = res?.data ?? {};
+    if (data?.ok === false) throw new Error(data?.message || 'Delete failed');
+    return { ok: true };
+  } catch (e: any) {
+    const msg = readableAdminError(e, 'Failed to delete story');
+    const errOut = new Error(msg) as any;
+    errOut.status = e?.response?.status;
+    throw errOut;
   }
-
-  const msg = readableAdminError(lastErr, 'Failed to delete story');
-  const errOut = new Error(msg) as any;
-  errOut.status = lastErr?.response?.status;
-  throw errOut;
 }

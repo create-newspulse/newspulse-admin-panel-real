@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { AdminCommunityStory } from '@/lib/api/communityReporterStories';
 import StoryStatusPill, { mapStoryStatus } from '@/components/community/StoryStatusPill';
 
@@ -21,9 +21,9 @@ export type StoryDeskRowActionType =
   | 'edit'
   | 'openPublic'
   | 'openAdminArticle'
-  | 'reporterProfile'
-  | 'archive'
-  | 'restore';
+  | 'moveToDeleted'
+  | 'restore'
+  | 'deletePermanently';
 
 export type StoryDeskRowAction = {
   type: StoryDeskRowActionType;
@@ -43,26 +43,39 @@ function fmtDateShort(value?: string) {
   return d.toLocaleString();
 }
 
-function isArchivedLike(story: AdminCommunityStory): boolean {
-  const st = String((story as any).status || '').toLowerCase();
-  return (
-    st.includes('withdrawn') ||
-    st.includes('rejected') ||
-    st.includes('removed') ||
-    st.includes('archived') ||
-    st.includes('deleted')
-  );
+function getDeletionCapabilities(
+  story: AdminCommunityStory,
+  baseCanMutate: boolean,
+  baseCanHardDelete: boolean,
+): {
+  isDeleted: boolean;
+  canSoftDelete: boolean;
+  canRestore: boolean;
+  canPermanentDelete: boolean;
+} {
+  const s: any = story as any;
+
+  // Drive visibility from backend capability fields when present.
+  // If the backend doesn't send these (older environments), fall back to conservative defaults.
+  const isDeleted = typeof s.isDeleted === 'boolean' ? s.isDeleted : false;
+  const canSoftDelete = typeof s.canSoftDelete === 'boolean' ? s.canSoftDelete : baseCanMutate && !isDeleted;
+  const canRestore = typeof s.canRestore === 'boolean' ? s.canRestore : baseCanMutate && isDeleted;
+  const canPermanentDelete = typeof s.canPermanentDelete === 'boolean' ? s.canPermanentDelete : baseCanHardDelete && isDeleted;
+
+  return { isDeleted, canSoftDelete, canRestore, canPermanentDelete };
 }
 
 export default function StoryDeskTable({
   groups,
   columns,
   canMutate,
+  canHardDelete,
   onAction,
 }: {
   groups: StoryDeskGroup[];
   columns: StoryDeskColumns;
   canMutate: boolean;
+  canHardDelete?: boolean;
   onAction: (action: StoryDeskRowAction) => void | Promise<void>;
 }) {
   const optionalCount =
@@ -81,6 +94,38 @@ export default function StoryDeskTable({
       </div>
     );
   }
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const openMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const openMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenuId(null);
+    };
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+
+      const btn = openMenuButtonRef.current;
+      const menu = openMenuRef.current;
+      if (btn && btn.contains(target)) return;
+      if (menu && menu.contains(target)) return;
+      setOpenMenuId(null);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown, true);
+    document.addEventListener('touchstart', onPointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown, true);
+      document.removeEventListener('touchstart', onPointerDown, true);
+    };
+  }, [openMenuId]);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -129,7 +174,10 @@ export default function StoryDeskTable({
 
                   const hasPublic = Boolean(String((story as any).linkedArticleSlug || '').trim());
                   const hasAdminArticle = Boolean(String((story as any).linkedArticleId || '').trim());
-                  const showRestore = isArchivedLike(story);
+                  const storyId = String((story as any).id || '');
+                  const isMenuOpen = !!openMenuId && openMenuId === storyId;
+                  const allowHardDelete = typeof canHardDelete === 'boolean' ? canHardDelete : canMutate;
+                  const deletion = getDeletionCapabilities(story, canMutate, allowHardDelete);
 
                   return (
                     <tr key={(story as any).id} className="hover:bg-slate-50">
@@ -164,70 +212,124 @@ export default function StoryDeskTable({
                       <td className="px-4 py-3 whitespace-nowrap">{fmtDateShort((story as any).createdAt)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{fmtDateShort((story as any).updatedAt)}</td>
                       <td className="px-4 py-3">
-                        <details className="relative">
-                          <summary className="cursor-pointer list-none rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 inline-flex items-center">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            ref={(el) => {
+                              if (isMenuOpen) openMenuButtonRef.current = el;
+                            }}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 inline-flex items-center"
+                            aria-haspopup="menu"
+                            aria-expanded={isMenuOpen}
+                            onClick={() => {
+                              if (!storyId) return;
+                              setOpenMenuId((prev) => (prev === storyId ? null : storyId));
+                            }}
+                          >
                             Actions
-                          </summary>
-                          <div className="absolute right-0 z-10 mt-2 w-52 rounded-md border border-slate-200 bg-white shadow-sm p-1 text-xs">
-                            <button
-                              type="button"
-                              className="w-full text-left px-2 py-2 rounded hover:bg-slate-50"
-                              onClick={() => void onAction({ type: 'view', story })}
+                          </button>
+
+                          {isMenuOpen ? (
+                            <div
+                              ref={(el) => {
+                                openMenuRef.current = el;
+                              }}
+                              role="menu"
+                              className="absolute right-0 z-10 mt-2 w-52 rounded-md border border-slate-200 bg-white shadow-sm p-1 text-xs"
                             >
-                              View
-                            </button>
-                            <button
-                              type="button"
-                              className="w-full text-left px-2 py-2 rounded hover:bg-slate-50"
-                              onClick={() => void onAction({ type: 'edit', story })}
-                            >
-                              Edit (new tab)
-                            </button>
-                            <button
-                              type="button"
-                              className={`w-full text-left px-2 py-2 rounded ${hasPublic ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
-                              disabled={!hasPublic}
-                              onClick={() => void onAction({ type: 'openPublic', story })}
-                            >
-                              Open public story
-                            </button>
-                            <button
-                              type="button"
-                              className={`w-full text-left px-2 py-2 rounded ${hasAdminArticle ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
-                              disabled={!hasAdminArticle}
-                              onClick={() => void onAction({ type: 'openAdminArticle', story })}
-                            >
-                              Open admin article
-                            </button>
-                            <button
-                              type="button"
-                              className="w-full text-left px-2 py-2 rounded hover:bg-slate-50"
-                              onClick={() => void onAction({ type: 'reporterProfile', story })}
-                            >
-                              Reporter profile
-                            </button>
-                            <div className="my-1 border-t border-slate-200" />
-                            {showRestore ? (
                               <button
                                 type="button"
-                                className={`w-full text-left px-2 py-2 rounded ${canMutate ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
-                                disabled={!canMutate}
-                                onClick={() => void onAction({ type: 'restore', story })}
+                                role="menuitem"
+                                className="w-full text-left px-2 py-2 rounded hover:bg-slate-50"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void onAction({ type: 'view', story });
+                                }}
                               >
-                                Restore
+                                View
                               </button>
-                            ) : (
                               <button
                                 type="button"
-                                className={`w-full text-left px-2 py-2 rounded ${canMutate ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
-                                disabled={!canMutate}
-                                onClick={() => void onAction({ type: 'archive', story })}
+                                role="menuitem"
+                                className="w-full text-left px-2 py-2 rounded hover:bg-slate-50"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void onAction({ type: 'edit', story });
+                                }}
                               >
-                                Archive
+                                Edit (new tab)
                               </button>
-                            )}
-                          </div>
-                        </details>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={`w-full text-left px-2 py-2 rounded ${hasPublic ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
+                                disabled={!hasPublic}
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void onAction({ type: 'openPublic', story });
+                                }}
+                              >
+                                Open public story
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={`w-full text-left px-2 py-2 rounded ${hasAdminArticle ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
+                                disabled={!hasAdminArticle}
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  void onAction({ type: 'openAdminArticle', story });
+                                }}
+                              >
+                                Open admin article
+                              </button>
+
+                              <div className="my-1 border-t border-slate-200" />
+
+                              {!deletion.isDeleted ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className={`w-full text-left px-2 py-2 rounded ${deletion.canSoftDelete ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
+                                  disabled={!deletion.canSoftDelete}
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    void onAction({ type: 'moveToDeleted', story });
+                                  }}
+                                >
+                                  Move to Deleted
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className={`w-full text-left px-2 py-2 rounded ${deletion.canRestore ? 'hover:bg-slate-50' : 'text-slate-400 cursor-not-allowed'}`}
+                                    disabled={!deletion.canRestore}
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      void onAction({ type: 'restore', story });
+                                    }}
+                                  >
+                                    Restore
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className={`w-full text-left px-2 py-2 rounded ${deletion.canPermanentDelete ? 'text-red-700 hover:bg-red-50' : 'text-slate-400 cursor-not-allowed'}`}
+                                    disabled={!deletion.canPermanentDelete}
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      void onAction({ type: 'deletePermanently', story });
+                                    }}
+                                  >
+                                    Delete Permanently
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
