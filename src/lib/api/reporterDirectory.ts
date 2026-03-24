@@ -29,6 +29,10 @@ function mapAdminActionError(err: any, fallback: string): UiNotifyError {
 
 export interface ReporterContact {
   id: string;
+  // Stable backend contributor identifier (preferred). `id` is kept as the canonical UI key.
+  contributorId?: string | null;
+  // Optional legacy contact-record id (when backend still maintains separate contact documents).
+  contactId?: string | null;
   reporterKey?: string | null;
   name: string | null;
   email: string | null;
@@ -36,11 +40,20 @@ export interface ReporterContact {
   city: string | null;
   state: string | null;
   country: string | null;
+  district?: string | null;
+  // Optional identity/debug fields (admin-only UI)
+  identitySource?: 'contact' | 'submission-derived' | 'merged' | string | null;
+  linkedStoryCount?: number | null;
+  // Prefer this for “last submission”; older UIs used `lastStoryAt`.
+  lastSubmissionAt?: string | null;
   // Admin-only private notes (never exposed publicly). Nullable if not set.
   notes?: string | null;
   totalStories: number;
   pendingStories: number;
   approvedStories: number;
+  rejectedStories?: number;
+  withdrawnStories?: number;
+  publishedStories?: number;
   lastStoryAt: string; // ISO date
   // Extended fields
   reporterType?: 'journalist' | 'community';
@@ -88,10 +101,41 @@ export async function listReporterContacts(params?: {
     // (`adminApi` normalizes the mode-specific prefix automatically.)
     const res = await adminApi.get<any>('/community/reporters', { params });
 
+    const rawPayload: any = res?.data ?? {};
+
+    // Backend response shapes seen in the wild:
+    // - { items: [], total }
+    // - { rows: [], total }
+    // - { reporters: [], total }
+    // - { contributors: [], total }
+    // - []
+    // - { data: [] }
+    const rawItems: any[] = Array.isArray(rawPayload)
+      ? rawPayload
+      : Array.isArray(rawPayload?.items)
+        ? rawPayload.items
+        : Array.isArray(rawPayload?.rows)
+          ? rawPayload.rows
+          : Array.isArray(rawPayload?.reporters)
+            ? rawPayload.reporters
+            : Array.isArray(rawPayload?.contributors)
+              ? rawPayload.contributors
+              : Array.isArray(rawPayload?.data)
+                ? rawPayload.data
+                : Array.isArray(rawPayload?.data?.items)
+                  ? rawPayload.data.items
+                  : Array.isArray(rawPayload?.data?.rows)
+                    ? rawPayload.data.rows
+                    : [];
+
+    const total = typeof rawPayload?.total === 'number'
+      ? rawPayload.total
+      : typeof rawPayload?.data?.total === 'number'
+        ? rawPayload.data.total
+        : rawItems.length;
+
     // Keep the page's expected response mapping shape.
-    const items = res?.data?.items ?? [];
-    const total = res?.data?.total ?? 0;
-    const payload = { ...(res?.data ?? {}), items, total };
+    const payload = { ...(rawPayload ?? {}), items: rawItems, total };
 
     // If backend uses 200 with { ok:false }, treat it as an error (do NOT fall back to empty UI state).
     if (payload && payload.ok === false) {
@@ -105,58 +149,130 @@ export async function listReporterContacts(params?: {
     const rowsRaw: any[] = Array.isArray(payload.items) ? payload.items : [];
 
     const rows: ReporterContact[] = rowsRaw.map((c: any) => {
-    const id = String(c._id ?? c.id ?? c.reporterKey ?? c.userId ?? '');
-    const fullName = (c.fullName ?? c.name ?? c.userName ?? c.contactName ?? '').toString().trim();
-    const email = (c.email ?? c.contactEmail ?? '').toString().trim();
-    const phone = (
-      c.phone
-      ?? c.phoneFull
-      ?? c.phoneNumber
-      ?? c.contactPhone
-      ?? c.contact?.phone
-      ?? ''
-    ).toString().trim();
-    const type = (c.type ?? c.reporterType ?? c.kind ?? '').toString().toLowerCase();
-    const status = (c.status ?? '').toString().toLowerCase();
-    const verificationStatus = (c.verificationStatus ?? c.verification ?? c.verificationLevel ?? '').toString().toLowerCase();
-    const storiesCount = Number(c.storiesCount ?? c.totalStories ?? 0) || 0;
-    const lastStoryAt = (c.lastStoryAt ?? c.lastStory ?? c.lastStoryDate ?? '').toString();
+      const contributorIdRaw = c.contributorId ?? c.contributorID ?? c.contributor?.id ?? c.contributor?._id;
 
-    const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? null);
-    const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? null);
-    const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? null);
+      const fullName = (c.fullName ?? c.name ?? c.displayName ?? c.userName ?? c.contactName ?? '').toString().trim();
+      const email = (c.email ?? c.contactEmail ?? c.contact?.email ?? c.identity?.email ?? '').toString().trim();
+      const phone = (
+        c.phone
+        ?? c.phoneFull
+        ?? c.phoneNumber
+        ?? c.contactPhone
+        ?? c.contact?.phone
+        ?? c.identity?.phone
+        ?? ''
+      ).toString().trim();
 
-    return {
-      id: id || cryptoRandomFallbackId(),
-      reporterKey: id || null,
-      name: fullName || null,
-      email: email || null,
-      phone: phone || null,
-      city: (city ?? null),
-      state: (state ?? null),
-      country: (country ?? null),
-      notes: (c.notes ?? null),
-      totalStories: storiesCount,
-      pendingStories: Number(c.pendingStories ?? 0) || 0,
-      approvedStories: Number(c.approvedStories ?? 0) || 0,
-      lastStoryAt,
-      reporterType: (type === 'journalist' ? 'journalist' : type === 'community' ? 'community' : undefined),
-      verificationLevel: (verificationStatus === 'verified'
-        ? 'verified'
-        : verificationStatus === 'pending'
-          ? 'pending'
-          : (verificationStatus === 'rejected' || verificationStatus === 'revoked')
-            ? 'revoked'
-            : verificationStatus === 'limited'
-              ? 'limited'
-              : verificationStatus === 'unverified'
-                ? 'unverified'
-                : verificationStatus === 'community_default'
-                  ? 'community_default'
-                  : undefined),
-      status: (status === 'blocked' || status === 'suspended' ? 'suspended' : status === 'archived' || status === 'banned' ? 'banned' : status ? 'active' : undefined),
-    };
-  });
+      const hasLegacyContactFields = !!(
+        c.contactEmail
+        || c.contactPhone
+        || c.contactName
+        || c.contact
+      );
+
+      const type = (c.type ?? c.reporterType ?? c.kind ?? c.role ?? '').toString().toLowerCase();
+      const status = (c.status ?? c.reporterStatus ?? '').toString().toLowerCase();
+      const verificationStatus = (c.verificationStatus ?? c.verification ?? c.verificationLevel ?? c.verification?.level ?? '').toString().toLowerCase();
+
+      const counts = (c.counts ?? c.stats ?? c.storyCounts ?? c.submissionCounts ?? c.submissions ?? null) as any;
+      const totalStories = Number(
+        c.storiesCount
+        ?? c.totalStories
+        ?? counts?.total
+        ?? counts?.all
+        ?? counts?.stories
+        ?? 0
+      ) || 0;
+      const approvedStories = Number(c.approvedStories ?? counts?.approved ?? counts?.accepted ?? 0) || 0;
+      const pendingStories = Number(c.pendingStories ?? counts?.pending ?? counts?.under_review ?? counts?.underReview ?? 0) || 0;
+      const rejectedStories = Number(c.rejectedStories ?? counts?.rejected ?? 0) || 0;
+      const withdrawnStories = Number(c.withdrawnStories ?? counts?.withdrawn ?? 0) || 0;
+      const publishedStories = Number(c.publishedStories ?? counts?.published ?? counts?.live ?? 0) || 0;
+
+      const lastSubmissionAt = String(
+        c.lastSubmissionAt
+        ?? c.lastSubmittedAt
+        ?? c.lastStoryAt
+        ?? c.lastStory
+        ?? c.lastStoryDate
+        ?? c.activity?.lastSubmissionAt
+        ?? c.activity?.lastStoryAt
+        ?? ''
+      ).trim();
+
+      const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? c.location?.town ?? null);
+      const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? c.location?.region ?? null);
+      const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? c.location?.nation ?? null);
+      const district = (c.district ?? c.location?.district ?? c.location?.area ?? c.locationDetail?.district ?? null);
+
+      const identitySource = (c.identitySource ?? c.identity?.source ?? c.source ?? c.sourceKind ?? null);
+      const linkedStoryCount = (c.linkedStoryCount ?? c.linkedStories ?? c.storyCount ?? totalStories ?? null);
+
+      const contactIdRaw = c.contactId ?? c.contactID ?? c.contactRecordId ?? c.contactRecordID ?? c.contact?._id ?? c.contact?.id;
+      const contactId = String(contactIdRaw ?? '').trim();
+
+      // For legacy contact-record responses where the row itself is the contact document,
+      // populate contactId from the row id to preserve “View stories”/delete flows.
+      const legacyRowId = String(c._id ?? c.id ?? '').trim();
+      const derivedContactId = !contactId && hasLegacyContactFields && !contributorIdRaw ? legacyRowId : '';
+
+      const idRaw = contributorIdRaw ?? derivedContactId ?? c._id ?? c.id ?? c.reporterId ?? c.userId ?? c.reporterKey ?? c.key;
+      const idCandidate = String(idRaw ?? '').trim();
+
+      const stableId = idCandidate || stableAnonId({ fullName, email, phone, city, state, country, district, totalStories, approvedStories, pendingStories, rejectedStories, withdrawnStories, publishedStories });
+      const reporterKey = String(c.reporterKey ?? c.identityKey ?? c.key ?? contributorIdRaw ?? idRaw ?? '').trim() || stableId;
+
+      return {
+        id: stableId,
+        contributorId: contributorIdRaw != null ? String(contributorIdRaw).trim() || null : null,
+        contactId: (contactId || derivedContactId) || null,
+        reporterKey: reporterKey || null,
+        name: fullName || null,
+        email: email || null,
+        phone: phone || null,
+        city: (city ?? null),
+        state: (state ?? null),
+        country: (country ?? null),
+        district: district != null ? String(district) : null,
+        identitySource: identitySource != null ? String(identitySource) : null,
+        linkedStoryCount: linkedStoryCount != null ? Number(linkedStoryCount) || null : null,
+        lastSubmissionAt: lastSubmissionAt || null,
+        notes: (c.notes ?? null),
+        totalStories,
+        pendingStories,
+        approvedStories,
+        rejectedStories,
+        withdrawnStories,
+        publishedStories,
+        lastStoryAt: lastSubmissionAt || '',
+        reporterType: (type === 'journalist' ? 'journalist' : type === 'community' ? 'community' : undefined),
+        verificationLevel: (verificationStatus === 'verified'
+          ? 'verified'
+          : verificationStatus === 'pending'
+            ? 'pending'
+            : (verificationStatus === 'rejected' || verificationStatus === 'revoked')
+              ? 'revoked'
+              : verificationStatus === 'limited'
+                ? 'limited'
+                : verificationStatus === 'unverified'
+                  ? 'unverified'
+                  : verificationStatus === 'community_default'
+                    ? 'community_default'
+                    : undefined),
+        status: (status === 'blocked' || status === 'suspended' ? 'suspended' : status === 'archived' || status === 'banned' ? 'banned' : status === 'watchlist' ? 'watchlist' : status ? 'active' : undefined),
+        ethicsStrikes: (typeof c.ethicsStrikes === 'number' ? c.ethicsStrikes : (typeof c.strikes === 'number' ? c.strikes : null)),
+        organisationName: c.organisationName ?? c.organizationName ?? null,
+        organisationType: c.organisationType ?? c.organizationType ?? null,
+        positionTitle: c.positionTitle ?? null,
+        beatsProfessional: Array.isArray(c.beatsProfessional) ? c.beatsProfessional : (Array.isArray(c.beats) ? c.beats : null),
+        yearsExperience: (typeof c.yearsExperience === 'number' ? c.yearsExperience : null),
+        languages: Array.isArray(c.languages) ? c.languages : null,
+        websiteOrPortfolio: c.websiteOrPortfolio ?? null,
+        socialLinks: (c.socialLinks ?? null),
+        journalistCharterAccepted: (typeof c.journalistCharterAccepted === 'boolean' ? c.journalistCharterAccepted : null),
+        charterAcceptedAt: c.charterAcceptedAt ?? null,
+      };
+    });
 
     const totalOut: number = typeof payload?.total === 'number' ? payload.total : rows.length;
     return {
@@ -170,9 +286,71 @@ export async function listReporterContacts(params?: {
   }
 }
 
-function cryptoRandomFallbackId() {
-  // Avoid importing crypto for browser bundles; use a lightweight fallback.
-  return `tmp_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+function stableAnonId(input: Record<string, unknown>) {
+  // Deterministic fallback id when backend does not provide a stable contributor id.
+  // Avoids React key collisions and prevents “collapsed” rows.
+  const s = JSON.stringify(input);
+  return `anon_${fnv1a32(s)}`;
+}
+
+function fnv1a32(str: string): string {
+  // 32-bit FNV-1a; returns unsigned hex string.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+export interface RebuildReporterDirectoryResult {
+  ok: boolean;
+  message?: string;
+  endpointUsed?: string;
+  upserted?: number;
+  skippedNoEmail?: number;
+}
+
+// Optional repair/rebuild action: prefers a backend "repair" endpoint when available.
+// Falls back to the legacy contacts backfill endpoint.
+export async function rebuildReporterDirectory(): Promise<RebuildReporterDirectoryResult> {
+  const candidates: Array<{ method: 'post'; path: string }> = [
+    { method: 'post', path: '/community/reporters/repair' },
+    { method: 'post', path: '/community/reporters/rebuild' },
+    { method: 'post', path: '/community/contributors/repair' },
+    { method: 'post', path: '/community/contributors/rebuild' },
+    { method: 'post', path: '/community-reporter/contacts/backfill' },
+  ];
+
+  let lastErr: any = null;
+  for (const c of candidates) {
+    try {
+      const res = await adminApi.post<any>(c.path);
+      const data = res?.data ?? {};
+      if (data?.ok === false || data?.success === false) {
+        throw new Error(extractBackendMessage(data) || 'Rebuild failed');
+      }
+      return {
+        ok: true,
+        endpointUsed: c.path,
+        message: extractBackendMessage(data) || undefined,
+        upserted: Number(data?.upserted ?? data?.updated ?? data?.rebuilt ?? 0) || undefined,
+        skippedNoEmail: Number(data?.skippedNoEmail ?? data?.skipped ?? 0) || undefined,
+      };
+    } catch (err: any) {
+      lastErr = err;
+      const status: number | undefined = err?.response?.status;
+      // Continue on "not implemented" style responses.
+      if (status === 404 || status === 405) continue;
+      // Abort early on auth errors.
+      if (status === 401 || status === 403) break;
+      // For other errors, keep trying next candidate but preserve message.
+      continue;
+    }
+  }
+
+  const msg = lastErr?.message || 'Rebuild endpoint not available';
+  throw mapAdminActionError(lastErr, msg);
 }
 
 // Update private admin-only reporter notes. Backend should secure this route.

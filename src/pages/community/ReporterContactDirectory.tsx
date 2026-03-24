@@ -6,7 +6,7 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
 import ReporterStoriesDrawer from '@/components/community/ReporterStoriesDrawer.tsx';
-import { backfillReporterContacts, bulkDeleteReporterContacts, deleteReporterContact, listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
+import { rebuildReporterDirectory, bulkDeleteReporterContacts, deleteReporterContact, listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
 import { useAuth } from '@/context/AuthContext.tsx';
 import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
@@ -81,11 +81,13 @@ export default function ReporterContactDirectory() {
 
   const [backfillOpen, setBackfillOpen] = useState(false);
   const backfillMutation = useMutation({
-    mutationFn: backfillReporterContacts,
+    mutationFn: rebuildReporterDirectory,
     onSuccess: async (result) => {
+      const used = String((result as any)?.endpointUsed || '').trim();
       const upserted = Number((result as any)?.upserted ?? 0) || 0;
       const skippedNoEmail = Number((result as any)?.skippedNoEmail ?? 0) || 0;
-      notify?.ok?.(`Backfill completed: ${upserted} reporters updated. Skipped: ${skippedNoEmail}.`);
+      const suffix = used ? ` (via ${used})` : '';
+      notify?.ok?.(`Directory rebuild completed${suffix}: ${upserted} updated. Skipped: ${skippedNoEmail}.`);
       setBackfillOpen(false);
 
       // Clear selection; ids may change after rebuild.
@@ -186,7 +188,7 @@ export default function ReporterContactDirectory() {
   const bulkDeleteInFlightRef = useRef(false);
 
   const contactDeleteId = (r: ReporterContact): string => {
-    const raw = (r as any)?._id ?? r.id ?? r.reporterKey;
+    const raw = (r as any)?._id ?? (r as any)?.contactId ?? (r as any)?.contactRecordId ?? (r as any)?.contactRecordID ?? r.contactId ?? '';
     return String(raw || '').trim();
   };
 
@@ -408,9 +410,10 @@ export default function ReporterContactDirectory() {
         return !hasName || !hasAnyContact;
       }
       if (viewFilter === 'no_stories') return Number(r.totalStories || 0) <= 0;
-      if (viewFilter === 'inactive_30') return ageDays(r.lastStoryAt) >= 30;
-      if (viewFilter === 'inactive_60') return ageDays(r.lastStoryAt) >= 60;
-      if (viewFilter === 'inactive_90') return ageDays(r.lastStoryAt) >= 90;
+      const last = (r as any).lastSubmissionAt || r.lastStoryAt;
+      if (viewFilter === 'inactive_30') return ageDays(last) >= 30;
+      if (viewFilter === 'inactive_60') return ageDays(last) >= 60;
+      if (viewFilter === 'inactive_90') return ageDays(last) >= 90;
       return true;
     });
   }, [filteredReporters, viewFilter]);
@@ -804,9 +807,9 @@ export default function ReporterContactDirectory() {
               if (!Number.isFinite(t) || t <= 0) return Infinity;
               return (now - t) / (1000 * 60 * 60 * 24);
             };
-            const inactive30 = base.filter(r => ageDays(r.lastStoryAt) >= 30).length;
-            const inactive60 = base.filter(r => ageDays(r.lastStoryAt) >= 60).length;
-            const inactive90 = base.filter(r => ageDays(r.lastStoryAt) >= 90).length;
+            const inactive30 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 30).length;
+            const inactive60 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 60).length;
+            const inactive90 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 90).length;
 
             const completeProfiles = base.filter(r => String(r.email || '').trim() && String(r.phone || '').trim() && (String(r.city || '').trim() || String(r.state || '').trim() || String(r.country || '').trim())).length;
             return (
@@ -835,10 +838,10 @@ export default function ReporterContactDirectory() {
               disabled={backfillMutation.isPending}
               onClick={() => setBackfillOpen(true)}
               className="ml-2 text-xs px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
-              title="Rebuild reporter contacts from existing community submissions"
+              title="Rebuild reporter directory from backend-normalized contributor data"
             >
               {backfillMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
-              {backfillMutation.isPending ? 'Backfilling…' : 'Backfill contacts'}
+              {backfillMutation.isPending ? 'Rebuilding…' : 'Rebuild directory'}
             </button>
           )}
           <span className="ml-2 text-xs text-slate-600">{selectedIds.size} selected</span>
@@ -919,10 +922,10 @@ export default function ReporterContactDirectory() {
 
       <ConfirmModal
         open={backfillOpen}
-        title="Backfill reporter contacts?"
-        description="This will scan all existing community reporter submissions and rebuild the contact directory. Safe to run multiple times."
+        title="Rebuild reporter directory?"
+        description="This will request the backend to repair/rebuild the contributor directory (including submission-derived reporters). Safe to run multiple times."
         cancelLabel="Cancel"
-        confirmLabel="Run Backfill"
+        confirmLabel="Run Rebuild"
         confirmDisabled={backfillMutation.isPending}
         confirmBusyLabel="Running…"
         onCancel={() => {
@@ -966,7 +969,25 @@ export default function ReporterContactDirectory() {
           }}
           onRequestRefresh={() => setRefreshTick(t => t + 1)}
           onSelect={(r) => { setSelectedReporter(r); setIsProfileOpen(true); }}
-          onOpenStories={(r) => setStoriesTarget(r)}
+          onOpenStories={(r) => {
+            const contactId = String((r as any)?.contactId || '').trim();
+            if (contactId) {
+              setStoriesTarget(r);
+              return;
+            }
+
+            const reporterKey = String(r.reporterKey || r.id || '').trim();
+            if (!reporterKey) {
+              notify?.error?.('Missing reporter key (cannot load stories)');
+              return;
+            }
+
+            const name = (r.name || r.email || '').trim();
+            const qs = new URLSearchParams();
+            qs.set('reporterKey', reporterKey);
+            if (name) qs.set('name', name);
+            navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey, reporterName: name } });
+          }}
         />
 
         </div>{/* end main content */}
@@ -988,7 +1009,7 @@ export default function ReporterContactDirectory() {
 
       <ReporterStoriesDrawer
         open={!!storiesTarget}
-        contactId={String((storiesTarget as any)?._id || storiesTarget?.id || '').trim()}
+        contactId={String((storiesTarget as any)?.contactId || (storiesTarget as any)?._id || '').trim()}
         contactName={String(storiesTarget?.name || storiesTarget?.email || '').trim()}
         canDelete={canDelete}
         onClose={() => setStoriesTarget(null)}
@@ -1142,7 +1163,11 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
           if (!deleteTarget || deleteBusy) return;
           setDeleteBusy(true);
           try {
-            const id = String((deleteTarget as any)._id || deleteTarget.id || deleteTarget.reporterKey || deleteTarget.email || '').trim();
+            const id = String((deleteTarget as any)._id || (deleteTarget as any)?.contactId || (deleteTarget as any)?.contactRecordId || '').trim();
+            if (!id) {
+              notify?.error?.('Missing contact record id (cannot delete contact)');
+              return;
+            }
             await deleteReporterContact({ id, reporterKey: deleteTarget.reporterKey || null, email: deleteTarget.email || null });
             notify?.ok?.('Deleted reporter contact');
             setDeleteTarget(null);
@@ -1385,11 +1410,6 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            const contactId = String((rc as any)?._id || rc.id || '').trim();
-                            if (!contactId || contactId.startsWith('tmp_')) {
-                              notify?.error?.('Missing contact id (cannot load stories)');
-                              return;
-                            }
                             onOpenStories(rc);
                           }}
                           className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
@@ -1403,7 +1423,10 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                         >
                           Profile
                         </button>
-                        {canDelete && (
+                        {(() => {
+                          const contactRecordId = String((rc as any)?._id || (rc as any)?.contactId || (rc as any)?.contactRecordId || '').trim();
+                          if (!canDelete || !contactRecordId) return null;
+                          return (
                           <button
                             type="button"
                             disabled={deleteBusy}
@@ -1412,7 +1435,8 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                           >
                             Delete Contact
                           </button>
-                        )}
+                          );
+                        })()}
                       </span>
                     );
                   })()}

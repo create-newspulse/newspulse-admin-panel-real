@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { deleteReporterStoryForAdmin, listReporterStoriesByEmail } from '@/lib/community';
+import { deleteReporterStoryForAdmin, listReporterStoriesByEmail, listReporterStoriesForAdmin } from '@/lib/community';
 import type { ReporterAdminStory } from '@/lib/community';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { useNotify } from '@/components/ui/toast-bridge';
@@ -17,15 +17,15 @@ export default function ReporterStoriesAdmin() {
   const emailFromQuery = useQueryParam('email');
   const reporterName = useQueryParam('name') || (location.state as any)?.reporterName || '';
   const reporterKeyFromState = (location.state as any)?.reporterKey || '';
-  const inferredInitial = (emailFromQuery || reporterKeyFromQuery || reporterKeyFromState).trim();
+  const inferredInitial = (reporterKeyFromQuery || reporterKeyFromState || emailFromQuery).trim();
 
   const notify = (useNotify?.() as unknown) as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
   const { user } = useAuth();
   const role = (user?.role || '').toLowerCase();
   const canDelete = role === 'founder' || role === 'admin';
 
-  const [emailInput, setEmailInput] = useState<string>(inferredInitial);
-  const [activeEmail, setActiveEmail] = useState<string>(inferredInitial);
+  const [keyInput, setKeyInput] = useState<string>(inferredInitial);
+  const [activeKey, setActiveKey] = useState<string>(inferredInitial);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchText, setSearchText] = useState('');
   const [stories, setStories] = useState<ReporterAdminStory[]>([]);
@@ -38,11 +38,14 @@ export default function ReporterStoriesAdmin() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function load() {
-    const email = (activeEmail || '').trim();
-    if (!email) { setError('Enter reporter email first'); return; }
+    const key = (activeKey || '').trim();
+    if (!key) { setError('Enter reporter key (id) or email first'); return; }
     setLoading(true); setError(null);
     try {
-      const res = await listReporterStoriesByEmail(email, { status: statusFilter === 'all' ? undefined : statusFilter, q: searchText || undefined });
+      const isEmail = key.includes('@');
+      const res = isEmail
+        ? await listReporterStoriesByEmail(key, { status: statusFilter === 'all' ? undefined : statusFilter, q: searchText || undefined })
+        : await listReporterStoriesForAdmin(key, { status: statusFilter === 'all' ? undefined : statusFilter, q: searchText || undefined });
       setStories(res.items || []);
       setSelectedStoryIds(new Set());
     } catch (e: any) {
@@ -56,10 +59,10 @@ export default function ReporterStoriesAdmin() {
 
   // Auto-load when arriving from the directory (query/state pre-fills email)
   useEffect(() => {
-    if (!activeEmail) return;
+    if (!activeKey) return;
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEmail]);
+  }, [activeKey]);
 
       return (
         <div className="px-6 py-4 max-w-6xl mx-auto space-y-6">
@@ -139,21 +142,20 @@ export default function ReporterStoriesAdmin() {
               <Link to="/community/reporter-contacts" className="text-sm text-slate-600 hover:text-slate-800">← Back to Reporter Contact Directory</Link>
             </div>
             <h1 className="text-3xl font-bold tracking-tight">My Community Stories</h1>
-            <p className="text-sm text-slate-600">Admin view – load stories by reporter email.</p>
+            <p className="text-sm text-slate-600">Admin view – load stories by contributor id (preferred) or reporter email.</p>
             <div className="flex items-center gap-2 mt-2">
               <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="Reporter email"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="Contributor id or reporter email"
                 className="border rounded-md px-3 py-1.5 text-sm w-80"
               />
               <button
-                onClick={() => setActiveEmail(emailInput.trim())}
+                onClick={() => setActiveKey(keyInput.trim())}
                 className="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm"
               >Load</button>
             </div>
-            <div className="text-xs text-slate-500">Loaded email: <span className="font-mono">{activeEmail || '—'}</span></div>
+            <div className="text-xs text-slate-500">Loaded key: <span className="font-mono">{activeKey || '—'}</span></div>
           </header>
 
           {loading ? (

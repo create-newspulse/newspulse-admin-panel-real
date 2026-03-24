@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import apiClient from '@lib/api';
 import type { LiveFeed } from '@/types/live';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 type ValidateResult = {
   ptiCompliance: { status: 'PENDING' | 'PASS' | 'FAIL'; notes?: string };
@@ -26,6 +27,7 @@ export default function LiveTVControl() {
   const [feed, setFeed] = useState<LiveFeed>(initialFeed);
   const [loading, setLoading] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [previewLoadError, setPreviewLoadError] = useState<string>('');
   const [audit, setAudit] = useState<any[]>([]);
 
   const canActivate = useMemo(() => feed.ptiCompliance.status === 'PASS' && feed.safety.status === 'SAFE', [feed]);
@@ -53,7 +55,8 @@ export default function LiveTVControl() {
         const sanitizeData = sanitizeRes.data?.data || sanitizeRes.data;
         console.log('✅ Sanitize response:', sanitizeData);
         setFeed((f) => ({ ...f, sanitizedEmbedHtml: sanitizeData?.sanitizedEmbedHtml }));
-        setPreviewHtml(String(sanitizeData?.sanitizedEmbedHtml || ''));
+        setPreviewLoadError('');
+        setPreviewHtml(sanitizeHtml(String(sanitizeData?.sanitizedEmbedHtml || '')));
         if (sanitizeData?.sanitizedEmbedHtml) {
           toast.success('✅ Sanitized & ready to preview');
         } else {
@@ -212,12 +215,18 @@ export default function LiveTVControl() {
         {!previewHtml && (
           <div className="text-sm text-slate-500">No preview yet. Click Sanitize after pasting an input.</div>
         )}
+        {!!previewLoadError && (
+          <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-3">
+            {previewLoadError}
+          </div>
+        )}
         {previewHtml && (
           <iframe
             title="Live Preview"
             className="w-full aspect-video rounded border border-slate-300"
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-presentation allow-popups-to-escape-sandbox"
             referrerPolicy="no-referrer"
+            onError={() => setPreviewLoadError('Preview failed to load in an embedded frame. Try opening the source in a new tab instead.')}
             srcDoc={`<!doctype html><html><head><meta charset='utf-8' /><meta name='viewport' content='width=device-width,initial-scale=1' /></head><body style='margin:0;background:#000'>${previewHtml}</body></html>`}
           />
         )}

@@ -3,6 +3,7 @@ import { ReporterContact, updateReporterContactNotes } from '@/lib/api/reporterD
 import { updateReporterStatus } from '@/lib/api/communityAdmin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '@/context/AuthContext';
 
 interface ReporterProfileDrawerProps {
   open: boolean;
@@ -19,7 +20,11 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose]);
 
-  const key = reporter?.email || reporter?.phone || '';
+  const { user } = useAuth();
+  const role = String(user?.role || '').trim().toLowerCase();
+  const canSeeDebug = role === 'founder' || role === 'admin';
+
+  const key = String(reporter?.reporterKey || reporter?.id || reporter?.email || reporter?.phone || '').trim();
   const name = reporter?.name || 'Unknown reporter';
   const maskedPhone = reporter?.phone ? reporter.phone.replace(/(\d{2})\d+(\d{3})/, '$1*****$2') : null;
 
@@ -167,8 +172,17 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             <>
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center px-2 py-1 text-xs rounded bg-slate-100 border">{reporter?.totalStories ?? 0} stories</span>
-                <span className="text-xs text-slate-500">Last: {reporter?.lastStoryAt ? new Date(reporter.lastStoryAt).toLocaleString() : '—'}</span>
+                <span className="text-xs text-slate-500">Last submission: {reporter?.lastSubmissionAt || reporter?.lastStoryAt ? new Date((reporter?.lastSubmissionAt || reporter?.lastStoryAt) as string).toLocaleString() : '—'}</span>
               </div>
+
+              {canSeeDebug && reporter ? (
+                <div className="rounded-md border bg-white p-3 text-xs text-slate-700 space-y-1">
+                  <div className="font-medium text-slate-800">Debug</div>
+                  <div>Contributor id: <span className="font-mono">{String(reporter.contributorId || reporter.id || '—')}</span></div>
+                  <div>Linked story count: <span className="font-mono">{typeof reporter.linkedStoryCount === 'number' ? reporter.linkedStoryCount : (reporter.totalStories ?? 0)}</span></div>
+                  <div>Identity source: <span className="font-mono">{String(reporter.identitySource || '—')}</span></div>
+                </div>
+              ) : null}
 
               {reporter && (!String(reporter.email || '').trim() || !reporter.phone || (!reporter.city && !reporter.state && !reporter.country)) && (
                 <div className="border rounded-md p-3 bg-slate-50 text-xs text-slate-600 space-y-1">
@@ -185,6 +199,9 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
                 <Metric label="Total" value={reporter?.totalStories ?? 0} />
                 <Metric label="Approved" value={reporter?.approvedStories ?? 0} />
                 <Metric label="Pending" value={reporter?.pendingStories ?? 0} />
+                <Metric label="Rejected" value={reporter?.rejectedStories ?? 0} />
+                <Metric label="Withdrawn" value={reporter?.withdrawnStories ?? 0} />
+                <Metric label="Published" value={reporter?.publishedStories ?? 0} />
               </div>
             </>
           ) : null}

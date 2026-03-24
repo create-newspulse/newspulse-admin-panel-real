@@ -24,14 +24,18 @@ export interface ReporterAdminStoryListResponse {
 // TODO: Confirm backend response shape and whether pagination will be added.
 export async function listReporterStoriesForAdmin(
   reporterKey: string,
-  _params?: { page?: number; limit?: number; status?: string }
+  params?: { page?: number; limit?: number; status?: string; q?: string; search?: string }
 ) {
   // Try canonical path first, then fallback to /api/admin prefixed variant
   const paths = ['/admin/community/reporter-stories', '/api/admin/community/reporter-stories'];
+  const query = { ...(params || {}) } as Record<string, any>;
+  query.reporterKey = String(reporterKey || '').trim();
+  if (query.q && !query.search) query.search = query.q;
+
   let lastErr: any = null;
   for (const p of paths) {
     try {
-      const { data } = await adminApi.get<ReporterAdminStoryListResponse>(p, { params: { reporterKey } });
+      const { data } = await adminApi.get<ReporterAdminStoryListResponse>(p, { params: query });
       if (data?.ok) return data;
       lastErr = new Error('Failed to load reporter stories');
     } catch (e: any) {

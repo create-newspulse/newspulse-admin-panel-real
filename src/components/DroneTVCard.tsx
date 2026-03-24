@@ -36,7 +36,45 @@ export default function DroneTVCard({ video }: Props) {
           try {
             const { extractIframeSrc, isHostAllowed } = require('../lib/embedUtils');
             const src = extractIframeSrc(video.embedCode || '');
-            if (src && isHostAllowed(src)) return <iframe title={video.title || 'video'} src={src} width="100%" height="280" frameBorder={0} allowFullScreen />;
+            if (src) {
+              const isLoopback = (() => {
+                try {
+                  const u = new URL(src);
+                  const host = u.hostname.toLowerCase();
+                  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]';
+                } catch { return false; }
+              })();
+
+              if (isLoopback && !import.meta.env.DEV) {
+                return (
+                  <div className="text-sm text-slate-700">
+                    Embed blocked (local/loopback URL).{' '}
+                    <a className="underline" href={src} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+                  </div>
+                );
+              }
+
+              if (isHostAllowed(src)) {
+                return (
+                  <iframe
+                    title={video.title || 'video'}
+                    src={src}
+                    width="100%"
+                    height="280"
+                    frameBorder={0}
+                    allowFullScreen
+                    referrerPolicy="no-referrer"
+                  />
+                );
+              }
+
+              return (
+                <div className="text-sm text-slate-700">
+                  Embed blocked (host not allowed).{' '}
+                  <a className="underline" href={src} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+                </div>
+              );
+            }
           } catch (e) {}
           const { sanitizeHtml } = require('../lib/sanitize');
           // eslint-disable-next-line react/no-danger

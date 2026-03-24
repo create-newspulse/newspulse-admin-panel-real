@@ -1,9 +1,33 @@
 // 📁 File: src/pages/admin/EmbedManager.tsx
 // ✅ Embed Manager with TED Youth Zone, Manual Embed, and Section Assignment
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminShell from '../../components/adminv2/AdminShell';
 import { extractIframeSrc, isHostAllowed } from '../../lib/embedUtils';
+
+function isLoopbackUrl(src: string): boolean {
+  try {
+    const u = new URL(src);
+    const host = u.hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+async function probeLoopbackUrl(url: string, timeoutMs = 1500): Promise<boolean> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    // `no-cors` lets us detect reachability without needing CORS headers.
+    await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 const SectionBlock = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="bg-white dark:bg-slate-800 rounded-xl shadow p-5 mb-8 border border-slate-200 dark:border-slate-700">
@@ -17,6 +41,32 @@ const EmbedManager: React.FC = () => {
   // embedSrc holds a safe iframe src URL extracted from user input
   const [embedSrc, setEmbedSrc] = useState('');
   const [embedError, setEmbedError] = useState('');
+  const [loopbackReachable, setLoopbackReachable] = useState<boolean | null>(null);
+
+  const isLoopback = !!embedSrc && isLoopbackUrl(embedSrc);
+  const loopbackBlocked = isLoopback && !import.meta.env.DEV;
+  const loopbackUnreachable = isLoopback && import.meta.env.DEV && loopbackReachable === false;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoopbackReachable(null);
+    if (!embedSrc) return;
+    if (!isLoopbackUrl(embedSrc)) return;
+    if (!import.meta.env.DEV) return;
+
+    void (async () => {
+      const ok = await probeLoopbackUrl(embedSrc);
+      if (cancelled) return;
+      setLoopbackReachable(ok);
+      if (!ok) {
+        setEmbedError('Local embed URL is not reachable. Start the service or open in a new tab instead.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [embedSrc]);
 
   // embed utils handle extraction and host allowlist (configurable via VITE_EMBED_ALLOWLIST)
 
@@ -130,15 +180,36 @@ const EmbedManager: React.FC = () => {
 
         {embedSrc && (
           <div className="mt-6 aspect-video w-full rounded overflow-hidden border border-blue-500 shadow">
-            <iframe
-              title="Embed preview"
-              src={embedSrc}
-              width="100%"
-              height="100%"
-              frameBorder={0}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+            {(loopbackBlocked || loopbackUnreachable) ? (
+              <div className="h-full w-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="text-sm font-semibold text-slate-800">Embed blocked</div>
+                <div className="text-xs text-slate-600 max-w-md">
+                  {loopbackBlocked
+                    ? 'This embed points to a local/loopback URL. Localhost iframes are disabled outside dev to prevent unsafe Chrome error-frame navigation.'
+                    : 'This embed points to a local/loopback URL that is not currently reachable.'}
+                </div>
+                <a
+                  href={embedSrc}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-3 py-2 rounded-md border hover:bg-slate-50"
+                >
+                  Open in new tab
+                </a>
+              </div>
+            ) : (
+              <iframe
+                title="Embed preview"
+                src={embedSrc}
+                width="100%"
+                height="100%"
+                frameBorder={0}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                referrerPolicy="no-referrer"
+                onError={() => setEmbedError('Embed failed to load. Open in a new tab instead.')}
+              />
+            )}
           </div>
         )}
       </SectionBlock>
