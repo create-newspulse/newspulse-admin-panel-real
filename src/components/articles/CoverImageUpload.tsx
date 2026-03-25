@@ -32,6 +32,35 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  const normalizedDisabledText = useMemo(() => {
+    const raw = String(disabledText || '').trim();
+    if (!raw) return '';
+    return raw.replace(/^cover image upload unavailable\s*:\s*/i, '').trim();
+  }, [disabledText]);
+
+  const status = useMemo(() => {
+    const checking = disabled && /\bchecking\b/i.test(String(disabledText || ''));
+    if (checking) {
+      return {
+        label: 'Checking',
+        className: 'bg-slate-100 text-slate-700 border-slate-200',
+        detail: normalizedDisabledText || String(disabledText || '').trim(),
+      };
+    }
+    if (disabled) {
+      return {
+        label: 'Unavailable',
+        className: 'bg-red-100 text-red-700 border-red-200',
+        detail: normalizedDisabledText || 'Uploads are disabled',
+      };
+    }
+    return {
+      label: 'Available',
+      className: 'bg-green-100 text-green-700 border-green-200',
+      detail: '',
+    };
+  }, [disabled, disabledText, normalizedDisabledText]);
+
   const sanitizeRemoteUrl = (raw: string | undefined): string => {
     const s = String(raw || '').trim();
     if (!s) return '';
@@ -132,7 +161,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
 
   return (
     <div
-      className="space-y-2"
+      className="space-y-3"
       onDragEnter={(e) => {
         if (disabled) return;
         e.preventDefault();
@@ -160,7 +189,18 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
         onDropFile(f);
       }}
     >
-      <div className="text-sm font-semibold">Cover Image</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">Cover Image</div>
+        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${status.className}`}>{status.label}</span>
+      </div>
+
+      {disabled && status.detail ? (
+        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="text-xs text-slate-700">
+            <span className="font-medium">Reason:</span> {status.detail}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0 space-y-2">
@@ -208,10 +248,6 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
               }}
             />
           </div>
-
-          {disabled && disabledText ? (
-            <div className="text-xs text-slate-600">{disabledText}</div>
-          ) : null}
         </div>
 
         <div className="w-28 shrink-0">
