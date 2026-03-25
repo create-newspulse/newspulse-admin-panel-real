@@ -27,6 +27,18 @@ import { stripHtmlToText } from '@/lib/richText';
 type LangCode = 'en' | 'hi' | 'gu';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
 
+function isArticleEditorDebugEnabled(): boolean {
+  try {
+    const w: any = window as any;
+    if (w && w.__np_debug_article_editor) return true;
+  } catch {}
+  try {
+    return localStorage.getItem('np_debug_article_editor') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function normalizeLang(input: any): LangCode {
   const v = String(input || '').trim().toLowerCase();
   if (v === 'en' || v === 'hi' || v === 'gu') return v;
@@ -214,6 +226,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
+  const [statusExplicitlyChanged, setStatusExplicitlyChanged] = useState(false);
   // Keep original status to ensure Save Draft never downgrades/changes live states
   const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
   const [tags, setTags] = useState<string[]>([]);
@@ -717,6 +730,22 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // because it can reset/clear fields (requirement: keep form exactly as-is).
     if (src && !initialValues && suppressServerHydration) return;
     if (src) {
+      const dbg = isArticleEditorDebugEnabled();
+      if (dbg) {
+        console.log('[ArticleForm] hydrate src', {
+          id: (src as any)?._id || (src as any)?.id,
+          status: (src as any)?.status,
+          state: (src as any)?.state,
+          publishStatus: (src as any)?.publishStatus,
+          isPublished: (src as any)?.isPublished,
+          publishedAt: (src as any)?.publishedAt || (src as any)?.publishAt,
+          scheduledAt: (src as any)?.scheduledAt || (src as any)?.publishAt,
+          language: (src as any)?.language,
+          lang: (src as any)?.lang,
+          translationGroupId: (src as any)?.translationGroupId,
+        });
+      }
+
       setTitle(src.title || '');
       setSlug(src.slug || '');
       setSummary((src as any).summary || '');
@@ -736,13 +765,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
       setTranslationGroupId(String((src as any).translationGroupId || ''));
       setTranslationStatus(extractTranslationStatus(src));
-      const incomingStatus = (((src as any).status as any) || 'draft') as 'draft'|'scheduled'|'published';
+      const rawStatus = ((src as any).status ?? (src as any).state ?? (src as any).publishStatus) as any;
+      const incomingStatus = (((rawStatus as any) || ((src as any).isPublished ? 'published' : undefined) || 'draft') as any) as 'draft'|'scheduled'|'published';
       setStatus(incomingStatus);
       originalStatusRef.current = incomingStatus;
+      setStatusExplicitlyChanged(false);
       const incomingTags = Array.isArray((src as any).tags) ? (src as any).tags : [];
       const normalizedTags = dedupeTags(incomingTags as any);
       setTags(normalizedTags);
-      setScheduledAt((src as any).scheduledAt ? new Date((src as any).scheduledAt).toISOString().slice(0,16) : '');
+      const incomingScheduledAt = (src as any).scheduledAt || (src as any).publishAt || '';
+      setScheduledAt(incomingScheduledAt ? new Date(incomingScheduledAt).toISOString().slice(0,16) : '');
 
       const incomingCategoryKey = String(categorySlug || '').trim();
       const hasBreakingTag0 = (normalizedTags || []).some((t) => normalizeTagKey(t) === 'breaking');
@@ -1007,8 +1039,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       // Ensure we never send an empty/invalid slug on publish/save.
       const safeSlug = ensureValidSlug(slug, title);
 
-      type PublicArticleStatus = 'draft' | 'published';
-      const coercePublicStatus = (s: 'draft'|'scheduled'|'published'): PublicArticleStatus => (s === 'published' ? 'published' : 'draft');
+      type PublicArticleStatus = 'draft' | 'scheduled' | 'published';
       const trimOrUndef = (v: string) => {
         const t = (v || '').trim();
         return t ? t : undefined;
@@ -1028,6 +1059,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         lang: 'en'|'hi'|'gu';
         translationGroupId?: string;
         publishedAt?: string;
+        publishAt?: string;
+        scheduledAt?: string;
         isBreaking: boolean;
         state?: string;
         district?: string;
@@ -1046,6 +1079,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
         const publishedAtToSend = opts.status === 'published'
           ? (opts.publishedAt || new Date().toISOString())
+          : undefined;
+
+        const scheduledAtToSend = opts.status === 'scheduled'
+          ? (() => {
+            const raw = String(scheduledAt || '').trim();
+            if (!raw) return undefined;
+            const d = new Date(raw);
+            return Number.isFinite(d.getTime()) ? d.toISOString() : undefined;
+          })()
           : undefined;
 
         const isViralVideo = categoryKey === 'viral-videos';
@@ -1074,6 +1116,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           lang: (language as any) as 'en'|'hi'|'gu',
           translationGroupId: (translationGroupId || '').trim() ? (translationGroupId || '').trim() : undefined,
           publishedAt: publishedAtToSend,
+          publishAt: scheduledAtToSend,
+          scheduledAt: scheduledAtToSend,
           isBreaking,
           state: trimOrUndef(state),
           district: trimOrUndef(district),
@@ -1130,25 +1174,54 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
 
       // Compute safe status to send:
-      // - New/draft items => draft
-      // - Live items (published/scheduled) => keep original live state
+      // - New items => draft
+      // - Existing items => preserve backend status unless the user explicitly changes it
       // - If override provided (e.g., publish), use it explicitly
       let statusToSend: PublicArticleStatus;
       if (desiredStatusOverride) {
-        statusToSend = coercePublicStatus(desiredStatusOverride);
+        statusToSend = desiredStatusOverride;
       } else if (computedMode === 'create') {
         statusToSend = 'draft';
       } else {
-        // Never let "Save Draft" unpublish/un-schedule an already-live article.
         const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
-        statusToSend = (orig === 'published') ? 'published' : 'draft';
+        // Only allow status changes if user explicitly modified the status control.
+        statusToSend = statusExplicitlyChanged ? status : (orig as PublicArticleStatus);
       }
 
       lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId };
 
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] submit', {
+          kind: saveKindRef.current,
+          effectiveId,
+          desiredStatusOverride,
+          originalStatus: originalStatusRef.current,
+          statusState: status,
+          statusExplicitlyChanged,
+          statusToSend,
+          scheduledAt,
+          publishedAt,
+          language,
+          translationGroupId,
+        });
+      }
+
       const publishingViaSave = statusToSend === 'published';
       const publishAtToSend = publishingViaSave ? (publishedAtIso || new Date().toISOString()) : undefined;
       const body = buildPublicPayload({ status: statusToSend, publishedAt: publishAtToSend });
+
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] payload', {
+          id: effectiveId,
+          status: body.status,
+          publishedAt: (body as any).publishedAt,
+          publishAt: (body as any).publishAt,
+          scheduledAt: (body as any).scheduledAt,
+          language: body.language,
+          lang: body.lang,
+          translationGroupId: body.translationGroupId,
+        });
+      }
       if (!title.trim()) throw new Error('Title required');
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryKey) {
         throw new Error('Category required to publish');
@@ -1166,6 +1239,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     onSuccess: (result: any) => {
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
+
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] saved', {
+          id: saved?._id || saved?.id,
+          status: saved?.status,
+          state: saved?.state,
+          publishStatus: saved?.publishStatus,
+          scheduledAt: saved?.scheduledAt || saved?.publishAt,
+          publishedAt: saved?.publishedAt,
+          language: saved?.language,
+          lang: saved?.lang,
+        });
+      }
       setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
@@ -1941,7 +2027,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-medium">Status</label>
-                <select value={status} onChange={e=> setStatus(e.target.value as any)} disabled={userRole==='writer'} className="w-full border px-2 py-2 rounded">
+                <select
+                  value={status}
+                  onChange={e=> {
+                    setStatus(e.target.value as any);
+                    setStatusExplicitlyChanged(true);
+                  }}
+                  disabled={userRole==='writer'}
+                  className="w-full border px-2 py-2 rounded"
+                >
                   <option value='draft'>Draft</option>
                   <option value='scheduled'>Scheduled</option>
                   {(userRole==='admin'||userRole==='founder') && <option value='published'>Published</option>}

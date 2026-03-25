@@ -96,6 +96,27 @@ function formatLangTag(code: any): string {
   return c.slice(0, 4).toUpperCase();
 }
 
+function getArticleLanguageBadge(a: Article): string {
+  const langs = new Set<string>();
+  const primary = String((a as any)?.lang ?? (a as any)?.language ?? '').trim().toLowerCase();
+  if (primary) langs.add(primary);
+
+  const translations = (a as any)?.translations;
+  if (translations && typeof translations === 'object') {
+    for (const k of Object.keys(translations)) {
+      const code = String(k || '').trim().toLowerCase();
+      if (code) langs.add(code);
+    }
+  }
+
+  const ordered = ['en', 'hi', 'gu'];
+  const picked = ordered.filter((x) => langs.has(x));
+  if (picked.length >= 2) return picked.map(formatLangTag).join('+');
+
+  const only = picked[0] || primary;
+  return formatLangTag(only);
+}
+
 function getAuthorName(a: Article): string {
   const authorRaw = (a as any)?.author;
 
@@ -989,9 +1010,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                           </span>
                         </td>
                         <td className="px-3 py-3 align-top">
-                          {formatLangTag((a as any)?.lang ?? a.language) ? (
+                          {getArticleLanguageBadge(a) ? (
                             <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
-                              {formatLangTag((a as any)?.lang ?? a.language)}
+                              {getArticleLanguageBadge(a)}
                             </span>
                           ) : (
                             <span className="text-xs text-slate-700">—</span>
@@ -1053,9 +1074,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     <div>
                       <div className="text-[11px] text-slate-500">Language</div>
                       <div>
-                        {formatLangTag((a as any)?.lang ?? a.language) ? (
+                        {getArticleLanguageBadge(a) ? (
                           <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
-                            {formatLangTag((a as any)?.lang ?? a.language)}
+                            {getArticleLanguageBadge(a)}
                           </span>
                         ) : (
                           <span>—</span>

@@ -21,6 +21,10 @@ export interface Article {
   coverImage?: string | { url: string; publicId?: string };
   category?: string;
   status?: ArticleStatus;
+  // Some backends use alternate fields instead of `status`.
+  state?: string;
+  publishStatus?: string;
+  isPublished?: boolean;
   author?: { name?: string };
   language?: string;
   // Some backends send language as `lang`.
@@ -46,6 +50,8 @@ export interface Article {
   createdAt?: string;
   updatedAt?: string;
   scheduledAt?: string;
+  // Back-compat: scheduled publish timestamp.
+  publishAt?: string;
 }
 
 export interface ListResponse {
@@ -67,6 +73,48 @@ function normalizeArticleLanguage<T>(input: T): T {
   // Fill both fields for maximum compatibility across UI/components.
   if (a.language == null || String(a.language).trim() === '') a.language = lang;
   if (a.lang == null || String(a.lang).trim() === '') a.lang = lang;
+  return input;
+}
+
+function normalizeArticleStatus<T>(input: T): T {
+  if (!input || typeof input !== 'object') return input;
+  const a: any = input as any;
+
+  const raw = (
+    a?.status ??
+    a?.state ??
+    a?.publishStatus ??
+    a?.workflowStatus ??
+    a?.reviewStatus
+  );
+
+  const statusString = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
+  const isPublished = a?.isPublished === true || a?.published === true;
+
+  const normalized = (() => {
+    if (isPublished) return 'published';
+    if (!statusString) return '';
+    if (statusString === 'draft' || statusString === 'unpublished') return 'draft';
+    if (statusString === 'scheduled' || statusString === 'schedule') return 'scheduled';
+    if (statusString === 'published' || statusString === 'publish' || statusString === 'live' || statusString === 'public') return 'published';
+    if (statusString === 'archived') return 'archived';
+    if (statusString === 'deleted') return 'deleted';
+    return '';
+  })();
+
+  if (normalized) {
+    if (a.status == null || String(a.status).trim() === '') a.status = normalized;
+    // Keep alternates in sync when present.
+    if (a.state == null || String(a.state).trim() === '') a.state = normalized;
+    if (a.publishStatus == null || String(a.publishStatus).trim() === '') a.publishStatus = normalized;
+  }
+
+  // Scheduling timestamp normalization (try to keep it stable on round-trips)
+  const publishAt = typeof a?.publishAt === 'string' ? a.publishAt : undefined;
+  const scheduledAt = typeof a?.scheduledAt === 'string' ? a.scheduledAt : undefined;
+  if (!scheduledAt && publishAt) a.scheduledAt = publishAt;
+  if (!publishAt && scheduledAt) a.publishAt = scheduledAt;
+
   return input;
 }
 
@@ -126,7 +174,8 @@ function normalizeListResponse(payload: any, opts: { requestedPage: number; limi
           ? payload.articles
           : [])));
 
-  const rows: Article[] = (rawRows || []).map((a) => normalizeArticleLanguage(a));
+  const rows: Article[] = (rawRows || [])
+    .map((a) => normalizeArticleStatus(normalizeArticleLanguage(a)));
 
   const total: number = typeof payload?.total === 'number'
     ? payload.total
@@ -201,7 +250,7 @@ export async function getArticle(id: string): Promise<Article> {
   if (!ok || !article || !article._id) {
     throw new Error('Failed to get article');
   }
-  return normalizeArticleLanguage(article as Article);
+  return normalizeArticleStatus(normalizeArticleLanguage(article as Article));
 }
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
