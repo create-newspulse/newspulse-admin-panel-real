@@ -23,6 +23,8 @@ export interface Article {
   status?: ArticleStatus;
   author?: { name?: string };
   language?: string;
+  // Some backends send language as `lang`.
+  lang?: string;
   // Publishing metadata
   publishedAt?: string;
   // Back-compat for older environments
@@ -55,6 +57,18 @@ export interface ListResponse {
 }
 
 const ARTICLES_PATH = 'articles';
+
+function normalizeArticleLanguage<T>(input: T): T {
+  if (!input || typeof input !== 'object') return input;
+  const a: any = input as any;
+  const lang = String(a?.lang ?? a?.language ?? '').trim().toLowerCase();
+  if (!lang) return input;
+
+  // Fill both fields for maximum compatibility across UI/components.
+  if (a.language == null || String(a.language).trim() === '') a.language = lang;
+  if (a.lang == null || String(a.lang).trim() === '') a.lang = lang;
+  return input;
+}
 
 function withDescriptionFallback<T extends Record<string, any>>(data: T): T {
   if (!data || typeof data !== 'object') return data;
@@ -102,7 +116,7 @@ async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
 
 
 function normalizeListResponse(payload: any, opts: { requestedPage: number; limit: number }): ListResponse {
-  const rows: Article[] = Array.isArray(payload?.data)
+  const rawRows: Article[] = Array.isArray(payload?.data)
     ? payload.data
     : (Array.isArray(payload?.items)
       ? payload.items
@@ -111,6 +125,8 @@ function normalizeListResponse(payload: any, opts: { requestedPage: number; limi
         : (Array.isArray(payload?.articles)
           ? payload.articles
           : [])));
+
+  const rows: Article[] = (rawRows || []).map((a) => normalizeArticleLanguage(a));
 
   const total: number = typeof payload?.total === 'number'
     ? payload.total
@@ -185,7 +201,7 @@ export async function getArticle(id: string): Promise<Article> {
   if (!ok || !article || !article._id) {
     throw new Error('Failed to get article');
   }
-  return article as Article;
+  return normalizeArticleLanguage(article as Article);
 }
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);

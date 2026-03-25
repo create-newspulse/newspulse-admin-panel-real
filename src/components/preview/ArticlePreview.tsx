@@ -12,6 +12,8 @@ export interface ArticlePreviewModel {
   coverImageUrl?: string;
   category?: string;
   language?: PreviewLanguage;
+  // Some backends/components provide language as `lang`.
+  lang?: PreviewLanguage;
   status?: 'draft' | 'scheduled' | 'published';
   scheduledAt?: string;
   tags?: string[];
@@ -53,7 +55,7 @@ export default function ArticlePreview({
   const slug = (article.slug || '').trim();
   const summary = (article.summary || '').trim();
   const category = (article.category || '').trim();
-  const lang = (selectedLanguage || article.language || 'en') as PreviewLanguage;
+  const lang = (selectedLanguage || article.language || article.lang || 'en') as PreviewLanguage;
 
   const content = article.content || '';
 
