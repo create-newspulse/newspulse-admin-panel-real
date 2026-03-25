@@ -261,14 +261,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (mediaStatusQuery.isLoading) return 'Checking upload availability…';
     if (coverUploadEnabled) return null;
 
-    const status = mediaStatusQuery.data;
-    const message = String(status?.message || '').trim();
-
-    // Prefer backend-provided details when available, but keep it founder/admin friendly.
-    // (Do not attempt to infer availability on the frontend.)
-    if (message && message !== 'Media upload status unavailable') return message;
-    if (status?.reason === 'media_status_unavailable') return 'Media upload status unavailable.';
-    return 'Cloudinary not configured.';
+    // If the status route is missing/errored OR explicitly disabled, keep the UX simple:
+    // disable uploads and show a clear, single inline reason.
+    return 'Cover image upload unavailable: Cloudinary not configured.';
   })();
 
   const coverImageUrl = String(coverImage?.url || '').trim();
