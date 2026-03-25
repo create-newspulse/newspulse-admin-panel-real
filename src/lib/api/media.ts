@@ -1,11 +1,13 @@
 import type { AxiosInstance } from 'axios';
-import apiClient from '@/lib/api';
+import apiClient, { apiUrl } from '@/lib/api';
 
 export type MediaStatus = {
   uploadEnabled: boolean;
   reason?: string;
   message?: string;
 };
+
+const STATUS_CHECK_FAILED_REASON = 'status_check_failed';
 
 export type UploadCoverImageResult = {
   url: string;
@@ -33,12 +35,26 @@ function extractUploadedPublicIdFromPayload(raw: any): string {
 }
 
 export async function getMediaStatus(client: AxiosInstance = apiClient): Promise<MediaStatus> {
+  const url = apiUrl('/media/status');
   try {
-    const res = await client.get('/media/status', {
+    const res = await client.get(url, {
       // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)
       skipErrorLog: true,
     });
     const raw = res?.data as any;
+
+    // If this accidentally hits the SPA rewrite, Vercel/Vite can return index.html as a string.
+    // Treat that as a failed status check (unknown availability).
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      const looksHtml = s.startsWith('<!doctype') || s.startsWith('<html') || /<head[\s>]/i.test(s);
+      if (looksHtml) {
+        if (import.meta.env.DEV) {
+          try { console.warn('[media] /media/status returned HTML (likely rewrite), treating as status check failure', { url }); } catch {}
+        }
+        return { uploadEnabled: false, reason: STATUS_CHECK_FAILED_REASON, message: 'Could not verify upload service' };
+      }
+    }
 
     // Accept common shapes:
     // - { uploadEnabled: true }
@@ -74,11 +90,27 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
 
     // If backend returns an unexpected shape, do NOT probe upload routes.
     // Probing (OPTIONS) can succeed even when the provider is misconfigured, causing confusing UI.
-    return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
+    if (import.meta.env.DEV) {
+      try { console.warn('[media] Unexpected /media/status shape, treating as status check failure', { url, raw }); } catch {}
+    }
+    return { uploadEnabled: false, reason: STATUS_CHECK_FAILED_REASON, message: 'Could not verify upload service' };
   } catch (err: any) {
     // If endpoint is missing or backend errors, treat as disabled.
     const status = err?.response?.status;
-    if (status === 404) return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
+    if (import.meta.env.DEV) {
+      try {
+        // eslint-disable-next-line no-console
+        console.warn('[media] Status check failed', {
+          url,
+          status,
+          message: err?.response?.data?.message || err?.response?.data?.error || err?.message,
+        });
+      } catch {}
+    }
+
+    if (status === 404) {
+      return { uploadEnabled: false, reason: STATUS_CHECK_FAILED_REASON, message: 'Status endpoint not found' };
+    }
     const rawMsg =
       err?.response?.data?.message ||
       err?.response?.data?.error ||
@@ -88,7 +120,9 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
     // Network/auth errors => safest is disabled.
     return {
       uploadEnabled: false,
-      ...(msg ? { reason: 'media_status_unavailable', message: msg } : { reason: 'media_status_unavailable', message: 'Media upload status unavailable' }),
+      ...(msg
+        ? { reason: STATUS_CHECK_FAILED_REASON, message: msg }
+        : { reason: STATUS_CHECK_FAILED_REASON, message: 'Could not verify upload service' }),
     };
   }
 }
