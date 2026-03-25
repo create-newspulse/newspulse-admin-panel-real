@@ -239,6 +239,21 @@ export async function listArticles(params: {
   const res = await adminApiClient.get(ARTICLES_PATH, { params: query });
   return normalizeListResponse(res.data, { requestedPage, limit });
 }
+
+export async function listArticlesByTranslationGroupId(translationGroupId: string, opts?: { limit?: number }): Promise<ListResponse> {
+  const gid = String(translationGroupId || '').trim();
+  if (!gid) return { rows: [], total: 0, page: 1, pages: 1 };
+  const limit = opts?.limit || 50;
+  const res = await adminApiClient.get(ARTICLES_PATH, {
+    params: {
+      translationGroupId: gid,
+      limit,
+      page: 1,
+      sort: '-updatedAt',
+    },
+  });
+  return normalizeListResponse(res.data, { requestedPage: 1, limit });
+}
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
   const res = await adminApiClient.get(`${ARTICLES_PATH}/${encoded}`);

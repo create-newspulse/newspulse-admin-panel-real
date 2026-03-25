@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -870,6 +870,46 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     },
   });
 
+  const translationGroupIdTrimmed = useMemo(() => String(translationGroupId || '').trim(), [translationGroupId]);
+  const translationGroupQuery = useQuery({
+    queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed],
+    queryFn: async () => listArticlesByTranslationGroupId(translationGroupIdTrimmed, { limit: 50 }),
+    enabled: !!translationGroupIdTrimmed,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+
+  const translationVariants = useMemo(() => {
+    const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
+    const map: Record<'en'|'hi'|'gu', any | null> = { en: null, hi: null, gu: null };
+    for (const r of rows) {
+      const raw = String((r as any)?.lang ?? (r as any)?.language ?? '').trim().toLowerCase();
+      const code = (raw === 'en' || raw === 'hi' || raw === 'gu') ? raw : '';
+      if (code) {
+        // Prefer the record that matches the current effectiveId if duplicates exist.
+        if (!map[code]) map[code] = r;
+        else if (effectiveId && String((r as any)?._id || '') === String(effectiveId)) map[code] = r;
+      }
+    }
+    return map;
+  }, [translationGroupQuery.data, effectiveId]);
+
+  const groupStatus = useMemo(() => {
+    const variants = Object.values(translationVariants).filter(Boolean) as any[];
+    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'published')) return 'Published';
+    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'scheduled')) return 'Scheduled';
+    if (variants.length > 0) return 'Draft';
+    return null;
+  }, [translationVariants]);
+
+  function variantCompletenessLabel(v: any | null): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+    if (!v) return { text: 'Missing', tone: 'warn' };
+    const t = String(v?.title || '').trim();
+    const c = String(v?.content || v?.body || '').trim();
+    if (t && c.length >= 50) return { text: 'Ready', tone: 'ok' };
+    return { text: 'Incomplete', tone: 'warn' };
+  }
+
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
   useEffect(()=> { setReadingSeconds(readingTimeSec(content)); }, [content]);
@@ -1174,11 +1214,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
 
       // Compute safe status to send:
+      // - Autosave NEVER changes status (hard rule)
       // - New items => draft
-      // - Existing items => preserve backend status unless the user explicitly changes it
+      // - Existing items => preserve backend status unless the user explicitly changes it AND this is a manual save
       // - If override provided (e.g., publish), use it explicitly
       let statusToSend: PublicArticleStatus;
-      if (desiredStatusOverride) {
+      if (saveKindRef.current === 'autosave') {
+        const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
+        statusToSend = orig as PublicArticleStatus;
+      } else if (desiredStatusOverride) {
         statusToSend = desiredStatusOverride;
       } else if (computedMode === 'create') {
         statusToSend = 'draft';
@@ -1431,7 +1475,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
   }
 
-  async function createLinkedTranslation(target: 'hi' | 'gu') {
+  async function createLinkedTranslation(target: LangCode) {
     if (!effectiveId) {
       toast.error('Save this story first to create a translation');
       return;
@@ -2005,6 +2049,88 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 ) : (
                   <div className="mt-1 text-[11px] text-slate-500">Save once to generate a group id.</div>
                 )}
+
+                {translationGroupIdTrimmed ? (
+                  <div className="mt-3 rounded border border-slate-200 bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold">Translations</div>
+                      <div className="text-[11px] text-slate-600">
+                        {groupStatus ? `Group Status: ${groupStatus}` : 'Group Status: —'}
+                      </div>
+                    </div>
+
+                    {translationGroupQuery.isFetching ? (
+                      <div className="mt-2 text-[11px] text-slate-500">Loading variants…</div>
+                    ) : null}
+                    {translationGroupQuery.isError ? (
+                      <div className="mt-2 text-[11px] text-amber-700">Could not load translation variants.</div>
+                    ) : null}
+
+                    <div className="mt-2 space-y-2">
+                      {(['en', 'hi', 'gu'] as const).map((code) => {
+                        const v = translationVariants[code];
+                        const completeness = variantCompletenessLabel(v);
+                        const isActive = language === code;
+                        const idForVariant = v?._id || v?.id || null;
+
+                        const badgeCls = completeness.tone === 'ok'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : completeness.tone === 'warn'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                            : 'border-slate-200 bg-slate-50 text-slate-700';
+
+                        return (
+                          <div key={code} className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              className={
+                                'px-2 py-1 rounded border text-xs ' +
+                                (isActive ? 'bg-black text-white border-black' : 'bg-white hover:bg-slate-50')
+                              }
+                              onClick={() => {
+                                if (isActive) return;
+                                if (idForVariant) {
+                                  navigate(`/admin/articles/${encodeURIComponent(String(idForVariant))}/edit`);
+                                  return;
+                                }
+                              }}
+                              title={idForVariant ? 'Open this language variant' : 'Variant not created yet'}
+                            >
+                              {code.toUpperCase()}
+                            </button>
+
+                            <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] ${badgeCls}`}>{completeness.text}</span>
+
+                            <div className="flex items-center gap-2">
+                              {idForVariant ? (
+                                <button
+                                  type="button"
+                                  className="text-[11px] underline text-slate-700 hover:text-slate-900"
+                                  onClick={() => navigate(`/admin/articles/${encodeURIComponent(String(idForVariant))}/edit`)}
+                                  disabled={isActive}
+                                >
+                                  {isActive ? 'Editing' : 'Edit'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="text-[11px] underline text-slate-700 hover:text-slate-900"
+                                  onClick={() => createLinkedTranslation(code)}
+                                >
+                                  Create
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-slate-600">
+                      These are separate drafts linked by the same Translation Group ID.
+                    </div>
+                  </div>
+                ) : null}
 
                 {effectiveId && String(translationGroupId || '').trim() ? (
                   <div className="mt-2 flex flex-wrap gap-2">
