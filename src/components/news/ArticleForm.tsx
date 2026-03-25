@@ -257,13 +257,55 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   });
 
   const coverUploadEnabled = mediaStatusQuery.data?.uploadEnabled === true;
-  const coverUploadDisabledText = (() => {
+  const coverUploadStatusText = (() => {
     if (mediaStatusQuery.isLoading) return 'Checking upload availability…';
     if (coverUploadEnabled) return null;
 
-    // If the status route is missing/errored OR explicitly disabled, keep the UX simple:
-    // disable uploads and show a clear, single inline reason.
-    return 'Cover image upload unavailable: Cloudinary not configured.';
+    const s = mediaStatusQuery.data;
+    const reason = String(s?.reason || '').trim();
+    const message = String(s?.message || '').trim();
+
+    // 1) Explicit Cloudinary misconfig (most actionable)
+    if (reason === 'cloudinary_not_configured') {
+      return message || 'Cloudinary not configured.';
+    }
+
+    // 2) Status endpoint truly missing/invalid response
+    if (reason === 'media_status_endpoint_unavailable') {
+      return 'Media status endpoint unavailable.';
+    }
+
+    // 3) Request failed (network/auth/etc)
+    if (reason === 'media_status_request_failed') {
+      return 'Status check failed.';
+    }
+
+    // Fallback: show backend-provided message when present.
+    return message || 'Upload unavailable.';
+  })();
+
+  const coverUploadStatusDetail = (() => {
+    if (mediaStatusQuery.isLoading) return null;
+    if (coverUploadEnabled) return null;
+
+    const s = mediaStatusQuery.data;
+    const reason = String(s?.reason || '').trim();
+    const message = String(s?.message || '').trim();
+    const detail = String((s as any)?.detail || '').trim();
+
+    if (reason === 'cloudinary_not_configured') {
+      return detail || null;
+    }
+
+    if (reason === 'media_status_endpoint_unavailable') {
+      return detail || 'Could not verify upload service.';
+    }
+
+    if (reason === 'media_status_request_failed') {
+      return message || 'Could not verify upload service.';
+    }
+
+    return detail || null;
   })();
 
   const coverImageUrl = String(coverImage?.url || '').trim();
@@ -1275,7 +1317,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setCoverImage(null);
       setCoverImageFile(null);
       setCoverUploadOk(false);
-      setCoverUploadError(coverUploadDisabledText || 'Cover image upload is unavailable.');
+      setCoverUploadError(coverUploadStatusText || 'Cover image upload is unavailable.');
       return;
     }
 
@@ -1922,7 +1964,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   url={coverImageUrl}
                   file={coverImageFile}
                   disabled={!coverUploadEnabled || mediaStatusQuery.isLoading}
-                  disabledText={coverUploadDisabledText}
+                  disabledText={coverUploadStatusText}
+                  disabledDetail={coverUploadStatusDetail}
                   onChangeFile={(f) => {
                     setCoverUploadOk(false);
                     setCoverUploadError(null);

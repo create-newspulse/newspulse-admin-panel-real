@@ -12,6 +12,7 @@ export type CoverImageUploadProps = {
   onRemove: () => void; // clears both url + file in parent
   disabled?: boolean;
   disabledText?: string | null;
+  disabledDetail?: string | null;
 };
 
 function formatBytes(bytes: number): string {
@@ -27,10 +28,23 @@ function formatBytes(bytes: number): string {
   return `${rounded} ${units[idx]}`;
 }
 
-export default function CoverImageUpload({ url, file, onChangeFile, onRemove, disabled = false, disabledText = null }: CoverImageUploadProps) {
+export default function CoverImageUpload({ url, file, onChangeFile, onRemove, disabled = false, disabledText = null, disabledDetail = null }: CoverImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  const status = useMemo(() => {
+    const raw = String(disabledText || '').trim();
+    const checking = disabled && /\bchecking\b/i.test(raw);
+    if (checking) return { label: 'Checking', className: 'bg-slate-100 text-slate-700 border-slate-200', kind: 'checking' as const };
+
+    if (!disabled) return { label: 'Upload available', className: 'bg-green-100 text-green-700 border-green-200', kind: 'available' as const };
+
+    const unknown = /^media status endpoint unavailable\b/i.test(raw) || /^status check failed\b/i.test(raw);
+    if (unknown) return { label: 'Status unknown', className: 'bg-yellow-100 text-yellow-700 border-yellow-200', kind: 'unknown' as const };
+
+    return { label: 'Upload unavailable', className: 'bg-red-100 text-red-700 border-red-200', kind: 'unavailable' as const };
+  }, [disabled, disabledText]);
 
   const sanitizeRemoteUrl = (raw: string | undefined): string => {
     const s = String(raw || '').trim();
@@ -132,7 +146,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
 
   return (
     <div
-      className="space-y-2"
+      className="space-y-3"
       onDragEnter={(e) => {
         if (disabled) return;
         e.preventDefault();
@@ -160,7 +174,17 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
         onDropFile(f);
       }}
     >
-      <div className="text-sm font-semibold">Cover Image</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">Cover Image</div>
+        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${status.className}`}>{status.label}</span>
+      </div>
+
+      {disabled && (disabledText || disabledDetail) ? (
+        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+          {disabledText ? <div className="text-xs text-slate-700">{disabledText}</div> : null}
+          {disabledDetail ? <div className="mt-1 text-[11px] text-slate-600 break-words">{disabledDetail}</div> : null}
+        </div>
+      ) : null}
 
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0 space-y-2">
@@ -208,10 +232,6 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
               }}
             />
           </div>
-
-          {disabled && disabledText ? (
-            <div className="text-xs text-slate-600">{disabledText}</div>
-          ) : null}
         </div>
 
         <div className="w-28 shrink-0">

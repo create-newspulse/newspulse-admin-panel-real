@@ -5,7 +5,21 @@ export type MediaStatus = {
   uploadEnabled: boolean;
   reason?: string;
   message?: string;
+  detail?: string;
+  provider?: string;
 };
+
+let didWarnMediaStatusFailure = false;
+
+function devWarnOnce(msg: string, extra?: any) {
+  if (!import.meta.env.DEV) return;
+  if (didWarnMediaStatusFailure) return;
+  didWarnMediaStatusFailure = true;
+  try {
+    // eslint-disable-next-line no-console
+    console.warn(msg, extra);
+  } catch {}
+}
 
 export type UploadCoverImageResult = {
   url: string;
@@ -40,6 +54,21 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
     });
     const raw = res?.data as any;
 
+    // Defensive: if a rewrite returns HTML/string instead of JSON, treat as unavailable.
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      const looksHtml = s.startsWith('<!doctype') || s.startsWith('<html') || /<head[\s>]/i.test(s);
+      if (looksHtml) {
+        devWarnOnce('[media] /media/status returned HTML (likely rewrite), treating as endpoint unavailable');
+        return {
+          uploadEnabled: false,
+          reason: 'media_status_endpoint_unavailable',
+          message: 'Media status endpoint unavailable',
+          detail: 'Could not verify upload service',
+        };
+      }
+    }
+
     // Accept common shapes:
     // - { uploadEnabled: true }
     // - { ok: true, uploadEnabled: true }
@@ -69,26 +98,50 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
           ? payload.error
           : undefined;
 
+    const detail =
+      (typeof payload?.detail === 'string' && payload.detail.trim())
+        ? payload.detail
+        : undefined;
+
+    const provider = typeof payload?.provider === 'string' ? payload.provider : undefined;
+
     // If backend explicitly reports enabled/disabled, trust it.
-    if (hasExplicitFlag) return { uploadEnabled: !!enabled, reason, message };
+    if (hasExplicitFlag) return { uploadEnabled: !!enabled, reason, message, detail, provider };
 
     // If backend returns an unexpected shape, do NOT probe upload routes.
     // Probing (OPTIONS) can succeed even when the provider is misconfigured, causing confusing UI.
-    return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
+    devWarnOnce('[media] Unexpected /media/status response shape, treating as endpoint unavailable', { raw });
+    return {
+      uploadEnabled: false,
+      reason: 'media_status_endpoint_unavailable',
+      message: 'Media status endpoint unavailable',
+      detail: 'Could not verify upload service',
+    };
   } catch (err: any) {
     // If endpoint is missing or backend errors, treat as disabled.
     const status = err?.response?.status;
-    if (status === 404) return { uploadEnabled: false, reason: 'media_status_unavailable', message: 'Media upload status unavailable' };
     const rawMsg =
       err?.response?.data?.message ||
       err?.response?.data?.error ||
       err?.message ||
       '';
     const msg = String(rawMsg || '').trim();
+
+    devWarnOnce('[media] /media/status request failed', { status, message: msg || undefined });
+
+    if (status === 404) {
+      return {
+        uploadEnabled: false,
+        reason: 'media_status_endpoint_unavailable',
+        message: 'Media status endpoint unavailable',
+        detail: 'Backend does not expose /api/media/status',
+      };
+    }
     // Network/auth errors => safest is disabled.
     return {
       uploadEnabled: false,
-      ...(msg ? { reason: 'media_status_unavailable', message: msg } : { reason: 'media_status_unavailable', message: 'Media upload status unavailable' }),
+      reason: 'media_status_request_failed',
+      message: msg || 'Status check failed',
     };
   }
 }
