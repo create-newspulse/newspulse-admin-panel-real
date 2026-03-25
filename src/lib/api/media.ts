@@ -1,5 +1,5 @@
 import type { AxiosInstance } from 'axios';
-import apiClient from '@/lib/api';
+import apiClient, { apiUrl } from '@/lib/api';
 
 export type MediaStatus = {
   uploadEnabled: boolean;
@@ -9,15 +9,22 @@ export type MediaStatus = {
   provider?: string;
 };
 
-let didWarnMediaStatusFailure = false;
+function shouldDebugMediaStatus(): boolean {
+  if (!import.meta.env.DEV) return false;
+  try {
+    if (typeof window !== 'undefined' && (window as any).__np_debug_media_status) return true;
+  } catch {}
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('np_debug_media_status') === '1') return true;
+  } catch {}
+  return false;
+}
 
-function devWarnOnce(msg: string, extra?: any) {
-  if (!import.meta.env.DEV) return;
-  if (didWarnMediaStatusFailure) return;
-  didWarnMediaStatusFailure = true;
+function devDebug(msg: string, extra?: any) {
+  if (!shouldDebugMediaStatus()) return;
   try {
     // eslint-disable-next-line no-console
-    console.warn(msg, extra);
+    console.log(msg, extra);
   } catch {}
 }
 
@@ -47,19 +54,23 @@ function extractUploadedPublicIdFromPayload(raw: any): string {
 }
 
 export async function getMediaStatus(client: AxiosInstance = apiClient): Promise<MediaStatus> {
+  const reqUrl = apiUrl('/media/status');
   try {
-    const res = await client.get('/media/status', {
+    devDebug('[media] fetching status', { url: reqUrl });
+
+    const res = await client.get(reqUrl, {
       // @ts-expect-error custom flag consumed by our axios interceptor (safe no-op for other clients)
       skipErrorLog: true,
     });
     const raw = res?.data as any;
+    devDebug('[media] raw status response', raw);
 
     // Defensive: if a rewrite returns HTML/string instead of JSON, treat as unavailable.
     if (typeof raw === 'string') {
       const s = raw.trim();
       const looksHtml = s.startsWith('<!doctype') || s.startsWith('<html') || /<head[\s>]/i.test(s);
       if (looksHtml) {
-        devWarnOnce('[media] /media/status returned HTML (likely rewrite), treating as endpoint unavailable');
+        devDebug('[media] /media/status returned HTML (likely rewrite)');
         return {
           uploadEnabled: false,
           reason: 'media_status_endpoint_unavailable',
@@ -76,21 +87,27 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
     // - { uploads: { enabled: true } }
     const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
 
-    const explicitFlags: Array<unknown> = [
+    // Newer contract supported by backend:
+    // { ok:true, provider:'cloudinary', available:true, configured:true, reason:null, message:'...' }
+    const ok = typeof payload?.ok === 'boolean' ? payload.ok : undefined;
+    const available = typeof payload?.available === 'boolean' ? payload.available : undefined;
+    const configured = typeof payload?.configured === 'boolean' ? payload.configured : undefined;
+
+    const legacyFlags: Array<unknown> = [
       payload?.uploadEnabled,
       payload?.uploads?.enabled,
       payload?.storage?.uploadEnabled,
       payload?.storage?.enabled,
     ];
-    const hasExplicitFlag = explicitFlags.some((v) => typeof v === 'boolean');
+    const hasLegacyExplicitFlag = legacyFlags.some((v) => typeof v === 'boolean');
 
-    const enabled =
+    const legacyEnabled =
       payload?.uploadEnabled === true ||
       payload?.uploads?.enabled === true ||
       payload?.storage?.uploadEnabled === true ||
       payload?.storage?.enabled === true;
 
-    const reason = typeof payload?.reason === 'string' ? payload.reason : undefined;
+    const reason = typeof payload?.reason === 'string' && payload.reason.trim() ? payload.reason : undefined;
     const message =
       (typeof payload?.message === 'string' && payload.message.trim())
         ? payload.message
@@ -105,12 +122,26 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
 
     const provider = typeof payload?.provider === 'string' ? payload.provider : undefined;
 
-    // If backend explicitly reports enabled/disabled, trust it.
-    if (hasExplicitFlag) return { uploadEnabled: !!enabled, reason, message, detail, provider };
+    // Prefer new contract when present.
+    const hasNewContract = typeof ok === 'boolean' && typeof available === 'boolean' && typeof configured === 'boolean';
+    if (hasNewContract) {
+      const uploadEnabled = ok === true && available === true && configured === true;
+      const normalizedReason = reason || (!configured ? 'cloudinary_not_configured' : undefined);
+      const normalized: MediaStatus = { uploadEnabled, reason: normalizedReason, message, detail, provider };
+      devDebug('[media] normalized status (new contract)', normalized);
+      return normalized;
+    }
+
+    // If backend explicitly reports enabled/disabled via legacy flags, trust it.
+    if (hasLegacyExplicitFlag) {
+      const normalized: MediaStatus = { uploadEnabled: !!legacyEnabled, reason, message, detail, provider };
+      devDebug('[media] normalized status (legacy flags)', normalized);
+      return normalized;
+    }
 
     // If backend returns an unexpected shape, do NOT probe upload routes.
     // Probing (OPTIONS) can succeed even when the provider is misconfigured, causing confusing UI.
-    devWarnOnce('[media] Unexpected /media/status response shape, treating as endpoint unavailable', { raw });
+    devDebug('[media] Unexpected /media/status response shape', { raw });
     return {
       uploadEnabled: false,
       reason: 'media_status_endpoint_unavailable',
@@ -127,7 +158,7 @@ export async function getMediaStatus(client: AxiosInstance = apiClient): Promise
       '';
     const msg = String(rawMsg || '').trim();
 
-    devWarnOnce('[media] /media/status request failed', { status, message: msg || undefined });
+    devDebug('[media] /media/status request failed', { url: reqUrl, status, message: msg || undefined });
 
     if (status === 404) {
       return {
