@@ -264,18 +264,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     const status = mediaStatusQuery.data;
     const message = String(status?.message || '').trim();
 
-    // If we could not verify the status endpoint, keep uploads disabled (unknown)
-    // and communicate that verification failed.
-    if (status?.reason === 'status_check_failed') {
-      if (message) return `Status check failed: ${message}`;
-      return 'Status check failed: could not verify upload service.';
-    }
-
     // Prefer backend-provided details when available, but keep it founder/admin friendly.
     // (Do not attempt to infer availability on the frontend.)
-    if (message) return `Upload unavailable: ${message}`;
-    if (status?.reason) return `Upload unavailable: ${String(status.reason).replace(/_/g, ' ')}`;
-    return 'Upload unavailable.';
+    if (message && message !== 'Media upload status unavailable') return message;
+    if (status?.reason === 'media_status_unavailable') return 'Media upload status unavailable.';
+    return 'Cloudinary not configured.';
   })();
 
   const coverImageUrl = String(coverImage?.url || '').trim();

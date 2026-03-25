@@ -40,19 +40,11 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
 
   const status = useMemo(() => {
     const checking = disabled && /\bchecking\b/i.test(String(disabledText || ''));
-    const failed = disabled && /^\s*status\s+check\s+failed\b/i.test(String(disabledText || ''));
     if (checking) {
       return {
         label: 'Checking',
         className: 'bg-slate-100 text-slate-700 border-slate-200',
         detail: normalizedDisabledText || String(disabledText || '').trim(),
-      };
-    }
-    if (failed) {
-      return {
-        label: 'Check failed',
-        className: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-        detail: normalizedDisabledText || String(disabledText || '').trim() || 'Could not verify upload service',
       };
     }
     if (disabled) {
