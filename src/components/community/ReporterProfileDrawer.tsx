@@ -8,12 +8,13 @@ import { useAuth } from '@/context/AuthContext';
 interface ReporterProfileDrawerProps {
   open: boolean;
   reporter: ReporterContact | null;
+  initialTab?: 'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'activity';
   onClose: () => void;
   onOpenStories: (key: string) => void;
   onOpenQueue: (key: string) => void;
 }
 
-export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenStories, onOpenQueue }: ReporterProfileDrawerProps) {
+export default function ReporterProfileDrawer({ open, reporter, initialTab, onClose, onOpenStories, onOpenQueue }: ReporterProfileDrawerProps) {
   useEffect(() => {
     function onEsc(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
     window.addEventListener('keydown', onEsc);
@@ -28,7 +29,7 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
   const name = reporter?.name || 'Unknown reporter';
   const maskedPhone = reporter?.phone ? reporter.phone.replace(/(\d{2})\d+(\d{3})/, '$1*****$2') : null;
 
-  type TabKey = 'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'verification' | 'activity';
+  type TabKey = 'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'activity';
   const tabs: Array<{ key: TabKey; label: string }> = useMemo(() => (
     [
       { key: 'overview', label: 'Overview' },
@@ -37,15 +38,15 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
       { key: 'stories', label: 'Stories' },
       { key: 'notes', label: 'Notes' },
       { key: 'tasks', label: 'Tasks' },
-      { key: 'verification', label: 'Verification' },
       { key: 'activity', label: 'Activity' },
     ]
   ), []);
   const [tab, setTab] = useState<TabKey>('overview');
   useEffect(() => {
-    // Reset to a predictable entry tab when switching between reporters.
-    setTab('overview');
-  }, [reporter?.id, reporter?.email, reporter?.phone]);
+    if (!open) return;
+    const next = (initialTab || 'overview') as TabKey;
+    setTab(next);
+  }, [open, initialTab, reporter?.id, reporter?.email, reporter?.phone]);
 
   const queryClient = useQueryClient();
   const [draftNotes, setDraftNotes] = useState<string>(reporter?.notes || '');
@@ -333,32 +334,28 @@ export default function ReporterProfileDrawer({ open, reporter, onClose, onOpenS
             </div>
           ) : null}
 
-          {tab === 'verification' ? (
-            <div className="space-y-3">
-              <div className="text-sm text-slate-700">
-                <span className="font-medium">Verification level:</span> {reporter?.verificationLevel || '—'}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'pending' }, 'Verification requested')}>Request verification</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'verified' }, 'Marked verified')}>Verify</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'limited' }, 'Limited verification')}>Limit</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'revoked' }, 'Verification revoked')}>Revoke</button>
-              </div>
-              <div className="pt-2 border-t" />
-              <div className="text-sm text-slate-700">
-                <span className="font-medium">Status:</span> {reporter?.status || '—'}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'watchlist' }, 'Marked watchlist')}>Mark watchlist</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => { if (window.confirm('Suspend this reporter?')) void applyStatusPatch({ status: 'suspended' }, 'Suspended'); }}>Suspend</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" disabled={!reporter?.id} onClick={() => { if (window.confirm('Ban this reporter?')) void applyStatusPatch({ status: 'banned' }, 'Banned'); }}>Ban</button>
-                <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ addStrike: true }, 'Ethics strike added')}>Add strike</button>
-              </div>
-            </div>
-          ) : null}
-
           {tab === 'activity' ? (
             <div className="space-y-3">
+              <div className="rounded-md border bg-white p-3 space-y-2">
+                <div className="text-sm text-slate-700"><span className="font-medium">Verification level:</span> {reporter?.verificationLevel || '—'}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'pending' }, 'Verification requested')}>Request verification</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'verified' }, 'Marked verified')}>Verify</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'limited' }, 'Limited verification')}>Limit</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ verificationLevel: 'revoked' }, 'Verification revoked')}>Revoke</button>
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-white p-3 space-y-2">
+                <div className="text-sm text-slate-700"><span className="font-medium">Status:</span> {reporter?.status || '—'}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'watchlist' }, 'Marked watchlist')}>Mark watchlist</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => { if (window.confirm('Suspend this reporter?')) void applyStatusPatch({ status: 'suspended' }, 'Suspended'); }}>Suspend</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" disabled={!reporter?.id} onClick={() => { if (window.confirm('Ban this reporter?')) void applyStatusPatch({ status: 'banned' }, 'Banned'); }}>Ban</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ addStrike: true }, 'Ethics strike added')}>Add strike</button>
+                </div>
+              </div>
+
               <div className="text-sm text-slate-700"><span className="font-medium">Ethics strikes:</span> {typeof reporter?.ethicsStrikes === 'number' ? reporter.ethicsStrikes : '—'}</div>
               <div className="flex flex-wrap items-center gap-2">
                 <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'archived' as any }, 'Archived')}>Archive reporter</button>

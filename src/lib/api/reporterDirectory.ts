@@ -77,8 +77,204 @@ export interface ReporterContactListResponse {
   // New canonical shape returned to UI consumers
   rows: ReporterContact[];
   total: number;
+  // Debug: which backend route actually served the data.
+  endpointUsed?: string;
   // Back-compat for any legacy usages reading items
   items?: ReporterContact[];
+}
+
+async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: Parameters<typeof listReporterContacts>[0]) {
+  const res = await adminApi.get<any>(endpointPath, { params });
+
+  const rawPayload: any = res?.data ?? {};
+
+  // Backend response shapes seen in the wild:
+  // - { items: [], total }
+  // - { rows: [], total }
+  // - { reporters: [], total }
+  // - { contributors: [], total }
+  // - []
+  // - { data: [] }
+  const rawItems: any[] = Array.isArray(rawPayload)
+    ? rawPayload
+    : Array.isArray(rawPayload?.items)
+      ? rawPayload.items
+      : Array.isArray(rawPayload?.rows)
+        ? rawPayload.rows
+        : Array.isArray(rawPayload?.reporters)
+          ? rawPayload.reporters
+          : Array.isArray(rawPayload?.contributors)
+            ? rawPayload.contributors
+            : Array.isArray(rawPayload?.data)
+              ? rawPayload.data
+              : Array.isArray(rawPayload?.data?.items)
+                ? rawPayload.data.items
+                : Array.isArray(rawPayload?.data?.rows)
+                  ? rawPayload.data.rows
+                  : [];
+
+  const total = typeof rawPayload?.total === 'number'
+    ? rawPayload.total
+    : typeof rawPayload?.data?.total === 'number'
+      ? rawPayload.data.total
+      : rawItems.length;
+
+  // Keep the page's expected response mapping shape.
+  const payload = { ...(rawPayload ?? {}), items: rawItems, total };
+
+  // If backend uses 200 with { ok:false }, treat it as an error (do NOT fall back to empty UI state).
+  if (payload && payload.ok === false) {
+    const msg = extractBackendMessage(payload) || 'Failed to load reporter contacts';
+    const e: UiNotifyError = new Error(msg) as UiNotifyError;
+    // Preserve a status for UI banners; 200 indicates transport succeeded but app-level failed.
+    e.status = 200;
+    throw e;
+  }
+
+  const rowsRaw: any[] = Array.isArray(payload.items) ? payload.items : [];
+
+  const rows: ReporterContact[] = rowsRaw.map((c: any) => {
+    const contributorIdRaw = c.contributorId ?? c.contributorID ?? c.contributor?.id ?? c.contributor?._id;
+
+    const fullName = (c.fullName ?? c.name ?? c.displayName ?? c.userName ?? c.contactName ?? '').toString().trim();
+    const email = (c.email ?? c.contactEmail ?? c.contact?.email ?? c.identity?.email ?? '').toString().trim();
+    const phone = (
+      c.phone
+      ?? c.phoneFull
+      ?? c.phoneNumber
+      ?? c.contactPhone
+      ?? c.contact?.phone
+      ?? c.identity?.phone
+      ?? ''
+    ).toString().trim();
+
+    const hasLegacyContactFields = !!(
+      c.contactEmail
+      || c.contactPhone
+      || c.contactName
+      || c.contact
+    );
+
+    const type = (c.type ?? c.reporterType ?? c.kind ?? c.role ?? '').toString().toLowerCase();
+    const status = (c.status ?? c.reporterStatus ?? '').toString().toLowerCase();
+    const verificationStatus = (c.verificationStatus ?? c.verification ?? c.verificationLevel ?? c.verification?.level ?? '').toString().toLowerCase();
+
+    const counts = (c.counts ?? c.stats ?? c.storyCounts ?? c.submissionCounts ?? c.submissions ?? null) as any;
+    const totalStories = Number(
+      c.storiesCount
+      ?? c.totalStories
+      ?? counts?.total
+      ?? counts?.all
+      ?? counts?.stories
+      ?? 0
+    ) || 0;
+    const approvedStories = Number(c.approvedStories ?? counts?.approved ?? counts?.accepted ?? 0) || 0;
+    const pendingStories = Number(c.pendingStories ?? counts?.pending ?? counts?.under_review ?? counts?.underReview ?? 0) || 0;
+    const rejectedStories = Number(c.rejectedStories ?? counts?.rejected ?? 0) || 0;
+    const withdrawnStories = Number(c.withdrawnStories ?? counts?.withdrawn ?? 0) || 0;
+    const publishedStories = Number(c.publishedStories ?? counts?.published ?? counts?.live ?? 0) || 0;
+
+    const lastSubmissionAt = String(
+      c.lastSubmissionAt
+      ?? c.lastSubmittedAt
+      ?? c.lastStoryAt
+      ?? c.lastStory
+      ?? c.lastStoryDate
+      ?? c.activity?.lastSubmissionAt
+      ?? c.activity?.lastStoryAt
+      ?? ''
+    ).trim();
+
+    const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? c.location?.town ?? null);
+    const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? c.location?.region ?? null);
+    const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? c.location?.nation ?? null);
+    const district = (c.district ?? c.location?.district ?? c.location?.area ?? c.locationDetail?.district ?? null);
+
+    const identitySource = (c.identitySource ?? c.identity?.source ?? c.source ?? c.sourceKind ?? null);
+    const linkedStoryCount = (c.linkedStoryCount ?? c.linkedStories ?? c.storyCount ?? totalStories ?? null);
+
+    const contactIdRaw = c.contactId ?? c.contactID ?? c.contactRecordId ?? c.contactRecordID ?? c.contact?._id ?? c.contact?.id;
+    const contactId = String(contactIdRaw ?? '').trim();
+
+    // For legacy contact-record responses where the row itself is the contact document,
+    // populate contactId from the row id to preserve “View stories”/delete flows.
+    const legacyRowId = String(c._id ?? c.id ?? '').trim();
+    const derivedContactId = !contactId && hasLegacyContactFields && !contributorIdRaw ? legacyRowId : '';
+
+    const idRaw = contributorIdRaw ?? derivedContactId ?? c._id ?? c.id ?? c.reporterId ?? c.userId ?? c.reporterKey ?? c.key;
+    const idCandidate = String(idRaw ?? '').trim();
+
+    const stableId = idCandidate || stableAnonId({
+      fullName,
+      email: email.toLowerCase(),
+      phone,
+      city,
+      state,
+      country,
+      district,
+    });
+    const reporterKey = String(c.reporterKey ?? c.identityKey ?? c.key ?? contributorIdRaw ?? idRaw ?? '').trim() || stableId;
+
+    return {
+      id: stableId,
+      contributorId: contributorIdRaw != null ? String(contributorIdRaw).trim() || null : null,
+      contactId: (contactId || derivedContactId) || null,
+      reporterKey: reporterKey || null,
+      name: fullName || null,
+      email: email || null,
+      phone: phone || null,
+      city: (city ?? null),
+      state: (state ?? null),
+      country: (country ?? null),
+      district: district != null ? String(district) : null,
+      identitySource: identitySource != null ? String(identitySource) : null,
+      linkedStoryCount: linkedStoryCount != null ? Number(linkedStoryCount) || null : null,
+      lastSubmissionAt: lastSubmissionAt || null,
+      notes: (c.notes ?? null),
+      totalStories,
+      pendingStories,
+      approvedStories,
+      rejectedStories,
+      withdrawnStories,
+      publishedStories,
+      lastStoryAt: lastSubmissionAt || '',
+      reporterType: (type === 'journalist' ? 'journalist' : type === 'community' ? 'community' : undefined),
+      verificationLevel: (verificationStatus === 'verified'
+        ? 'verified'
+        : verificationStatus === 'pending'
+          ? 'pending'
+          : (verificationStatus === 'rejected' || verificationStatus === 'revoked')
+            ? 'revoked'
+            : verificationStatus === 'limited'
+              ? 'limited'
+              : verificationStatus === 'unverified'
+                ? 'unverified'
+                : verificationStatus === 'community_default'
+                  ? 'community_default'
+                  : undefined),
+      status: (status === 'blocked' || status === 'suspended' ? 'suspended' : status === 'archived' || status === 'banned' ? 'banned' : status === 'watchlist' ? 'watchlist' : status ? 'active' : undefined),
+      ethicsStrikes: (typeof c.ethicsStrikes === 'number' ? c.ethicsStrikes : (typeof c.strikes === 'number' ? c.strikes : null)),
+      organisationName: c.organisationName ?? c.organizationName ?? null,
+      organisationType: c.organisationType ?? c.organizationType ?? null,
+      positionTitle: c.positionTitle ?? null,
+      beatsProfessional: Array.isArray(c.beatsProfessional) ? c.beatsProfessional : (Array.isArray(c.beats) ? c.beats : null),
+      yearsExperience: (typeof c.yearsExperience === 'number' ? c.yearsExperience : null),
+      languages: Array.isArray(c.languages) ? c.languages : null,
+      websiteOrPortfolio: c.websiteOrPortfolio ?? null,
+      socialLinks: (c.socialLinks ?? null),
+      journalistCharterAccepted: (typeof c.journalistCharterAccepted === 'boolean' ? c.journalistCharterAccepted : null),
+      charterAcceptedAt: c.charterAcceptedAt ?? null,
+    };
+  });
+
+  const totalOut: number = typeof payload?.total === 'number' ? payload.total : rows.length;
+  return {
+    ok: payload?.ok === true || payload?.success === true,
+    rows,
+    total: totalOut,
+    items: rows,
+    endpointUsed: endpointPath,
+  } satisfies ReporterContactListResponse;
 }
 
 export async function listReporterContacts(params?: {
@@ -95,195 +291,110 @@ export async function listReporterContacts(params?: {
   sortDir?: 'asc' | 'desc';
 }) {
   try {
+    // IMPORTANT: Contributor Network must reflect unified contributor identities derived from
+    // community submissions. Prefer the unified contributor dataset route when present.
     // Backend routes for reporter directory are mounted under:
-    // - proxy mode:  /admin-api/admin/community/reporters
-    // - direct mode: /api/admin/community/reporters
+    // - proxy mode:  /admin-api/admin/community/*
+    // - direct mode: /api/admin/community/*
     // (`adminApi` normalizes the mode-specific prefix automatically.)
-    const res = await adminApi.get<any>('/community/reporters', { params });
+    const candidates = ['/community/contributors', '/community/reporters'];
 
-    const rawPayload: any = res?.data ?? {};
-
-    // Backend response shapes seen in the wild:
-    // - { items: [], total }
-    // - { rows: [], total }
-    // - { reporters: [], total }
-    // - { contributors: [], total }
-    // - []
-    // - { data: [] }
-    const rawItems: any[] = Array.isArray(rawPayload)
-      ? rawPayload
-      : Array.isArray(rawPayload?.items)
-        ? rawPayload.items
-        : Array.isArray(rawPayload?.rows)
-          ? rawPayload.rows
-          : Array.isArray(rawPayload?.reporters)
-            ? rawPayload.reporters
-            : Array.isArray(rawPayload?.contributors)
-              ? rawPayload.contributors
-              : Array.isArray(rawPayload?.data)
-                ? rawPayload.data
-                : Array.isArray(rawPayload?.data?.items)
-                  ? rawPayload.data.items
-                  : Array.isArray(rawPayload?.data?.rows)
-                    ? rawPayload.data.rows
-                    : [];
-
-    const total = typeof rawPayload?.total === 'number'
-      ? rawPayload.total
-      : typeof rawPayload?.data?.total === 'number'
-        ? rawPayload.data.total
-        : rawItems.length;
-
-    // Keep the page's expected response mapping shape.
-    const payload = { ...(rawPayload ?? {}), items: rawItems, total };
-
-    // If backend uses 200 with { ok:false }, treat it as an error (do NOT fall back to empty UI state).
-    if (payload && payload.ok === false) {
-      const msg = extractBackendMessage(payload) || 'Failed to load reporter contacts';
-      const e: UiNotifyError = new Error(msg) as UiNotifyError;
-      // Preserve a status for UI banners; 200 indicates transport succeeded but app-level failed.
-      e.status = 200;
-      throw e;
+    let lastErr: any = null;
+    for (const endpointPath of candidates) {
+      try {
+        return await fetchReporterContactsFromEndpoint(endpointPath, params);
+      } catch (err: any) {
+        lastErr = err;
+        const status: number | undefined = err?.response?.status ?? err?.status;
+        if (status === 404 || status === 405) continue;
+        throw err;
+      }
     }
 
-    const rowsRaw: any[] = Array.isArray(payload.items) ? payload.items : [];
-
-    const rows: ReporterContact[] = rowsRaw.map((c: any) => {
-      const contributorIdRaw = c.contributorId ?? c.contributorID ?? c.contributor?.id ?? c.contributor?._id;
-
-      const fullName = (c.fullName ?? c.name ?? c.displayName ?? c.userName ?? c.contactName ?? '').toString().trim();
-      const email = (c.email ?? c.contactEmail ?? c.contact?.email ?? c.identity?.email ?? '').toString().trim();
-      const phone = (
-        c.phone
-        ?? c.phoneFull
-        ?? c.phoneNumber
-        ?? c.contactPhone
-        ?? c.contact?.phone
-        ?? c.identity?.phone
-        ?? ''
-      ).toString().trim();
-
-      const hasLegacyContactFields = !!(
-        c.contactEmail
-        || c.contactPhone
-        || c.contactName
-        || c.contact
-      );
-
-      const type = (c.type ?? c.reporterType ?? c.kind ?? c.role ?? '').toString().toLowerCase();
-      const status = (c.status ?? c.reporterStatus ?? '').toString().toLowerCase();
-      const verificationStatus = (c.verificationStatus ?? c.verification ?? c.verificationLevel ?? c.verification?.level ?? '').toString().toLowerCase();
-
-      const counts = (c.counts ?? c.stats ?? c.storyCounts ?? c.submissionCounts ?? c.submissions ?? null) as any;
-      const totalStories = Number(
-        c.storiesCount
-        ?? c.totalStories
-        ?? counts?.total
-        ?? counts?.all
-        ?? counts?.stories
-        ?? 0
-      ) || 0;
-      const approvedStories = Number(c.approvedStories ?? counts?.approved ?? counts?.accepted ?? 0) || 0;
-      const pendingStories = Number(c.pendingStories ?? counts?.pending ?? counts?.under_review ?? counts?.underReview ?? 0) || 0;
-      const rejectedStories = Number(c.rejectedStories ?? counts?.rejected ?? 0) || 0;
-      const withdrawnStories = Number(c.withdrawnStories ?? counts?.withdrawn ?? 0) || 0;
-      const publishedStories = Number(c.publishedStories ?? counts?.published ?? counts?.live ?? 0) || 0;
-
-      const lastSubmissionAt = String(
-        c.lastSubmissionAt
-        ?? c.lastSubmittedAt
-        ?? c.lastStoryAt
-        ?? c.lastStory
-        ?? c.lastStoryDate
-        ?? c.activity?.lastSubmissionAt
-        ?? c.activity?.lastStoryAt
-        ?? ''
-      ).trim();
-
-      const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? c.location?.town ?? null);
-      const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? c.location?.region ?? null);
-      const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? c.location?.nation ?? null);
-      const district = (c.district ?? c.location?.district ?? c.location?.area ?? c.locationDetail?.district ?? null);
-
-      const identitySource = (c.identitySource ?? c.identity?.source ?? c.source ?? c.sourceKind ?? null);
-      const linkedStoryCount = (c.linkedStoryCount ?? c.linkedStories ?? c.storyCount ?? totalStories ?? null);
-
-      const contactIdRaw = c.contactId ?? c.contactID ?? c.contactRecordId ?? c.contactRecordID ?? c.contact?._id ?? c.contact?.id;
-      const contactId = String(contactIdRaw ?? '').trim();
-
-      // For legacy contact-record responses where the row itself is the contact document,
-      // populate contactId from the row id to preserve “View stories”/delete flows.
-      const legacyRowId = String(c._id ?? c.id ?? '').trim();
-      const derivedContactId = !contactId && hasLegacyContactFields && !contributorIdRaw ? legacyRowId : '';
-
-      const idRaw = contributorIdRaw ?? derivedContactId ?? c._id ?? c.id ?? c.reporterId ?? c.userId ?? c.reporterKey ?? c.key;
-      const idCandidate = String(idRaw ?? '').trim();
-
-      const stableId = idCandidate || stableAnonId({ fullName, email, phone, city, state, country, district, totalStories, approvedStories, pendingStories, rejectedStories, withdrawnStories, publishedStories });
-      const reporterKey = String(c.reporterKey ?? c.identityKey ?? c.key ?? contributorIdRaw ?? idRaw ?? '').trim() || stableId;
-
-      return {
-        id: stableId,
-        contributorId: contributorIdRaw != null ? String(contributorIdRaw).trim() || null : null,
-        contactId: (contactId || derivedContactId) || null,
-        reporterKey: reporterKey || null,
-        name: fullName || null,
-        email: email || null,
-        phone: phone || null,
-        city: (city ?? null),
-        state: (state ?? null),
-        country: (country ?? null),
-        district: district != null ? String(district) : null,
-        identitySource: identitySource != null ? String(identitySource) : null,
-        linkedStoryCount: linkedStoryCount != null ? Number(linkedStoryCount) || null : null,
-        lastSubmissionAt: lastSubmissionAt || null,
-        notes: (c.notes ?? null),
-        totalStories,
-        pendingStories,
-        approvedStories,
-        rejectedStories,
-        withdrawnStories,
-        publishedStories,
-        lastStoryAt: lastSubmissionAt || '',
-        reporterType: (type === 'journalist' ? 'journalist' : type === 'community' ? 'community' : undefined),
-        verificationLevel: (verificationStatus === 'verified'
-          ? 'verified'
-          : verificationStatus === 'pending'
-            ? 'pending'
-            : (verificationStatus === 'rejected' || verificationStatus === 'revoked')
-              ? 'revoked'
-              : verificationStatus === 'limited'
-                ? 'limited'
-                : verificationStatus === 'unverified'
-                  ? 'unverified'
-                  : verificationStatus === 'community_default'
-                    ? 'community_default'
-                    : undefined),
-        status: (status === 'blocked' || status === 'suspended' ? 'suspended' : status === 'archived' || status === 'banned' ? 'banned' : status === 'watchlist' ? 'watchlist' : status ? 'active' : undefined),
-        ethicsStrikes: (typeof c.ethicsStrikes === 'number' ? c.ethicsStrikes : (typeof c.strikes === 'number' ? c.strikes : null)),
-        organisationName: c.organisationName ?? c.organizationName ?? null,
-        organisationType: c.organisationType ?? c.organizationType ?? null,
-        positionTitle: c.positionTitle ?? null,
-        beatsProfessional: Array.isArray(c.beatsProfessional) ? c.beatsProfessional : (Array.isArray(c.beats) ? c.beats : null),
-        yearsExperience: (typeof c.yearsExperience === 'number' ? c.yearsExperience : null),
-        languages: Array.isArray(c.languages) ? c.languages : null,
-        websiteOrPortfolio: c.websiteOrPortfolio ?? null,
-        socialLinks: (c.socialLinks ?? null),
-        journalistCharterAccepted: (typeof c.journalistCharterAccepted === 'boolean' ? c.journalistCharterAccepted : null),
-        charterAcceptedAt: c.charterAcceptedAt ?? null,
-      };
-    });
-
-    const totalOut: number = typeof payload?.total === 'number' ? payload.total : rows.length;
-    return {
-      ok: payload?.ok === true || payload?.success === true,
-      rows,
-      total: totalOut,
-      items: rows,
-    } satisfies ReporterContactListResponse;
+    throw lastErr || new Error('Failed to load reporter contacts');
   } catch (err: any) {
     throw mapAdminActionError(err, 'Failed to load reporter contacts');
   }
+}
+
+export async function listReporterContactsAll(params?: Parameters<typeof listReporterContacts>[0]) {
+  // Fetch all pages so the directory reflects backend totals.
+  // This avoids showing an artificially-small dataset when backend has many contributors.
+  const limit = Math.max(1, Math.min(Number(params?.limit ?? 500) || 500, 1000));
+  const first = await listReporterContacts({ ...(params || {}), page: 1, limit });
+  const endpointUsed = first.endpointUsed;
+
+  const mergedById = new Map<string, ReporterContact>();
+  const mergeIn = (rows: ReporterContact[]) => {
+    for (const r of rows) {
+      const prev = mergedById.get(r.id);
+      if (!prev) {
+        mergedById.set(r.id, r);
+        continue;
+      }
+      mergedById.set(r.id, {
+        ...prev,
+        ...r,
+        contributorId: (prev.contributorId ?? r.contributorId) ?? null,
+        contactId: (prev.contactId ?? r.contactId) ?? null,
+        reporterKey: (prev.reporterKey ?? r.reporterKey) ?? null,
+        name: prev.name || r.name || null,
+        email: prev.email || r.email || null,
+        phone: prev.phone || r.phone || null,
+        city: prev.city || r.city || null,
+        state: prev.state || r.state || null,
+        country: prev.country || r.country || null,
+        district: prev.district || r.district || null,
+        identitySource: prev.identitySource || r.identitySource || null,
+        linkedStoryCount: (typeof prev.linkedStoryCount === 'number' ? prev.linkedStoryCount : null) ?? (typeof r.linkedStoryCount === 'number' ? r.linkedStoryCount : null),
+        lastSubmissionAt: prev.lastSubmissionAt || r.lastSubmissionAt || null,
+        notes: prev.notes || r.notes || null,
+        totalStories: Math.max(Number(prev.totalStories || 0), Number(r.totalStories || 0)),
+        approvedStories: Math.max(Number(prev.approvedStories || 0), Number(r.approvedStories || 0)),
+        pendingStories: Math.max(Number(prev.pendingStories || 0), Number(r.pendingStories || 0)),
+        rejectedStories: Math.max(Number(prev.rejectedStories || 0), Number(r.rejectedStories || 0)),
+        withdrawnStories: Math.max(Number(prev.withdrawnStories || 0), Number(r.withdrawnStories || 0)),
+        publishedStories: Math.max(Number(prev.publishedStories || 0), Number(r.publishedStories || 0)),
+        lastStoryAt: prev.lastStoryAt || r.lastStoryAt || '',
+      });
+    }
+  };
+
+  mergeIn(first.rows || first.items || []);
+
+  // If backend doesn't provide an explicit total, our wrapper falls back to `rows.length`.
+  // In that situation we should treat the expected total as unknown and keep paging
+  // until the backend stops returning *new* identities.
+  const firstCount = Array.isArray(first.rows) ? first.rows.length : (Array.isArray(first.items) ? first.items.length : 0);
+  const totalExpected = (typeof first.total === 'number' && first.total > firstCount)
+    ? first.total
+    : Number.POSITIVE_INFINITY;
+  const maxPages = 50;
+
+  for (let page = 2; page <= maxPages; page++) {
+    if (Number.isFinite(totalExpected) && mergedById.size >= totalExpected) break;
+    // If endpointUsed is unknown, fall back to listReporterContacts (it will re-select).
+    const pageRes = endpointUsed
+      ? await fetchReporterContactsFromEndpoint(endpointUsed, { ...(params || {}), page, limit })
+      : await listReporterContacts({ ...(params || {}), page, limit });
+    const pageRows = pageRes.rows || pageRes.items || [];
+    if (pageRows.length === 0) break;
+
+    const before = mergedById.size;
+    mergeIn(pageRows);
+    const after = mergedById.size;
+    // Stop when paging yields no new identities (prevents infinite loops if backend ignores page).
+    if (after <= before) break;
+  }
+
+  const rows = Array.from(mergedById.values());
+  return {
+    ok: first.ok,
+    rows,
+    items: rows,
+    total: (Number.isFinite(totalExpected) ? totalExpected : rows.length),
+    endpointUsed,
+  } satisfies ReporterContactListResponse;
 }
 
 function stableAnonId(input: Record<string, unknown>) {

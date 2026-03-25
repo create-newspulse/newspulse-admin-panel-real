@@ -6,9 +6,8 @@ import { useNotify } from '@/components/ui/toast-bridge';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer.tsx';
 import ReporterStoriesDrawer from '@/components/community/ReporterStoriesDrawer.tsx';
-import { rebuildReporterDirectory, bulkDeleteReporterContacts, deleteReporterContact, listReporterContacts, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
+import { rebuildReporterDirectory, bulkDeleteReporterContacts, deleteReporterContact, listReporterContactsAll, type ReporterContact } from '@/lib/api/reporterDirectory.ts';
 import { useAuth } from '@/context/AuthContext.tsx';
-import { updateReporterStatus } from '@/lib/api/communityAdmin.ts';
 
 // Deprecated: legacy activity from lastStoryAt removed in favor of backend activity field
 
@@ -41,6 +40,7 @@ function norm(val: any, prefer?: 'city'|'state'|'country'): string {
 
 export default function ReporterContactDirectory() {
   const STORAGE_KEY = 'reporterDirectoryPreferences';
+  const STORAGE_KEY_UI = 'reporterDirectoryUiPreferences';
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -55,11 +55,16 @@ export default function ReporterContactDirectory() {
   const [districtFilter, setDistrictFilter] = useState<'all' | string>('all');
   const [areaTypeFilter, setAreaTypeFilter] = useState<'all' | 'metro' | 'corporation' | 'district_hq' | 'taluka' | 'village' | 'other'>('all');
   const [beatFilter, setBeatFilter] = useState<'all' | string>('all');
-  const [page] = useState(1);
   const notify = (useNotify?.() as unknown) as { ok: (msg: string, sub?: string) => void; error: (msg: string) => void } | undefined;
   const [sortBy, setSortBy] = useState<undefined | 'name' | 'stories' | 'lastStory' | 'activity'>(undefined);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const { user } = useAuth();
+
+  type DirectoryTab = 'table' | 'coverage' | 'timeline' | 'archive';
+  const [directoryTab, setDirectoryTab] = useState<DirectoryTab>('table');
+  const lastNonArchiveStatusRef = useRef<typeof statusFilter>('all');
+  const [showFounderColumns, setShowFounderColumns] = useState(false);
+  const [profileStartTab, setProfileStartTab] = useState<'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'activity'>('overview');
 
   const resolvedRole = useMemo(() => {
     const fromUser = String(user?.role || '').trim().toLowerCase();
@@ -151,10 +156,7 @@ export default function ReporterContactDirectory() {
       status: statusFilter, activity: activityFilter, hasNotes: hasNotesOnly, searchQuery, refreshTick
     }],
     queryFn: async () => {
-      const params: Parameters<typeof listReporterContacts>[0] = {
-        page: 1,
-        limit: 500,
-      };
+      const params: Parameters<typeof listReporterContactsAll>[0] = { limit: 500 };
 
       const q = String(searchQuery || '').trim();
       if (q) params.search = q;
@@ -171,7 +173,7 @@ export default function ReporterContactDirectory() {
       if (sortBy === 'stories') params.sortBy = 'totalStories';
       if (sortBy === 'lastStory' || sortBy === 'stories') params.sortDir = sortDirection;
 
-      return await listReporterContacts(params);
+      return await listReporterContactsAll(params);
     },
     staleTime: 0,
     refetchOnMount: 'always',
@@ -283,6 +285,19 @@ export default function ReporterContactDirectory() {
     } catch {}
   }, []);
 
+  // Load UI prefs (e.g., founder-only columns)
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem(STORAGE_KEY_UI);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data && typeof data === 'object') {
+        if (typeof data.showFounderColumns === 'boolean') setShowFounderColumns(data.showFounderColumns);
+      }
+    } catch {}
+  }, []);
+
   // Persist preferences whenever they change
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -303,6 +318,14 @@ export default function ReporterContactDirectory() {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
     } catch {}
   }, [searchQuery, countryVal, stateVal, cityVal, districtFilter, areaTypeFilter, beatFilter, hasNotesOnly, activityFilter, sortBy, sortDirection]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prefs = { showFounderColumns };
+    try {
+      window.localStorage.setItem(STORAGE_KEY_UI, JSON.stringify(prefs));
+    } catch {}
+  }, [showFounderColumns]);
 
   // Remove legacy effect-based fetch; useQuery handles loading + error
 
@@ -622,11 +645,72 @@ export default function ReporterContactDirectory() {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([city, count]) => ({ city, count }));
   }, [items, stateVal, countryVal, searchQuery]);
 
+  const summary = useMemo(() => {
+    const base = viewFilteredReporters;
+    const totalReporters = base.length;
+    const verified = base.filter(r => String(r.verificationLevel || '').toLowerCase() === 'verified').length;
+    const missingEmail = base.filter(r => !String(r.email || '').trim()).length;
+    const missingPhone = base.filter(r => !String(r.phone || '').trim()).length;
+    const missingLocation = base.filter(r => !String(r.city || '').trim() && !String((r as any).district || '').trim() && !String(r.state || '').trim()).length;
+    const unresolvedIdentity = base.filter(r => !String(r.name || '').trim() || (!String(r.email || '').trim() && !String(r.phone || '').trim())).length;
+    const now = Date.now();
+    const daysSince = (iso?: string | null) => {
+      const s = String(iso || '').trim();
+      if (!s) return Infinity;
+      const t = new Date(s).getTime();
+      if (!Number.isFinite(t) || t <= 0) return Infinity;
+      return (now - t) / (1000 * 60 * 60 * 24);
+    };
+    const activeThisMonth = base.filter(r => daysSince((r as any).lastSubmissionAt || r.lastStoryAt) <= 31).length;
+    const newThisMonth = base.filter(r => String((r as any).activity || '').toLowerCase() === 'new').length;
+    const inactive30 = base.filter(r => daysSince((r as any).lastSubmissionAt || r.lastStoryAt) >= 30).length;
+    const inactive60 = base.filter(r => daysSince((r as any).lastSubmissionAt || r.lastStoryAt) >= 60).length;
+    const inactive90 = base.filter(r => daysSince((r as any).lastSubmissionAt || r.lastStoryAt) >= 90).length;
+    const completeProfiles = base.filter(r => String(r.email || '').trim() && String(r.phone || '').trim() && (String(r.city || '').trim() || String((r as any).district || '').trim() || String(r.state || '').trim())).length;
+    const lastSubmissionMs = base
+      .map(r => new Date(String((r as any).lastSubmissionAt || r.lastStoryAt || '')).getTime())
+      .filter(t => Number.isFinite(t) && t > 0)
+      .sort((a, b) => b - a)[0];
+    const lastSubmissionLabel = lastSubmissionMs ? new Date(lastSubmissionMs).toLocaleString() : '—';
+    return {
+      totalReporters,
+      verified,
+      missingEmail,
+      missingPhone,
+      missingLocation,
+      activeThisMonth,
+      newThisMonth,
+      inactive30,
+      inactive60,
+      inactive90,
+      completeProfiles,
+      unresolvedIdentity,
+      lastSubmissionLabel,
+    };
+  }, [viewFilteredReporters]);
+
+  useEffect(() => {
+    if (directoryTab !== 'archive') return;
+    if (statusFilter !== 'archived') {
+      lastNonArchiveStatusRef.current = statusFilter;
+      setStatusFilter('archived');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryTab]);
+
+  useEffect(() => {
+    if (directoryTab === 'archive') return;
+    if (statusFilter === 'archived') {
+      setStatusFilter(lastNonArchiveStatusRef.current || 'all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryTab]);
+
   return (
     <div className="px-6 py-4 max-w-7xl mx-auto w-full">
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight">Contributor Network</h1>
-        <p className="text-sm text-slate-600">Founder-grade directory for follow-up, verification, and coverage planning. (Path unchanged.)</p>
+        <h1 className="text-3xl font-bold tracking-tight">Reporter Contact Directory</h1>
+        <p className="text-sm text-slate-600">Founder-grade reporter identity, contact, follow-up, and coverage planning directory.</p>
       </header>
 
       {unauthorized && (
@@ -635,246 +719,349 @@ export default function ReporterContactDirectory() {
         </div>
       )}
 
-      {/* Mobile location toggle (only if states available) */}
-      {hasStates && (
-        <div className="mt-4 md:hidden">
-          <button
-            type="button"
-            onClick={() => setShowLocationNav(v => !v)}
-            className="text-sm px-3 py-2 rounded-md border bg-white shadow-sm hover:bg-slate-50"
-          >{showLocationNav ? 'Hide location navigator' : 'Browse by location'}</button>
-          {showLocationNav && (
-            <div className="mt-3 border rounded-md overflow-hidden">
-              <LocationNavigator
-                stateGroups={stateGroups}
-                cityGroups={cityGroups}
-                activeState={stateVal}
-                activeCity={cityVal}
-                onSelectState={(s) => { setStateVal(s); setCityVal(undefined); }}
-                onSelectCity={(c) => setCityVal(c)}
-              />
-            </div>
-          )}
+      {/* Summary */}
+      <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <SummaryCard label="Total Reporters" value={summary.totalReporters} />
+        <SummaryCard label="Verified" value={summary.verified} />
+        <SummaryCard label="Missing Phone" value={summary.missingPhone} />
+        <SummaryCard label="Missing Location" value={summary.missingLocation} />
+        <SummaryCard label="Active This Month" value={summary.activeThisMonth} />
+        <SummaryCard label="New This Month" value={summary.newThisMonth} />
+        <SummaryCard label="Last Submission" value={summary.lastSubmissionLabel} isText />
+      </div>
+
+      <div className="mt-2 text-xs text-slate-600">
+        {summary.completeProfiles} complete · {summary.unresolvedIdentity} unresolved identity · {summary.missingEmail} missing email · {summary.missingPhone} missing phone · {summary.missingLocation} missing location · inactive {summary.inactive30}/{summary.inactive60}/{summary.inactive90} (30/60/90d)
+      </div>
+
+      {/* Directory tabs */}
+      <div className="mt-6 border-b">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+          {([
+            { key: 'table', label: 'Table' },
+            { key: 'coverage', label: 'Coverage' },
+            { key: 'timeline', label: 'Timeline' },
+            { key: 'archive', label: 'Archive' },
+          ] as const).map(t => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setDirectoryTab(t.key)}
+              className={
+                'px-3 py-1.5 text-sm rounded-md border whitespace-nowrap ' +
+                (directoryTab === t.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700')
+              }
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      <div className="mt-6 md:mt-8 flex flex-col md:flex-row gap-8">
-        {/* Desktop Sidebar (only if states available) */}
-        {hasStates && (
-          <aside className="hidden md:block w-72 shrink-0">
-            <div className="border rounded-lg p-4 bg-white shadow-sm">
-              <h2 className="text-sm font-semibold mb-3">Browse by location</h2>
-              <LocationNavigator
-                stateGroups={stateGroups}
-                cityGroups={cityGroups}
-                activeState={stateVal}
-                activeCity={cityVal}
-                onSelectState={(s) => { setStateVal(s); setCityVal(undefined); }}
-                onSelectCity={(c) => setCityVal(c)}
+      <div className="mt-6 space-y-6">
+        {/* Filters */}
+        <div className="border rounded-xl bg-white p-4 shadow-sm space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-slate-600 mb-1">Search</label>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name, email, phone…"
+                className="w-full px-3 py-2 border rounded-md text-sm"
               />
             </div>
-          </aside>
-        )}
-
-        <div className="flex-1 space-y-6">
-        {/* Filters Bar */}
-        <div className="flex flex-wrap items-center gap-3">
-        <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
-          {uniqueCountries.map(c => <option key={c ?? 'All countries'} value={c === 'All countries' ? '' : (c ?? '')}>{c}</option>)}
-        </select>
-        <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); setDistrictFilter('all'); }} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
-          {uniqueStates.map(s => <option key={s ?? 'All states'} value={s === 'All states' ? '' : (s ?? '')}>{s}</option>)}
-        </select>
-        {/* District */}
-        <select value={districtFilter} onChange={(e) => setDistrictFilter((e.target.value || 'all') as 'all' | string)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
-          {filteredDistricts.map(d => <option key={d ?? 'All districts'} value={d === 'All districts' ? 'all' : (d ?? '')}>{d}</option>)}
-        </select>
-        <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
-          {filteredCities.map(c => <option key={c ?? 'All cities'} value={c === 'All cities' ? '' : (c ?? '')}>{c}</option>)}
-        </select>
-        {/* Area type */}
-        <select value={areaTypeFilter} onChange={(e) => setAreaTypeFilter((e.target.value || 'all') as any)} className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm">
-          <option value="all">All areas</option>
-          <option value="metro">Metro city</option>
-          <option value="corporation">Municipal corporation</option>
-          <option value="district_hq">District HQ</option>
-          <option value="taluka">Taluka / block</option>
-          <option value="village">Village / rural</option>
-        </select>
-        <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search name, email, or phone…"
-          className="w-full sm:w-64 px-3 py-2 border rounded-md text-sm"
-        />
-
-        <select
-          value={viewFilter}
-          onChange={(e) => setViewFilter((e.target.value || 'all') as any)}
-          className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm"
-          title="CRM views"
-        >
-          <option value="all">All reporters</option>
-          <option value="unresolved_identity">Unresolved identity</option>
-          <option value="missing_email">Missing email</option>
-          <option value="missing_phone">Missing phone</option>
-          <option value="missing_location">Missing location</option>
-          <option value="no_stories">No stories yet</option>
-          <option value="inactive_30">Inactive 30+ days</option>
-          <option value="inactive_60">Inactive 60+ days</option>
-          <option value="inactive_90">Inactive 90+ days</option>
-        </select>
-        <button
-          type="button"
-          onClick={() => {
-            setCountryVal(undefined);
-            setStateVal(undefined);
-            setCityVal(undefined);
-            setDistrictFilter('all');
-            setAreaTypeFilter('all');
-            setBeatFilter('all');
-            setSearchQuery('');
-            setHasNotesOnly(false);
-            setActivityFilter('all');
-            setSortBy(undefined);
-            setSortDirection('desc');
-            if (typeof window !== 'undefined') {
-              try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
-            }
-          }}
-          className="text-xs px-3 py-2 border rounded-md hover:bg-slate-50"
-        >Clear filters</button>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" checked={hasNotesOnly} onChange={(e) => setHasNotesOnly(e.target.checked)} />
-            Has notes
-          </label>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">Beat:</span>
-            <select value={beatFilter} onChange={(e)=> setBeatFilter((e.target.value || 'all') as 'all' | string)} className="text-xs px-2 py-2 border rounded-md">
-              {['all','Politics','Crime','Youth','Education','Business','Sports','Civic issues'].map(opt => (
-                <option key={opt} value={opt}>{opt === 'all' ? 'All beats' : opt}</option>
-              ))}
-            </select>
-            <span className="text-xs text-slate-600">Type:</span>
-            <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as 'all'|'community'|'journalist')} className="text-xs px-2 py-2 border rounded-md">
-              <option value="all">All</option>
-              <option value="community">Community</option>
-              <option value="journalist">Journalist</option>
-            </select>
-            <span className="text-xs text-slate-600">Verification:</span>
-            <select value={verificationFilter} onChange={(e)=> setVerificationFilter(e.target.value as any)} className="text-xs px-2 py-2 border rounded-md">
-              {['All','Verified','Pending','Limited','Revoked','Unverified','Community Default'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-            <span className="text-xs text-slate-600">Status:</span>
-            <select value={statusFilter} onChange={(e)=> setStatusFilter(e.target.value as 'all'|'active'|'blocked'|'archived')} className="text-xs px-2 py-2 border rounded-md">
-              <option value="all">All</option>
-              <option value="active">Active</option>
-              <option value="blocked">Blocked</option>
-              <option value="archived">Archived</option>
-            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCountryVal(undefined);
+                  setStateVal(undefined);
+                  setCityVal(undefined);
+                  setDistrictFilter('all');
+                  setAreaTypeFilter('all');
+                  setBeatFilter('all');
+                  setSearchQuery('');
+                  setHasNotesOnly(false);
+                  setActivityFilter('all');
+                  setVerificationFilter('All');
+                  setTypeFilter('all');
+                  setStatusFilter('all');
+                  setViewFilter('all');
+                  setSortBy(undefined);
+                  setSortDirection('desc');
+                  if (typeof window !== 'undefined') {
+                    try {
+                      window.localStorage.removeItem(STORAGE_KEY);
+                    } catch {}
+                  }
+                }}
+                className="text-sm px-3 py-2 border rounded-md hover:bg-slate-50"
+              >Clear filters</button>
+              <span className="text-sm text-slate-600">{viewFilteredReporters.length} shown · {total} total</span>
+            </div>
           </div>
-          <select
-            value={activityFilter}
-            onChange={(e) => setActivityFilter((e.target.value || 'all') as any)}
-            className="text-xs px-2 py-2 border rounded-md"
-            title="Filter by activity"
-          >
-            {[
-              { label: 'All activity', value: 'all' },
-              { label: 'Active', value: 'active' },
-              { label: 'Inactive', value: 'inactive' },
-              { label: 'New', value: 'new' },
-              { label: 'On leave', value: 'on_leave' },
-              { label: 'Blacklisted', value: 'blacklisted' },
-            ].map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-          <span className="text-xs text-slate-500">{viewFilteredReporters.length} shown · {total} total</span>
-          {(() => {
-            const base = viewFilteredReporters;
-            const totalReporters = base.length;
-            const missingEmail = base.filter(r => !String(r.email || '').trim()).length;
-            const missingPhone = base.filter(r => !String(r.phone || '').trim()).length;
-            const missingLocation = base.filter(r => !String(r.city || '').trim() && !String(r.state || '').trim() && !String(r.country || '').trim()).length;
-            const unresolvedIdentity = base.filter(r => !String(r.name || '').trim() || (!String(r.email || '').trim() && !String(r.phone || '').trim())).length;
 
-            const now = Date.now();
-            const ageDays = (iso?: string | null) => {
-              const s = String(iso || '').trim();
-              if (!s) return Infinity;
-              const t = new Date(s).getTime();
-              if (!Number.isFinite(t) || t <= 0) return Infinity;
-              return (now - t) / (1000 * 60 * 60 * 24);
-            };
-            const inactive30 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 30).length;
-            const inactive60 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 60).length;
-            const inactive90 = base.filter(r => ageDays((r as any).lastSubmissionAt || r.lastStoryAt) >= 90).length;
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+              <select value={statusFilter} onChange={(e)=> setStatusFilter(e.target.value as any)} className="w-full px-3 py-2 border rounded-md text-sm">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="blocked">Blocked</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Verification</label>
+              <select value={verificationFilter} onChange={(e)=> setVerificationFilter(e.target.value as any)} className="w-full px-3 py-2 border rounded-md text-sm">
+                {['All','Verified','Pending','Limited','Revoked','Unverified','Community Default'].map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Type</label>
+              <select value={typeFilter} onChange={(e)=> setTypeFilter(e.target.value as any)} className="w-full px-3 py-2 border rounded-md text-sm">
+                <option value="all">All</option>
+                <option value="community">Community Reporter</option>
+                <option value="journalist">Journalist</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Activity</label>
+              <select value={activityFilter} onChange={(e) => setActivityFilter((e.target.value || 'all') as any)} className="w-full px-3 py-2 border rounded-md text-sm">
+                {[{ label: 'All activity', value: 'all' },{ label: 'Active', value: 'active' },{ label: 'Inactive', value: 'inactive' },{ label: 'New', value: 'new' },{ label: 'On leave', value: 'on_leave' },{ label: 'Blacklisted', value: 'blacklisted' }].map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
 
-            const completeProfiles = base.filter(r => String(r.email || '').trim() && String(r.phone || '').trim() && (String(r.city || '').trim() || String(r.state || '').trim() || String(r.country || '').trim())).length;
-            return (
-              <span className="text-xs text-slate-500 inline-flex items-center gap-2">
-                {totalReporters > 0 && (
-                  <>
-                    <span>{completeProfiles} complete</span>
-                    <span>· {unresolvedIdentity} unresolved identity</span>
-                    <span>· {missingEmail} missing email</span>
-                    <span title="Missing phone means the reporter contact record does not yet include a phone number.">· {missingPhone} missing phone</span>
-                    <span>· {missingLocation} missing location</span>
-                    <span title="Computed from last story date (or missing)">· inactive: {inactive30}/{inactive60}/{inactive90} (30/60/90d)</span>
-                  </>
-                )}
-              </span>
-            );
-          })()}
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="ml-auto text-xs px-3 py-2 border rounded-md hover:bg-slate-50"
-          >Export CSV</button>
-          {canDelete && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">State</label>
+              <select value={stateVal ?? ''} onChange={(e) => { setStateVal(e.target.value || undefined); setCityVal(undefined); setDistrictFilter('all'); }} className="w-full px-3 py-2 border rounded-md text-sm">
+                {uniqueStates.map(s => <option key={s ?? 'All states'} value={s === 'All states' ? '' : (s ?? '')}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">District</label>
+              <select value={districtFilter} onChange={(e) => setDistrictFilter((e.target.value || 'all') as 'all' | string)} className="w-full px-3 py-2 border rounded-md text-sm">
+                {filteredDistricts.map(d => <option key={d ?? 'All districts'} value={d === 'All districts' ? 'all' : (d ?? '')}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">City</label>
+              <select value={cityVal ?? ''} onChange={(e) => setCityVal(e.target.value || undefined)} className="w-full px-3 py-2 border rounded-md text-sm">
+                {filteredCities.map(c => <option key={c ?? 'All cities'} value={c === 'All cities' ? '' : (c ?? '')}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Beat / Area</label>
+              <div className="flex gap-2">
+                <select value={beatFilter} onChange={(e)=> setBeatFilter((e.target.value || 'all') as any)} className="w-1/2 px-3 py-2 border rounded-md text-sm">
+                  {['all','Politics','Crime','Youth','Education','Business','Sports','Civic issues'].map(opt => (
+                    <option key={opt} value={opt}>{opt === 'all' ? 'All beats' : opt}</option>
+                  ))}
+                </select>
+                <select value={areaTypeFilter} onChange={(e) => setAreaTypeFilter((e.target.value || 'all') as any)} className="w-1/2 px-3 py-2 border rounded-md text-sm">
+                  <option value="all">All areas</option>
+                  <option value="metro">Metro</option>
+                  <option value="corporation">Corporation</option>
+                  <option value="district_hq">District HQ</option>
+                  <option value="taluka">Taluka / block</option>
+                  <option value="village">Village / rural</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Missing data</label>
+              <select value={viewFilter} onChange={(e) => setViewFilter((e.target.value || 'all') as any)} className="w-full px-3 py-2 border rounded-md text-sm">
+                <option value="all">All reporters</option>
+                <option value="unresolved_identity">Unresolved identity</option>
+                <option value="missing_email">Missing email</option>
+                <option value="missing_phone">Missing phone</option>
+                <option value="missing_location">Missing location</option>
+                <option value="no_stories">No stories yet</option>
+                <option value="inactive_30">Inactive 30+ days</option>
+                <option value="inactive_60">Inactive 60+ days</option>
+                <option value="inactive_90">Inactive 90+ days</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Country</label>
+              <select value={countryVal ?? ''} onChange={(e) => { setCountryVal(e.target.value || undefined); setStateVal(undefined); setCityVal(undefined); }} className="w-full px-3 py-2 border rounded-md text-sm">
+                {uniqueCountries.map(c => <option key={c ?? 'All countries'} value={c === 'All countries' ? '' : (c ?? '')}>{c}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-end">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={hasNotesOnly} onChange={(e) => setHasNotesOnly(e.target.checked)} />
+                Has notes
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Secondary actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={handleExportCsv} className="text-sm px-3 py-2 border rounded-md hover:bg-slate-50">Export CSV</button>
+            {canDelete && (
+              <button
+                type="button"
+                disabled={backfillMutation.isPending}
+                onClick={() => setBackfillOpen(true)}
+                className="text-sm px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
+                title="Rebuild reporter directory from backend-normalized contributor data"
+              >
+                {backfillMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
+                {backfillMutation.isPending ? 'Rebuilding…' : 'Rebuild directory'}
+              </button>
+            )}
             <button
               type="button"
-              disabled={backfillMutation.isPending}
-              onClick={() => setBackfillOpen(true)}
-              className="ml-2 text-xs px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
-              title="Rebuild reporter directory from backend-normalized contributor data"
-            >
-              {backfillMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : null}
-              {backfillMutation.isPending ? 'Rebuilding…' : 'Rebuild directory'}
-            </button>
-          )}
-          <span className="ml-2 text-xs text-slate-600">{selectedIds.size} selected</span>
-          {canDelete && (
-            <button
-              type="button"
-              disabled={selectedIds.size === 0 || bulkDeleteBusy}
-              onClick={() => setBulkDeleteOpen(true)}
-              className="text-xs px-3 py-2 rounded-md border text-red-700 hover:bg-red-50 disabled:opacity-50"
-              title={selectedIds.size === 0 ? 'Select one or more contacts to delete' : 'Delete selected contacts'}
-            >
-              {bulkDeleteBusy ? 'Deleting…' : 'Delete selected'}
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={selectedIds.size === 0}
-            onClick={() => {
-              const visibleById = new Map(sortedReporters.map(r => [r.id, r] as const));
-              const emails = Array.from(selectedIds)
-                .map(id => visibleById.get(id)?.email || '')
-                .filter(e => !!e);
-              if (emails.length === 0) {
-                notify?.error?.('No emails found for selection');
+              disabled={selectedIds.size === 0}
+              onClick={() => {
+                const visibleById = new Map(sortedReporters.map(r => [r.id, r] as const));
+                const emails = Array.from(selectedIds)
+                  .map(id => visibleById.get(id)?.email || '')
+                  .filter(e => !!e);
+                if (emails.length === 0) {
+                  notify?.error?.('No emails found for selection');
+                  return;
+                }
+                const payload = emails.join(', ');
+                navigator.clipboard?.writeText(payload);
+                notify?.ok?.(`Copied ${emails.length} email(s) to clipboard`);
+              }}
+              className="text-sm px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50"
+            >Copy selected emails</button>
+            {canDelete && (
+              <button
+                type="button"
+                disabled={selectedIds.size === 0 || bulkDeleteBusy}
+                onClick={() => setBulkDeleteOpen(true)}
+                className="text-sm px-3 py-2 rounded-md border text-red-700 hover:bg-red-50 disabled:opacity-50"
+                title={selectedIds.size === 0 ? 'Select one or more contacts to delete' : 'Delete selected contacts'}
+              >
+                {bulkDeleteBusy ? 'Deleting…' : `Delete selected (${selectedIds.size})`}
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {canDelete && (
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={showFounderColumns} onChange={(e) => setShowFounderColumns(e.target.checked)} />
+                Founder columns
+              </label>
+            )}
+            <span className="text-sm text-slate-600">{selectedIds.size} selected</span>
+          </div>
+        </div>
+
+        {/* Main content */}
+        {directoryTab === 'coverage' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="border rounded-xl bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold">Coverage signals</h2>
+              <p className="text-xs text-slate-600 mt-1">Quick distribution view for beats and activity.</p>
+              <CoverageSummary items={sortedReporters} onOpenProfile={(r) => { setSelectedReporter(r); setProfileStartTab('coverage'); setIsProfileOpen(true); }} />
+            </div>
+            {hasStates ? (
+              <div className="border rounded-xl bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">Browse by location</h2>
+                    <p className="text-xs text-slate-600 mt-1">Use state/city counts to narrow coverage planning.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowLocationNav(v => !v)}
+                    className="text-sm px-3 py-2 rounded-md border hover:bg-slate-50 lg:hidden"
+                  >{showLocationNav ? 'Hide' : 'Show'}</button>
+                </div>
+                <div className={showLocationNav ? 'mt-3' : 'mt-3 hidden lg:block'}>
+                  <LocationNavigator
+                    stateGroups={stateGroups}
+                    cityGroups={cityGroups}
+                    activeState={stateVal}
+                    activeCity={cityVal}
+                    onSelectState={(s) => { setStateVal(s); setCityVal(undefined); }}
+                    onSelectCity={(c) => setCityVal(c)}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {directoryTab === 'timeline' ? (
+          <div className="border rounded-xl bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold">Timeline</h2>
+            <p className="text-xs text-slate-600 mt-1">Recent reporter submissions and activity signals (sorted by latest submission).</p>
+            <ReporterTimeline items={sortedReporters} onOpenProfile={(r) => { setSelectedReporter(r); setProfileStartTab('activity'); setIsProfileOpen(true); }} />
+          </div>
+        ) : null}
+
+        {directoryTab === 'table' || directoryTab === 'archive' ? (
+          <DirectoryTable
+            isLoading={isLoading}
+            isError={isError}
+            error={error as any}
+            items={sortedReporters}
+            selectedIds={selectedIds}
+            notify={notify}
+            canDelete={canDelete}
+            showFounderColumns={showFounderColumns}
+            onGoToLogin={() => navigate('/admin/login')}
+            onToggleSelect={(id: string) => {
+              setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id); else next.add(id);
+                return next;
+              });
+            }}
+            onToggleSelectAll={() => {
+              const allVisibleIds = sortedReporters.map(r => r.id);
+              const allSelected = allVisibleIds.every(id => selectedIds.has(id)) && allVisibleIds.length > 0;
+              setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (allSelected) {
+                  allVisibleIds.forEach(id => next.delete(id));
+                } else {
+                  allVisibleIds.forEach(id => next.add(id));
+                }
+                return next;
+              });
+            }}
+            onRequestRefresh={() => setRefreshTick(t => t + 1)}
+            onSelect={(r) => { setSelectedReporter(r); setProfileStartTab('overview'); setIsProfileOpen(true); }}
+            onAddNote={(r) => { setSelectedReporter(r); setProfileStartTab('notes'); setIsProfileOpen(true); }}
+            onAddTask={(r) => { setSelectedReporter(r); setProfileStartTab('tasks'); setIsProfileOpen(true); }}
+            onOpenStories={(r) => {
+              const contactId = String((r as any)?.contactId || '').trim();
+              if (contactId) {
+                setStoriesTarget(r);
                 return;
               }
-              const payload = emails.join(', ');
-              navigator.clipboard?.writeText(payload);
-              notify?.ok?.(`Copied ${emails.length} email(s) to clipboard`);
+
+              const reporterKey = String(r.reporterKey || r.id || '').trim();
+              if (!reporterKey) {
+                notify?.error?.('Missing reporter key (cannot load stories)');
+                return;
+              }
+
+              const name = (r.name || r.email || '').trim();
+              const qs = new URLSearchParams();
+              qs.set('reporterKey', reporterKey);
+              if (name) qs.set('name', name);
+              navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey, reporterName: name } });
             }}
-            className="text-xs px-3 py-2 border rounded-md hover:bg-slate-50 disabled:opacity-50"
-          >Copy selected emails</button>
-      </div>
+          />
+        ) : null}
+
 
       <ConfirmModal
         open={bulkDeleteOpen}
@@ -938,64 +1125,12 @@ export default function ReporterContactDirectory() {
         }}
       />
 
-      {/* Table with data */}
-        <DirectoryTable
-          isLoading={isLoading}
-          isError={isError}
-          error={error as any}
-          items={sortedReporters}
-          selectedIds={selectedIds}
-          notify={notify}
-          canDelete={canDelete}
-          onToggleSelect={(id: string) => {
-            setSelectedIds(prev => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id); else next.add(id);
-              return next;
-            });
-          }}
-          onToggleSelectAll={() => {
-            const allVisibleIds = sortedReporters.map(r => r.id);
-            const allSelected = allVisibleIds.every(id => selectedIds.has(id)) && allVisibleIds.length > 0;
-            setSelectedIds(prev => {
-              const next = new Set(prev);
-              if (allSelected) {
-                allVisibleIds.forEach(id => next.delete(id));
-              } else {
-                allVisibleIds.forEach(id => next.add(id));
-              }
-              return next;
-            });
-          }}
-          onRequestRefresh={() => setRefreshTick(t => t + 1)}
-          onSelect={(r) => { setSelectedReporter(r); setIsProfileOpen(true); }}
-          onOpenStories={(r) => {
-            const contactId = String((r as any)?.contactId || '').trim();
-            if (contactId) {
-              setStoriesTarget(r);
-              return;
-            }
-
-            const reporterKey = String(r.reporterKey || r.id || '').trim();
-            if (!reporterKey) {
-              notify?.error?.('Missing reporter key (cannot load stories)');
-              return;
-            }
-
-            const name = (r.name || r.email || '').trim();
-            const qs = new URLSearchParams();
-            qs.set('reporterKey', reporterKey);
-            if (name) qs.set('name', name);
-            navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey, reporterName: name } });
-          }}
-        />
-
-        </div>{/* end main content */}
       </div>
 
       <ReporterProfileDrawer
         open={isProfileOpen}
         reporter={selectedReporter}
+        initialTab={profileStartTab}
         onClose={() => setIsProfileOpen(false)}
         onOpenStories={(key) => {
           const name = selectedReporter?.name || selectedReporter?.email || '';
@@ -1015,6 +1150,132 @@ export default function ReporterContactDirectory() {
         onClose={() => setStoriesTarget(null)}
         onAfterMutation={() => setRefreshTick((t) => t + 1)}
       />
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, isText }: { label: string; value: number | string; isText?: boolean }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="text-[11px] font-medium text-slate-600">{label}</div>
+      <div className={isText ? 'mt-1 text-sm font-semibold text-slate-900' : 'mt-1 text-2xl font-semibold text-slate-900'}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function CoverageSummary({ items, onOpenProfile }: { items: ReporterContact[]; onOpenProfile: (r: ReporterContact) => void }) {
+  const beatCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    items.forEach(r => {
+      const beats = ((r as any).beatsProfessional || (r as any).beats || []) as string[];
+      if (!Array.isArray(beats) || beats.length === 0) {
+        map.set('Unspecified', (map.get('Unspecified') || 0) + 1);
+        return;
+      }
+      beats.forEach(b => {
+        const k = String(b || '').trim() || 'Unspecified';
+        map.set(k, (map.get(k) || 0) + 1);
+      });
+    });
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  }, [items]);
+
+  const topActive = useMemo(() => {
+    const now = Date.now();
+    const daysSince = (iso?: string | null) => {
+      const s = String(iso || '').trim();
+      if (!s) return Infinity;
+      const t = new Date(s).getTime();
+      if (!Number.isFinite(t) || t <= 0) return Infinity;
+      return (now - t) / (1000 * 60 * 60 * 24);
+    };
+    return [...items]
+      .filter(r => daysSince((r as any).lastSubmissionAt || r.lastStoryAt) <= 31)
+      .sort((a, b) => Number(b.totalStories || 0) - Number(a.totalStories || 0))
+      .slice(0, 8);
+  }, [items]);
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div>
+        <div className="text-xs font-medium text-slate-700">Top beats (current view)</div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {beatCounts.length === 0 ? (
+            <span className="text-sm text-slate-600">No beat data yet.</span>
+          ) : (
+            beatCounts.map(([beat, count]) => (
+              <span key={beat} className="inline-flex items-center gap-2 px-2 py-1 rounded-md border bg-white text-xs text-slate-700">
+                <span>{beat}</span>
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">{count}</span>
+              </span>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs font-medium text-slate-700">Active this month (quick access)</div>
+        <div className="mt-2 divide-y rounded-lg border">
+          {topActive.length === 0 ? (
+            <div className="p-3 text-sm text-slate-600">No active reporters in the current view this month.</div>
+          ) : (
+            topActive.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onOpenProfile(r)}
+                className="w-full text-left p-3 hover:bg-slate-50 flex items-center justify-between"
+              >
+                <span className="text-sm text-slate-900">{r.name || r.email || 'Unknown'}</span>
+                <span className="text-xs text-slate-600">{r.totalStories ?? 0} stories</span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReporterTimeline({ items, onOpenProfile }: { items: ReporterContact[]; onOpenProfile: (r: ReporterContact) => void }) {
+  const rows = useMemo(() => {
+    const toMs = (iso?: string | null) => {
+      const s = String(iso || '').trim();
+      if (!s) return 0;
+      const t = new Date(s).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+    return [...items]
+      .map(r => ({ r, t: toMs((r as any).lastSubmissionAt || r.lastStoryAt) }))
+      .sort((a, b) => b.t - a.t)
+      .slice(0, 50);
+  }, [items]);
+
+  return (
+    <div className="mt-4 divide-y rounded-lg border bg-white">
+      {rows.length === 0 ? (
+        <div className="p-4 text-sm text-slate-600">No recent activity for the current view.</div>
+      ) : (
+        rows.map(({ r, t }) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => onOpenProfile(r)}
+            className="w-full text-left p-4 hover:bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+          >
+            <div>
+              <div className="text-sm font-medium text-slate-900">{r.name || r.email || 'Unknown'}</div>
+              <div className="text-xs text-slate-600">{r.email || '—'}{r.phone ? ` · ${r.phone}` : ''}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">{t ? new Date(t).toLocaleString() : '—'}</span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">{r.totalStories ?? 0} stories</span>
+            </div>
+          </button>
+        ))
+      )}
     </div>
   );
 }
@@ -1070,14 +1331,31 @@ function LocationNavigator({ stateGroups, cityGroups, activeState, activeCity, o
   );
 }
 
-function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, onOpenStories, onRequestRefresh, notify, canDelete }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; onOpenStories: (r: ReporterContact) => void; onRequestRefresh: () => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void }; canDelete: boolean }) {
+function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggleSelect, onToggleSelectAll, onSelect, onAddNote, onAddTask, onOpenStories, onRequestRefresh, onGoToLogin, notify, canDelete, showFounderColumns }: { isLoading: boolean; isError: boolean; error: any; items: ReporterContact[]; selectedIds: Set<string>; onToggleSelect: (id: string) => void; onToggleSelectAll: () => void; onSelect: (r: ReporterContact) => void; onAddNote: (r: ReporterContact) => void; onAddTask: (r: ReporterContact) => void; onOpenStories: (r: ReporterContact) => void; onRequestRefresh: () => void; onGoToLogin: () => void; notify?: { ok: (msg: string, sub?: string) => void; error: (msg: string) => void }; canDelete: boolean; showFounderColumns: boolean }) {
   const { isFounder } = useAuth();
+  const showDebug = canDelete && showFounderColumns;
+  const colCount = showDebug ? 20 : 14;
+
+  const identitySourceLabel = (rc: ReporterContact): string => {
+    const raw = String((rc as any).identitySource || '').trim();
+    if (raw) return raw;
+    const hasContributor = !!String((rc as any).contributorId || '').trim();
+    const hasContact = !!String((rc as any).contactId || '').trim();
+    if (hasContributor && hasContact) return 'merged';
+    if (hasContributor) return 'submission-derived';
+    if (hasContact) return 'contact';
+    return 'unknown';
+  };
 
   const safe = (v: any) => {
     const s = v == null ? '' : String(v);
     const t = s.trim();
     return t ? t : '—';
   };
+
+  const MissingBadge = ({ label }: { label: string }) => (
+    <span className="inline-flex items-center px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200 text-xs">{label}</span>
+  );
 
   const [deleteTarget, setDeleteTarget] = useState<ReporterContact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -1091,20 +1369,36 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
+              <th className="px-3 py-3" />
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Email</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Phone</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">District</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Stories</th>
-              <th className="px-4 py-3"></th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Approved</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Pending</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Last Story</th>
+              <th className="px-4 py-3" />
+              {showDebug && (
+                <>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Activity</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Identity</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">IDs</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Linked</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white">
             {Array.from({ length: 6 }).map((_, i) => (
               <tr key={i}>
-                {Array.from({ length: 8 }).map((__, j) => (
+                {Array.from({ length: showDebug ? 20 : 14 }).map((__, j) => (
                   <td key={j} className="px-4 py-3">
                     <div className="h-4 w-full max-w-[140px] bg-slate-100 animate-pulse rounded" />
                   </td>
@@ -1125,7 +1419,7 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
         <p className="text-sm text-red-700">For security, reporter contact details are only visible to Founder/Admin.</p>
         <p className="text-sm text-red-700">Please log in again, then reopen this page.</p>
         <button
-          onClick={() => navigate('/admin/login')}
+          onClick={onGoToLogin}
           className="inline-flex items-center px-4 py-2 rounded-md bg-red-600 text-white text-sm font-medium hover:bg-red-700 shadow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
         >
           Go to Admin Login
@@ -1197,14 +1491,12 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
               </button>
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600" title={!isFounder ? 'Contact details may be masked for non-Founder' : undefined}>Email</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status / Strikes</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600" title={!isFounder ? 'Contact details may be masked for non-Founder' : undefined}>Phone</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">City</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">District</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">State</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Type</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Verification</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
                 <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('stories') || undefined}>
                   Stories <SortIndicator column="stories" />
@@ -1213,22 +1505,30 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Approved</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Pending</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
-              <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('activity') || undefined}>
-                Activity <SortIndicator column="activity" />
-              </button>
-            </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">
               <button type="button" className="inline-flex items-center gap-1 hover:underline" onClick={() => (window as any).__rc_handleSortChange?.('lastStory') || undefined}>
                 Last Story <SortIndicator column="lastStory" />
               </button>
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Actions</th>
+            {showDebug && (
+              <>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Activity</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Country</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Identity source</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600">Linked IDs</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-600" title="Backend-provided linked story count (if present)">Linked</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200 bg-white">
           {items.length === 0 ? (
             <tr>
-              <td colSpan={17} className="px-4 py-8 text-center text-sm text-slate-600">No reporters match your filters yet.</td>
+              <td colSpan={colCount} className="px-4 py-10 text-center">
+                <div className="text-sm font-medium text-slate-900">No reporters match your filters</div>
+                <div className="mt-1 text-sm text-slate-600">Try clearing filters or changing the missing-data view.</div>
+              </td>
             </tr>
           ) : (
             items.map((rc) => (
@@ -1252,13 +1552,6 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       <span title="Has founder/admin notes" className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">Notes</span>
                     )}
                   </div>
-                  {(() => {
-                    const beats = ((rc as any).beatsProfessional || (rc as any).beats || []) as string[];
-                    if (Array.isArray(beats) && beats.length > 0) {
-                      return <div className="mt-1 text-[11px] text-slate-600">Beats: {beats.join(', ')}</div>;
-                    }
-                    return null;
-                  })()}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.email ? (
@@ -1273,75 +1566,9 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                         <CopyIcon size={14} />
                       </button>
                     </div>
-                  ) : '—'}
-                  {Array.isArray(rc.languages) && rc.languages.length > 0 && (
-                    <div className="mt-1 text-[10px] text-slate-600">{rc.languages.map(l => (l || '').toUpperCase()).join(' · ')}</div>
+                  ) : (
+                    <MissingBadge label="Missing email" />
                   )}
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
-                    {rc.reporterType==='journalist' ? 'Journalist' : 'Community Reporter'}
-                  </span>
-                  {rc.organisationName && (
-                    <span className="ml-2 text-xs text-slate-600">{rc.organisationName}{rc.beatsProfessional && rc.beatsProfessional.length>0 ? ` · ${rc.beatsProfessional.join(', ')}` : ''}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : rc.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='revoked' ? 'bg-slate-100 text-slate-700 border-slate-200' : rc.verificationLevel==='community_default' ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                    {rc.verificationLevel==='verified' ? 'Verified' : rc.verificationLevel==='pending' ? 'Pending' : rc.verificationLevel==='limited' ? 'Limited' : rc.verificationLevel==='revoked' ? 'Revoked' : rc.verificationLevel==='community_default' ? 'Community Default' : 'Unverified'}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  {(() => {
-                    const s = rc.status || 'active';
-                    const map: Record<string, string> = {
-                      active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-                      watchlist: 'bg-amber-100 text-amber-800 border-amber-200',
-                      suspended: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-                      banned: 'bg-red-100 text-red-700 border-red-200',
-                    };
-                    const label: Record<string, string> = { active: 'Active', watchlist: 'Watchlist', suspended: 'Suspended', banned: 'Banned' };
-                    const activity = String(((rc as any).activity || '')).toLowerCase();
-                    const activityMap: Record<string, string> = {
-                      active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-                      new: 'bg-blue-100 text-blue-700 border-blue-200',
-                      on_leave: 'bg-amber-100 text-amber-800 border-amber-200',
-                      inactive: 'bg-slate-100 text-slate-700 border-slate-200',
-                      blacklisted: 'bg-red-100 text-red-700 border-red-200',
-                    };
-                    const activityLabel: Record<string, string> = { active: 'Active', new: 'New', on_leave: 'On leave', inactive: 'Inactive', blacklisted: 'Blacklisted' };
-                    return (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${map[s]}`}>{label[s]}</span>
-                        {activity && activity !== s && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${activityMap[activity]}`}>{activityLabel[activity] || activity}</span>
-                        )}
-                        {isFounder && (
-                          <select
-                            className="ml-2 text-xs px-2 py-1 border rounded-md bg-white"
-                            value={s}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={async (e) => {
-                              e.stopPropagation();
-                              const next = e.target.value as 'active'|'watchlist'|'suspended'|'banned';
-                              const id = (rc as any)._id || rc.id || rc.reporterKey || rc.email || '';
-                              try {
-                                await updateReporterStatus(String(id), { status: next });
-                                notify?.ok?.('Status updated', `Set to ${next}`);
-                                onRequestRefresh();
-                              } catch (err:any) {
-                                notify?.error?.('Failed to update status');
-                              }
-                            }}
-                            title="Founder-only: change reporter status"
-                          >
-                            {['active','watchlist','suspended','banned'].map(v => <option key={v} value={v}>{label[v]}</option>)}
-                          </select>
-                        )}
-                        <span className="ml-2 text-[11px] text-slate-600">Strikes: {typeof rc.ethicsStrikes === 'number' ? rc.ethicsStrikes : 0}</span>
-                      </div>
-                    );
-                  })()}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {rc.phone ? (
@@ -1354,55 +1581,30 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                       >Copy</button>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">No phone yet</span>
+                    <MissingBadge label="Missing phone" />
                   )}
                 </td>
-                <td className="px-4 py-3 text-sm">{norm(rc.city, 'city') || (!rc.city && !rc.state && !rc.country ? <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-xs">Location not set</span> : '—')}</td>
+                <td className="px-4 py-3 text-sm">{norm(rc.city, 'city') || (!rc.city && !(rc as any).district && !rc.state ? <MissingBadge label="Missing location" /> : '—')}</td>
                 <td className="px-4 py-3 text-sm">{String(((rc as any).district || '')).trim() || '—'}</td>
                 <td className="px-4 py-3 text-sm">{norm(rc.state, 'state') || '—'}</td>
-                <td className="px-4 py-3 text-sm">{norm(rc.country, 'country') || '—'}</td>
+                <td className="px-4 py-3 text-sm">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.reporterType==='journalist' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'}`}>
+                    {rc.reporterType==='journalist' ? 'Journalist' : 'Community'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${rc.verificationLevel==='verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : rc.verificationLevel==='pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : rc.verificationLevel==='revoked' ? 'bg-slate-100 text-slate-700 border-slate-200' : rc.verificationLevel==='community_default' ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                    {rc.verificationLevel==='verified' ? 'Verified' : rc.verificationLevel==='pending' ? 'Pending' : rc.verificationLevel==='limited' ? 'Limited' : rc.verificationLevel==='revoked' ? 'Revoked' : rc.verificationLevel==='community_default' ? 'Community Default' : 'Unverified'}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-sm">{rc.totalStories}</td>
                 <td className="px-4 py-3 text-sm">{typeof rc.approvedStories === 'number' ? rc.approvedStories : 0}</td>
                 <td className="px-4 py-3 text-sm">{typeof rc.pendingStories === 'number' ? rc.pendingStories : 0}</td>
-                <td className="px-4 py-3 text-sm">
-                  {(() => {
-                    const activity = String(((rc as any).activity || '')).toLowerCase();
-                    const label: Record<string, string> = { active: 'Active', new: 'New', on_leave: 'On leave', inactive: 'Inactive', blacklisted: 'Blacklisted' };
-                    const styles: Record<string, string> = {
-                      active: 'bg-emerald-100 text-emerald-700',
-                      new: 'bg-blue-100 text-blue-700',
-                      on_leave: 'bg-amber-100 text-amber-700',
-                      inactive: 'bg-slate-100 text-slate-600',
-                      blacklisted: 'bg-red-100 text-red-700',
-                    };
-                    return activity ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${styles[activity]}`}>{label[activity] || activity}</span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">—</span>
-                    );
-                  })()}
-                </td>
                 <td className="px-4 py-3 text-sm">{rc.lastStoryAt ? new Date(rc.lastStoryAt).toLocaleString() : '—'}</td>
                 <td className="px-4 py-3 text-right">
                   {(() => {
-                    function normalizePhone(phone?: string, country?: string): string {
-                      const raw = String(phone || '').replace(/[^0-9+]/g, '');
-                      if (!raw) return '';
-                      if (raw.startsWith('+')) return raw;
-                      const c = String(country || '').toLowerCase();
-                      const defaultCode = c === 'india' || c === 'in' ? '+91' : '+91';
-                      return `${defaultCode}${raw}`;
-                    }
-                    const normalizedPhone = normalizePhone(rc.phone || undefined, (norm(rc.country, 'country') || undefined) as string | undefined);
-                    const id = (rc as any)._id || rc.id || rc.reporterKey || rc.email || '';
                     return (
                       <span className="inline-flex items-center gap-2">
-                        {rc.phone && (
-                          <a href={`tel:${rc.phone}`} onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">Call</a>
-                        )}
-                        {normalizedPhone && (
-                          <a href={`https://wa.me/${normalizedPhone.replace('+','')}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">WhatsApp</a>
-                        )}
                         {rc.email && (
                           <a href={`mailto:${rc.email}`} onClick={(e) => e.stopPropagation()} className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50">Email</a>
                         )}
@@ -1423,6 +1625,20 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                         >
                           Profile
                         </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onAddNote(rc); }}
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
+                        >
+                          Add note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onAddTask(rc); }}
+                          className="text-xs px-2 py-1 rounded-md border hover:bg-slate-50"
+                        >
+                          Add task
+                        </button>
                         {(() => {
                           const contactRecordId = String((rc as any)?._id || (rc as any)?.contactId || (rc as any)?.contactRecordId || '').trim();
                           if (!canDelete || !contactRecordId) return null;
@@ -1441,6 +1657,37 @@ function DirectoryTable({ isLoading, isError, error, items, selectedIds, onToggl
                     );
                   })()}
                 </td>
+                {showDebug && (
+                  <>
+                    <td className="px-4 py-3 text-sm">
+                      {(() => {
+                        const s = rc.status || 'active';
+                        const label: Record<string, string> = { active: 'Active', watchlist: 'Watchlist', suspended: 'Suspended', banned: 'Banned' };
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-slate-50 text-slate-700 border-slate-200">{label[s] || s}</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {(() => {
+                        const activity = String(((rc as any).activity || '')).toLowerCase();
+                        const label: Record<string, string> = { active: 'Active', new: 'New', on_leave: 'On leave', inactive: 'Inactive', blacklisted: 'Blacklisted' };
+                        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-slate-50 text-slate-700 border-slate-200">{label[activity] || activity || '—'}</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 text-sm">{norm(rc.country, 'country') || '—'}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-slate-50 text-slate-700 border-slate-200" title={safe((rc as any).identitySource)}>
+                        {identitySourceLabel(rc)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="text-[11px] text-slate-700" title={`contributorId=${safe((rc as any).contributorId)}\ncontactId=${safe((rc as any).contactId)}`}>
+                        <div>c: {safe((rc as any).contributorId)}</div>
+                        <div>k: {safe((rc as any).contactId)}</div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm">{typeof (rc as any).linkedStoryCount === 'number' ? (rc as any).linkedStoryCount : '—'}</td>
+                  </>
+                )}
               </tr>
             ))
           )}
