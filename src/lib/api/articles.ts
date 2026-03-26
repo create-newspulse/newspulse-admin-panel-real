@@ -5,6 +5,15 @@
 import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
 
+type NpLangCode = 'en' | 'hi' | 'gu';
+type NpTextMap = Record<string, string>;
+type NpI18nBundle = {
+  title?: NpTextMap;
+  summary?: NpTextMap;
+  content?: NpTextMap;
+  description?: NpTextMap;
+};
+
 export interface Article {
   _id: string;
   title: string;
@@ -21,10 +30,6 @@ export interface Article {
   coverImage?: string | { url: string; publicId?: string };
   category?: string;
   status?: ArticleStatus;
-  // Some backends use alternate fields instead of `status`.
-  state?: string;
-  publishStatus?: string;
-  isPublished?: boolean;
   author?: { name?: string };
   language?: string;
   // Some backends send language as `lang`.
@@ -50,8 +55,10 @@ export interface Article {
   createdAt?: string;
   updatedAt?: string;
   scheduledAt?: string;
-  // Back-compat: scheduled publish timestamp.
-  publishAt?: string;
+
+  // Non-contract helper attached by this client normalizer when the backend
+  // stores multilingual text fields as objects (e.g., { en, hi, gu }).
+  __np_i18n?: NpI18nBundle;
 }
 
 export interface ListResponse {
@@ -76,45 +83,61 @@ function normalizeArticleLanguage<T>(input: T): T {
   return input;
 }
 
-function normalizeArticleStatus<T>(input: T): T {
+function coerceTextMap(value: any): NpTextMap | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: NpTextMap = {};
+  let hasAny = false;
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v !== 'string') continue;
+    out[String(k)] = v;
+    if (v.trim()) hasAny = true;
+  }
+  if (!Object.keys(out).length) return null;
+  // Keep the map even if currently empty-ish; the editor may need visibility.
+  return hasAny ? out : out;
+}
+
+function pickTextFromMap(map: NpTextMap, lang: string): string {
+  const l = String(lang || '').trim().toLowerCase();
+  const direct = typeof map?.[l] === 'string' ? map[l] : '';
+  if (direct.trim()) return direct;
+  const en = typeof map?.en === 'string' ? map.en : '';
+  if (en.trim()) return en;
+  for (const v of Object.values(map || {})) {
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return '';
+}
+
+function normalizeArticleI18nTextFields<T>(input: T): T {
   if (!input || typeof input !== 'object') return input;
   const a: any = input as any;
+  const lang = String(a?.lang ?? a?.language ?? 'en').trim().toLowerCase();
 
-  const raw = (
-    a?.status ??
-    a?.state ??
-    a?.publishStatus ??
-    a?.workflowStatus ??
-    a?.reviewStatus
-  );
+  const titleMap = coerceTextMap(a?.title);
+  const summaryMap = coerceTextMap(a?.summary);
+  const contentMap = coerceTextMap(a?.content ?? a?.body);
+  const descriptionMap = coerceTextMap(a?.description);
 
-  const statusString = (typeof raw === 'string' ? raw : '').trim().toLowerCase();
-  const isPublished = a?.isPublished === true || a?.published === true;
+  const bundle: NpI18nBundle = {
+    title: titleMap || undefined,
+    summary: summaryMap || undefined,
+    content: contentMap || undefined,
+    description: descriptionMap || undefined,
+  };
 
-  const normalized = (() => {
-    if (isPublished) return 'published';
-    if (!statusString) return '';
-    if (statusString === 'draft' || statusString === 'unpublished') return 'draft';
-    if (statusString === 'scheduled' || statusString === 'schedule') return 'scheduled';
-    if (statusString === 'published' || statusString === 'publish' || statusString === 'live' || statusString === 'public') return 'published';
-    if (statusString === 'archived') return 'archived';
-    if (statusString === 'deleted') return 'deleted';
-    return '';
-  })();
+  const hasAny = !!(titleMap || summaryMap || contentMap || descriptionMap);
+  if (hasAny) {
+    a.__np_i18n = bundle;
 
-  if (normalized) {
-    if (a.status == null || String(a.status).trim() === '') a.status = normalized;
-    // Keep alternates in sync when present.
-    if (a.state == null || String(a.state).trim() === '') a.state = normalized;
-    if (a.publishStatus == null || String(a.publishStatus).trim() === '') a.publishStatus = normalized;
+    if (titleMap) a.title = pickTextFromMap(titleMap, lang) || '';
+    if (summaryMap) a.summary = pickTextFromMap(summaryMap, lang) || '';
+    if (contentMap) a.content = pickTextFromMap(contentMap, lang) || '';
+    if (descriptionMap) a.description = pickTextFromMap(descriptionMap, lang) || '';
   }
 
-  // Scheduling timestamp normalization (try to keep it stable on round-trips)
-  const publishAt = typeof a?.publishAt === 'string' ? a.publishAt : undefined;
-  const scheduledAt = typeof a?.scheduledAt === 'string' ? a.scheduledAt : undefined;
-  if (!scheduledAt && publishAt) a.scheduledAt = publishAt;
-  if (!publishAt && scheduledAt) a.publishAt = scheduledAt;
-
+  // Ensure `content` exists for downstream components if backend uses `body`.
+  if (a.content == null && typeof a.body === 'string') a.content = a.body;
   return input;
 }
 
@@ -175,7 +198,8 @@ function normalizeListResponse(payload: any, opts: { requestedPage: number; limi
           : [])));
 
   const rows: Article[] = (rawRows || [])
-    .map((a) => normalizeArticleStatus(normalizeArticleLanguage(a)));
+    .map((a) => normalizeArticleLanguage(a))
+    .map((a) => normalizeArticleI18nTextFields(a));
 
   const total: number = typeof payload?.total === 'number'
     ? payload.total
@@ -240,10 +264,11 @@ export async function listArticles(params: {
   return normalizeListResponse(res.data, { requestedPage, limit });
 }
 
-export async function listArticlesByTranslationGroupId(translationGroupId: string, opts?: { limit?: number }): Promise<ListResponse> {
+export async function listArticlesByTranslationGroupId(translationGroupId: string): Promise<Article[]> {
   const gid = String(translationGroupId || '').trim();
-  if (!gid) return { rows: [], total: 0, page: 1, pages: 1 };
-  const limit = opts?.limit || 50;
+  if (!gid) return [];
+
+  const limit = 100;
   const res = await adminApiClient.get(ARTICLES_PATH, {
     params: {
       translationGroupId: gid,
@@ -252,7 +277,12 @@ export async function listArticlesByTranslationGroupId(translationGroupId: strin
       sort: '-updatedAt',
     },
   });
-  return normalizeListResponse(res.data, { requestedPage: 1, limit });
+
+  // Some backends ignore translationGroupId param; defensively filter.
+  const normalized = normalizeListResponse(res.data, { requestedPage: 1, limit });
+  return (normalized.rows || [])
+    .map((a) => normalizeArticleLanguage(a))
+    .filter((a: any) => String(a?.translationGroupId || '').trim() === gid);
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
@@ -265,7 +295,7 @@ export async function getArticle(id: string): Promise<Article> {
   if (!ok || !article || !article._id) {
     throw new Error('Failed to get article');
   }
-  return normalizeArticleStatus(normalizeArticleLanguage(article as Article));
+  return normalizeArticleI18nTextFields(normalizeArticleLanguage(article as Article));
 }
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
