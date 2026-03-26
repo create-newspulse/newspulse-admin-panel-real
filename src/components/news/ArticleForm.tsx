@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, updateArticlePartial, getArticle, retryArticleTranslation, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -27,35 +27,22 @@ import { stripHtmlToText } from '@/lib/richText';
 type LangCode = 'en' | 'hi' | 'gu';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
 
-type EditorStatus = 'draft' | 'scheduled' | 'published';
-
-type LocaleDraft = {
-  id: string | null;
-  title: string;
-  slug: string;
-  summary: string;
-  content: string;
-};
-
-const REQUIRED_LOCALES: ReadonlyArray<LangCode> = ['en', 'hi', 'gu'];
-
-function formatEditorStatus(s: EditorStatus): string {
-  if (s === 'published') return 'Published';
-  if (s === 'scheduled') return 'Scheduled';
-  return 'Draft';
+function isArticleEditorDebugEnabled(): boolean {
+  try {
+    const w: any = window as any;
+    if (w && w.__np_debug_article_editor) return true;
+  } catch {}
+  try {
+    return localStorage.getItem('np_debug_article_editor') === '1';
+  } catch {
+    return false;
+  }
 }
 
 function normalizeLang(input: any): LangCode {
   const v = String(input || '').trim().toLowerCase();
   if (v === 'en' || v === 'hi' || v === 'gu') return v;
   return 'en';
-}
-
-function normalizeEditorStatus(input: any): EditorStatus {
-  const v = String(input || '').trim().toLowerCase();
-  if (v === 'published' || v === 'publish' || v === 'live') return 'published';
-  if (v === 'scheduled' || v === 'schedule') return 'scheduled';
-  return 'draft';
 }
 
 function extractTranslationStatus(article: any): string | null {
@@ -89,61 +76,6 @@ function formatScriptKind(k: ScriptKind): string {
   if (k === 'devanagari') return 'Devanagari';
   if (k === 'gujarati') return 'Gujarati';
   return 'Latin';
-}
-
-function isExpectedScriptDominant(lang: LangCode, sampleText: string): boolean {
-  const counts = analyzeScripts(sampleText);
-  const latin = counts.latin;
-  const devanagari = counts.devanagari;
-  const gujarati = counts.gujarati;
-
-  // Only enforce when there is meaningful script signal.
-  const meaningful = (latin + devanagari + gujarati) >= 20;
-  if (!meaningful) return true;
-
-  const dominantWrong = (wrong: number, expected: number) => wrong >= 10 && wrong > expected * 2;
-
-  if (lang === 'en') {
-    // English should not be Gujarati/Devanagari-dominant.
-    if (dominantWrong(gujarati, latin)) return false;
-    if (dominantWrong(devanagari, latin)) return false;
-    return true;
-  }
-  if (lang === 'hi') {
-    // Hindi should not be Latin/Gujarati-dominant.
-    if (dominantWrong(latin, devanagari)) return false;
-    if (dominantWrong(gujarati, devanagari)) return false;
-    return true;
-  }
-  // Gujarati
-  if (dominantWrong(latin, gujarati)) return false;
-  if (dominantWrong(devanagari, gujarati)) return false;
-  return true;
-}
-
-function localeCompleteness(v: any): { slugOk: boolean; titleOk: boolean; summaryOk: boolean; contentOk: boolean; scriptOk: boolean; complete: boolean } {
-  if (!v) return { slugOk: false, titleOk: false, summaryOk: false, contentOk: false, scriptOk: true, complete: false };
-  const slugOk = String(v?.slug || '').trim().length > 0;
-  const titleOk = String(v?.title || '').trim().length > 0;
-  const summaryOk = String(v?.summary ?? v?.description ?? '').trim().length > 0;
-  const contentOk = String(v?.content ?? v?.body ?? '').trim().length >= 50;
-  const lang = normalizeLang(v?.language ?? v?.lang ?? v?.locale ?? 'en');
-  const sample = `${String(v?.title || '')} ${stripHtmlToText(String(v?.content ?? v?.body ?? ''))}`.trim();
-  const scriptOk = isExpectedScriptDominant(lang, sample);
-  return { slugOk, titleOk, summaryOk, contentOk, scriptOk, complete: slugOk && titleOk && summaryOk && contentOk && scriptOk };
-}
-
-function shouldDebugArticleEditor(): boolean {
-  if (!import.meta.env.DEV) return false;
-  try {
-    const w = window as any;
-    return (
-      w?.__np_debug_article_editor === true
-      || localStorage.getItem('np_debug_article_editor') === '1'
-    );
-  } catch {
-    return false;
-  }
 }
 
 function analyzeScripts(text: string): { latin: number; devanagari: number; gujarati: number; total: number } {
@@ -291,17 +223,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
-  const [localeDrafts, setLocaleDrafts] = useState<Record<LangCode, LocaleDraft>>(() => ({
-    en: { id: null, title: '', slug: '', summary: '', content: '' },
-    hi: { id: null, title: '', slug: '', summary: '', content: '' },
-    gu: { id: null, title: '', slug: '', summary: '', content: '' },
-  }));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
-  const [status, setStatus] = useState<EditorStatus>('draft');
-  const [statusTouched, setStatusTouched] = useState(false);
+  const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
+  const [statusExplicitlyChanged, setStatusExplicitlyChanged] = useState(false);
   // Keep original status to ensure Save Draft never downgrades/changes live states
-  const originalStatusRef = useRef<EditorStatus | 'unknown'>('unknown');
+  const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
   const [tags, setTags] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState<string>('');
   const [ptiStatus, setPtiStatus] = useState<'pending'|'compliant'|'needs_review'>('pending');
@@ -492,7 +419,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setLanguage(DEFAULT_CREATE_LANGUAGE);
     setTranslationGroupId('');
     setStatus('draft');
-    setStatusTouched(false);
     setTags([]);
     setScheduledAt('');
     setIsBreaking(false);
@@ -804,34 +730,26 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // because it can reset/clear fields (requirement: keep form exactly as-is).
     if (src && !initialValues && suppressServerHydration) return;
     if (src) {
-      const hydratedLang = normalizeLang((src as any).lang ?? (src as any).language ?? 'en');
-      const i18n = (src as any).__np_i18n as any;
-      const pickI18n = (map: any, l: LangCode, fallback: any) => {
-        const v = map && typeof map === 'object' ? map[l] : undefined;
-        return (typeof v === 'string' ? v : (typeof fallback === 'string' ? fallback : ''));
-      };
-
-      if (shouldDebugArticleEditor()) {
-        console.log('[ArticleForm] init payload from backend', {
-          effectiveId,
-          rawStatus: (src as any).status,
-          rawLang: (src as any).lang ?? (src as any).language,
-          rawTranslationGroupId: (src as any).translationGroupId,
-          src,
+      const dbg = isArticleEditorDebugEnabled();
+      if (dbg) {
+        console.log('[ArticleForm] hydrate src', {
+          id: (src as any)?._id || (src as any)?.id,
+          status: (src as any)?.status,
+          state: (src as any)?.state,
+          publishStatus: (src as any)?.publishStatus,
+          isPublished: (src as any)?.isPublished,
+          publishedAt: (src as any)?.publishedAt || (src as any)?.publishAt,
+          scheduledAt: (src as any)?.scheduledAt || (src as any)?.publishAt,
+          language: (src as any)?.language,
+          lang: (src as any)?.lang,
+          translationGroupId: (src as any)?.translationGroupId,
         });
       }
 
-      // Language must be decided before we pick which localized strings to show.
-      setLanguage(hydratedLang);
-
-      const titleFromI18n = pickI18n(i18n?.title, hydratedLang, (src as any).title);
-      const summaryFromI18n = pickI18n(i18n?.summary, hydratedLang, (src as any).summary);
-      const contentFromI18n = pickI18n(i18n?.content, hydratedLang, (src as any).content ?? (src as any).body);
-
-      setTitle(titleFromI18n || '');
-      setSlug((src as any).slug || '');
-      setSummary(summaryFromI18n || '');
-      setContent(contentFromI18n || '');
+      setTitle(src.title || '');
+      setSlug(src.slug || '');
+      setSummary((src as any).summary || '');
+      setContent((src as any).content ?? (src as any).body ?? '');
       // Backward compat: category might be stored as a string OR object.
       // Normalize to string slug/_id only; never store the object.
       const incomingCategory: any = (src as any).category;
@@ -844,34 +762,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       const normalizedCategory = normalizeArticleCategoryKey(categorySlug);
       setCategory(normalizedCategory || '');
-      // setLanguage handled earlier via hydratedLang
+      setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
       setTranslationGroupId(String((src as any).translationGroupId || ''));
       setTranslationStatus(extractTranslationStatus(src));
-      const rawStatusField = (
-        (src as any).status ??
-        (src as any).publishStatus ??
-        (src as any).workflowStatus ??
-        (src as any).reviewStatus ??
-        (src as any).state
-      );
-
-      const inferredPublished = (src as any).isPublished === true || (src as any).published === true;
-      const inferredByTimestamps = (src as any).publishedAt
-        ? 'published'
-        : ((src as any).scheduledAt || (src as any).publishAt)
-          ? 'scheduled'
-          : undefined;
-
-      const incomingStatus = normalizeEditorStatus(
-        inferredPublished ? 'published' : (rawStatusField ?? inferredByTimestamps ?? 'draft'),
-      );
+      const rawStatus = ((src as any).status ?? (src as any).state ?? (src as any).publishStatus) as any;
+      const incomingStatus = (((rawStatus as any) || ((src as any).isPublished ? 'published' : undefined) || 'draft') as any) as 'draft'|'scheduled'|'published';
       setStatus(incomingStatus);
-      setStatusTouched(false);
       originalStatusRef.current = incomingStatus;
+      setStatusExplicitlyChanged(false);
       const incomingTags = Array.isArray((src as any).tags) ? (src as any).tags : [];
       const normalizedTags = dedupeTags(incomingTags as any);
       setTags(normalizedTags);
-      setScheduledAt((src as any).scheduledAt ? new Date((src as any).scheduledAt).toISOString().slice(0,16) : '');
+      const incomingScheduledAt = (src as any).scheduledAt || (src as any).publishAt || '';
+      setScheduledAt(incomingScheduledAt ? new Date(incomingScheduledAt).toISOString().slice(0,16) : '');
 
       const incomingCategoryKey = String(categorySlug || '').trim();
       const hasBreakingTag0 = (normalizedTags || []).some((t) => normalizeTagKey(t) === 'breaking');
@@ -929,7 +832,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
           language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
           translationGroupId: String((src as any).translationGroupId || ''),
-          status: normalizeEditorStatus((src as any).status ?? 'draft'),
+          status: ((((src as any).status as any) || 'draft') as any),
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
           coverImage: String(incomingCoverUrl || ''),
           coverImagePublicId: String(incomingCoverPid || ''),
@@ -946,65 +849,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       // Ensure we have an effective id for subsequent PUT updates.
       const sid: string | null = (src as any)?._id || (src as any)?.id || null;
       if (sid && sid !== effectiveId) setEffectiveId(String(sid));
-
-      // Cache per-locale drafts so EN/HI/GU switching doesn't lose data.
-      // Prefer the backend-provided i18n maps when present.
-      setLocaleDrafts((prev) => {
-        const baseId = sid ? String(sid) : (effectiveId ? String(effectiveId) : null);
-        const baseSlug = String((src as any).slug || '');
-        const next: any = { ...prev };
-
-        const hasI18n = !!(i18n && typeof i18n === 'object' && (i18n.title || i18n.summary || i18n.content));
-        if (hasI18n) {
-          (['en', 'hi', 'gu'] as const).forEach((l) => {
-            next[l] = {
-              id: baseId,
-              slug: next?.[l]?.slug || baseSlug,
-              title: pickI18n(i18n?.title, l, next?.[l]?.title || ''),
-              summary: pickI18n(i18n?.summary, l, next?.[l]?.summary || ''),
-              content: pickI18n(i18n?.content, l, next?.[l]?.content || ''),
-            };
-          });
-          // Ensure the currently-hydrated language reflects the same values.
-          next[hydratedLang] = {
-            ...(next[hydratedLang] || { id: baseId, slug: baseSlug, title: '', summary: '', content: '' }),
-            id: baseId,
-            slug: next?.[hydratedLang]?.slug || baseSlug,
-            title: titleFromI18n || '',
-            summary: summaryFromI18n || '',
-            content: contentFromI18n || '',
-          };
-          return next;
-        }
-
-        // Fallback: cache only the hydrated locale.
-        next[hydratedLang] = {
-          id: baseId,
-          title: String(titleFromI18n || ''),
-          slug: baseSlug,
-          summary: String(summaryFromI18n || ''),
-          content: String(contentFromI18n || ''),
-        };
-        return next;
-      });
     }
   }, [initialValues, data, computedMode]);
-
-  const persistActiveLocaleDraft = useMemo(() => {
-    return () => {
-      const active = normalizeLang(language);
-      setLocaleDrafts((prev) => ({
-        ...prev,
-        [active]: {
-          id: effectiveId,
-          title,
-          slug,
-          summary,
-          content,
-        },
-      }));
-    };
-  }, [language, effectiveId, title, slug, summary, content]);
 
   const retryTranslationMutation = useMutation({
     mutationFn: async () => {
@@ -1024,6 +870,46 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     },
   });
 
+  const translationGroupIdTrimmed = useMemo(() => String(translationGroupId || '').trim(), [translationGroupId]);
+  const translationGroupQuery = useQuery({
+    queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed],
+    queryFn: async () => listArticlesByTranslationGroupId(translationGroupIdTrimmed, { limit: 50 }),
+    enabled: !!translationGroupIdTrimmed,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+
+  const translationVariants = useMemo(() => {
+    const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
+    const map: Record<'en'|'hi'|'gu', any | null> = { en: null, hi: null, gu: null };
+    for (const r of rows) {
+      const raw = String((r as any)?.lang ?? (r as any)?.language ?? '').trim().toLowerCase();
+      const code = (raw === 'en' || raw === 'hi' || raw === 'gu') ? raw : '';
+      if (code) {
+        // Prefer the record that matches the current effectiveId if duplicates exist.
+        if (!map[code]) map[code] = r;
+        else if (effectiveId && String((r as any)?._id || '') === String(effectiveId)) map[code] = r;
+      }
+    }
+    return map;
+  }, [translationGroupQuery.data, effectiveId]);
+
+  const groupStatus = useMemo(() => {
+    const variants = Object.values(translationVariants).filter(Boolean) as any[];
+    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'published')) return 'Published';
+    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'scheduled')) return 'Scheduled';
+    if (variants.length > 0) return 'Draft';
+    return null;
+  }, [translationVariants]);
+
+  function variantCompletenessLabel(v: any | null): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+    if (!v) return { text: 'Missing', tone: 'warn' };
+    const t = String(v?.title || '').trim();
+    const c = String(v?.content || v?.body || '').trim();
+    if (t && c.length >= 50) return { text: 'Ready', tone: 'ok' };
+    return { text: 'Incomplete', tone: 'warn' };
+  }
+
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
   useEffect(()=> { setReadingSeconds(readingTimeSec(content)); }, [content]);
@@ -1040,173 +926,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (c === 'gu') return 'Gujarati';
     return (code || '').toUpperCase();
   };
-
-  const groupId = useMemo(() => String(translationGroupId || '').trim(), [translationGroupId]);
-  const groupVariantsQuery = useQuery({
-    queryKey: ['articles', 'translation-group', groupId],
-    queryFn: async () => listArticlesByTranslationGroupId(groupId),
-    enabled: !!groupId,
-    staleTime: 60 * 1000,
-    retry: false,
-  });
-
-  const groupVariants = useMemo(() => {
-    const fromApi = Array.isArray(groupVariantsQuery.data) ? groupVariantsQuery.data : [];
-
-    // Always include the currently-open article as the freshest source.
-    const currentVariant: any = effectiveId
-      ? {
-          _id: effectiveId,
-          title,
-          summary,
-          content,
-          category,
-          status,
-          language,
-          lang: language,
-          translationGroupId: groupId,
-        }
-      : null;
-
-    const out: any[] = [...fromApi];
-    if (currentVariant) {
-      const idx = out.findIndex((v) => String((v as any)?._id || '') === String(effectiveId));
-      if (idx >= 0) out[idx] = { ...(out[idx] as any), ...currentVariant };
-      else out.unshift(currentVariant);
-    }
-
-    // Dedupe by id.
-    const seen = new Set<string>();
-    return out.filter((v) => {
-      const id = String((v as any)?._id || (v as any)?.id || '').trim();
-      if (!id) return false;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  }, [groupVariantsQuery.data, effectiveId, title, summary, content, category, status, language, groupId]);
-
-  const groupVariantByLang = useMemo(() => {
-    const map: Record<LangCode, any | null> = { en: null, hi: null, gu: null };
-    for (const v of groupVariants) {
-      const l = normalizeLang((v as any)?.lang ?? (v as any)?.language ?? '');
-      if (!map[l]) map[l] = v;
-    }
-    return map;
-  }, [groupVariants]);
-
-  // Fetch full article objects for each variant so completeness checks do not depend
-  // on whatever the list endpoint includes.
-  const groupBundleQuery = useQuery({
-    queryKey: ['articles', 'translation-group-bundle', groupId],
-    enabled: !!groupId,
-    staleTime: 60 * 1000,
-    retry: false,
-    queryFn: async () => {
-      const base = Array.isArray(groupVariantsQuery.data)
-        ? (groupVariantsQuery.data as any[])
-        : await listArticlesByTranslationGroupId(groupId);
-
-      const ids = Array.from(
-        new Set(
-          (base || [])
-            .map((v) => String((v as any)?._id || (v as any)?.id || '').trim())
-            .filter(Boolean),
-        ),
-      );
-
-      const full = await Promise.all(ids.map((id) => getArticle(id)));
-      return full;
-    },
-  });
-
-  const groupFullByLang = useMemo(() => {
-    const map: Record<LangCode, Article | null> = { en: null, hi: null, gu: null };
-    const rows = Array.isArray(groupBundleQuery.data) ? (groupBundleQuery.data as any[]) : [];
-    for (const a of rows) {
-      const l = normalizeLang((a as any)?.lang ?? (a as any)?.language ?? '');
-      if (!map[l]) map[l] = a as Article;
-    }
-    return map;
-  }, [groupBundleQuery.data]);
-
-  const localeStatus = useMemo(() => {
-    const out: Record<LangCode, { id: string | null; slugOk: boolean; titleOk: boolean; summaryOk: boolean; contentOk: boolean; scriptOk: boolean; complete: boolean }> = {
-      en: { id: null, slugOk: false, titleOk: false, summaryOk: false, contentOk: false, scriptOk: true, complete: false },
-      hi: { id: null, slugOk: false, titleOk: false, summaryOk: false, contentOk: false, scriptOk: true, complete: false },
-      gu: { id: null, slugOk: false, titleOk: false, summaryOk: false, contentOk: false, scriptOk: true, complete: false },
-    };
-
-    for (const l of REQUIRED_LOCALES) {
-      const active = normalizeLang(language) === l;
-      const full = groupFullByLang[l];
-      const d = localeDrafts[l];
-      const idFromVariant = String((groupVariantByLang[l] as any)?._id || (groupVariantByLang[l] as any)?.id || '').trim();
-
-      const effective = {
-        slug: active ? ensureValidSlug(slug, title) : ensureValidSlug((d?.slug || String((full as any)?.slug || '')), (d?.title || String((full as any)?.title || ''))),
-        title: active ? title : (d?.title || String((full as any)?.title || '')),
-        summary: active ? summary : (d?.summary || String((full as any)?.summary ?? (full as any)?.description ?? '')),
-        content: active ? content : (d?.content || String((full as any)?.content ?? (full as any)?.body ?? '')),
-      };
-
-      const c = localeCompleteness(effective);
-      out[l] = {
-        id: (idFromVariant || d?.id || (full as any)?._id || null) ? String(idFromVariant || d?.id || (full as any)?._id) : null,
-        ...c,
-      };
-    }
-
-    return out;
-  }, [groupVariantByLang, groupFullByLang, localeDrafts, language, title, summary, content]);
-
-  const groupLocalesComplete = useMemo(() => REQUIRED_LOCALES.every((l) => localeStatus[l].complete), [localeStatus]);
-
-  const groupLanguagesPresent = useMemo(() => {
-    const present: LangCode[] = [];
-    (['en', 'hi', 'gu'] as const).forEach((l) => {
-      if (groupVariantByLang[l]) present.push(l);
-    });
-    return present;
-  }, [groupVariantByLang]);
-
-  const groupHasAllRequiredLocales = useMemo(() => {
-    // Prefer full bundle presence when available, else fall back to variants.
-    return REQUIRED_LOCALES.every((l) => !!(groupFullByLang[l] || groupVariantByLang[l]));
-  }, [groupFullByLang, groupVariantByLang]);
-
-  const groupStatus = useMemo(() => {
-    // Story-group status must only be considered live when ALL required locales exist and are complete.
-    // This prevents the broken state: one locale published while others are missing/incomplete.
-    if (!groupHasAllRequiredLocales) return 'draft' as const;
-    if (!groupLocalesComplete) return 'draft' as const;
-
-    const statuses = REQUIRED_LOCALES.map((l) => localeStatusByLang[l]);
-    const allPublished = statuses.every((s) => s === 'published');
-    const allScheduled = statuses.every((s) => s === 'scheduled');
-    if (allPublished) return 'published' as const;
-    if (allScheduled) return 'scheduled' as const;
-    return 'draft' as const;
-  }, [groupHasAllRequiredLocales, groupLocalesComplete, localeStatusByLang]);
-
-  const localeStatusByLang = useMemo(() => {
-    const out: Record<LangCode, EditorStatus> = { en: 'draft', hi: 'draft', gu: 'draft' };
-    for (const l of REQUIRED_LOCALES) {
-      const raw =
-        (groupVariantByLang[l] as any)?.status ??
-        (groupFullByLang[l] as any)?.status ??
-        (groupVariantByLang[l] as any)?.state ??
-        (groupFullByLang[l] as any)?.state ??
-        'draft';
-      out[l] = normalizeEditorStatus(raw);
-    }
-    return out;
-  }, [groupVariantByLang, groupFullByLang]);
-
-  const groupStatusConsistent = useMemo(() => {
-    const values = REQUIRED_LOCALES.map((l) => localeStatusByLang[l]);
-    return values.every((v) => v === values[0]);
-  }, [localeStatusByLang]);
 
   const categoryValidForPublish = useMemo(() => {
     const v = String(category || '').trim();
@@ -1349,87 +1068,33 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '…')); }
 
   const lastSubmitRef = useRef<null | {
-    statusToSend: EditorStatus;
+    statusToSend: 'draft'|'published';
     safeSlug: string;
     wasNew: boolean;
   }>(null);
 
   const mutation = useMutation({
     // desiredStatusOverride lets callers force a specific status (e.g., Publish)
-    mutationFn: async (desiredStatusOverride?: EditorStatus) => {
+    mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
       // Ensure we never send an empty/invalid slug on publish/save.
       const safeSlug = ensureValidSlug(slug, title);
 
-      const coerceStatus = (s: any): EditorStatus => normalizeEditorStatus(s);
+      type PublicArticleStatus = 'draft' | 'scheduled' | 'published';
       const trimOrUndef = (v: string) => {
         const t = (v || '').trim();
         return t ? t : undefined;
       };
 
-      const scheduledAtIso = (() => {
-        const v = String(scheduledAt || '').trim();
-        if (!v) return '';
-        const d = new Date(v);
-        return Number.isFinite(d.getTime()) ? d.toISOString() : '';
-      })();
-
-      const getLocaleField = (l: LangCode, field: keyof LocaleDraft): string => {
-        const active = normalizeLang(language) === l;
-        const d = localeDrafts[l];
-        const full = groupFullByLang[l] as any;
-        if (field === 'slug') {
-          const raw = active ? slug : (d?.slug || String(full?.slug || ''));
-          return String(raw || '');
-        }
-        if (field === 'title') {
-          return String(active ? title : (d?.title || String(full?.title || '')));
-        }
-        if (field === 'summary') {
-          return String(active ? summary : (d?.summary || String(full?.summary ?? full?.description ?? '')));
-        }
-        if (field === 'content') {
-          return String(active ? content : (d?.content || String(full?.content ?? full?.body ?? '')));
-        }
-        return '';
-      };
-
-      const buildGroupI18n = (overrides?: Partial<{ title: string; summary: string; content: string; language: LangCode }>) => {
-        const out: {
-          title: Record<LangCode, string>;
-          summary: Record<LangCode, string>;
-          content: Record<LangCode, string>;
-        } = {
-          title: { en: '', hi: '', gu: '' },
-          summary: { en: '', hi: '', gu: '' },
-          content: { en: '', hi: '', gu: '' },
-        };
-
-        for (const l of REQUIRED_LOCALES) {
-          out.title[l] = getLocaleField(l, 'title');
-          out.summary[l] = getLocaleField(l, 'summary');
-          out.content[l] = getLocaleField(l, 'content');
-        }
-
-        const overrideLang = overrides?.language ? normalizeLang(overrides.language) : null;
-        if (overrideLang) {
-          if (typeof overrides?.title === 'string') out.title[overrideLang] = overrides.title;
-          if (typeof overrides?.summary === 'string') out.summary[overrideLang] = overrides.summary;
-          if (typeof overrides?.content === 'string') out.content[overrideLang] = overrides.content;
-        }
-
-        return out;
-      };
-
-      const buildPublicPayload = (opts: { status: EditorStatus; publishedAt?: string; publishAt?: string; overrides?: Partial<{ title: string; slug: string; summary: string; content: string; language: LangCode }> }): {
-        title: any;
+      const buildPublicPayload = (opts: { status: PublicArticleStatus; publishedAt?: string }): {
+        title: string;
         slug: string;
-        summary: any;
+        summary: string;
         description: string;
-        content: any;
+        content: string;
         category?: string;
         postType?: string;
         isFounder?: boolean;
-        status: EditorStatus;
+        status: PublicArticleStatus;
         language: 'en'|'hi'|'gu';
         lang: 'en'|'hi'|'gu';
         translationGroupId?: string;
@@ -1450,31 +1115,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImage?: { url: string; publicId?: string };
         tags: string[];
       } => {
-        const o = opts.overrides || {};
-        const effectiveLanguage = (o.language || language) as LangCode;
-        const effectiveTitle = (o.title ?? title);
-        const effectiveSlug = ensureValidSlug((o.slug ?? slug), effectiveTitle);
-        const effectiveSummary = (o.summary ?? summary);
-        const effectiveContent = (o.content ?? content);
-
-        const shouldWriteI18n = !!String(translationGroupId || '').trim();
-        const i18n = shouldWriteI18n
-          ? buildGroupI18n({
-              language: effectiveLanguage,
-              title: effectiveTitle,
-              summary: effectiveSummary,
-              content: effectiveContent,
-            })
-          : null;
-
         const categoryKeyRaw = (category || '').trim();
         const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
-        const publishedAtToSend = (opts.status === 'published')
-          ? (opts.publishedAt || undefined)
+        const publishedAtToSend = opts.status === 'published'
+          ? (opts.publishedAt || new Date().toISOString())
           : undefined;
 
-        const publishAtToSend = (opts.status === 'scheduled')
-          ? (opts.publishAt || undefined)
+        const scheduledAtToSend = opts.status === 'scheduled'
+          ? (() => {
+            const raw = String(scheduledAt || '').trim();
+            if (!raw) return undefined;
+            const d = new Date(raw);
+            return Number.isFinite(d.getTime()) ? d.toISOString() : undefined;
+          })()
           : undefined;
 
         const isViralVideo = categoryKey === 'viral-videos';
@@ -1490,22 +1143,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           ? { state: geoState, district: geoDistrict, city: geoCity }
           : undefined;
         return {
-          title: shouldWriteI18n ? i18n!.title : effectiveTitle,
-          slug: effectiveSlug,
-          summary: shouldWriteI18n ? i18n!.summary : effectiveSummary,
-          // Keep description as a string for SEO snippets / legacy clients.
-          description: (shouldWriteI18n ? (String(i18n!.summary.en || '').trim() || String(i18n!.summary[effectiveLanguage] || '').trim() || String(effectiveSummary || '')) : String(effectiveSummary || '')),
-          content: shouldWriteI18n ? i18n!.content : effectiveContent,
+          title,
+          slug: safeSlug,
+          summary,
+          description: summary,
+          content,
           category: categoryKey || undefined,
           postType: isViralVideo ? 'video' : undefined,
           isFounder: isFounderEditorial ? true : undefined,
           status: opts.status,
-          language: (effectiveLanguage as any) as 'en'|'hi'|'gu',
-          lang: (effectiveLanguage as any) as 'en'|'hi'|'gu',
+          language: (language as any) as 'en'|'hi'|'gu',
+          lang: (language as any) as 'en'|'hi'|'gu',
           translationGroupId: (translationGroupId || '').trim() ? (translationGroupId || '').trim() : undefined,
           publishedAt: publishedAtToSend,
-          publishAt: publishAtToSend,
-          scheduledAt: publishAtToSend,
+          publishAt: scheduledAtToSend,
+          scheduledAt: scheduledAtToSend,
           isBreaking,
           state: trimOrUndef(state),
           district: trimOrUndef(district),
@@ -1530,142 +1182,90 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       })();
 
       // Production CMS contract:
-      // Publish must be group-safe and must validate EN + HI + GU readiness.
+      // Publish should create (draft) first if needed, then publish via endpoint.
       if (!onSubmit && desiredStatusOverride === 'published') {
-        const gid = String(translationGroupId || '').trim();
-        if (!gid) throw new Error('Save once to generate Translation Group ID before publishing');
-
         const publishAtToSend = publishedAtIso || new Date().toISOString();
+
+        if (!title.trim()) throw new Error('Title required to publish');
         if (!categoryKey) throw new Error('Category required to publish');
+        if (!content.trim()) throw new Error('Content required to publish');
         if (!categoryAllowed) throw new Error('Category is not allowed');
 
-        const missing: string[] = [];
-        for (const l of REQUIRED_LOCALES) {
-          const s = localeStatus[l];
-          if (!s.slugOk) missing.push(`${l.toUpperCase()} slug`);
-          if (!s.titleOk) missing.push(`${l.toUpperCase()} title`);
-          if (!s.summaryOk) missing.push(`${l.toUpperCase()} summary`);
-          if (!s.contentOk) missing.push(`${l.toUpperCase()} content`);
-          if (!s.scriptOk) missing.push(`${l.toUpperCase()} language`);
-        }
-        if (missing.length) throw new Error(`Cannot publish: missing ${missing.join(', ')}`);
+        const draftPayload = buildPublicPayload({ status: 'draft' });
+        const publishPayload = buildPublicPayload({ status: 'published', publishedAt: publishAtToSend });
 
-        const effectiveLocaleFields = (l: LangCode) => {
-          const active = normalizeLang(language) === l;
-          const d = localeDrafts[l];
-          const full = groupFullByLang[l] as any;
-          return {
-            id: String((groupVariantByLang[l] as any)?._id || (groupVariantByLang[l] as any)?.id || d?.id || full?._id || '').trim() || null,
-            title: active ? title : (d?.title || String(full?.title || '')),
-            slug: active ? slug : (d?.slug || String(full?.slug || '')),
-            summary: active ? summary : (d?.summary || String(full?.summary ?? full?.description ?? '')),
-            content: active ? content : (d?.content || String(full?.content ?? full?.body ?? '')),
-          };
-        };
-
-        const idsByLang: Record<LangCode, string> = { en: '', hi: '', gu: '' };
-
-        // Ensure all locale variants exist (draft-create if missing)
-        for (const l of REQUIRED_LOCALES) {
-          const eff = effectiveLocaleFields(l);
-          let idForLocale: string | null = eff.id ? String(eff.id) : null;
-          if (!idForLocale) {
-            const draftPayload = buildPublicPayload({
-              status: 'draft',
-              overrides: { title: eff.title, slug: eff.slug, summary: eff.summary, content: eff.content, language: l },
-            });
-            const created: any = await createArticle({ ...(draftPayload as any), translationGroupId: gid });
-            const createdPayload = created?.article || created?.data?.article || created?.data || created;
-            idForLocale = createdPayload?._id || createdPayload?.id || created?._id || created?.id || null;
-            if (!idForLocale) throw new Error(`Failed to create ${l.toUpperCase()} draft (missing id)`);
-          }
-          idsByLang[l] = String(idForLocale);
+        let idToPublish: string | null = effectiveId ? String(effectiveId) : null;
+        if (!idToPublish) {
+          const created: any = await createArticle(draftPayload as any);
+          const createdPayload = created?.article || created?.data?.article || created?.data || created;
+          idToPublish = createdPayload?._id || createdPayload?.id || created?._id || created?.id || null;
+          if (!idToPublish) throw new Error('Failed to create draft before publish (missing id).');
         }
 
-        // Publish all locales.
-        for (const l of REQUIRED_LOCALES) {
-          const eff = effectiveLocaleFields(l);
-          const publishPayload = buildPublicPayload({
-            status: 'published',
-            publishedAt: publishAtToSend,
-            overrides: { title: eff.title, slug: eff.slug, summary: eff.summary, content: eff.content, language: l },
-          });
-          if (shouldDebugArticleEditor()) {
-            console.log('[ArticleForm] group publish', { lang: l, id: idsByLang[l], returned: 'pending', body: publishPayload });
-          }
-          await updateArticle(idsByLang[l], { ...(publishPayload as any), translationGroupId: gid } as any);
+        try {
+          // Preferred: send full payload via update (ensures backend receives clean fields)
+          const updated: any = await updateArticle(idToPublish, publishPayload as any);
+          return { ...(updated as any), __npCreatedId: idToPublish };
+        } catch {
+          // Fallback: minimal publish contract via admin proxy
+          const published: any = await publishArticle(idToPublish, publishAtToSend, { summary });
+          return { data: { ...(published as any), __npCreatedId: idToPublish } };
         }
-
-        return { data: { ok: true, translationGroupId: gid, idsByLang } } as any;
       }
 
       // Compute safe status to send:
-      // - Always preserve backend status unless user explicitly changes Status.
-      // - Never downgrade published/scheduled -> draft during autosave.
-      // - If override provided (e.g. Publish), use it explicitly.
-      let statusToSend: EditorStatus;
+      // - Autosave NEVER changes status (hard rule)
+      // - New items => draft
+      // - Existing items => preserve backend status unless the user explicitly changes it AND this is a manual save
+      // - If override provided (e.g., publish), use it explicitly
+      let statusToSend: PublicArticleStatus;
       if (saveKindRef.current === 'autosave') {
-        const orig = originalStatusRef.current === 'unknown' ? status : originalStatusRef.current;
-        statusToSend = coerceStatus(orig);
+        const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
+        statusToSend = orig as PublicArticleStatus;
       } else if (desiredStatusOverride) {
-        statusToSend = coerceStatus(desiredStatusOverride);
+        statusToSend = desiredStatusOverride;
       } else if (computedMode === 'create') {
         statusToSend = 'draft';
-      } else if (statusTouched) {
-        statusToSend = coerceStatus(status);
       } else {
-        const orig = originalStatusRef.current === 'unknown' ? status : originalStatusRef.current;
-        statusToSend = coerceStatus(orig);
-      }
-
-      // Enforce story-group readiness for any live-like status.
-      // If the group is missing required locales or incomplete, never persist Published/Scheduled
-      // via Save Draft/autosave. Publish flow uses the dedicated group-safe path above.
-      if (groupInvalidForLive && (statusToSend === 'published' || statusToSend === 'scheduled') && desiredStatusOverride !== 'published') {
-        statusToSend = 'draft';
+        const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
+        // Only allow status changes if user explicitly modified the status control.
+        statusToSend = statusExplicitlyChanged ? status : (orig as PublicArticleStatus);
       }
 
       lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId };
 
-      const publishingViaSave = statusToSend === 'published';
-
-      const isExplicitPublish = desiredStatusOverride === 'published' || saveKindRef.current === 'publish';
-      const isExplicitSchedule = desiredStatusOverride === 'scheduled' || statusTouched;
-
-      // Only set publishedAt when explicitly publishing. Otherwise preserve whatever backend already has.
-      const publishAtToSend = (publishingViaSave && isExplicitPublish)
-        ? (publishedAtIso || new Date().toISOString())
-        : undefined;
-
-      // Only set publishAt/scheduledAt when user explicitly selected Scheduled.
-      const scheduleAtToSend = (statusToSend === 'scheduled' && isExplicitSchedule)
-        ? (scheduledAtIso || undefined)
-        : undefined;
-
-      if (statusTouched && statusToSend === 'scheduled' && !scheduleAtToSend) {
-        throw new Error('Schedule time required');
-      }
-
-      // Scheduling is also a go-live path: block scheduling unless locales are complete.
-      if (statusToSend === 'scheduled' && groupInvalidForLive) {
-        throw new Error('Cannot schedule: EN + HI + GU must be linked and ready first');
-      }
-
-      const body = buildPublicPayload({ status: statusToSend, publishedAt: publishAtToSend, publishAt: scheduleAtToSend });
-
-      if (shouldDebugArticleEditor()) {
-        console.log('[ArticleForm] pre-save', {
-          saveKind: saveKindRef.current,
-          desiredStatusOverride,
-          statusTouched,
-          statusState: status,
-          originalStatus: originalStatusRef.current,
-          statusToSend,
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] submit', {
+          kind: saveKindRef.current,
           effectiveId,
-          body,
+          desiredStatusOverride,
+          originalStatus: originalStatusRef.current,
+          statusState: status,
+          statusExplicitlyChanged,
+          statusToSend,
+          scheduledAt,
+          publishedAt,
+          language,
+          translationGroupId,
         });
       }
 
+      const publishingViaSave = statusToSend === 'published';
+      const publishAtToSend = publishingViaSave ? (publishedAtIso || new Date().toISOString()) : undefined;
+      const body = buildPublicPayload({ status: statusToSend, publishedAt: publishAtToSend });
+
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] payload', {
+          id: effectiveId,
+          status: body.status,
+          publishedAt: (body as any).publishedAt,
+          publishAt: (body as any).publishAt,
+          scheduledAt: (body as any).scheduledAt,
+          language: body.language,
+          lang: body.lang,
+          translationGroupId: body.translationGroupId,
+        });
+      }
       if (!title.trim()) throw new Error('Title required');
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryKey) {
         throw new Error('Category required to publish');
@@ -1678,76 +1278,24 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
       if (onSubmit) return onSubmit(body);
       if (computedMode === 'create') return createArticle(body as any);
-
-      // Keep shared metadata aligned across the group on MANUAL saves only.
-      // This prevents one-locale updates from drifting (cover/category/tags/etc),
-      // while still avoiding localized field corruption.
-      if (saveKindRef.current === 'manual' && groupId && groupVariants.length) {
-        const sharedPatch: any = {
-          category: normalizeArticleCategoryKey(String(category || '').trim()) || undefined,
-          tags: Array.isArray(tags) ? tags : [],
-          isBreaking,
-          translationGroupId: groupId,
-          imageUrl: (coverImageUrl || '').trim() ? coverImageUrl : undefined,
-          coverImageUrl: (coverImageUrl || '').trim() ? coverImageUrl : undefined,
-          coverImage: (coverImageUrl || '').trim()
-            ? { url: String(coverImageUrl), publicId: (coverImagePublicId || '').trim() ? coverImagePublicId : undefined }
-            : undefined,
-          state: (state || '').trim() ? state : undefined,
-          district: (district || '').trim() ? district : undefined,
-          city: (city || '').trim() ? city : undefined,
-        };
-
-        // Story-group status is shared.
-        // - If user explicitly changed Draft/Scheduled, propagate it.
-        // - If the group is invalid or inconsistent, normalize to a safe Draft on manual save.
-        //   (This prevents one locale row remaining published while the group is incomplete.)
-        const shouldNormalizeToDraft = groupInvalidForLive || !groupStatusConsistent;
-        const statusToPropagate: EditorStatus | null = shouldNormalizeToDraft
-          ? 'draft'
-          : (statusTouched && statusToSend !== 'published' ? statusToSend : null);
-
-        if (statusToPropagate) {
-          sharedPatch.status = statusToPropagate;
-          if (statusToPropagate === 'scheduled') {
-            sharedPatch.publishAt = scheduleAtToSend || undefined;
-            sharedPatch.scheduledAt = scheduleAtToSend || undefined;
-          } else {
-            // Draft: clear any schedule fields.
-            sharedPatch.publishAt = null;
-            sharedPatch.scheduledAt = null;
-          }
-        }
-
-        if (shouldDebugArticleEditor()) {
-          console.log('[ArticleForm] sync shared across group', { groupId, sharedPatch });
-        }
-
-        await Promise.all(
-          groupVariants
-            .map((v: any) => String(v?._id || v?.id || '').trim())
-            .filter(Boolean)
-            .map((id) => updateArticlePartial(id, sharedPatch)),
-        );
-      }
-
       return updateArticle(effectiveId!, body as any);
     },
     onSuccess: (result: any) => {
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
 
-      if (shouldDebugArticleEditor()) {
-        console.log('[ArticleForm] post-save', {
-          saveKind: saveKindRef.current,
-          effectiveId,
-          returnedStatus: (saved as any)?.status,
-          returnedLang: (saved as any)?.lang ?? (saved as any)?.language,
-          returnedTranslationGroupId: (saved as any)?.translationGroupId,
-          saved,
+      if (isArticleEditorDebugEnabled()) {
+        console.log('[ArticleForm] saved', {
+          id: saved?._id || saved?.id,
+          status: saved?.status,
+          state: saved?.state,
+          publishStatus: saved?.publishStatus,
+          scheduledAt: saved?.scheduledAt || saved?.publishAt,
+          publishedAt: saved?.publishedAt,
+          language: saved?.language,
+          lang: saved?.lang,
         });
       }
-
       setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
@@ -1866,7 +1414,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   function saveDraft(){
     if (!mutation.isPending) {
-      persistActiveLocaleDraft();
       // Create mode: force draft persist.
       // Edit mode: no override so live stays live.
       saveKindRef.current = 'manual';
@@ -1884,7 +1431,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       return;
     }
     if (!mutation.isPending) {
-      persistActiveLocaleDraft();
       // Publish is the only place that sets status: 'published'.
       saveKindRef.current = 'publish';
       setIsPublishing(true);
@@ -1948,19 +1494,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
 
     try {
-      const placeholderTitle = (t: LangCode) => {
-        if (t === 'hi') return 'अनुवाद लंबित';
-        if (t === 'gu') return 'અનુવાદ બાકી';
-        return 'Translation pending';
-      };
-
-      // IMPORTANT: do not clone the currently-open locale text into the new locale.
-      // Creating EN while viewing GU was a common footgun that caused Gujarati text
-      // to leak into English routes.
       const payload: any = {
-        title: placeholderTitle(target),
-        summary: '',
-        content: '',
+        title,
+        summary,
+        content,
         category: categoryKey,
         status: 'draft',
         language: target,
@@ -2001,15 +1538,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
 
   const requiredForPublishOk = useMemo(() => {
+    const okTitle = (title || '').trim().length > 0;
     const okCategory = String(category || '').trim().length > 0 && categoryValidForPublish;
-    if (!groupId) return false;
-    return okCategory && groupLocalesComplete;
-  }, [category, categoryValidForPublish, groupId, groupLocalesComplete]);
-
-  const groupInvalidForLive = useMemo(() => {
-    if (!groupId) return false;
-    return !groupHasAllRequiredLocales || !groupLocalesComplete;
-  }, [groupHasAllRequiredLocales, groupId, groupLocalesComplete]);
+    const okContent = (content || '').trim().length >= 50;
+    return okTitle && okCategory && okContent;
+  }, [title, category, content, categoryValidForPublish]);
 
   // Role gate stays in place; required fields gate controls enable/disable.
   const roleCanPublish = (userRole === 'admin' || userRole === 'founder');
@@ -2017,59 +1550,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const publishMissing: string[] = useMemo(() => {
     const missing: string[] = [];
+    if ((title || '').trim().length === 0) missing.push('Title');
     if (!String(category || '').trim()) missing.push('Category');
     if (category && !categoryValidForPublish) missing.push('Valid Category');
-    if (!groupId) missing.push('Translation Group');
-    for (const l of REQUIRED_LOCALES) {
-      const s = localeStatus[l];
-      if (!s?.slugOk) missing.push(`${l.toUpperCase()} slug`);
-      if (!s?.titleOk) missing.push(`${l.toUpperCase()} title`);
-      if (!s?.summaryOk) missing.push(`${l.toUpperCase()} summary`);
-      if (!s?.contentOk) missing.push(`${l.toUpperCase()} content`);
-      if (!s?.scriptOk) missing.push(`${l.toUpperCase()} language`);
-    }
+    if ((content || '').trim().length < 50) missing.push('Content (min 50 chars)');
     return missing;
-  }, [category, categoryValidForPublish, groupId, localeStatus]);
-
-  const enMissingWarning = useMemo(() => {
-    if (!groupId) return '';
-    if (groupVariantByLang.en || groupFullByLang.en) return '';
-    return 'English (EN) version is missing. This story will not appear on English routes until EN is created and ready.';
-  }, [groupId, groupVariantByLang.en, groupFullByLang.en]);
+  }, [title, content, category, categoryValidForPublish]);
 
   const previewEnabled = (title || '').trim().length > 0 && (content || '').trim().length > 0;
   const publishTooltip = !publishEnabled
     ? 'Publishing temporarily disabled'
     : (!roleCanPublish ? 'Not authorized to publish' : (publishMissing.length ? `Fill ${publishMissing.join(', ')}` : undefined));
-
-  const statusForDisplay: EditorStatus = (groupId ? groupStatus : status);
-  const statusBadgeClass = useMemo(() => {
-    const base = 'text-[11px] px-2 py-0.5 rounded-full border ';
-    if (statusForDisplay === 'published') return base + 'border-green-200 bg-green-50 text-green-800';
-    if (statusForDisplay === 'scheduled') return base + 'border-amber-200 bg-amber-50 text-amber-800';
-    return base + 'border-slate-200 bg-slate-50 text-slate-700';
-  }, [statusForDisplay]);
-
-  const localeReadinessText = useMemo(() => {
-    if (!groupId) return '';
-    const parts: string[] = [];
-    for (const l of REQUIRED_LOCALES) {
-      const s = localeStatus[l];
-      if (!s) continue;
-      if (s.complete) {
-        parts.push(`${l.toUpperCase()}: Ready`);
-        continue;
-      }
-      const miss: string[] = [];
-      if (!s.slugOk) miss.push('slug');
-      if (!s.titleOk) miss.push('title');
-      if (!s.summaryOk) miss.push('summary');
-      if (!s.contentOk) miss.push('content');
-      if (!s.scriptOk) miss.push('language');
-      parts.push(`${l.toUpperCase()}: Incomplete (${miss.join(', ')})`);
-    }
-    return parts.join(' · ');
-  }, [groupId, localeStatus]);
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
@@ -2529,161 +2020,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-medium">Language</label>
-                {groupId ? (
-                  <div className="mt-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[11px] text-slate-600">Story languages</div>
-                      <span className={
-                        'text-[11px] px-2 py-0.5 rounded-full border ' +
-                        (groupStatus === 'published'
-                          ? 'border-green-200 bg-green-50 text-green-800'
-                          : groupStatus === 'scheduled'
-                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-700')
-                      }>
-                        {groupStatus.toUpperCase()}
-                      </span>
-                    </div>
-
-                    {enMissingWarning ? (
-                      <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-2 text-[11px] text-red-800">
-                        {enMissingWarning}
-                      </div>
-                    ) : null}
-
-                    {!groupStatusConsistent ? (
-                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] text-amber-800">
-                        Status is inconsistent across locales. Status is enforced at the story-group level.
-                        Publish is blocked until EN+HI+GU are linked and ready.
-                      </div>
-                    ) : null}
-
-                    <div className="mt-2 inline-flex rounded-md border border-slate-200 overflow-hidden">
-                      {(['en', 'hi', 'gu'] as const).map((code) => {
-                        const v = groupVariantByLang[code];
-                        const isActive = code === language;
-                        const ready = localeStatus[code]?.complete;
-                        const label = code.toUpperCase();
-                        const title = v
-                          ? `${label} · ${ready ? 'Ready' : 'Incomplete'}`
-                          : `${label} · Missing`;
-
-                        return (
-                          <button
-                            key={code}
-                            type="button"
-                            onClick={() => {
-                              if (isActive) return;
-                              persistActiveLocaleDraft();
-                              if (v && (v as any)?._id) {
-                                const targetId = String((v as any)._id);
-                                const draft = localeDrafts[code];
-                                const hasLocalDraft = draft && String(draft.id || '') === targetId && (
-                                  String(draft.title || '').trim()
-                                  || String(draft.summary || '').trim()
-                                  || String(draft.content || '').trim()
-                                  || String(draft.slug || '').trim()
-                                );
-
-                                if (hasLocalDraft) {
-                                  setTitle(draft.title || '');
-                                  setSlug(draft.slug || '');
-                                  setSummary(draft.summary || '');
-                                  setContent(draft.content || '');
-                                  setSuppressServerHydration(true);
-                                } else {
-                                  setSuppressServerHydration(false);
-                                }
-                                setLanguage(code);
-                                setEffectiveId(targetId);
-                                return;
-                              }
-                              void createLinkedTranslation(code);
-                            }}
-                            className={
-                              'px-3 py-1 text-xs border-r border-slate-200 last:border-r-0 ' +
-                              (isActive ? 'bg-slate-100 font-semibold text-slate-900 ' : 'bg-white text-slate-700 hover:bg-slate-50 ') +
-                              (v ? '' : 'text-slate-400')
-                            }
-                            title={title}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              <span>{label}</span>
-                              {v ? (
-                                <span className={ready ? 'text-green-700' : 'text-amber-700'}>{ready ? '✓' : '!'}</span>
-                              ) : (
-                                <span className="text-slate-400">+</span>
-                              )}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-1 text-[11px] text-slate-600">
-                      Present: {groupLanguagesPresent.length ? groupLanguagesPresent.map((l) => l.toUpperCase()).join(' / ') : '—'}
-                    </div>
-
-                    {localeReadinessText ? (
-                      <div className="mt-1 text-[11px] text-slate-600">
-                        {localeReadinessText}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3 rounded-md border border-slate-200 overflow-hidden">
-                      <div className="grid grid-cols-4 bg-slate-50 text-[11px] font-medium text-slate-700">
-                        <div className="px-2 py-1">Field</div>
-                        <div className="px-2 py-1 text-center">EN</div>
-                        <div className="px-2 py-1 text-center">HI</div>
-                        <div className="px-2 py-1 text-center">GU</div>
-                      </div>
-                      {(
-                        [
-                          { key: 'title', label: 'Title' },
-                          { key: 'summary', label: 'Summary' },
-                          { key: 'content', label: 'Content' },
-                          { key: 'slug', label: 'Slug' },
-                        ] as const
-                      ).map((row) => (
-                        <div key={row.key} className="grid grid-cols-4 border-t border-slate-200 text-[11px]">
-                          <div className="px-2 py-1 text-slate-700">{row.label}</div>
-                          {(['en', 'hi', 'gu'] as const).map((l) => {
-                            const s = localeStatus[l];
-                            const ok = row.key === 'title'
-                              ? s.titleOk
-                              : row.key === 'summary'
-                                ? s.summaryOk
-                                : row.key === 'content'
-                                  ? s.contentOk
-                                  : s.slugOk;
-                            const cell = ok ? '✓' : '✕';
-                            const cls = ok ? 'text-green-700' : 'text-red-700';
-                            return (
-                              <div key={l} className={`px-2 py-1 text-center font-medium ${cls}`}>{cell}</div>
-                            );
-                          })}
-                        </div>
-                      ))}
-                      <div className="grid grid-cols-4 border-t border-slate-200 text-[11px]">
-                        <div className="px-2 py-1 text-slate-700">Language</div>
-                        {(['en', 'hi', 'gu'] as const).map((l) => {
-                          const ok = !!localeStatus[l].scriptOk;
-                          return (
-                            <div key={l} className={`px-2 py-1 text-center font-medium ${ok ? 'text-green-700' : 'text-amber-700'}`}>{ok ? '✓' : '!'}</div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {!groupId ? (
-                  <select value={language} onChange={e=> setLanguage(normalizeLang(e.target.value))} className="w-full border px-2 py-2 rounded" required>
-                    <option value="en">English (en)</option>
-                    <option value="hi">Hindi (hi)</option>
-                    <option value="gu">Gujarati (gu)</option>
-                  </select>
-                ) : null}
+                <select value={language} onChange={e=> setLanguage(normalizeLang(e.target.value))} className="w-full border px-2 py-2 rounded" required>
+                  <option value="en">English (en)</option>
+                  <option value="hi">Hindi (hi)</option>
+                  <option value="gu">Gujarati (gu)</option>
+                </select>
                 {!languagesQuery.isLoading && !languageValidForPublish && language && (
                   <div className="mt-1 text-xs text-red-600">Selected language is not supported.</div>
                 )}
@@ -2709,15 +2050,90 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <div className="mt-1 text-[11px] text-slate-500">Save once to generate a group id.</div>
                 )}
 
+                {translationGroupIdTrimmed ? (
+                  <div className="mt-3 rounded border border-slate-200 bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold">Translations</div>
+                      <div className="text-[11px] text-slate-600">
+                        {groupStatus ? `Group Status: ${groupStatus}` : 'Group Status: —'}
+                      </div>
+                    </div>
+
+                    {translationGroupQuery.isFetching ? (
+                      <div className="mt-2 text-[11px] text-slate-500">Loading variants…</div>
+                    ) : null}
+                    {translationGroupQuery.isError ? (
+                      <div className="mt-2 text-[11px] text-amber-700">Could not load translation variants.</div>
+                    ) : null}
+
+                    <div className="mt-2 space-y-2">
+                      {(['en', 'hi', 'gu'] as const).map((code) => {
+                        const v = translationVariants[code];
+                        const completeness = variantCompletenessLabel(v);
+                        const isActive = language === code;
+                        const idForVariant = v?._id || v?.id || null;
+
+                        const badgeCls = completeness.tone === 'ok'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : completeness.tone === 'warn'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                            : 'border-slate-200 bg-slate-50 text-slate-700';
+
+                        return (
+                          <div key={code} className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              className={
+                                'px-2 py-1 rounded border text-xs ' +
+                                (isActive ? 'bg-black text-white border-black' : 'bg-white hover:bg-slate-50')
+                              }
+                              onClick={() => {
+                                if (isActive) return;
+                                if (idForVariant) {
+                                  navigate(`/admin/articles/${encodeURIComponent(String(idForVariant))}/edit`);
+                                  return;
+                                }
+                              }}
+                              title={idForVariant ? 'Open this language variant' : 'Variant not created yet'}
+                            >
+                              {code.toUpperCase()}
+                            </button>
+
+                            <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] ${badgeCls}`}>{completeness.text}</span>
+
+                            <div className="flex items-center gap-2">
+                              {idForVariant ? (
+                                <button
+                                  type="button"
+                                  className="text-[11px] underline text-slate-700 hover:text-slate-900"
+                                  onClick={() => navigate(`/admin/articles/${encodeURIComponent(String(idForVariant))}/edit`)}
+                                  disabled={isActive}
+                                >
+                                  {isActive ? 'Editing' : 'Edit'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="text-[11px] underline text-slate-700 hover:text-slate-900"
+                                  onClick={() => createLinkedTranslation(code)}
+                                >
+                                  Create
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-slate-600">
+                      These are separate drafts linked by the same Translation Group ID.
+                    </div>
+                  </div>
+                ) : null}
+
                 {effectiveId && String(translationGroupId || '').trim() ? (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {language !== 'en' ? (
-                      <button
-                        type="button"
-                        className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
-                        onClick={() => createLinkedTranslation('en')}
-                      >Create English version</button>
-                    ) : null}
                     {language !== 'hi' ? (
                       <button
                         type="button"
@@ -2737,32 +2153,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-medium">Status</label>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <span className={statusBadgeClass}>{formatEditorStatus(statusForDisplay)}</span>
-                  <span className="text-[11px] text-slate-500">Story-group</span>
-                </div>
-
-                {/* Status changes are allowed only for Draft/Scheduled and apply to the whole group on Save Draft.
-                    Publishing is only allowed via the Publish button (group-safe, readiness-validated). */}
-                {(userRole !== 'writer') && (statusForDisplay !== 'published') ? (
-                  <select
-                    value={statusTouched ? status : statusForDisplay}
-                    onChange={(e) => {
-                      setStatusTouched(true);
-                      setStatus(normalizeEditorStatus(e.target.value));
-                    }}
-                    className="mt-2 w-full border px-2 py-2 rounded"
-                  >
-                    <option value='draft'>Draft</option>
-                    <option value='scheduled'>Scheduled</option>
-                  </select>
-                ) : null}
-
-                {(statusForDisplay === 'published') ? (
-                  <div className="mt-1 text-[11px] text-slate-600">
-                    Publishing is enforced via the Publish button (EN+HI+GU readiness required).
-                  </div>
-                ) : null}
+                <select
+                  value={status}
+                  onChange={e=> {
+                    setStatus(e.target.value as any);
+                    setStatusExplicitlyChanged(true);
+                  }}
+                  disabled={userRole==='writer'}
+                  className="w-full border px-2 py-2 rounded"
+                >
+                  <option value='draft'>Draft</option>
+                  <option value='scheduled'>Scheduled</option>
+                  {(userRole==='admin'||userRole==='founder') && <option value='published'>Published</option>}
+                </select>
               </div>
               {status === 'scheduled' && (
                 <div>
