@@ -45,6 +45,95 @@ function normalizeLang(input: any): LangCode {
   return 'en';
 }
 
+function getVariantStatus(input: any): string {
+  if (!input) return '';
+  const raw = String(input?.status ?? input?.state ?? input?.publishStatus ?? '').trim().toLowerCase();
+  if (raw) return raw;
+  if (input?.isPublished || String(input?.publishedAt ?? input?.publishAt ?? '').trim()) return 'published';
+  return '';
+}
+
+function isLangCode(input: any): input is LangCode {
+  return input === 'en' || input === 'hi' || input === 'gu';
+}
+
+function extractSourceLanguage(...inputs: any[]): LangCode | null {
+  for (const input of inputs) {
+    const raw = String(
+      input?.sourceLanguage
+      ?? input?.originalLanguage
+      ?? input?.baseLanguage
+      ?? input?.sourceLang
+      ?? input?.originalLang
+      ?? input?.baseLang
+      ?? ''
+    ).trim().toLowerCase();
+    if (isLangCode(raw)) return raw;
+  }
+  return null;
+}
+
+function extractSourceArticle(...inputs: any[]): any | null {
+  for (const input of inputs) {
+    const candidate = input?.sourceArticle ?? input?.originalArticle ?? input?.baseArticle ?? null;
+    if (candidate && typeof candidate === 'object') return candidate;
+  }
+  return null;
+}
+
+function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCode, any>> {
+  const map: Partial<Record<LangCode, any>> = {};
+  for (const input of inputs) {
+    const translations = input?.translations;
+    if (!translations || typeof translations !== 'object') continue;
+    for (const key of Object.keys(translations)) {
+      const code = String(key || '').trim().toLowerCase();
+      if (!isLangCode(code) || code === 'status') continue;
+      const raw = (translations as any)[code];
+      if (!raw) continue;
+      const entity = (raw && typeof raw === 'object')
+        ? (raw.article ?? raw.articleData ?? raw.item ?? raw.variant ?? raw)
+        : {};
+
+      map[code] = {
+        ...(map[code] || {}),
+        ...(entity && typeof entity === 'object' ? entity : {}),
+        lang: code,
+        language: code,
+        status: (entity as any)?.status ?? (raw as any)?.status,
+        state: (entity as any)?.state ?? (raw as any)?.state,
+        publishStatus: (entity as any)?.publishStatus ?? (raw as any)?.publishStatus,
+        isPublished: (entity as any)?.isPublished ?? (raw as any)?.isPublished,
+        publishedAt: (entity as any)?.publishedAt ?? (raw as any)?.publishedAt,
+        publishAt: (entity as any)?.publishAt ?? (raw as any)?.publishAt,
+        title: (entity as any)?.title ?? (raw as any)?.title,
+        content: (entity as any)?.content ?? (raw as any)?.content,
+        body: (entity as any)?.body ?? (raw as any)?.body,
+        _id: (entity as any)?._id ?? (raw as any)?._id,
+        id: (entity as any)?.id ?? (raw as any)?.id,
+        __presenceFromMetadata: true,
+      };
+    }
+  }
+  return map;
+}
+
+type TranslationBadgeTone = 'ok' | 'warn' | 'muted';
+
+function getTranslationBadges(v: any | null): Array<{ text: string; tone: TranslationBadgeTone }> {
+  if (!v) return [{ text: 'Missing', tone: 'warn' }];
+
+  const badges: Array<{ text: string; tone: TranslationBadgeTone }> = [];
+  if (v?.__isSource) badges.push({ text: 'Source', tone: 'muted' });
+
+  const variantStatus = getVariantStatus(v);
+  if (variantStatus === 'published') badges.push({ text: 'Published', tone: 'ok' });
+  else if (variantStatus === 'scheduled') badges.push({ text: 'Ready', tone: 'muted' });
+  else badges.push({ text: 'Ready', tone: 'ok' });
+
+  return badges;
+}
+
 function extractTranslationStatus(article: any): string | null {
   if (!article) return null;
   const raw =
@@ -881,34 +970,134 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const translationVariants = useMemo(() => {
     const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
-    const map: Record<'en'|'hi'|'gu', any | null> = { en: null, hi: null, gu: null };
+    const currentArticle = (computedMode === 'edit') ? (initialValues || data) : null;
+    const groupPayload = (translationGroupQuery.data as any) || null;
+    const sourceArticle = extractSourceArticle(groupPayload, currentArticle);
+    const explicitSourceLanguage = extractSourceLanguage(groupPayload, currentArticle, sourceArticle);
+    const currentArticleLanguage = currentArticle
+      ? normalizeLang((currentArticle as any)?.lang ?? (currentArticle as any)?.language ?? language)
+      : normalizeLang(language);
+    const inferredSourceLanguage = explicitSourceLanguage
+      || (currentArticle && (currentArticle as any)?.translations && typeof (currentArticle as any)?.translations === 'object'
+        ? currentArticleLanguage
+        : null);
+    const map: Record<LangCode, any | null> = { en: null, hi: null, gu: null };
+
+    const applyVariant = (code: LangCode, next: any, mode: 'fill' | 'override' = 'fill') => {
+      if (!next) return;
+      const existing = map[code];
+
+      if (mode === 'override') {
+        map[code] = {
+          ...(existing || {}),
+          ...(next || {}),
+          lang: code,
+          language: code,
+          __isSource: !!((existing as any)?.__isSource || next?.__isSource),
+          __presenceFromMetadata: !!((existing as any)?.__presenceFromMetadata || next?.__presenceFromMetadata),
+        };
+        return;
+      }
+
+      if (!existing) {
+        map[code] = {
+          ...(next || {}),
+          lang: code,
+          language: code,
+        };
+        return;
+      }
+
+      map[code] = {
+        ...(next || {}),
+        ...(existing || {}),
+        _id: (existing as any)?._id || next?._id,
+        id: (existing as any)?.id || next?.id,
+        title: (existing as any)?.title || next?.title,
+        content: (existing as any)?.content || next?.content,
+        body: (existing as any)?.body || next?.body,
+        status: (existing as any)?.status || next?.status,
+        state: (existing as any)?.state || next?.state,
+        publishStatus: (existing as any)?.publishStatus || next?.publishStatus,
+        isPublished: (existing as any)?.isPublished ?? next?.isPublished,
+        publishedAt: (existing as any)?.publishedAt || next?.publishedAt,
+        publishAt: (existing as any)?.publishAt || next?.publishAt,
+        lang: code,
+        language: code,
+        __isSource: !!((existing as any)?.__isSource || next?.__isSource),
+        __presenceFromMetadata: !!((existing as any)?.__presenceFromMetadata || next?.__presenceFromMetadata),
+      };
+    };
+
+    const metadataMap = extractTranslationMetadataMap(groupPayload, sourceArticle, currentArticle);
+    for (const code of Object.keys(metadataMap) as LangCode[]) {
+      applyVariant(code, {
+        ...(metadataMap[code] || {}),
+        __isSource: inferredSourceLanguage === code,
+      }, 'fill');
+    }
+
+    if (sourceArticle) {
+      const sourceCode = normalizeLang((sourceArticle as any)?.lang ?? (sourceArticle as any)?.language ?? inferredSourceLanguage ?? 'en');
+      applyVariant(sourceCode, {
+        ...(sourceArticle as any),
+        lang: sourceCode,
+        language: sourceCode,
+        __isSource: true,
+      }, 'fill');
+    }
+
     for (const r of rows) {
       const raw = String((r as any)?.lang ?? (r as any)?.language ?? '').trim().toLowerCase();
       const code = (raw === 'en' || raw === 'hi' || raw === 'gu') ? raw : '';
       if (code) {
-        // Prefer the record that matches the current effectiveId if duplicates exist.
-        if (!map[code]) map[code] = r;
-        else if (effectiveId && String((r as any)?._id || '') === String(effectiveId)) map[code] = r;
+        const existingId = String((map[code] as any)?._id || (map[code] as any)?.id || '').trim();
+        const rowId = String((r as any)?._id || (r as any)?.id || '').trim();
+        const shouldOverride = !map[code] || !existingId || (!!effectiveId && rowId === String(effectiveId));
+        applyVariant(code, {
+          ...(r as any),
+          __isSource: inferredSourceLanguage === code || !!(map[code] as any)?.__isSource,
+        }, shouldOverride ? 'override' : 'fill');
       }
     }
+
+    if (translationGroupIdTrimmed && currentArticle) {
+      const currentCode = currentArticleLanguage;
+      applyVariant(currentCode, {
+        ...(currentArticle as any),
+        _id: String(effectiveId || (currentArticle as any)?._id || (currentArticle as any)?.id || '').trim() || undefined,
+        id: String(effectiveId || (currentArticle as any)?.id || (currentArticle as any)?._id || '').trim() || undefined,
+        title: String(title || (currentArticle as any)?.title || ''),
+        content: String(content || (currentArticle as any)?.content || (currentArticle as any)?.body || ''),
+        body: String(content || (currentArticle as any)?.body || (currentArticle as any)?.content || ''),
+        lang: currentCode,
+        language: currentCode,
+        status: status || (currentArticle as any)?.status,
+        state: state || (currentArticle as any)?.state,
+        publishStatus: (currentArticle as any)?.publishStatus,
+        isPublished: getVariantStatus({
+          ...(currentArticle as any),
+          status,
+          state,
+          publishedAt,
+        }) === 'published',
+        publishedAt: publishedAt || (currentArticle as any)?.publishedAt || (currentArticle as any)?.publishAt,
+        publishAt: publishedAt || (currentArticle as any)?.publishAt || (currentArticle as any)?.publishedAt,
+        translationGroupId: translationGroupIdTrimmed,
+        __isSource: inferredSourceLanguage === currentCode,
+      }, 'override');
+    }
+
     return map;
-  }, [translationGroupQuery.data, effectiveId]);
+  }, [translationGroupIdTrimmed, translationGroupQuery.data, computedMode, initialValues, data, effectiveId, language, title, content, status, state, publishedAt]);
 
   const groupStatus = useMemo(() => {
     const variants = Object.values(translationVariants).filter(Boolean) as any[];
-    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'published')) return 'Published';
-    if (variants.some((v) => String(v?.status || '').toLowerCase() === 'scheduled')) return 'Scheduled';
+    if (variants.some((v) => getVariantStatus(v) === 'published')) return 'Published';
+    if (variants.some((v) => getVariantStatus(v) === 'scheduled')) return 'Scheduled';
     if (variants.length > 0) return 'Draft';
     return null;
   }, [translationVariants]);
-
-  function variantCompletenessLabel(v: any | null): { text: string; tone: 'ok' | 'warn' | 'muted' } {
-    if (!v) return { text: 'Missing', tone: 'warn' };
-    const t = String(v?.title || '').trim();
-    const c = String(v?.content || v?.body || '').trim();
-    if (t && c.length >= 50) return { text: 'Ready', tone: 'ok' };
-    return { text: 'Incomplete', tone: 'warn' };
-  }
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
@@ -2069,15 +2258,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     <div className="mt-2 space-y-2">
                       {(['en', 'hi', 'gu'] as const).map((code) => {
                         const v = translationVariants[code];
-                        const completeness = variantCompletenessLabel(v);
+                        const badges = getTranslationBadges(v);
                         const isActive = language === code;
                         const idForVariant = v?._id || v?.id || null;
-
-                        const badgeCls = completeness.tone === 'ok'
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                          : completeness.tone === 'warn'
-                            ? 'border-amber-200 bg-amber-50 text-amber-800'
-                            : 'border-slate-200 bg-slate-50 text-slate-700';
+                        const isPresent = !!v;
 
                         return (
                           <div key={code} className="flex items-center justify-between gap-2">
@@ -2099,7 +2283,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                               {code.toUpperCase()}
                             </button>
 
-                            <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] ${badgeCls}`}>{completeness.text}</span>
+                            <div className="flex flex-wrap items-center justify-center gap-1">
+                              {badges.map((badge) => {
+                                const badgeCls = badge.tone === 'ok'
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                  : badge.tone === 'warn'
+                                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                    : 'border-slate-200 bg-slate-50 text-slate-700';
+
+                                return (
+                                  <span key={`${code}-${badge.text}`} className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] ${badgeCls}`}>
+                                    {badge.text}
+                                  </span>
+                                );
+                              })}
+                            </div>
 
                             <div className="flex items-center gap-2">
                               {idForVariant ? (
@@ -2111,7 +2309,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                                 >
                                   {isActive ? 'Editing' : 'Edit'}
                                 </button>
-                              ) : (
+                              ) : !isPresent ? (
                                 <button
                                   type="button"
                                   className="text-[11px] underline text-slate-700 hover:text-slate-900"
@@ -2119,6 +2317,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                                 >
                                   Create
                                 </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-500">Covered</span>
                               )}
                             </div>
                           </div>

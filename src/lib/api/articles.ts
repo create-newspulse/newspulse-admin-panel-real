@@ -29,6 +29,16 @@ export interface Article {
   language?: string;
   // Some backends send language as `lang`.
   lang?: string;
+  translations?: Record<string, any>;
+  sourceLanguage?: string;
+  originalLanguage?: string;
+  baseLanguage?: string;
+  sourceLang?: string;
+  originalLang?: string;
+  baseLang?: string;
+  sourceArticle?: any;
+  originalArticle?: any;
+  baseArticle?: any;
   // Publishing metadata
   publishedAt?: string;
   // Back-compat for older environments
@@ -60,6 +70,17 @@ export interface ListResponse {
   total: number;
   page: number;
   pages: number;
+  translations?: Record<string, any>;
+  sourceLanguage?: string;
+  originalLanguage?: string;
+  baseLanguage?: string;
+  sourceLang?: string;
+  originalLang?: string;
+  baseLang?: string;
+  sourceArticle?: any;
+  originalArticle?: any;
+  baseArticle?: any;
+  [key: string]: any;
 }
 
 const ARTICLES_PATH = 'articles';
@@ -202,6 +223,7 @@ function normalizeListResponse(payload: any, opts: { requestedPage: number; limi
   const pages = pagesFromPayload ?? Math.max(1, Math.ceil(total / opts.limit));
 
   return {
+    ...(payload && typeof payload === 'object' ? payload : {}),
     rows: rowsForPage,
     total,
     page,
