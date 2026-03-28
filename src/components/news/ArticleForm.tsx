@@ -120,6 +120,13 @@ function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCod
 
 type TranslationBadgeTone = 'ok' | 'warn' | 'muted';
 
+type TranslationSyncState = 'source' | 'synced' | 'needs-refresh' | 'regenerating' | 'failed';
+
+type TranslationSyncEntry = {
+  state: TranslationSyncState;
+  detail?: string;
+};
+
 function getTranslationBadges(v: any | null): Array<{ text: string; tone: TranslationBadgeTone }> {
   if (!v) return [{ text: 'Missing', tone: 'warn' }];
 
@@ -132,6 +139,81 @@ function getTranslationBadges(v: any | null): Array<{ text: string; tone: Transl
   else badges.push({ text: 'Ready', tone: 'ok' });
 
   return badges;
+}
+
+function escapeRegExp(input: string): string {
+  return String(input || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeComparableUrl(input: string): string {
+  return String(input || '')
+    .trim()
+    .replace(/^https?:\/\/(www\.)?/i, '')
+    .replace(/[?#].*$/, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+function extractComparableUrls(input: string): string[] {
+  const raw = String(input || '');
+  if (!raw) return [];
+
+  const found = new Set<string>();
+  const matches = raw.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+  for (const match of matches) {
+    const normalized = normalizeComparableUrl(match);
+    if (normalized) found.add(normalized);
+  }
+  return Array.from(found);
+}
+
+function removeSharedArtifactsFromContent(input: string, removedUrls: string[]): string {
+  let next = String(input || '');
+  if (!next || removedUrls.length === 0) return next;
+
+  for (const url of removedUrls) {
+    const escaped = escapeRegExp(url);
+    const blockPatterns = [
+      new RegExp(`<figure[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/figure>`, 'gi'),
+      new RegExp(`<blockquote[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/blockquote>`, 'gi'),
+      new RegExp(`<iframe[^>]*${escaped}[^>]*>[\\s\\S]*?<\\/iframe>`, 'gi'),
+      new RegExp(`<p[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/p>`, 'gi'),
+      new RegExp(`<div[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/div>`, 'gi'),
+      new RegExp(`<a[^>]*${escaped}[^>]*>[\\s\\S]*?<\\/a>`, 'gi'),
+      new RegExp(`^.*${escaped}.*(?:\\r?\\n|$)`, 'gim'),
+    ];
+
+    for (const pattern of blockPatterns) {
+      next = next.replace(pattern, '');
+    }
+  }
+
+  return next
+    .replace(/<p>\s*(?:&nbsp;|<br\s*\/?>)?\s*<\/p>/gi, '')
+    .replace(/(<br\s*\/?>\s*){3,}/gi, '<br /><br />')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function computeRemovedSharedUrls(previousContent: string, nextContent: string): string[] {
+  const previous = new Set(extractComparableUrls(previousContent));
+  const next = new Set(extractComparableUrls(nextContent));
+  return Array.from(previous).filter((url) => !next.has(url));
+}
+
+function getTranslationSyncTone(state: TranslationSyncState): TranslationBadgeTone {
+  if (state === 'source') return 'muted';
+  if (state === 'synced') return 'ok';
+  if (state === 'failed') return 'warn';
+  return 'muted';
+}
+
+function getTranslationSyncLabel(state: TranslationSyncState): string {
+  if (state === 'source') return 'Source';
+  if (state === 'synced') return 'Synced';
+  if (state === 'needs-refresh') return 'Needs Refresh';
+  if (state === 'regenerating') return 'Regenerating';
+  return 'Failed';
 }
 
 function extractTranslationStatus(article: any): string | null {
@@ -341,7 +423,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     viewUrl: string;
     slug: string;
     id?: string | null;
+    syncResults?: Partial<Record<LangCode, string>>;
   }>(null);
+  const [translationSyncOverrides, setTranslationSyncOverrides] = useState<Partial<Record<LangCode, TranslationSyncEntry>>>({});
 
   // Cover image (backend-supported field: imageUrl)
   const [coverImage, setCoverImage] = useState<{ url: string; publicId?: string } | null>(null);
@@ -960,6 +1044,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   });
 
   const translationGroupIdTrimmed = useMemo(() => String(translationGroupId || '').trim(), [translationGroupId]);
+  const currentArticleRecord = useMemo(() => {
+    return (computedMode === 'edit') ? (initialValues || data || null) : null;
+  }, [computedMode, initialValues, data]);
+
   const translationGroupQuery = useQuery({
     queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed],
     queryFn: async () => listArticlesByTranslationGroupId(translationGroupIdTrimmed, { limit: 50 }),
@@ -968,19 +1056,42 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     retry: false,
   });
 
+  const translationGroupPayload = useMemo(() => {
+    return (translationGroupQuery.data as any) || null;
+  }, [translationGroupQuery.data]);
+
+  const translationSourceArticle = useMemo(() => {
+    return extractSourceArticle(translationGroupPayload, currentArticleRecord);
+  }, [translationGroupPayload, currentArticleRecord]);
+
+  const translationSourceLanguage = useMemo<LangCode | null>(() => {
+    const explicit = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
+    if (explicit) return explicit;
+
+    if (currentArticleRecord && (currentArticleRecord as any)?.translations && typeof (currentArticleRecord as any)?.translations === 'object') {
+      return normalizeLang((currentArticleRecord as any)?.lang ?? (currentArticleRecord as any)?.language ?? language);
+    }
+
+    if (translationSourceArticle) {
+      return normalizeLang((translationSourceArticle as any)?.lang ?? (translationSourceArticle as any)?.language ?? 'en');
+    }
+
+    return null;
+  }, [translationGroupPayload, currentArticleRecord, translationSourceArticle, language]);
+
+  const currentArticleLanguage = useMemo<LangCode>(() => {
+    if (currentArticleRecord) {
+      return normalizeLang((currentArticleRecord as any)?.lang ?? (currentArticleRecord as any)?.language ?? language);
+    }
+    return normalizeLang(language);
+  }, [currentArticleRecord, language]);
+
   const translationVariants = useMemo(() => {
     const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
-    const currentArticle = (computedMode === 'edit') ? (initialValues || data) : null;
-    const groupPayload = (translationGroupQuery.data as any) || null;
-    const sourceArticle = extractSourceArticle(groupPayload, currentArticle);
-    const explicitSourceLanguage = extractSourceLanguage(groupPayload, currentArticle, sourceArticle);
-    const currentArticleLanguage = currentArticle
-      ? normalizeLang((currentArticle as any)?.lang ?? (currentArticle as any)?.language ?? language)
-      : normalizeLang(language);
-    const inferredSourceLanguage = explicitSourceLanguage
-      || (currentArticle && (currentArticle as any)?.translations && typeof (currentArticle as any)?.translations === 'object'
-        ? currentArticleLanguage
-        : null);
+    const currentArticle = currentArticleRecord;
+    const groupPayload = translationGroupPayload;
+    const sourceArticle = translationSourceArticle;
+    const inferredSourceLanguage = translationSourceLanguage;
     const map: Record<LangCode, any | null> = { en: null, hi: null, gu: null };
 
     const applyVariant = (code: LangCode, next: any, mode: 'fill' | 'override' = 'fill') => {
@@ -1089,7 +1200,129 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
 
     return map;
-  }, [translationGroupIdTrimmed, translationGroupQuery.data, computedMode, initialValues, data, effectiveId, language, title, content, status, state, publishedAt]);
+  }, [translationGroupIdTrimmed, translationGroupQuery.data, translationGroupPayload, currentArticleRecord, translationSourceArticle, translationSourceLanguage, currentArticleLanguage, effectiveId, language, title, content, status, state, publishedAt]);
+
+  const linkedVersionCodes = useMemo(() => {
+    return (['en', 'hi', 'gu'] as const).filter((code) => !!translationVariants[code]);
+  }, [translationVariants]);
+
+  const isMasterArticle = useMemo(() => {
+    return !!translationGroupIdTrimmed && !!translationSourceLanguage && translationSourceLanguage === currentArticleLanguage;
+  }, [translationGroupIdTrimmed, translationSourceLanguage, currentArticleLanguage]);
+
+  const translationSyncStatuses = useMemo<Record<LangCode, TranslationSyncEntry>>(() => {
+    const base = { en: null, hi: null, gu: null } as Record<LangCode, TranslationSyncEntry | null>;
+
+    for (const code of ['en', 'hi', 'gu'] as const) {
+      if (translationSyncOverrides[code]) {
+        base[code] = translationSyncOverrides[code] || null;
+        continue;
+      }
+
+      if (translationSourceLanguage === code && translationVariants[code]) {
+        base[code] = { state: 'source', detail: 'Master article' };
+        continue;
+      }
+
+      if (translationVariants[code]) {
+        base[code] = { state: 'synced', detail: 'Linked version ready' };
+        continue;
+      }
+
+      base[code] = { state: 'needs-refresh', detail: 'No linked version yet' };
+    }
+
+    return base as Record<LangCode, TranslationSyncEntry>;
+  }, [translationSyncOverrides, translationSourceLanguage, translationVariants]);
+
+  useEffect(() => {
+    setTranslationSyncOverrides({});
+  }, [effectiveId, translationGroupIdTrimmed, translationSourceLanguage]);
+
+  async function syncMasterArticlePublish(args: {
+    masterId: string;
+    groupId: string;
+    publishedTs: string;
+  }): Promise<Partial<Record<LangCode, string>>> {
+    const { masterId, groupId, publishedTs } = args;
+    const results: Partial<Record<LangCode, string>> = {};
+    const sourceCode = translationSourceLanguage || currentArticleLanguage;
+    const categoryKey = normalizeArticleCategoryKey(String(category || '').trim()) || undefined;
+    const coverUrl = String(coverImageUrl || '').trim() || undefined;
+    const coverPid = String(coverImagePublicId || '').trim() || undefined;
+    const removedSharedUrls = computeRemovedSharedUrls(lastSavedSnapshot.content, content);
+
+    setTranslationSyncOverrides((prev) => ({
+      ...prev,
+      [sourceCode]: { state: 'source', detail: 'Master published' },
+    }));
+    results[sourceCode] = `${sourceCode.toUpperCase()} synced`;
+
+    for (const code of ['en', 'hi', 'gu'] as const) {
+      if (code === sourceCode) continue;
+
+      const variant = translationVariants[code];
+      const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
+      if (!variant || !variantId || variantId === masterId) {
+        setTranslationSyncOverrides((prev) => ({
+          ...prev,
+          [code]: { state: 'needs-refresh', detail: 'No linked version available' },
+        }));
+        results[code] = `${code.toUpperCase()} needs refresh`;
+        continue;
+      }
+
+      setTranslationSyncOverrides((prev) => ({
+        ...prev,
+        [code]: { state: 'regenerating', detail: 'Syncing shared fields…' },
+      }));
+
+      try {
+        const variantContent = String((variant as any)?.content ?? (variant as any)?.body ?? '');
+        const nextVariantContent = removedSharedUrls.length > 0
+          ? removeSharedArtifactsFromContent(variantContent, removedSharedUrls)
+          : variantContent;
+
+        const sharedPayload: any = {
+          language: code,
+          lang: code,
+          translationGroupId: groupId,
+          category: categoryKey,
+          tags: Array.isArray(tags) ? tags : [],
+          content: nextVariantContent,
+          publishedAt: publishedTs,
+          imageUrl: coverUrl,
+          coverImageUrl: coverUrl,
+          coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
+          isBreaking,
+          state: state || undefined,
+          district: district || undefined,
+          city: city || undefined,
+        };
+
+        await publishArticle(variantId, publishedTs, sharedPayload);
+        await retryArticleTranslation(variantId);
+
+        setTranslationSyncOverrides((prev) => ({
+          ...prev,
+          [code]: {
+            state: 'synced',
+            detail: removedSharedUrls.length > 0 ? 'Shared cleanup applied' : 'Linked version synced',
+          },
+        }));
+        results[code] = `${code.toUpperCase()} synced`;
+      } catch (error: any) {
+        const message = normalizeError(error, `${languageLabel(code)} sync failed`).message;
+        setTranslationSyncOverrides((prev) => ({
+          ...prev,
+          [code]: { state: 'failed', detail: message },
+        }));
+        results[code] = `${code.toUpperCase()} failed`;
+      }
+    }
+
+    return results;
+  }
 
   const groupStatus = useMemo(() => {
     const variants = Object.values(translationVariants).filter(Boolean) as any[];
@@ -1469,7 +1702,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if (computedMode === 'create') return createArticle(body as any);
       return updateArticle(effectiveId!, body as any);
     },
-    onSuccess: (result: any) => {
+    onSuccess: async (result: any) => {
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
 
@@ -1498,6 +1731,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const safeSlug = lastSubmitRef.current?.safeSlug || ensureValidSlug(slug, title);
       const statusToSend = lastSubmitRef.current?.statusToSend || status;
       const wasNew = lastSubmitRef.current?.wasNew ?? (!effectiveId);
+      const publishAtToUse = String(saved?.publishedAt || publishedAt || new Date().toISOString());
+      let syncResults: Partial<Record<LangCode, string>> | undefined;
 
       // Persist id after create so subsequent saves update (PUT) instead of creating duplicates.
       if (!effectiveId && savedId) {
@@ -1526,6 +1761,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       if (savedGroupId && savedGroupId !== translationGroupId) {
         setTranslationGroupId(savedGroupId);
+      }
+
+      if (saveKindRef.current === 'publish' && savedId && savedGroupId && isMasterArticle) {
+        syncResults = await syncMasterArticlePublish({
+          masterId: String(savedId),
+          groupId: savedGroupId,
+          publishedTs: publishAtToUse,
+        });
+        qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', savedGroupId] });
       }
 
       setLastSavedSnapshot(buildSnapshot({
@@ -1560,6 +1804,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           viewUrl,
           slug: safeSlug,
           id: savedId,
+          syncResults,
         });
         return;
       } else if (saveKindRef.current !== 'autosave') {
@@ -2248,12 +2493,75 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       </div>
                     </div>
 
+                    <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500">Article Mode</div>
+                          <div className="text-sm font-semibold text-slate-900">
+                            {isMasterArticle ? 'Master Article' : 'Linked Version'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500">Linked Versions</div>
+                          <div className="mt-1 flex flex-wrap justify-end gap-1">
+                            {(['en', 'hi', 'gu'] as const).map((code) => {
+                              const present = linkedVersionCodes.includes(code);
+                              return (
+                                <span
+                                  key={`linked-${code}`}
+                                  className={
+                                    'inline-flex rounded-full border px-2 py-0.5 text-[11px] ' +
+                                    (present ? 'border-slate-300 bg-white text-slate-800' : 'border-slate-200 bg-slate-100 text-slate-400')
+                                  }
+                                >
+                                  {code.toUpperCase()}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {isMasterArticle ? (
+                        <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
+                          Changes to this master article will sync to all linked language versions.
+                        </div>
+                      ) : null}
+                    </div>
+
                     {translationGroupQuery.isFetching ? (
                       <div className="mt-2 text-[11px] text-slate-500">Loading variants…</div>
                     ) : null}
                     {translationGroupQuery.isError ? (
                       <div className="mt-2 text-[11px] text-amber-700">Could not load translation variants.</div>
                     ) : null}
+
+                    <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs font-semibold text-slate-900">Translation Sync Status</div>
+                      <div className="mt-2 space-y-2">
+                        {(['en', 'hi', 'gu'] as const).map((code) => {
+                          const syncEntry = translationSyncStatuses[code];
+                          const tone = getTranslationSyncTone(syncEntry.state);
+                          const badgeCls = tone === 'ok'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : tone === 'warn'
+                              ? 'border-amber-200 bg-amber-50 text-amber-800'
+                              : 'border-slate-200 bg-white text-slate-700';
+
+                          return (
+                            <div key={`sync-${code}`} className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="font-medium text-slate-700">{languageLabel(code)}</span>
+                              <div className="flex items-center gap-2">
+                                {syncEntry.detail ? <span className="text-slate-500">{syncEntry.detail}</span> : null}
+                                <span className={`inline-flex rounded-full border px-2 py-0.5 ${badgeCls}`}>
+                                  {getTranslationSyncLabel(syncEntry.state)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
 
                     <div className="mt-2 space-y-2">
                       {(['en', 'hi', 'gu'] as const).map((code) => {
@@ -2327,7 +2635,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     </div>
 
                     <div className="mt-2 text-[11px] text-slate-600">
-                      These are separate drafts linked by the same Translation Group ID.
+                      {isMasterArticle
+                        ? 'Publish once from the master article to sync shared cleanup changes across linked versions.'
+                        : 'This version stays linked to the master article and receives shared cleanup changes on master publish.'}
                     </div>
                   </div>
                 ) : null}
@@ -2456,10 +2766,22 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       {publishSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
-            <div className="text-sm font-semibold text-slate-900">Published ✅ (Translations pending)</div>
+            <div className="text-sm font-semibold text-slate-900">
+              {publishSuccess.syncResults ? 'Published and synced' : 'Published ✅ (Translations pending)'}
+            </div>
             <div className="mt-1 text-xs text-slate-600">
               {publishSuccess.id ? `Article ID: ${publishSuccess.id}` : 'Article published'}
             </div>
+            {publishSuccess.syncResults ? (
+              <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold text-slate-900">Sync Results</div>
+                <div className="mt-2 space-y-1 text-[11px] text-slate-700">
+                  {(['en', 'hi', 'gu'] as const).map((code) => (
+                    <div key={`publish-sync-${code}`}>{publishSuccess.syncResults?.[code] || `${code.toUpperCase()} needs refresh`}</div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
                 type="button"
