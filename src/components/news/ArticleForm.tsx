@@ -21,6 +21,7 @@ import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailabil
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { getMediaStatus, uploadCoverImage } from '@/lib/api/media';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
+import { ARTICLE_COVER_FIT_OPTIONS, normalizeArticleCoverFit, type ArticleCoverFit } from '@/lib/articleCoverFit';
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 
@@ -434,6 +435,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [coverUploadOk, setCoverUploadOk] = useState(false);
   const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
+  const [coverFit, setCoverFit] = useState<ArticleCoverFit>('photo');
 
   const mediaStatusQuery = useQuery({
     queryKey: ['media', 'status'],
@@ -551,6 +553,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     tags: string[];
     coverImage: string;
     coverImagePublicId: string;
+    coverFit: ArticleCoverFit;
     isBreaking: boolean;
     publishedAt: string;
     state: string;
@@ -571,6 +574,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     tags: [],
     coverImage: '',
     coverImagePublicId: '',
+    coverFit: 'photo',
     isBreaking: false,
     publishedAt: '',
     state: '',
@@ -613,6 +617,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setCoverImageFile(null);
     setCoverUploadOk(false);
     setCoverUploadError(null);
+    setCoverFit('photo');
     setLastSavedSnapshot(EMPTY_SNAPSHOT);
     setLastSavedAt(null);
     setPublishSuccess(null);
@@ -636,6 +641,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       tags: Array.isArray(next?.tags) ? (next?.tags as string[]) : tags,
       coverImage: (next?.coverImage ?? coverImageUrl ?? '').toString(),
       coverImagePublicId: (next?.coverImagePublicId ?? coverImagePublicId ?? '').toString(),
+      coverFit: normalizeArticleCoverFit(next?.coverFit ?? coverFit),
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
       publishedAt: (next?.publishedAt ?? publishedAt ?? '').toString(),
       state: (next?.state ?? state ?? '').toString(),
@@ -658,6 +664,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       tags: (Array.isArray(s.tags) ? s.tags : []).map((t) => String(t || '').trim()).filter(Boolean),
       coverImage: (s.coverImage || ''),
       coverImagePublicId: (s.coverImagePublicId || ''),
+      coverFit: normalizeArticleCoverFit(s.coverFit),
       isBreaking: !!s.isBreaking,
       publishedAt: (s.publishedAt || ''),
       state: (s.state || ''),
@@ -992,6 +999,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setCoverImageFile(null);
       setCoverUploadOk(false);
       setCoverUploadError(null);
+      setCoverFit(normalizeArticleCoverFit((src as any).coverFit));
 
       // Seed "last saved" hash for edit mode.
       try {
@@ -1009,6 +1017,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
           coverImage: String(incomingCoverUrl || ''),
           coverImagePublicId: String(incomingCoverPid || ''),
+          coverFit: normalizeArticleCoverFit((src as any).coverFit),
           isBreaking: !!(src as any).isBreaking,
           publishedAt: incomingPublishedAt ? new Date(incomingPublishedAt).toISOString() : '',
           state: String((src as any).state || ''),
@@ -1294,6 +1303,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
+          coverFit,
           isBreaking,
           state: state || undefined,
           district: district || undefined,
@@ -1535,6 +1545,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         imageUrl?: string;
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
+        coverFit: ArticleCoverFit;
         tags: string[];
       } => {
         const categoryKeyRaw = (category || '').trim();
@@ -1588,6 +1599,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
+          coverFit,
           tags: Array.isArray(tags) ? tags : [],
         };
       };
@@ -1630,7 +1642,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           return { ...(updated as any), __npCreatedId: idToPublish };
         } catch {
           // Fallback: minimal publish contract via admin proxy
-          const published: any = await publishArticle(idToPublish, publishAtToSend, { summary });
+          const published: any = await publishArticle(idToPublish, publishAtToSend, {
+            summary,
+            coverFit,
+            imageUrl: draftPayload.imageUrl,
+            coverImageUrl: draftPayload.coverImageUrl,
+            coverImage: draftPayload.coverImage,
+          });
           return { data: { ...(published as any), __npCreatedId: idToPublish } };
         }
       }
@@ -1778,6 +1796,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         translationGroupId: savedGroupId || translationGroupId,
         coverImage: coverImageUrl,
         coverImagePublicId,
+        coverFit,
         isBreaking,
         publishedAt,
         state,
@@ -1937,6 +1956,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         language: target,
         lang: target,
         translationGroupId: gid,
+        coverFit,
       };
 
       const created: any = await createArticle(payload);
@@ -1965,7 +1985,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, coverFit, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -1998,7 +2018,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, coverFit, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2716,6 +2736,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 {!isUploadingCover && coverUploadError ? (
                   <div className="mt-1 text-[11px] text-red-600">{coverUploadError}</div>
                 ) : null}
+                <div className="mt-3 space-y-2">
+                  <label className="block text-xs font-medium">Cover Fit</label>
+                  <select
+                    value={coverFit}
+                    onChange={(e) => setCoverFit(normalizeArticleCoverFit(e.target.value))}
+                    className="w-full border px-2 py-2 rounded"
+                  >
+                    {ARTICLE_COVER_FIT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <div className="text-[11px] text-slate-600">
+                    {ARTICLE_COVER_FIT_OPTIONS.find((option) => option.value === coverFit)?.description}
+                  </div>
+                </div>
               </div>
 
               {(userRole==='founder') && (
@@ -2755,6 +2790,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           summary,
           content,
           coverImageUrl: coverImageUrl || undefined,
+          coverFit,
           category,
           language,
           status,
