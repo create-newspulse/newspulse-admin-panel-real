@@ -4,7 +4,6 @@
 
 import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
-import type { ArticleCoverFit } from '@/lib/articleCoverFit';
 
 export interface Article {
   _id: string;
@@ -20,7 +19,6 @@ export interface Article {
   // Canonical field requested by admin publish contract.
   // Back-compat: some environments store this as a plain string URL.
   coverImage?: string | { url: string; publicId?: string };
-  coverFit?: ArticleCoverFit;
   category?: string;
   status?: ArticleStatus;
   // Some backends use alternate fields instead of `status`.

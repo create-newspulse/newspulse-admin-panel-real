@@ -12,7 +12,6 @@ import type { WorkflowChecklist, WorkflowState } from '@/types/api';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
-import { ARTICLE_COVER_FIT_OPTIONS, normalizeArticleCoverFit, type ArticleCoverFit } from '@/lib/articleCoverFit';
 
 interface NewsForm {
   title: string;
@@ -52,7 +51,6 @@ export default function EditNews() {
   const [coverPublicId, setCoverPublicId] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
-  const [coverFit, setCoverFit] = useState<ArticleCoverFit>('photo');
 
   // Editorial workflow state
   const [workflow, setWorkflow] = useState<WorkflowState | null>(null);
@@ -101,7 +99,6 @@ export default function EditNews() {
           });
           setCoverUrl(String(incomingCoverUrl || ''));
           setCoverPublicId(String(incomingCoverPid || ''));
-          setCoverFit(normalizeArticleCoverFit(article?.coverFit));
           setCoverFile(null);
         } else {
           setError('⚠️ Article not found');
@@ -120,7 +117,6 @@ export default function EditNews() {
               language: found.language || '',
               summary: found.summary || ''
             });
-            setCoverFit(normalizeArticleCoverFit(found?.coverFit));
           } else {
             setError('⚠️ Article not found');
           }
@@ -186,7 +182,6 @@ export default function EditNews() {
         imageUrl: trimmedCoverUrl || undefined,
         coverImageUrl: trimmedCoverUrl || undefined,
         coverImage: trimmedCoverUrl ? { url: trimmedCoverUrl, publicId: trimmedCoverPid || undefined } : undefined,
-        coverFit,
       };
 
       await api.put(`articles/${id}`, payload);
@@ -313,22 +308,6 @@ export default function EditNews() {
             }}
           />
           {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-900">Cover fit</label>
-          <select
-            value={coverFit}
-            onChange={(e) => setCoverFit(normalizeArticleCoverFit(e.target.value))}
-            className="w-full border px-4 py-2 rounded"
-          >
-            {ARTICLE_COVER_FIT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <div className="mt-1 text-xs text-slate-600">
-            {ARTICLE_COVER_FIT_OPTIONS.find((option) => option.value === coverFit)?.description}
-          </div>
         </div>
 
         <select

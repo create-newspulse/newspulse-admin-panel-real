@@ -1,8 +1,6 @@
 // Shared API domain types for NewsPulse admin panel.
 // Centralizing these reduces scattered 'any' usage and drift.
 
-import type { ArticleCoverFit } from '@/lib/articleCoverFit';
-
 export type CommunitySubmissionPriority = 'FOUNDER_REVIEW' | 'EDITOR_REVIEW' | 'LOW_PRIORITY';
 
 // Raw shape from backend (Mongo-style _id; backend may send varied optional fields)
@@ -69,7 +67,6 @@ export interface Article {
   summary?: string;
   content?: string; // aka body
   imageUrl?: string;
-  coverFit?: ArticleCoverFit;
   category?: string;
   language?: string;
   status?: 'draft' | 'scheduled' | 'published' | 'archived' | 'deleted';

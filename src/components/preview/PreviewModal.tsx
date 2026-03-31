@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import ArticlePreview, { type ArticlePreviewModel, type PreviewLanguage } from '@/components/preview/ArticlePreview';
-import { getArticleCoverFrameClass, getArticleCoverImageClass } from '@/lib/articleCoverFit';
 
 export interface PreviewModalProps {
   open: boolean;
@@ -20,7 +19,6 @@ export default function PreviewModal({ open, onClose, article }: PreviewModalPro
   if (!open) return null;
 
   const cover = (article as any)?.coverImageUrl ? String((article as any).coverImageUrl).trim() : '';
-  const coverFit = (article as any)?.coverFit;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 p-4" role="dialog" aria-modal="true">
@@ -42,8 +40,8 @@ export default function PreviewModal({ open, onClose, article }: PreviewModalPro
           <div className="p-4">
             {cover ? (
               <div className="mb-4">
-                <div className={getArticleCoverFrameClass(coverFit)}>
-                  <img src={cover} alt="Cover" className={getArticleCoverImageClass(coverFit)} />
+                <div className="w-full aspect-video rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+                  <img src={cover} alt="Cover" className="w-full h-full object-cover" />
                 </div>
               </div>
             ) : null}

@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { sanitizeHtml } from '@/lib/sanitize';
-import type { ArticleCoverFit } from '@/lib/articleCoverFit';
 
 export type PreviewLanguage = 'en' | 'hi' | 'gu';
 
@@ -11,7 +10,6 @@ export interface ArticlePreviewModel {
   content: string;
   // Optional cover image for preview (admin uses this as coverImageUrl).
   coverImageUrl?: string;
-  coverFit?: ArticleCoverFit;
   category?: string;
   language?: PreviewLanguage;
   // Some backends/components provide language as `lang`.
