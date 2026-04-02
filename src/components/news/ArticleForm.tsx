@@ -44,6 +44,18 @@ function logArticleEditorDebug(label: string, payload: Record<string, any>): voi
   console.log(`[ArticleForm] ${label}`, payload);
 }
 
+function getRelatedArticleIds(input: any): string[] {
+  const values = [
+    input?.linkedArticleId,
+    input?.articleId,
+    input?.id,
+    input?._id,
+  ];
+  return values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+}
+
 function normalizeLang(input: any): LangCode {
   const v = String(input || '').trim().toLowerCase();
   if (v === 'en' || v === 'hi' || v === 'gu') return v;
@@ -1244,99 +1256,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setTranslationSyncOverrides({});
   }, [effectiveId, translationGroupIdTrimmed, translationSourceLanguage]);
 
-  async function syncMasterArticlePublish(args: {
-    masterId: string;
-    groupId: string;
-    publishedTs: string;
-  }): Promise<Partial<Record<LangCode, string>>> {
-    const { masterId, groupId, publishedTs } = args;
-    const results: Partial<Record<LangCode, string>> = {};
-    const sourceCode = translationSourceLanguage || currentArticleLanguage;
-    const categoryKey = normalizeArticleCategoryKey(String(category || '').trim()) || undefined;
-    const removedSharedUrls = computeRemovedSharedUrls(lastSavedSnapshot.content, content);
-
-    setTranslationSyncOverrides((prev) => ({
-      ...prev,
-      [sourceCode]: { state: 'source', detail: 'Master published' },
-    }));
-    results[sourceCode] = `${sourceCode.toUpperCase()} synced`;
-
-    for (const code of ['en', 'hi', 'gu'] as const) {
-      if (code === sourceCode) continue;
-
-      const variant = translationVariants[code];
-      const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
-      if (!variant || !variantId || variantId === masterId) {
-        setTranslationSyncOverrides((prev) => ({
-          ...prev,
-          [code]: { state: 'needs-refresh', detail: 'No linked version available' },
-        }));
-        results[code] = `${code.toUpperCase()} needs refresh`;
-        continue;
-      }
-
-      setTranslationSyncOverrides((prev) => ({
-        ...prev,
-        [code]: { state: 'regenerating', detail: 'Syncing shared fields…' },
-      }));
-
-      try {
-        const variantContent = String((variant as any)?.content ?? (variant as any)?.body ?? '');
-        const nextVariantContent = removedSharedUrls.length > 0
-          ? removeSharedArtifactsFromContent(variantContent, removedSharedUrls)
-          : variantContent;
-
-        const sharedPayload: any = {
-          language: code,
-          lang: code,
-          translationGroupId: groupId,
-          category: categoryKey,
-          tags: Array.isArray(tags) ? tags : [],
-          content: nextVariantContent,
-          publishedAt: publishedTs,
-          isBreaking,
-          state: state || undefined,
-          district: district || undefined,
-          city: city || undefined,
-        };
-
-        logArticleEditorDebug('translation publish payload', {
-          sourceArticleId: masterId,
-          targetArticleId: variantId,
-          route: `/admin-api/articles/${encodeURIComponent(variantId)}`,
-          slug: String((variant as any)?.slug || ''),
-          language: code,
-          translationGroupId: groupId,
-          imageUrl: sharedPayload.imageUrl,
-          coverImageUrl: sharedPayload.coverImageUrl,
-          coverImage: sharedPayload.coverImage,
-          payloadKeys: Object.keys(sharedPayload).sort(),
-        });
-
-        await publishArticle(variantId, publishedTs, sharedPayload);
-        await retryArticleTranslation(variantId);
-
-        setTranslationSyncOverrides((prev) => ({
-          ...prev,
-          [code]: {
-            state: 'synced',
-            detail: removedSharedUrls.length > 0 ? 'Shared cleanup applied' : 'Linked version synced',
-          },
-        }));
-        results[code] = `${code.toUpperCase()} synced`;
-      } catch (error: any) {
-        const message = normalizeError(error, `${languageLabel(code)} sync failed`).message;
-        setTranslationSyncOverrides((prev) => ({
-          ...prev,
-          [code]: { state: 'failed', detail: message },
-        }));
-        results[code] = `${code.toUpperCase()} failed`;
-      }
-    }
-
-    return results;
-  }
-
   const groupStatus = useMemo(() => {
     const variants = Object.values(translationVariants).filter(Boolean) as any[];
     if (variants.some((v) => getVariantStatus(v) === 'published')) return 'Published';
@@ -1702,6 +1621,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         imageUrl: body.imageUrl,
         coverImageUrl: body.coverImageUrl,
         coverImage: body.coverImage,
+        relatedArticleIds: getRelatedArticleIds(body),
         payloadKeys: Object.keys(body).sort(),
       });
       if (!title.trim()) throw new Error('Title required');
@@ -1735,6 +1655,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         imageUrl: saved?.imageUrl,
         coverImageUrl: saved?.coverImageUrl,
         coverImage: saved?.coverImage,
+        relatedArticleIds: getRelatedArticleIds(saved),
       });
       setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
@@ -1749,7 +1670,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const safeSlug = lastSubmitRef.current?.safeSlug || ensureValidSlug(slug, title);
       const statusToSend = lastSubmitRef.current?.statusToSend || status;
       const wasNew = lastSubmitRef.current?.wasNew ?? (!effectiveId);
-      const publishAtToUse = String(saved?.publishedAt || publishedAt || new Date().toISOString());
       let syncResults: Partial<Record<LangCode, string>> | undefined;
 
       // Persist id after create so subsequent saves update (PUT) instead of creating duplicates.
@@ -1781,11 +1701,28 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         setTranslationGroupId(savedGroupId);
       }
 
-      if (saveKindRef.current === 'publish' && savedId && savedGroupId && isMasterArticle) {
-        syncResults = await syncMasterArticlePublish({
-          masterId: String(savedId),
-          groupId: savedGroupId,
-          publishedTs: publishAtToUse,
+      if (saveKindRef.current === 'publish' && savedId) {
+        logArticleEditorDebug('publish target confirmation', {
+          targetArticleId: String(savedId),
+          route: `/admin-api/articles/${encodeURIComponent(String(savedId))}`,
+          slug: safeSlug,
+          language,
+          translationGroupId: savedGroupId || translationGroupId || undefined,
+          relatedArticleIds: getRelatedArticleIds(saved),
+          note: 'Publish is scoped to the current article only. Linked variants are not auto-published.',
+        });
+      }
+
+      if (saveKindRef.current === 'publish' && savedGroupId && isMasterArticle) {
+        setTranslationSyncOverrides((prev) => {
+          const next: Partial<Record<LangCode, TranslationSyncEntry>> = { ...prev };
+          for (const code of ['en', 'hi', 'gu'] as const) {
+            const variant = translationVariants[code];
+            const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
+            if (!variant || !variantId || variantId === String(savedId)) continue;
+            next[code] = { state: 'needs-refresh', detail: 'Publish separately when ready' };
+          }
+          return next;
         });
         qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', savedGroupId] });
       }
@@ -2542,7 +2479,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
                       {isMasterArticle ? (
                         <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
-                          Changes to this master article will sync to all linked language versions.
+                          Linked language versions stay separate. Publishing or changing media here does not update other stories.
                         </div>
                       ) : null}
                     </div>
@@ -2654,8 +2591,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
                     <div className="mt-2 text-[11px] text-slate-600">
                       {isMasterArticle
-                        ? 'Publish once from the master article to sync shared cleanup changes across linked versions.'
-                        : 'This version stays linked to the master article and receives shared cleanup changes on master publish.'}
+                        ? 'Publishing this story affects only this story. Linked versions must be reviewed and published separately.'
+                        : 'This linked version stays separate from the master article for publish and media changes.'}
                     </div>
                   </div>
                 ) : null}

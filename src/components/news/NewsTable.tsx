@@ -117,6 +117,24 @@ function getArticleLanguageBadge(a: Article): string {
   return formatLangTag(only);
 }
 
+function isAdminArticleDebugEnabled(): boolean {
+  try {
+    const w: any = window as any;
+    if (w && (w.__np_debug_article_editor || w.__np_debug_article_requests)) return true;
+  } catch {}
+  try {
+    return localStorage.getItem('np_debug_article_editor') === '1'
+      || localStorage.getItem('np_debug_article_requests') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function logNewsTableAction(label: string, payload: Record<string, any>): void {
+  if (!isAdminArticleDebugEnabled()) return;
+  console.log(`[NewsTable] ${label}`, payload);
+}
+
 function getAuthorName(a: Article): string {
   const authorRaw = (a as any)?.author;
 
@@ -700,13 +718,27 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const renderActions = (a: Article) => {
     const st = (a.status ?? 'draft') as ArticleStatus;
     const id = a._id;
+    const baseLogPayload = {
+      clickedArticleId: id,
+      slug: String(a.slug || ''),
+      language: String((a as any).lang ?? a.language ?? ''),
+      translationGroupId: String((a as any).translationGroupId || ''),
+      status: st,
+      relatedArticleIds: [],
+    };
 
     return (
       <div className="flex items-center justify-end gap-3 flex-nowrap whitespace-nowrap">
         <ActionLink
           label="Edit"
           tone="blue"
-          onClick={() => navigate(`/admin/articles/${id}/edit`)}
+          onClick={() => {
+            logNewsTableAction('edit click', {
+              ...baseLogPayload,
+              route: `/admin/articles/${encodeURIComponent(id)}/edit`,
+            });
+            navigate(`/admin/articles/${id}/edit`);
+          }}
         />
 
         {st === 'draft' && (
@@ -718,6 +750,11 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
               disabled={!publishEnabled}
               onClick={() => {
                 if (!publishEnabled) return;
+                logNewsTableAction('publish click', {
+                  ...baseLogPayload,
+                  route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                  payload: { status: 'published' },
+                });
                 mutatePublish.mutate(id);
               }}
             />
@@ -728,6 +765,10 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
               disabled={!publishEnabled}
               onClick={() => {
                 if (!publishEnabled) return;
+                logNewsTableAction('schedule click', {
+                  ...baseLogPayload,
+                  route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                });
                 setScheduleTarget(a);
                 setScheduleOpen(true);
               }}
@@ -739,7 +780,14 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Unschedule"
             tone="amber"
-            onClick={() => mutateUnschedule.mutate(id)}
+            onClick={() => {
+              logNewsTableAction('unschedule click', {
+                ...baseLogPayload,
+                route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                payload: { status: 'draft', publishAt: null, scheduledAt: null },
+              });
+              mutateUnschedule.mutate(id);
+            }}
           />
         )}
 
@@ -747,7 +795,14 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Unpublish"
             tone="slate"
-            onClick={() => mutateUnpublish.mutate(id)}
+            onClick={() => {
+              logNewsTableAction('unpublish click', {
+                ...baseLogPayload,
+                route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                payload: { status: 'draft' },
+              });
+              mutateUnpublish.mutate(id);
+            }}
           />
         )}
 

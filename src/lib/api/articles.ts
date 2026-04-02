@@ -85,6 +85,24 @@ export interface ListResponse {
 
 const ARTICLES_PATH = 'articles';
 
+function isAdminArticleDebugEnabled(): boolean {
+  try {
+    const w: any = window as any;
+    if (w && (w.__np_debug_article_editor || w.__np_debug_article_requests)) return true;
+  } catch {}
+  try {
+    return localStorage.getItem('np_debug_article_editor') === '1'
+      || localStorage.getItem('np_debug_article_requests') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function logAdminArticleRequest(label: string, payload: Record<string, any>): void {
+  if (!isAdminArticleDebugEnabled()) return;
+  console.log(`[articles.api] ${label}`, payload);
+}
+
 function normalizeArticleLanguage<T>(input: T): T {
   if (!input || typeof input !== 'object') return input;
   const a: any = input as any;
@@ -311,10 +329,22 @@ export async function updateArticleStatus(id: string, status: ArticleStatus) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   if (status === 'published') {
     const publishedAt = new Date().toISOString();
+    logAdminArticleRequest('updateArticleStatus', {
+      targetArticleId: id,
+      route: `/admin-api/${url}`,
+      payload: { status: 'published', publishedAt },
+      relatedArticleIds: [],
+    });
     // Prefer PUT for publish to avoid accidental calls to a /publish endpoint on the frontend host.
     const res = await adminApiClient.put(url, { status: 'published', publishedAt });
     return res.data as any;
   }
+  logAdminArticleRequest('updateArticleStatus', {
+    targetArticleId: id,
+    route: `/admin-api/${url}`,
+    payload: { status },
+    relatedArticleIds: [],
+  });
   return patchThenPut<Article>(url, { status });
 }
 
@@ -322,6 +352,12 @@ export async function publishArticle(id: string, publishedAt?: string, extra?: P
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   const ts = (publishedAt && String(publishedAt).trim()) ? String(publishedAt).trim() : new Date().toISOString();
   const payload = withDescriptionFallback({ ...(extra || {}), status: 'published', publishedAt: ts } as any);
+  logAdminArticleRequest('publishArticle', {
+    targetArticleId: id,
+    route: `/admin-api/${url}`,
+    payload,
+    relatedArticleIds: [],
+  });
   const res = await adminApiClient.put(url, payload);
   return res.data as any;
 }
@@ -335,12 +371,24 @@ export async function retryArticleTranslation(id: string) {
 
 export async function scheduleArticle(id: string, publishAt: string) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  logAdminArticleRequest('scheduleArticle', {
+    targetArticleId: id,
+    route: `/admin-api/${url}`,
+    payload: { status: 'scheduled', publishAt },
+    relatedArticleIds: [],
+  });
   return patchThenPut<Article>(url, { status: 'scheduled', publishAt });
 }
 
 export async function unscheduleArticle(id: string) {
   // Clear schedule and revert to draft
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
+  logAdminArticleRequest('unscheduleArticle', {
+    targetArticleId: id,
+    route: `/admin-api/${url}`,
+    payload: { status: 'draft', publishAt: null, scheduledAt: null },
+    relatedArticleIds: [],
+  });
   return patchThenPut<Article>(url, { status: 'draft', publishAt: null, scheduledAt: null });
 }
 
@@ -398,7 +446,13 @@ export async function hardDeleteArticle(id: string) {
 // Optional extra helpers (create/update/meta) if needed by other screens
 export async function createArticle(data: Partial<Article>) {
   // Canonical contract: POST /articles (proxy -> /admin-api/articles)
-  const res = await adminApiClient.post(ARTICLES_PATH, withDescriptionFallback(data as any));
+  const payload = withDescriptionFallback(data as any);
+  logAdminArticleRequest('createArticle', {
+    route: `/admin-api/${ARTICLES_PATH}`,
+    payload,
+    relatedArticleIds: [],
+  });
+  const res = await adminApiClient.post(ARTICLES_PATH, payload);
   return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
@@ -416,7 +470,14 @@ export async function createCommunityArticle(data: Partial<Article>) {
 export async function updateArticle(id: string, data: Partial<Article>) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   // Standard contract ONLY: PUT /admin-api/articles/:id
-  const res = await adminApiClient.put(url, withDescriptionFallback(data as any));
+  const payload = withDescriptionFallback(data as any);
+  logAdminArticleRequest('updateArticle', {
+    targetArticleId: id,
+    route: `/admin-api/${url}`,
+    payload,
+    relatedArticleIds: [],
+  });
+  const res = await adminApiClient.put(url, payload);
   return res.data;
 }
 
