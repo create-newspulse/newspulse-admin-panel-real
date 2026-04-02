@@ -39,6 +39,11 @@ function isArticleEditorDebugEnabled(): boolean {
   }
 }
 
+function logArticleEditorDebug(label: string, payload: Record<string, any>): void {
+  if (!isArticleEditorDebugEnabled()) return;
+  console.log(`[ArticleForm] ${label}`, payload);
+}
+
 function normalizeLang(input: any): LangCode {
   const v = String(input || '').trim().toLowerCase();
   if (v === 'en' || v === 'hi' || v === 'gu') return v;
@@ -1248,8 +1253,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     const results: Partial<Record<LangCode, string>> = {};
     const sourceCode = translationSourceLanguage || currentArticleLanguage;
     const categoryKey = normalizeArticleCategoryKey(String(category || '').trim()) || undefined;
-    const coverUrl = String(coverImageUrl || '').trim() || undefined;
-    const coverPid = String(coverImagePublicId || '').trim() || undefined;
     const removedSharedUrls = computeRemovedSharedUrls(lastSavedSnapshot.content, content);
 
     setTranslationSyncOverrides((prev) => ({
@@ -1291,14 +1294,24 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           tags: Array.isArray(tags) ? tags : [],
           content: nextVariantContent,
           publishedAt: publishedTs,
-          imageUrl: coverUrl,
-          coverImageUrl: coverUrl,
-          coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
           isBreaking,
           state: state || undefined,
           district: district || undefined,
           city: city || undefined,
         };
+
+        logArticleEditorDebug('translation publish payload', {
+          sourceArticleId: masterId,
+          targetArticleId: variantId,
+          route: `/admin-api/articles/${encodeURIComponent(variantId)}`,
+          slug: String((variant as any)?.slug || ''),
+          language: code,
+          translationGroupId: groupId,
+          imageUrl: sharedPayload.imageUrl,
+          coverImageUrl: sharedPayload.coverImageUrl,
+          coverImage: sharedPayload.coverImage,
+          payloadKeys: Object.keys(sharedPayload).sort(),
+        });
 
         await publishArticle(variantId, publishedTs, sharedPayload);
         await retryArticleTranslation(variantId);
@@ -1656,38 +1669,41 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId };
 
-      if (isArticleEditorDebugEnabled()) {
-        console.log('[ArticleForm] submit', {
-          kind: saveKindRef.current,
-          effectiveId,
-          desiredStatusOverride,
-          originalStatus: originalStatusRef.current,
-          statusState: status,
-          statusExplicitlyChanged,
-          statusToSend,
-          scheduledAt,
-          publishedAt,
-          language,
-          translationGroupId,
-        });
-      }
+      logArticleEditorDebug('submit', {
+        kind: saveKindRef.current,
+        targetArticleId: effectiveId,
+        route: effectiveId ? `/admin-api/articles/${encodeURIComponent(effectiveId)}` : '/admin-api/articles',
+        desiredStatusOverride,
+        originalStatus: originalStatusRef.current,
+        statusState: status,
+        statusExplicitlyChanged,
+        statusToSend,
+        scheduledAt,
+        publishedAt,
+        language,
+        translationGroupId,
+      });
 
       const publishingViaSave = statusToSend === 'published';
       const publishAtToSend = publishingViaSave ? (publishedAtIso || new Date().toISOString()) : undefined;
       const body = buildPublicPayload({ status: statusToSend, publishedAt: publishAtToSend });
 
-      if (isArticleEditorDebugEnabled()) {
-        console.log('[ArticleForm] payload', {
-          id: effectiveId,
-          status: body.status,
-          publishedAt: (body as any).publishedAt,
-          publishAt: (body as any).publishAt,
-          scheduledAt: (body as any).scheduledAt,
-          language: body.language,
-          lang: body.lang,
-          translationGroupId: body.translationGroupId,
-        });
-      }
+      logArticleEditorDebug('payload', {
+        targetArticleId: effectiveId,
+        route: effectiveId ? `/admin-api/articles/${encodeURIComponent(effectiveId)}` : '/admin-api/articles',
+        slug: body.slug,
+        status: body.status,
+        publishedAt: (body as any).publishedAt,
+        publishAt: (body as any).publishAt,
+        scheduledAt: (body as any).scheduledAt,
+        language: body.language,
+        lang: body.lang,
+        translationGroupId: body.translationGroupId,
+        imageUrl: body.imageUrl,
+        coverImageUrl: body.coverImageUrl,
+        coverImage: body.coverImage,
+        payloadKeys: Object.keys(body).sort(),
+      });
       if (!title.trim()) throw new Error('Title required');
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryKey) {
         throw new Error('Category required to publish');
@@ -1706,18 +1722,20 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const raw = result as any;
       const saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
 
-      if (isArticleEditorDebugEnabled()) {
-        console.log('[ArticleForm] saved', {
-          id: saved?._id || saved?.id,
-          status: saved?.status,
-          state: saved?.state,
-          publishStatus: saved?.publishStatus,
-          scheduledAt: saved?.scheduledAt || saved?.publishAt,
-          publishedAt: saved?.publishedAt,
-          language: saved?.language,
-          lang: saved?.lang,
-        });
-      }
+      logArticleEditorDebug('saved', {
+        id: saved?._id || saved?.id,
+        status: saved?.status,
+        state: saved?.state,
+        publishStatus: saved?.publishStatus,
+        scheduledAt: saved?.scheduledAt || saved?.publishAt,
+        publishedAt: saved?.publishedAt,
+        language: saved?.language,
+        lang: saved?.lang,
+        slug: saved?.slug,
+        imageUrl: saved?.imageUrl,
+        coverImageUrl: saved?.coverImageUrl,
+        coverImage: saved?.coverImage,
+      });
       setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
