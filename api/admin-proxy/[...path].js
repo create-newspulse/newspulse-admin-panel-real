@@ -185,7 +185,14 @@ async function handleCoverUpload(req, res) {
     const publicId = String(payload?.public_id || '').trim();
     if (!url) return res.status(502).json({ error: 'Cloudinary upload succeeded but no URL returned' });
 
-    return res.status(200).json({ url, publicId });
+    return res.status(200).json({
+        url,
+        publicId,
+        width: typeof payload?.width === 'number' ? payload.width : undefined,
+        height: typeof payload?.height === 'number' ? payload.height : undefined,
+        bytes: typeof payload?.bytes === 'number' ? payload.bytes : undefined,
+        format: typeof payload?.format === 'string' ? payload.format : undefined,
+    });
 }
 
 async function handleMediaStatus(req, res) {

@@ -31,7 +31,24 @@ function devDebug(msg: string, extra?: any) {
 export type UploadCoverImageResult = {
   url: string;
   publicId?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  format?: string;
 };
+
+function extractUploadedNumber(raw: any, key: string): number | undefined {
+  const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const value = payload?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function extractUploadedString(raw: any, key: string): string | undefined {
+  const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const value = payload?.[key];
+  const normalized = String(value || '').trim();
+  return normalized || undefined;
+}
 
 function extractUploadedUrlFromPayload(raw: any): string {
   const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
@@ -251,5 +268,14 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
   const url = extractUploadedUrl(data);
   if (!url) throw new Error('Upload succeeded but no URL was returned');
   const publicId = extractUploadedPublicId(data);
-  return { url, publicId: publicId || undefined };
+  const result: UploadCoverImageResult = {
+    url,
+    publicId: publicId || undefined,
+    width: extractUploadedNumber(data, 'width'),
+    height: extractUploadedNumber(data, 'height'),
+    bytes: extractUploadedNumber(data, 'bytes'),
+    format: extractUploadedString(data, 'format'),
+  };
+  devDebug('[media] upload cover success', result);
+  return result;
 }

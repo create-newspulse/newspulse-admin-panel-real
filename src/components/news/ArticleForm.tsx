@@ -1848,6 +1848,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setCoverImage(null);
     try {
       const res = await uploadCoverImage(file);
+      logArticleEditorDebug('cover upload result', {
+        url: res.url,
+        publicId: res.publicId,
+        width: res.width,
+        height: res.height,
+        bytes: res.bytes,
+        format: res.format,
+      });
       setCoverImage({ url: res.url, publicId: res.publicId || undefined });
       setCoverImageFile(null);
       setCoverUploadOk(true);
