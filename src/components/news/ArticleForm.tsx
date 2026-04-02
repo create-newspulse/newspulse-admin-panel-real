@@ -23,6 +23,7 @@ import { getMediaStatus, uploadCoverImage } from '@/lib/api/media';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
+import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
 
 type LangCode = 'en' | 'hi' | 'gu';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
@@ -410,6 +411,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const contentPlain = useMemo(() => stripHtmlToText(content), [content]);
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
+  const [youthPulseTrack, setYouthPulseTrack] = useState<YouthPulseTrack | ''>('');
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
@@ -562,6 +564,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     summary: string;
     content: string;
     category: string;
+    youthPulseTrack: string;
     language: string;
     translationGroupId: string;
     status: 'draft' | 'scheduled' | 'published';
@@ -582,6 +585,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     summary: '',
     content: '',
     category: '',
+    youthPulseTrack: '',
     language: DEFAULT_CREATE_LANGUAGE,
     translationGroupId: '',
     status: 'draft',
@@ -606,6 +610,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setAutoSummary(true);
     setContent('');
     setCategory('');
+    setYouthPulseTrack('');
     setLanguage(DEFAULT_CREATE_LANGUAGE);
     setTranslationGroupId('');
     setStatus('draft');
@@ -647,6 +652,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       summary: (next?.summary ?? summary ?? '').toString(),
       content: (next?.content ?? content ?? '').toString(),
       category: (next?.category ?? category ?? '').toString(),
+      youthPulseTrack: (next?.youthPulseTrack ?? youthPulseTrack ?? '').toString(),
       language: (next?.language ?? language ?? '').toString(),
       translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
       status: (next?.status ?? status) as Snapshot['status'],
@@ -952,6 +958,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       const normalizedCategory = normalizeArticleCategoryKey(categorySlug);
       setCategory(normalizedCategory || '');
+      setYouthPulseTrack(normalizeYouthPulseTrack(
+        String((src as any).track ?? (src as any).subCategory ?? (src as any).subcategory ?? (src as any).trackName ?? '')
+      ));
       setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
       setTranslationGroupId(String((src as any).translationGroupId || ''));
       setTranslationStatus(extractTranslationStatus(src));
@@ -1489,6 +1498,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
+        const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
 
         const geoState = trimOrUndef(state);
         const geoDistrict = trimOrUndef(district);
@@ -1503,6 +1513,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           description: summary,
           content,
           category: categoryKey || undefined,
+          track: youthTrack || undefined,
+          trackName: youthTrack ? YOUTH_PULSE_TRACK_LABELS[youthTrack] : undefined,
+          subCategory: youthTrack || undefined,
+          subcategory: youthTrack || undefined,
           postType: isViralVideo ? 'video' : undefined,
           isFounder: isFounderEditorial ? true : undefined,
           status: opts.status,
@@ -1896,6 +1910,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         summary,
         content,
         category: categoryKey,
+        track: categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) || undefined : undefined,
+        trackName: categoryKey === 'youth-pulse' && normalizeYouthPulseTrack(youthPulseTrack)
+          ? YOUTH_PULSE_TRACK_LABELS[normalizeYouthPulseTrack(youthPulseTrack) as YouthPulseTrack]
+          : undefined,
+        subCategory: categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) || undefined : undefined,
+        subcategory: categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) || undefined : undefined,
         status: 'draft',
         language: target,
         lang: target,
@@ -1928,7 +1948,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -1961,7 +1981,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2305,6 +2325,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <div className="mt-1 text-xs text-red-600">Category is not allowed. Please choose a supported category.</div>
                 )}
               </div>
+
+              {category === 'youth-pulse' && (
+                <div>
+                  <label className="block text-xs font-medium">Youth Pulse Track</label>
+                  <select value={youthPulseTrack} onChange={e=> setYouthPulseTrack((e.target.value || '') as YouthPulseTrack | '')} className="w-full border px-2 py-2 rounded">
+                    <option value="">Select Youth Pulse track…</option>
+                    {YOUTH_PULSE_TRACK_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between gap-3 mb-2">

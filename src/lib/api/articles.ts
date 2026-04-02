@@ -48,6 +48,10 @@ export interface Article {
   // Flags + metadata used by frontend filters
   isBreaking?: boolean;
   tags?: string[];
+  track?: string;
+  trackName?: string;
+  subCategory?: string;
+  subcategory?: string;
   state?: string;
   district?: string;
   city?: string;
