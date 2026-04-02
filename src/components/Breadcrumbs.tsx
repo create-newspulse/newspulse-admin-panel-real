@@ -51,6 +51,7 @@ const Breadcrumbs = () => {
     "/admin/settings/public-site/homepage": "Homepage Modules",
     "/admin/settings/public-site/tickers": "Tickers",
     "/admin/settings/public-site/live-tv": "Live TV",
+    "/admin/settings/public-site/inspiration-hub": "Inspiration Hub",
     "/admin/settings/public-site/footer": "Footer",
     "/admin/settings/public-site/language-theme": "Language & Theme",
     "/admin/settings/public-site/preview": "Preview",

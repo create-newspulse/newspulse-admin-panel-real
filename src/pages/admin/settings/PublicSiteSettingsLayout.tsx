@@ -59,6 +59,7 @@ function PublicSiteSettingsLayoutInner() {
         <NavLink to="homepage" className={linkCls}>Homepage Modules</NavLink>
         <NavLink to="tickers" className={linkCls}>Tickers</NavLink>
         <NavLink to="live-tv" className={linkCls}>Live TV</NavLink>
+        <NavLink to="inspiration-hub" className={linkCls}>Inspiration Hub</NavLink>
         <NavLink to="footer" className={linkCls}>Footer</NavLink>
         <NavLink to="language-theme" className={linkCls}>Language & Theme</NavLink>
       </aside>

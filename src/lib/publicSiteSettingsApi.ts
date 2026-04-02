@@ -65,6 +65,46 @@ function mergeDefaults(value: PublicSiteSettings): PublicSiteSettings {
       ...DEFAULT_PUBLIC_SITE_SETTINGS.liveTv,
       ...(value.liveTv || {}),
     },
+    inspirationHub: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub,
+      ...(value.inspirationHub || {}),
+      localizedContent: {
+        ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent,
+        ...(value.inspirationHub?.localizedContent || {}),
+        sectionTitle: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.sectionTitle,
+          ...(value.inspirationHub?.localizedContent?.sectionTitle || {}),
+        },
+        sectionSubtitle: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.sectionSubtitle,
+          ...(value.inspirationHub?.localizedContent?.sectionSubtitle || {}),
+        },
+        droneTvTitle: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.droneTvTitle,
+          ...(value.inspirationHub?.localizedContent?.droneTvTitle || {}),
+        },
+        droneTvSubtitle: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.droneTvSubtitle,
+          ...(value.inspirationHub?.localizedContent?.droneTvSubtitle || {}),
+        },
+        dailyWondersHeading: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.dailyWondersHeading,
+          ...(value.inspirationHub?.localizedContent?.dailyWondersHeading || {}),
+        },
+        quoteText: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.quoteText,
+          ...(value.inspirationHub?.localizedContent?.quoteText || {}),
+        },
+        cardText: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.cardText,
+          ...(value.inspirationHub?.localizedContent?.cardText || {}),
+        },
+        narrationText: {
+          ...DEFAULT_PUBLIC_SITE_SETTINGS.inspirationHub.localizedContent.narrationText,
+          ...(value.inspirationHub?.localizedContent?.narrationText || {}),
+        },
+      },
+    },
     languageTheme: {
       ...DEFAULT_PUBLIC_SITE_SETTINGS.languageTheme,
       ...(value.languageTheme || {}),

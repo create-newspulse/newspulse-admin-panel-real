@@ -10,6 +10,7 @@ export default function PublicPreview() {
       homepage: s.homepage,
       tickers: s.tickers,
       liveTv: s.liveTv,
+      inspirationHub: s.inspirationHub,
       languageTheme: s.languageTheme,
     };
   }, [draft]);

@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+const LocalizedTextSchema = z.object({
+  en: z.string().default(''),
+  hi: z.string().default(''),
+  gu: z.string().default(''),
+}).default({});
+
+const InspirationHubLocalizedContentSchema = z.object({
+  sectionTitle: LocalizedTextSchema,
+  sectionSubtitle: LocalizedTextSchema,
+  droneTvTitle: LocalizedTextSchema,
+  droneTvSubtitle: LocalizedTextSchema,
+  dailyWondersHeading: LocalizedTextSchema,
+  quoteText: LocalizedTextSchema,
+  cardText: LocalizedTextSchema,
+  narrationText: LocalizedTextSchema,
+}).default({});
+
 export type HomepageModuleKey =
   | 'explore'
   | 'categoryStrip'
@@ -101,6 +118,23 @@ export const SiteSettingsSchema = z.object({
   liveTv: z.object({
     enabled: z.boolean().default(false),
     embedUrl: z.string().url().or(z.literal('')).default(''),
+  }).default({}),
+
+  inspirationHub: z.object({
+    enabled: z.boolean().default(false),
+    droneTvEnabled: z.boolean().default(false),
+    youtubeUrl: z.string().default(''),
+    embedUrl: z.string().default(''),
+    droneTvYoutubeUrl: z.string().default(''),
+    title: z.string().default(''),
+    videoTitle: z.string().default(''),
+    subtitle: z.string().default(''),
+    videoSubtitle: z.string().default(''),
+    autoplayMuted: z.boolean().default(true),
+    showOnHomepage: z.boolean().default(false),
+    showOnCategoryPage: z.boolean().default(true),
+    showOnInspirationHubPage: z.boolean().default(true),
+    localizedContent: InspirationHubLocalizedContentSchema,
   }).default({}),
 
   // Public site footer
