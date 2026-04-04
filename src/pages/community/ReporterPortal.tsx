@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCommunityStats, fetchCommunitySubmissions } from '@/lib/communityAdminApi';
+import { listReporterContacts } from '@/lib/api/reporterDirectory';
 import { Users, FileText, PenSquare, BarChart3, ArrowRight, AlertCircle } from 'lucide-react';
 import MyCommunityStories from '@/pages/community/MyCommunityStories';
 
@@ -54,6 +55,12 @@ export default function ReporterPortal() {
     staleTime: 20_000,
   });
 
+  const { data: reporterContactsData, isLoading: reporterContactsLoading } = useQuery({
+    queryKey: ['community-reporter-accounts-overview'],
+    queryFn: async () => await listReporterContacts({ page: 1, limit: 6 }),
+    staleTime: 20_000,
+  });
+
   const items = useMemo(() => (Array.isArray(submissions) ? submissions : []), [submissions]);
 
   const stats = useMemo<StatsShape>(() => {
@@ -78,11 +85,35 @@ export default function ReporterPortal() {
     const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     return bt - at;
   }).slice(0,5), [items]);
+
+  const reporterAccounts = useMemo(() => {
+    const rows = Array.isArray(reporterContactsData?.rows)
+      ? reporterContactsData.rows
+      : Array.isArray(reporterContactsData?.items)
+        ? reporterContactsData.items
+        : [];
+
+    return rows
+      .slice()
+      .sort((left, right) => {
+        const leftMs = new Date(left.lastSubmissionAt || left.lastStoryAt || 0).getTime() || 0;
+        const rightMs = new Date(right.lastSubmissionAt || right.lastStoryAt || 0).getTime() || 0;
+        return rightMs - leftMs;
+      })
+      .slice(0, 5);
+  }, [reporterContactsData]);
+
+  const totalReporterAccounts = typeof reporterContactsData?.total === 'number'
+    ? reporterContactsData.total
+    : reporterAccounts.length;
+  const verifiedReporterAccounts = reporterAccounts.filter((reporter) => reporter.verificationLevel === 'verified').length;
+  const restrictedReporterAccounts = reporterAccounts.filter((reporter) => reporter.status === 'suspended' || reporter.status === 'banned').length;
+
   if (!(isFounder || isAdmin)) {
     return (
       <div className="px-6 py-4 max-w-6xl mx-auto">
         <div className="p-4 border border-red-200 bg-red-50 rounded text-red-700 text-sm">
-          Access restricted. Reporter Portal is currently a Founder/Admin preview.
+          Access restricted. Reporter Portal oversight is available to Founder/Admin only.
         </div>
       </div>
     );
@@ -101,9 +132,9 @@ export default function ReporterPortal() {
           </div>
           <div>
             <h1 className="text-2xl font-bold">Reporter Portal</h1>
-            <p className="text-sm text-slate-600 mt-1">Founder preview – this is how the Community Reporter workspace will look.</p>
+            <p className="text-sm text-slate-600 mt-1">Admin oversight for the live Reporter Portal, reporter activity, and reporter-owned story records.</p>
             {isLoading && (
-              <p className="text-xs text-slate-500 mt-1">Loading your stories…</p>
+              <p className="text-xs text-slate-500 mt-1">Loading portal activity…</p>
             )}
             {isError && (
               <p className="text-xs text-red-600 mt-1">{(error as any)?.message || 'Failed to load submissions.'}</p>
@@ -112,20 +143,19 @@ export default function ReporterPortal() {
         </div>
         <div className="text-sm text-slate-600 md:text-right">
           {isFounder ? (
-            <span className="inline-block px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">Logged in as Founder Preview</span>
+            <span className="inline-block px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">Founder oversight</span>
           ) : (
-            <span className="inline-block px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">Reporter: {user?.name || user?.email || 'Unknown user'}</span>
+            <span className="inline-block px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">Admin oversight: {user?.name || user?.email || 'Unknown user'}</span>
           )}
         </div>
       </div>
 
-      {/* Warning for non-founder */}
-      {!isFounder && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 flex items-start gap-2 text-sm">
-          <AlertCircle className="w-5 h-5 mt-0.5" />
-          <div>This page is primarily designed for the Founder preview. In future, it will be the main dashboard for Community Reporters.</div>
+      <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 flex items-start gap-2 text-sm">
+        <AlertCircle className="w-5 h-5 mt-0.5" />
+        <div>
+          This admin view mirrors the live Reporter Portal. Reporters keep ownership of their own records while Founder/Admin can monitor activity here and move into moderation when needed.
         </div>
-      )}
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
@@ -135,14 +165,93 @@ export default function ReporterPortal() {
         <StatCard icon={<AlertCircle className="w-5 h-5" />} label="Rejected" value={stats.rejected} loading={isLoading} />
       </div>
 
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Reporter Accounts Snapshot</h2>
+            <p className="mt-1 text-sm text-slate-600">Lightweight visibility into live reporter accounts without leaving the current admin workflow.</p>
+          </div>
+          <div className="text-sm text-slate-500">
+            {reporterContactsLoading ? 'Loading accounts…' : `${totalReporterAccounts} reporter account${totalReporterAccounts === 1 ? '' : 's'}`}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Reporter accounts</div>
+            <div className="mt-2 text-2xl font-semibold text-slate-900">{reporterContactsLoading ? '…' : totalReporterAccounts}</div>
+            <div className="mt-1 text-sm text-slate-600">Total accounts currently visible to admin oversight.</div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Identity trust snapshot</div>
+            <div className="mt-2 text-2xl font-semibold text-slate-900">{reporterContactsLoading ? '…' : verifiedReporterAccounts}</div>
+            <div className="mt-1 text-sm text-slate-600">Verified reporter identities in the current snapshot. Restricted accounts: {reporterContactsLoading ? '…' : restrictedReporterAccounts}.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {reporterContactsLoading && (
+            <div className="text-sm text-slate-500">Loading reporter accounts…</div>
+          )}
+
+          {!reporterContactsLoading && reporterAccounts.length === 0 && (
+            <div className="text-sm text-slate-500">No reporter accounts are available in the admin directory yet.</div>
+          )}
+
+          {!reporterContactsLoading && reporterAccounts.map((reporter) => (
+            <div key={reporter.id} className="flex flex-col gap-2 rounded-xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-medium text-slate-900">{reporter.name || reporter.email || 'Unnamed reporter'}</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {[reporter.city, reporter.state, reporter.country].filter(Boolean).join(', ') || 'Location pending'}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  {reporter.verificationLevel && (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${reporter.verificationLevel === 'verified' ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : reporter.verificationLevel === 'pending' ? 'border-amber-200 bg-amber-100 text-amber-800' : reporter.verificationLevel === 'limited' ? 'border-amber-200 bg-amber-100 text-amber-800' : reporter.verificationLevel === 'revoked' ? 'border-red-200 bg-red-100 text-red-700' : 'border-slate-200 bg-slate-100 text-slate-700'}`}>
+                      {reporter.verificationLevel === 'verified' ? 'Verified identity' : reporter.verificationLevel === 'pending' ? 'Verification pending' : reporter.verificationLevel === 'limited' ? 'Verification limited' : reporter.verificationLevel === 'revoked' ? 'Verification revoked' : 'Identity unverified'}
+                    </span>
+                  )}
+                  {typeof reporter.emailVerified === 'boolean' && (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${reporter.emailVerified ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-amber-200 bg-amber-100 text-amber-800'}`}>
+                      {reporter.emailVerified ? 'Verified email' : 'Email not verified'}
+                    </span>
+                  )}
+                  {reporter.status && reporter.status !== 'active' && (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 ${reporter.status === 'watchlist' ? 'border-amber-200 bg-amber-100 text-amber-800' : 'border-red-200 bg-red-100 text-red-700'}`}>
+                      {reporter.status === 'watchlist' ? 'Watchlist' : reporter.status === 'suspended' ? 'Access locked' : 'Blocked'}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="text-sm text-slate-600 md:text-right">
+                <div>{reporter.totalStories} stor{reporter.totalStories === 1 ? 'y' : 'ies'} total</div>
+                <div>{reporter.pendingStories} pending</div>
+                <div>{reporter.authStatus || 'Auth status unavailable'}{reporter.authProvider ? ` · ${reporter.authProvider}` : ''}</div>
+                <div>{reporter.lastSubmissionAt || reporter.lastStoryAt ? `Last submission ${new Date(reporter.lastSubmissionAt || reporter.lastStoryAt || '').toLocaleDateString()}` : 'No submission date yet'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link to="/community/reporter-contacts" className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+            Open Reporter Accounts
+          </Link>
+          <Link to="/community/reporter" className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+            Open Review Queue
+          </Link>
+        </div>
+      </div>
+
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-4 mt-2">
         <Link to="/community/my-stories" className="flex-1 min-w-[220px] bg-slate-900 text-white rounded-xl p-4 flex items-center justify-between hover:bg-indigo-700 transition-colors" onClick={(e)=>{e.preventDefault(); navigate('/community/my-stories');}}>
           <div className="flex items-center gap-3">
             <FileText className="w-6 h-6" />
             <div>
-              <div className="font-semibold">Open My Stories</div>
-              <div className="text-xs text-indigo-200">View and manage your submissions</div>
+              <div className="font-semibold">Open My Community Stories</div>
+              <div className="text-xs text-indigo-200">Review reporter-owned submissions and history</div>
             </div>
           </div>
           <ArrowRight className="w-5 h-5" />
@@ -151,8 +260,8 @@ export default function ReporterPortal() {
           <div className="flex items-center gap-3">
             <PenSquare className="w-6 h-6" />
             <div>
-              <div className="font-semibold">Submit New Story</div>
-              <div className="text-xs text-slate-500">Write and send a new report</div>
+              <div className="font-semibold">Open Submission Flow</div>
+              <div className="text-xs text-slate-500">Use the same reporter-compatible submission path</div>
             </div>
           </div>
           <ArrowRight className="w-5 h-5" />

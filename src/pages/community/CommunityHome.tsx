@@ -96,7 +96,7 @@ export default function CommunityHome() {
         <HubCard
           to="/community/portal"
           title="Reporter Portal"
-          description="Dashboard view, stats & recent stories"
+          description="Live portal oversight, stats, and recent reporter activity"
           icon={<Users className="w-6 h-6" />}
           variant="primary"
         />
@@ -112,7 +112,7 @@ export default function CommunityHome() {
         <HubCard
           to="/community/my-stories"
           title="My Community Stories"
-          description="Manage and track your submissions"
+          description="Reporter-owned submission history with admin oversight tools"
           icon={<PenSquare className="w-6 h-6" />}
           variant="neutral"
         />
@@ -136,14 +136,14 @@ export default function CommunityHome() {
         <HubCard
           to="/founder/feature-toggles"
           title="Community Reporter Feature Toggles – Founder only"
-          description="Configure visibility of the public Reporter Portal features."
+          description="Open or close the live Reporter Portal and public submission entry."
           icon={<LayoutGrid className="w-6 h-6" />}
           variant="secondary"
         />
       </section>
 
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-indigo-700 text-sm">
-        This hub will expand as new Community features are introduced. Use the cards above to access current tools.
+        Use these cards to monitor the live Reporter Portal, review reporter-owned submissions, and control public access when needed.
       </div>
     </div>
   );

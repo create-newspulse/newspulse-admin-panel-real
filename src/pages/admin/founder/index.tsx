@@ -75,7 +75,7 @@ export default function FounderControlPage() {
       <div className="mt-4">
         <Link to="/founder/feature-toggles" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm">
           ⚙️ Feature Toggles
-          <span className="opacity-80">Control Reporter Portal visibility</span>
+          <span className="opacity-80">Control Reporter Portal and submission visibility</span>
         </Link>
       </div>
     </div>

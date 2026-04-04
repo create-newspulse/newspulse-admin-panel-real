@@ -656,7 +656,7 @@ const MyCommunityStoriesPage: React.FC = () => {
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Community Story Desk</h1>
-          <p className="mt-1 text-sm text-slate-600">Founder/Admin operations view for Community Reporter submissions (record/history management).</p>
+          <p className="mt-1 text-sm text-slate-600">Founder/Admin oversight for reporter-owned Community Reporter submissions, status history, and follow-up actions.</p>
           <p className="mt-1 text-xs text-slate-500">
             Live site content (publish/unpublish/archive/delete) is managed in{' '}
             <a href="/admin/manage-news" className="underline hover:text-slate-700">Manage News Articles</a>.
@@ -681,7 +681,7 @@ const MyCommunityStoriesPage: React.FC = () => {
             type="button"
             onClick={() => window.open(REPORTER_PORTAL_URL, '_blank', 'noopener,noreferrer')}
             className="text-sm px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-            title="Open the public reporter portal"
+            title="Open the live reporter portal"
           >
             Reporter Portal
           </button>

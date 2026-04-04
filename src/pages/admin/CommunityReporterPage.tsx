@@ -15,7 +15,7 @@ import { CommunitySubmission } from '@/types/CommunitySubmission';
 import { formatLocation, getAgeGroup, toneToBadgeClasses } from '@/lib/communityReporterUtils';
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
 import { Star } from 'lucide-react';
-import { listReporterContacts as listReporterContactsDirectory } from '@/lib/api/reporterDirectory';
+import { listReporterContacts as listReporterContactsDirectory, type ReporterContact } from '@/lib/api/reporterDirectory';
 
 /*
  * Community Reporter Queue (admin)
@@ -56,9 +56,19 @@ export default function CommunityReporterPage(){
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSubmission, setProfileSubmission] = useState<CommunitySubmission | null>(null);
 
-  const contactsIndexRef = useRef<Map<string, string>>(new Map());
+  const contactsIndexRef = useRef<Map<string, ReporterContact>>(new Map());
   const contactsLoadedRef = useRef(false);
-  const contactsLoadPromiseRef = useRef<Promise<Map<string, string>> | null>(null);
+  const contactsLoadPromiseRef = useRef<Promise<Map<string, ReporterContact>> | null>(null);
+
+  function readOptionalBoolean(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+    return undefined;
+  }
 
   function normalizePhone(p?: string | null): string {
     const digits = String(p || '').replace(/\D/g, '');
@@ -67,7 +77,7 @@ export default function CommunityReporterPage(){
     return digits.length > 10 ? digits.slice(-10) : digits;
   }
 
-  async function ensureContactsIndexLoaded(): Promise<Map<string, string>> {
+  async function ensureContactsIndexLoaded(): Promise<Map<string, ReporterContact>> {
     if (contactsLoadedRef.current) return contactsIndexRef.current;
     if (contactsLoadPromiseRef.current) return contactsLoadPromiseRef.current;
 
@@ -75,16 +85,19 @@ export default function CommunityReporterPage(){
       try {
         const res = await listReporterContactsDirectory({ page: 1, limit: 500 } as any);
         const rows = (res as any)?.rows ?? (res as any)?.items ?? [];
-        const idx = new Map<string, string>();
-        for (const r of rows) {
-          const name = String((r as any)?.name || '').trim();
-          if (!name) continue;
-          const email = String((r as any)?.email || '').trim().toLowerCase();
-          const phone = normalizePhone((r as any)?.phone);
-          if (email) idx.set(`e:${email}`, name);
-          if (phone) idx.set(`p:${phone}`, name);
-          const id = String((r as any)?.id || (r as any)?._id || (r as any)?.reporterKey || '').trim();
-          if (id) idx.set(`id:${id}`, name);
+        const idx = new Map<string, ReporterContact>();
+        for (const row of rows) {
+          const reporter = row as ReporterContact;
+          const email = String(reporter?.email || '').trim().toLowerCase();
+          const phone = normalizePhone(reporter?.phone);
+          const id = String(reporter?.id || '').trim();
+          const contributorId = String(reporter?.contributorId || '').trim();
+          const reporterKey = String(reporter?.reporterKey || '').trim();
+          if (email) idx.set(`e:${email}`, reporter);
+          if (phone) idx.set(`p:${phone}`, reporter);
+          if (id) idx.set(`id:${id}`, reporter);
+          if (contributorId) idx.set(`cid:${contributorId}`, reporter);
+          if (reporterKey) idx.set(`rk:${reporterKey}`, reporter);
         }
         contactsIndexRef.current = idx;
         contactsLoadedRef.current = true;
@@ -102,20 +115,45 @@ export default function CommunityReporterPage(){
     return contactsLoadPromiseRef.current;
   }
 
-  async function enrichReporterNamesIfPossible(list: CommunitySubmission[]): Promise<CommunitySubmission[]> {
-    const needs = list.some(s => !s.reporterName && (!!s.email || !!s.contactEmail || !!s.contactPhone || !!s.contactName || !!s.name || !!s.userName));
+  async function enrichReporterIdentityIfPossible(list: CommunitySubmission[]): Promise<CommunitySubmission[]> {
+    const needs = list.some((s) => {
+      return !s.reporterName
+        || !s.reporterVerificationLevel
+        || !s.reporterStatus
+        || !s.reporterContributorId
+        || s.reporterEmailVerified === undefined;
+    });
     if (!needs) return list;
 
     const idx = await ensureContactsIndexLoaded();
     if (!idx.size) return list;
 
     return list.map((s) => {
-      if (s.reporterName) return s;
       const email = String((s.email || s.contactEmail || '')).trim().toLowerCase();
       const phone = normalizePhone((s as any).phone || s.contactPhone);
-      const id = String((s as any).reporterKey || (s as any).userId || '').trim();
-      const name = (email && idx.get(`e:${email}`)) || (phone && idx.get(`p:${phone}`)) || (id && idx.get(`id:${id}`)) || '';
-      return name ? { ...s, reporterName: name } : s;
+      const reporterKey = String(s.reporterKey || (s as any).userId || '').trim();
+      const contributorId = String(s.reporterContributorId || '').trim();
+      const matchedReporter = (contributorId && idx.get(`cid:${contributorId}`))
+        || (reporterKey && idx.get(`rk:${reporterKey}`))
+        || (reporterKey && idx.get(`id:${reporterKey}`))
+        || (email && idx.get(`e:${email}`))
+        || (phone && idx.get(`p:${phone}`));
+
+      if (!matchedReporter) return s;
+
+      return {
+        ...s,
+        reporterName: s.reporterName || matchedReporter.name || undefined,
+        reporterKey: s.reporterKey || matchedReporter.reporterKey || matchedReporter.id || undefined,
+        reporterContributorId: s.reporterContributorId || matchedReporter.contributorId || matchedReporter.id || undefined,
+        reporterVerificationLevel: s.reporterVerificationLevel || matchedReporter.verificationLevel || undefined,
+        reporterStatus: s.reporterStatus || matchedReporter.status || undefined,
+        reporterIdentitySource: s.reporterIdentitySource || matchedReporter.identitySource || undefined,
+        reporterEmailVerified: s.reporterEmailVerified ?? matchedReporter.emailVerified ?? undefined,
+        reporterAuthStatus: s.reporterAuthStatus || matchedReporter.authStatus || undefined,
+        reporterAuthProvider: s.reporterAuthProvider || matchedReporter.authProvider || undefined,
+        reporterLastLoginAt: s.reporterLastLoginAt || matchedReporter.lastLoginAt || undefined,
+      };
     });
   }
 
@@ -167,6 +205,66 @@ export default function CommunityReporterPage(){
     const contactMethod = (raw as any).contactMethod || (raw as any)?.contact?.method || (raw as any)?.identity?.contactMethod || undefined;
     const contactOk = (raw as any).contactOk === true || (raw as any).contactOk === 'true';
     const futureContactOk = (raw as any).futureContactOk === true || (raw as any).futureContactOk === 'true';
+    const reporterKey = String(
+      (raw as any).reporterKey
+      || (raw as any).identity?.reporterKey
+      || (raw as any).reporter?.reporterKey
+      || (raw as any).userId
+      || (raw as any).user?.id
+      || (raw as any).reporter?.id
+      || ''
+    ).trim() || undefined;
+    const reporterContributorId = String(
+      (raw as any).contributorId
+      || (raw as any).identity?.contributorId
+      || (raw as any).reporter?.contributorId
+      || (raw as any).user?.contributorId
+      || ''
+    ).trim() || undefined;
+    const reporterVerificationLevel = String(
+      (raw as any).reporterVerificationLevel
+      || (raw as any).verificationLevel
+      || (raw as any).identity?.verificationLevel
+      || (raw as any).reporter?.verificationLevel
+      || ''
+    ).trim().toLowerCase() || undefined;
+    const reporterStatus = String(
+      (raw as any).reporterStatus
+      || (raw as any).identity?.status
+      || (raw as any).reporter?.status
+      || ''
+    ).trim().toLowerCase() || undefined;
+    const reporterIdentitySource = String(
+      (raw as any).identitySource
+      || (raw as any).identity?.source
+      || ''
+    ).trim() || undefined;
+    const reporterEmailVerified = readOptionalBoolean(
+      (raw as any).emailVerified
+      ?? (raw as any).verifiedEmail
+      ?? (raw as any).identity?.emailVerified
+      ?? (raw as any).reporter?.emailVerified
+    );
+    const reporterAuthStatus = String(
+      (raw as any).authStatus
+      || (raw as any).portalAuthStatus
+      || (raw as any).identity?.authStatus
+      || (raw as any).reporter?.authStatus
+      || ''
+    ).trim() || undefined;
+    const reporterAuthProvider = String(
+      (raw as any).authProvider
+      || (raw as any).portalAuthProvider
+      || (raw as any).identity?.authProvider
+      || (raw as any).reporter?.authProvider
+      || ''
+    ).trim() || undefined;
+    const reporterLastLoginAt = String(
+      (raw as any).lastLoginAt
+      || (raw as any).identity?.lastLoginAt
+      || (raw as any).reporter?.lastLoginAt
+      || ''
+    ).trim() || undefined;
     const locParts = [city, state, country].map(p => String(p || '').trim()).filter(Boolean);
     const joinedLoc = locParts.join(', ');
     const reporterLocation = joinedLoc || norm((raw as any).location ?? (raw as any).city);
@@ -195,9 +293,18 @@ export default function CommunityReporterPage(){
       contactOk: contactOk || undefined,
       futureContactOk: futureContactOk || undefined,
       reporterName,
+      reporterKey,
+      reporterContributorId,
       reporterAge,
       reporterAgeGroup: agInfo.label,
       reporterLocation,
+      reporterVerificationLevel: reporterVerificationLevel as CommunitySubmission['reporterVerificationLevel'],
+      reporterStatus: reporterStatus as CommunitySubmission['reporterStatus'],
+      reporterIdentitySource,
+      reporterEmailVerified,
+      reporterAuthStatus,
+      reporterAuthProvider,
+      reporterLastLoginAt,
       // AI review fields (support legacy naming fallbacks)
       aiTitle: (raw as any).aiTitle ?? (raw as any).aiHeadline ?? null,
       aiBody: (raw as any).aiBody ?? (raw as any).aiText ?? null,
@@ -244,7 +351,7 @@ export default function CommunityReporterPage(){
         });
         const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
         const mapped = list.map(mapRaw);
-        const enriched = await enrichReporterNamesIfPossible(mapped);
+        const enriched = await enrichReporterIdentityIfPossible(mapped);
         setSubmissions(enriched);
       } catch (e:any) {
         const n = normalizeError(e, 'Failed to load submissions.');
@@ -577,6 +684,16 @@ export default function CommunityReporterPage(){
                   <h2 className="text-lg font-semibold truncate max-w-[640px]" title={currentReviewItem.headline}>{currentReviewItem.headline || 'Untitled story'}</h2>
                   <div className="flex flex-wrap gap-2 items-center text-xs">
                     <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200" title="Reporter">{currentReviewItem.reporterName || currentReviewItem.userName || currentReviewItem.name || 'Unknown reporter'}</span>
+                    {currentReviewItem.reporterVerificationLevel ? (
+                      <span className={`px-2 py-0.5 rounded border text-[10px] ${currentReviewItem.reporterVerificationLevel === 'verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : currentReviewItem.reporterVerificationLevel === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : currentReviewItem.reporterVerificationLevel === 'limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : currentReviewItem.reporterVerificationLevel === 'revoked' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                        {currentReviewItem.reporterVerificationLevel === 'verified' ? 'Verified identity' : currentReviewItem.reporterVerificationLevel === 'pending' ? 'Verification pending' : currentReviewItem.reporterVerificationLevel === 'limited' ? 'Verification limited' : currentReviewItem.reporterVerificationLevel === 'revoked' ? 'Verification revoked' : 'Identity unverified'}
+                      </span>
+                    ) : null}
+                    {currentReviewItem.reporterStatus && currentReviewItem.reporterStatus !== 'active' ? (
+                      <span className={`px-2 py-0.5 rounded border text-[10px] ${currentReviewItem.reporterStatus === 'watchlist' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                        {currentReviewItem.reporterStatus === 'watchlist' ? 'Watchlist' : currentReviewItem.reporterStatus === 'suspended' ? 'Access locked' : 'Blocked'}
+                      </span>
+                    ) : null}
                     {typeof currentReviewItem.riskScore === 'number' && (
                       <span className={`px-2 py-0.5 rounded border text-[10px] ${(() => { const tier = getRiskTier(currentReviewItem); if (tier==='LOW') return 'bg-emerald-100 text-emerald-700 border-emerald-200'; if (tier==='MEDIUM') return 'bg-amber-100 text-amber-700 border-amber-200'; if (tier==='HIGH') return 'bg-red-100 text-red-700 border-red-200'; return 'bg-slate-100 text-slate-600 border-slate-200'; })()}`}
                         title={`Risk tier: ${getRiskTier(currentReviewItem)} (${currentReviewItem.riskScore})`}
@@ -686,6 +803,16 @@ export default function CommunityReporterPage(){
                         title={s.reporterLocation}
                       >{s.reporterLocation}</span>
                     )}
+                    {s.reporterVerificationLevel && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ${s.reporterVerificationLevel === 'verified' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : s.reporterVerificationLevel === 'pending' ? 'bg-amber-100 text-amber-800 border-amber-200' : s.reporterVerificationLevel === 'limited' ? 'bg-amber-100 text-amber-800 border-amber-200' : s.reporterVerificationLevel === 'revoked' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`} title="Reporter verification">
+                        {s.reporterVerificationLevel === 'verified' ? 'Verified identity' : s.reporterVerificationLevel === 'pending' ? 'Verification pending' : s.reporterVerificationLevel === 'limited' ? 'Verification limited' : s.reporterVerificationLevel === 'revoked' ? 'Verification revoked' : 'Identity unverified'}
+                      </span>
+                    )}
+                    {s.reporterStatus && s.reporterStatus !== 'active' && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border ${s.reporterStatus === 'watchlist' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-red-100 text-red-700 border-red-200'}`} title="Reporter account status">
+                        {s.reporterStatus === 'watchlist' ? 'Watchlist' : s.reporterStatus === 'suspended' ? 'Access locked' : 'Blocked'}
+                      </span>
+                    )}
                     {/* Source chips */}
                     {(() => {
                       const sourceType = (s as any).sourceType as 'community'|'journalist'|undefined;
@@ -714,6 +841,21 @@ export default function CommunityReporterPage(){
                       {contactEmail}{contactEmail && contactPhone ? ' · ' : ''}{contactPhone}
                     </span>
                   ) : <span className="text-[11px] text-slate-400">—</span>}
+                  {typeof s.reporterEmailVerified === 'boolean' && contactEmail && (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] border w-max ${s.reporterEmailVerified ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}`} title="Reporter email trust">
+                      {s.reporterEmailVerified ? 'Verified email' : 'Email not verified'}
+                    </span>
+                  )}
+                  {(s.reporterAuthStatus || s.reporterAuthProvider) && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200 w-max" title="Reporter portal auth status">
+                      {s.reporterAuthStatus || 'Portal auth'}{s.reporterAuthProvider ? ` · ${s.reporterAuthProvider}` : ''}
+                    </span>
+                  )}
+                  {(s.reporterContributorId || s.reporterKey) && (
+                    <span className="text-[10px] text-slate-500 truncate" title={s.reporterContributorId || s.reporterKey}>
+                      Identity: {s.reporterContributorId || s.reporterKey}
+                    </span>
+                  )}
                   {s.contactMethod && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200 w-max" title="Preferred contact method">{s.contactMethod}</span>}
                 </div>
               </td>
@@ -827,14 +969,22 @@ export default function CommunityReporterPage(){
       <ReporterProfileDrawer
         open={profileOpen}
         reporter={profileSubmission ? {
-          id: profileSubmission.id,
-          reporterKey: profileSubmission.email || profileSubmission.contactEmail || profileSubmission.contactPhone || profileSubmission.id,
+          id: profileSubmission.reporterContributorId || profileSubmission.reporterKey || profileSubmission.contactEmail || profileSubmission.email || '',
+          contributorId: profileSubmission.reporterContributorId || profileSubmission.reporterKey || null,
+          reporterKey: profileSubmission.reporterKey || profileSubmission.reporterContributorId || profileSubmission.contactEmail || profileSubmission.email || null,
             name: getReporterDisplayName(profileSubmission),
             email: profileSubmission.contactEmail || profileSubmission.email || null,
             phone: profileSubmission.contactPhone || (profileSubmission as any).phone || (profileSubmission as any).whatsapp || null,
             city: profileSubmission.city || null,
             state: profileSubmission.state || null,
             country: profileSubmission.country || null,
+            identitySource: profileSubmission.reporterIdentitySource || null,
+            verificationLevel: profileSubmission.reporterVerificationLevel || undefined,
+            status: profileSubmission.reporterStatus || undefined,
+            emailVerified: profileSubmission.reporterEmailVerified ?? null,
+            authStatus: profileSubmission.reporterAuthStatus || null,
+            authProvider: profileSubmission.reporterAuthProvider || null,
+            lastLoginAt: profileSubmission.reporterLastLoginAt || null,
             notes: undefined,
             totalStories: 0,
             pendingStories: 0,
@@ -844,10 +994,13 @@ export default function CommunityReporterPage(){
         onClose={()=> { setProfileOpen(false); setProfileSubmission(null); }}
         onOpenStories={(key)=> {
           const qs = new URLSearchParams();
-          if (key) qs.set('reporterKey', key);
+          const stableKey = profileSubmission?.reporterContributorId || profileSubmission?.reporterKey || key;
+          const email = profileSubmission?.contactEmail || profileSubmission?.email || '';
+          if (stableKey) qs.set('reporterKey', stableKey);
+          if (email) qs.set('email', email);
           const name = profileSubmission?.reporterName || profileSubmission?.userName || profileSubmission?.name || '';
           if (name) qs.set('name', name);
-          navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: key, reporterName: name } });
+          navigate(`/community/reporter-stories?${qs.toString()}`, { state: { reporterKey: stableKey, reporterName: name, reporterEmail: email } });
         }}
         onOpenQueue={(key)=> {
           navigate(`/community/reporter?reporterKey=${encodeURIComponent(key)}`);

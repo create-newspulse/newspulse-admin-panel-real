@@ -182,6 +182,8 @@ export default function ReporterProfileDrawer({ open, reporter, initialTab, onCl
                   <div>Contributor id: <span className="font-mono">{String(reporter.contributorId || reporter.id || '—')}</span></div>
                   <div>Linked story count: <span className="font-mono">{typeof reporter.linkedStoryCount === 'number' ? reporter.linkedStoryCount : (reporter.totalStories ?? 0)}</span></div>
                   <div>Identity source: <span className="font-mono">{String(reporter.identitySource || '—')}</span></div>
+                  <div>Portal auth: <span className="font-mono">{String(reporter.authStatus || '—')}</span></div>
+                  <div>Email verified: <span className="font-mono">{reporter.emailVerified == null ? '—' : reporter.emailVerified ? 'yes' : 'no'}</span></div>
                 </div>
               ) : null}
 
@@ -203,6 +205,13 @@ export default function ReporterProfileDrawer({ open, reporter, initialTab, onCl
                 <Metric label="Rejected" value={reporter?.rejectedStories ?? 0} />
                 <Metric label="Withdrawn" value={reporter?.withdrawnStories ?? 0} />
                 <Metric label="Published" value={reporter?.publishedStories ?? 0} />
+              </div>
+
+              <div className="rounded-md border bg-slate-50 p-3 space-y-1 text-sm text-slate-700">
+                <div><span className="font-medium">Trusted identity:</span> {reporter?.contributorId || reporter?.reporterKey || reporter?.email || 'Unresolved'}</div>
+                <div><span className="font-medium">Email verification:</span> {reporter?.emailVerified == null ? 'Not supplied by backend' : reporter.emailVerified ? 'Verified email' : 'Email not verified yet'}</div>
+                <div><span className="font-medium">Portal auth:</span> {reporter?.authStatus || 'Not supplied by backend'}{reporter?.authProvider ? ` via ${reporter.authProvider}` : ''}</div>
+                <div><span className="font-medium">Last portal login:</span> {reporter?.lastLoginAt ? new Date(reporter.lastLoginAt).toLocaleString() : '—'}</div>
               </div>
             </>
           ) : null}
@@ -350,8 +359,8 @@ export default function ReporterProfileDrawer({ open, reporter, initialTab, onCl
                 <div className="text-sm text-slate-700"><span className="font-medium">Status:</span> {reporter?.status || '—'}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ status: 'watchlist' }, 'Marked watchlist')}>Mark watchlist</button>
-                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => { if (window.confirm('Suspend this reporter?')) void applyStatusPatch({ status: 'suspended' }, 'Suspended'); }}>Suspend</button>
-                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" disabled={!reporter?.id} onClick={() => { if (window.confirm('Ban this reporter?')) void applyStatusPatch({ status: 'banned' }, 'Banned'); }}>Ban</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => { if (window.confirm('Lock reporter access for this account?')) void applyStatusPatch({ status: 'suspended' }, 'Reporter access locked'); }}>Lock access</button>
+                  <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50 text-red-700" disabled={!reporter?.id} onClick={() => { if (window.confirm('Block this reporter account?')) void applyStatusPatch({ status: 'banned' }, 'Reporter blocked'); }}>Block reporter</button>
                   <button className="px-3 py-2 text-sm rounded-md border hover:bg-slate-50" disabled={!reporter?.id} onClick={() => applyStatusPatch({ addStrike: true }, 'Ethics strike added')}>Add strike</button>
                 </div>
               </div>

@@ -142,12 +142,12 @@ export default function ReporterStoriesAdmin() {
               <Link to="/community/reporter-contacts" className="text-sm text-slate-600 hover:text-slate-800">← Back to Reporter Contact Directory</Link>
             </div>
             <h1 className="text-3xl font-bold tracking-tight">My Community Stories</h1>
-            <p className="text-sm text-slate-600">Admin view – load stories by contributor id (preferred) or reporter email.</p>
+            <p className="text-sm text-slate-600">Admin view – load stories by verified contributor id first, with reporter email kept as a fallback for older records.</p>
             <div className="flex items-center gap-2 mt-2">
               <input
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="Contributor id or reporter email"
+                placeholder="Verified contributor id or reporter email"
                 className="border rounded-md px-3 py-1.5 text-sm w-80"
               />
               <button
@@ -155,7 +155,7 @@ export default function ReporterStoriesAdmin() {
                 className="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm"
               >Load</button>
             </div>
-            <div className="text-xs text-slate-500">Loaded key: <span className="font-mono">{activeKey || '—'}</span></div>
+            <div className="text-xs text-slate-500">Loaded identity key: <span className="font-mono">{activeKey || '—'}</span></div>
           </header>
 
           {loading ? (

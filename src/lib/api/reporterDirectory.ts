@@ -43,6 +43,10 @@ export interface ReporterContact {
   district?: string | null;
   // Optional identity/debug fields (admin-only UI)
   identitySource?: 'contact' | 'submission-derived' | 'merged' | string | null;
+  emailVerified?: boolean | null;
+  authStatus?: string | null;
+  authProvider?: string | null;
+  lastLoginAt?: string | null;
   linkedStoryCount?: number | null;
   // Prefer this for “last submission”; older UIs used `lastStoryAt`.
   lastSubmissionAt?: string | null;
@@ -228,6 +232,18 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       country: (country ?? null),
       district: district != null ? String(district) : null,
       identitySource: identitySource != null ? String(identitySource) : null,
+      emailVerified: typeof (c.emailVerified ?? c.verifiedEmail ?? c.auth?.emailVerified) === 'boolean'
+        ? Boolean(c.emailVerified ?? c.verifiedEmail ?? c.auth?.emailVerified)
+        : null,
+      authStatus: (c.authStatus ?? c.portalAuthStatus ?? c.auth?.status ?? null) != null
+        ? String(c.authStatus ?? c.portalAuthStatus ?? c.auth?.status)
+        : null,
+      authProvider: (c.authProvider ?? c.portalAuthProvider ?? c.auth?.provider ?? null) != null
+        ? String(c.authProvider ?? c.portalAuthProvider ?? c.auth?.provider)
+        : null,
+      lastLoginAt: (c.lastLoginAt ?? c.portalLastLoginAt ?? c.auth?.lastLoginAt ?? null) != null
+        ? String(c.lastLoginAt ?? c.portalLastLoginAt ?? c.auth?.lastLoginAt)
+        : null,
       linkedStoryCount: linkedStoryCount != null ? Number(linkedStoryCount) || null : null,
       lastSubmissionAt: lastSubmissionAt || null,
       notes: (c.notes ?? null),

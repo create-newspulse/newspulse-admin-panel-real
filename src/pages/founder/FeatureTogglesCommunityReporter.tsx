@@ -75,7 +75,7 @@ export default function FeatureTogglesCommunityReporter() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Community Reporter Feature Toggles</h1>
       <p className="text-sm text-slate-600">
-        Founder-only switches to temporarily close Community Reporter access on the public site.
+        Founder-only switches for the live Community Reporter experience.
         <br />
         <strong>ON = closed / hidden, OFF = open / visible.</strong>
       </p>
@@ -108,8 +108,8 @@ export default function FeatureTogglesCommunityReporter() {
             <div>
               <h2 className="font-semibold">Community Reporter</h2>
               <p className="text-sm text-slate-400">
-                When <strong>ON</strong>, the News Pulse Community Reporter page is hidden for the public.
-                When <strong>OFF</strong>, the page is visible and users can submit stories.
+                When <strong>ON</strong>, the public Community Reporter submission entry is hidden.
+                When <strong>OFF</strong>, it stays open so reporters can start new submissions.
               </p>
             </div>
             <InlineToggleSwitch
@@ -123,8 +123,8 @@ export default function FeatureTogglesCommunityReporter() {
             <div>
               <h2 className="font-semibold">Reporter Portal</h2>
               <p className="text-sm text-slate-400">
-                When <strong>ON</strong>, the Reporter Portal login/dashboard is hidden.
-                When <strong>OFF</strong>, reporters can access the portal.
+                When <strong>ON</strong>, the live Reporter Portal is hidden and closed for reporters.
+                When <strong>OFF</strong>, reporters can see the portal, access their dashboard, and track their own stories.
               </p>
             </div>
             <InlineToggleSwitch

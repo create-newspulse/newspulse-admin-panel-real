@@ -130,7 +130,7 @@ function FeatureTogglesInner(){
             <div className="flex items-start justify-between">
               <div>
                 <div className="font-semibold">Community Reporter</div>
-                <div className="text-sm text-slate-600 mt-1">ON closes and hides the public Community Reporter submission flow. OFF keeps it open and visible.</div>
+                <div className="text-sm text-slate-600 mt-1">ON closes and hides the public Community Reporter submission entry. OFF keeps it open so reporters can start new submissions.</div>
               </div>
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={settings.communityReporterClosed} onChange={e=> onToggle('communityReporterClosed', e.target.checked)} disabled={saving} />
@@ -143,7 +143,7 @@ function FeatureTogglesInner(){
             <div className="flex items-start justify-between">
               <div>
                 <div className="font-semibold">Reporter Portal</div>
-                <div className="text-sm text-slate-600 mt-1">ON closes and hides the public Reporter Portal. OFF keeps it open and visible.</div>
+                <div className="text-sm text-slate-600 mt-1">ON hides and closes the live Reporter Portal. OFF keeps it open and visible so reporters can use their dashboard and story workspace.</div>
               </div>
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={settings.reporterPortalClosed} onChange={e=> onToggle('reporterPortalClosed', e.target.checked)} disabled={saving} />

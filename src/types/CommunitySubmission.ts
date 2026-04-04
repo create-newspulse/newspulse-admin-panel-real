@@ -25,9 +25,18 @@ export interface CommunitySubmission {
   futureContactOk?: boolean;
   // --- Reporter enrichment (UI only) ---
   reporterName?: string; // normalized name (userName || name)
+  reporterKey?: string;
+  reporterContributorId?: string;
   reporterAge?: number; // if backend sends age or age numeric string
   reporterAgeGroup?: string; // if backend sends explicit ageGroup; else derived
   reporterLocation?: string; // combined city/state/country, or raw location
+  reporterVerificationLevel?: 'community_default' | 'pending' | 'verified' | 'limited' | 'revoked' | 'unverified';
+  reporterStatus?: 'active' | 'watchlist' | 'suspended' | 'banned';
+  reporterIdentitySource?: string;
+  reporterEmailVerified?: boolean;
+  reporterAuthStatus?: string;
+  reporterAuthProvider?: string;
+  reporterLastLoginAt?: string;
   // --- AI review & highlighting ---
   aiTitle?: string | null;
   aiBody?: string | null;
