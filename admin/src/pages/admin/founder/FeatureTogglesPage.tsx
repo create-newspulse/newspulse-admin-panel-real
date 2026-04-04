@@ -19,7 +19,11 @@ function FeatureTogglesInner(){
     .split(',')
     .map((s: string) => s.trim())
     .filter(Boolean);
-  const isFounder = auth.email && founderEmails.length > 0 ? founderEmails.includes(auth.email) : true; // default open if not configured
+  const emailIsFounder = !!(auth.email && founderEmails.length > 0 && founderEmails.includes(auth.email));
+  const hasFounderClaim = auth.isFounder === true;
+  const isFounder = hasFounderClaim || emailIsFounder || (founderEmails.length === 0 && auth.isFounder !== false);
+  const sessionSummary = [auth.email || 'unknown account', auth.role ? `role: ${auth.role}` : null].filter(Boolean).join(' • ');
+  const sessionSource = auth.source ? `source: ${auth.source}` : null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string|null>(null);
@@ -51,7 +55,11 @@ function FeatureTogglesInner(){
         });
       } catch (e:any) {
         const status = e?.response?.status;
-        setError(status === 401 ? 'Founder session is not authorized for feature toggles.' : (e?.message || 'Failed to load settings'));
+        if (status === 401 || status === 403) {
+          setError('Founder access required');
+        } else {
+          setError(e?.message || 'Failed to load settings');
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -84,7 +92,7 @@ function FeatureTogglesInner(){
     } catch (e:any) {
       setSettings(prev);
       const status = e?.response?.status;
-      setError(status === 401 ? 'Founder session is not authorized for feature toggles.' : `Request failed: ${e?.message || 'Failed to update settings'}`);
+      setError((status === 401 || status === 403) ? 'Founder access required' : `Request failed: ${e?.message || 'Failed to update settings'}`);
       setTimeout(()=> setError(null), 5000);
     } finally {
       setSaving(false);
@@ -92,7 +100,15 @@ function FeatureTogglesInner(){
   };
 
   if (!isFounder) {
-    return <div className="p-6"><h2 className="text-xl font-semibold">Feature Toggles</h2><div className="mt-4 text-sm text-red-600">You do not have Founder access.</div></div>;
+    return (
+      <div className="p-6">
+        <h2 className="text-xl font-semibold">Feature Toggles</h2>
+        <div className="mt-4 text-sm text-red-600">Founder access required.</div>
+        <div className="mt-2 text-xs text-slate-500">Current session: {sessionSummary}</div>
+        {sessionSource ? <div className="mt-1 text-xs text-slate-500">{sessionSource}</div> : null}
+        {auth.hasMismatch ? <div className="mt-1 text-xs text-amber-600">A stale local session differs from the current cookie session. Refresh or sign in again.</div> : null}
+      </div>
+    );
   }
 
   return (
@@ -104,7 +120,7 @@ function FeatureTogglesInner(){
       {loading && <div className="p-4 border rounded">Loading settings…</div>}
       {error && (
         <div className="p-4 border rounded border-red-300 text-red-700 flex items-center justify-between">
-          <span>{error}</span>
+          <span>{error === 'Founder access required' ? `${error}. Current session: ${sessionSummary}${sessionSource ? ` • ${sessionSource}` : ''}${auth.hasMismatch ? ' • stale local session detected' : ''}` : error}</span>
           <button onClick={retry} className="px-3 py-1 text-sm bg-red-600 text-white rounded">Retry</button>
         </div>
       )}

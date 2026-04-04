@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { resolveAdminSession } from '../authSession';
 
 // Admin frontend should always talk to the backend via the Vercel proxy.
 // This keeps auth/cookies consistent and avoids CORS surprises.
@@ -21,38 +22,6 @@ function normalizeProxyPath(url?: string) {
   return raw;
 }
 
-function readStoredAdminToken() {
-  try {
-    const rawSession = localStorage.getItem('newsPulseAdminAuth');
-    if (rawSession) {
-      const parsed = JSON.parse(rawSession);
-      if (parsed?.token && String(parsed.token).trim()) {
-        return String(parsed.token).replace(/^Bearer\s+/i, '');
-      }
-    }
-  } catch {}
-
-  try {
-    const legacyKeys = ['admin_token', 'np_token', 'np_admin_token', 'adminToken'];
-    for (const key of legacyKeys) {
-      const value = localStorage.getItem(key);
-      if (value && String(value).trim()) {
-        return String(value).replace(/^Bearer\s+/i, '');
-      }
-    }
-  } catch {}
-
-  try {
-    const cookie = typeof document !== 'undefined' ? String(document.cookie || '') : '';
-    const match = cookie.match(/(?:^|;\s*)np_admin=([^;]+)/);
-    if (match?.[1]) {
-      return decodeURIComponent(match[1]).replace(/^Bearer\s+/i, '');
-    }
-  } catch {}
-
-  return null;
-}
-
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true
@@ -62,7 +31,7 @@ api.interceptors.request.use((config) => {
   config.url = normalizeProxyPath(config.url);
   config.withCredentials = true;
   try {
-    const token = readStoredAdminToken();
+    const token = resolveAdminSession().token;
     if (token) {
       config.headers = config.headers || {};
       if (!(config.headers as any).Authorization) {

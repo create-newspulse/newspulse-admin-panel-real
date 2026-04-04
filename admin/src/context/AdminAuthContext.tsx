@@ -1,14 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { clearAdminSessionStorage, persistResolvedAdminSession, resolveAdminSession, type AdminSessionSource } from '../lib/authSession';
 
 export interface AdminAuthState {
   token: string | null;
   email?: string;
+  role?: string;
+  isFounder?: boolean;
+  source?: AdminSessionSource;
+  hasMismatch?: boolean;
 }
 
 export interface AdminAuthContextValue {
   auth: AdminAuthState;
   isReady: boolean; // false while bootstrapping from localStorage
-  login: (data: { token: string; email?: string }) => void;
+  login: (data: { token: string; email?: string; role?: string }) => void;
   logout: () => void;
 }
 
@@ -23,13 +28,9 @@ export const AdminAuthProvider: React.FC<React.PropsWithChildren> = ({ children 
   // Hydrate once
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          setAuth({ token: parsed.token || null, email: parsed.email });
-        }
-      }
+      const resolved = resolveAdminSession();
+      setAuth(resolved);
+      if (resolved.token) persistResolvedAdminSession(resolved);
     } catch (e) {
       // Silently ignore hydration errors in legacy admin build
     } finally {
@@ -37,15 +38,17 @@ export const AdminAuthProvider: React.FC<React.PropsWithChildren> = ({ children 
     }
   }, []);
 
-  const login = useCallback((data: { token: string; email?: string }) => {
-    const next: AdminAuthState = { token: data.token, email: data.email };
+  const login = useCallback((data: { token: string; email?: string; role?: string }) => {
+    const next = resolveAdminSession().token === data.token
+      ? resolveAdminSession()
+      : { ...resolveAdminSession(), token: data.token, email: data.email, role: data.role, isFounder: (data.role || '').toLowerCase() === 'founder', source: 'newsPulseAdminAuth', hasMismatch: false };
     setAuth(next);
-    try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch {}
+    persistResolvedAdminSession(next);
   }, []);
 
   const logout = useCallback(() => {
-    setAuth({ token: null });
-    try { localStorage.removeItem(LS_KEY); } catch {}
+    setAuth({ token: null, source: 'none', isFounder: false, hasMismatch: false });
+    clearAdminSessionStorage();
   }, []);
 
   const value: AdminAuthContextValue = { auth, isReady, login, logout };
