@@ -63,7 +63,7 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
     setLoading(true);
     (async () => {
       try {
-        const res = await adminApiClient.get('/api/admin/system/ai-training-info');
+        const res = await adminApiClient.get('/admin/system/ai-training-info');
         const json = res.data as { data?: AITrainingInfo };
         if (cancelled) return;
         setInfo(json?.data ?? null);
@@ -77,7 +77,10 @@ export function AITrainingInfoProvider({ children }: ProviderProps) {
           setInfo(null);
           return;
         }
-        setError('Failed to load AI training info.');
+        const backendMessage = e?.response?.data?.message || e?.response?.data?.error || e?.message;
+        const detail = status ? `HTTP ${status}` : 'request failed';
+        setError(backendMessage ? `AI training info failed: ${backendMessage} (${detail}).` : `AI training info failed (${detail}).`);
+        setInfo(null);
       } finally {
         if (!cancelled) setLoading(false);
       }

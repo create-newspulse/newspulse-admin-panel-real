@@ -19,6 +19,12 @@ export type OwnerZoneShellContext = {
   lastAuditAt: string | null;
 
   status: OwnerZoneStatus;
+  loadErrors: {
+    settings?: string | null;
+    health?: string | null;
+    audit?: string | null;
+    snapshots?: string | null;
+  };
   canUseDangerActions: boolean;
   busy: boolean;
   updateAdminSettings: (patch: any, auditAction?: string) => Promise<void>;
@@ -62,6 +68,15 @@ function statusPillClass(status: OwnerZoneStatus) {
   return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700';
 }
 
+function formatLoadError(err: unknown, fallback: string) {
+  const anyErr = err as any;
+  const status = anyErr?.status ?? anyErr?.response?.status;
+  const message = anyErr?.body?.message || anyErr?.response?.data?.message || anyErr?.response?.data?.error || anyErr?.message;
+  if (message && status) return `${fallback}: ${message} (HTTP ${status})`;
+  if (message) return `${fallback}: ${message}`;
+  return fallback;
+}
+
 export default function SafeOwnerZoneShell() {
   const notify = useNotify();
   const { lockdown } = useFounderActions();
@@ -75,6 +90,7 @@ export default function SafeOwnerZoneShell() {
 
   const [backendConnected, setBackendConnected] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<OwnerZoneShellContext['loadErrors']>({});
 
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
@@ -94,6 +110,12 @@ export default function SafeOwnerZoneShell() {
 
       const okAny = results.some((r) => r.status === 'fulfilled' && r.value != null);
       setBackendConnected(okAny);
+      setLoadErrors({
+        settings: results[0].status === 'rejected' ? formatLoadError(results[0].reason, 'Settings failed to load') : null,
+        health: results[1].status === 'rejected' ? formatLoadError(results[1].reason, 'System health failed to load') : null,
+        audit: results[2].status === 'rejected' ? formatLoadError(results[2].reason, 'Recent audit failed to load') : null,
+        snapshots: results[3].status === 'rejected' ? formatLoadError(results[3].reason, 'Snapshots failed to load') : null,
+      });
 
       const s = results[0].status === 'fulfilled' ? results[0].value : null;
       setSettings(s);
@@ -169,6 +191,7 @@ export default function SafeOwnerZoneShell() {
     lastSnapshotAt,
     lastAuditAt,
     status,
+    loadErrors,
     canUseDangerActions,
     busy,
     updateAdminSettings,
@@ -182,6 +205,16 @@ export default function SafeOwnerZoneShell() {
       <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 md:-mx-6 md:px-6">
         {/* Owner Command Bar */}
         <div className="flex flex-col gap-3">
+          {(loadErrors.settings || loadErrors.health || loadErrors.audit || loadErrors.snapshots) && (
+            <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
+              <div className="font-semibold">Founder Command backend request failed</div>
+              {loadErrors.settings ? <div className="mt-1">{loadErrors.settings}</div> : null}
+              {loadErrors.health ? <div className="mt-1">{loadErrors.health}</div> : null}
+              {loadErrors.audit ? <div className="mt-1">{loadErrors.audit}</div> : null}
+              {loadErrors.snapshots ? <div className="mt-1">{loadErrors.snapshots}</div> : null}
+            </div>
+          )}
+
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">

@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext.tsx';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getFounderFeatureToggles, patchFounderFeatureToggles, type FounderFeatureToggles } from '@/lib/adminApi.ts';
 import { useNotify } from '@/components/ui/toast-bridge';
@@ -6,28 +7,69 @@ import { useNotify } from '@/components/ui/toast-bridge';
 // ON = closed, OFF = open
 type CommunityFeatureToggles = FounderFeatureToggles;
 
+const DEFAULT_TOGGLES: CommunityFeatureToggles = {
+  communityReporterClosed: false,
+  reporterPortalClosed: false,
+};
+
+type SaveState = {
+  kind: 'success' | 'error';
+  message: string;
+};
+
+function formatVisibilityLabel(isClosed: boolean) {
+  return isClosed ? 'closed / hidden' : 'open / visible';
+}
+
 export default function FeatureTogglesCommunityReporter() {
   const { isFounder } = useAuth();
   const notify = useNotify();
   const queryClient = useQueryClient();
+  const [saveState, setSaveState] = useState<SaveState | null>(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['founder-feature-toggles'],
     queryFn: async (): Promise<CommunityFeatureToggles> => getFounderFeatureToggles(),
   });
 
+  const currentToggles = useMemo(
+    () => ({ ...DEFAULT_TOGGLES, ...(data ?? {}) }),
+    [data],
+  );
+
   const mutation = useMutation({
     mutationFn: async (partial: Partial<CommunityFeatureToggles>) => patchFounderFeatureToggles(partial),
-    onSuccess: () => {
+    onSuccess: (saved, variables) => {
+      queryClient.setQueryData(['founder-feature-toggles'], saved);
       queryClient.invalidateQueries({ queryKey: ['founder-feature-toggles'] });
-      notify.ok('Feature toggles updated');
+
+      const changedFeature = typeof variables.communityReporterClosed === 'boolean'
+        ? 'Community Reporter'
+        : 'Reporter Portal';
+      const changedValue = typeof variables.communityReporterClosed === 'boolean'
+        ? saved.communityReporterClosed
+        : saved.reporterPortalClosed;
+      const message = `${changedFeature} saved as ${formatVisibilityLabel(changedValue)}.`;
+
+      setSaveState({ kind: 'success', message });
+      notify.ok(message);
     },
-    onError: () => {
-      notify.err('Failed to update feature toggles');
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Failed to update feature toggles.';
+      setSaveState({ kind: 'error', message });
+      notify.err(message);
     },
   });
 
   const saving = mutation.isPending;
+
+  const handleToggleChange = (nextPatch: Partial<CommunityFeatureToggles>) => {
+    setSaveState(null);
+    mutation.mutate({
+      ...currentToggles,
+      ...nextPatch,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -38,9 +80,23 @@ export default function FeatureTogglesCommunityReporter() {
         <strong>ON = closed / hidden, OFF = open / visible.</strong>
       </p>
 
+      {saveState && (
+        <div className={`p-4 border rounded ${saveState.kind === 'success' ? 'border-emerald-300 text-emerald-700 bg-emerald-50' : 'border-red-300 text-red-700 bg-red-50'}`}>
+          {saveState.message}
+          {saveState.kind === 'success' && currentToggles.updatedAt ? (
+            <span className="ml-2 text-xs text-current/80">Updated {new Date(currentToggles.updatedAt).toLocaleString()}.</span>
+          ) : null}
+        </div>
+      )}
+
       {isError && (
         <div className="p-4 border rounded border-red-300 text-red-700">
-          Failed to load feature toggles.
+          {(() => {
+            const status = (error as any)?.response?.status ?? (error as any)?.status;
+            const message = (error as any)?.response?.data?.message || (error as any)?.response?.data?.error || (error as any)?.message;
+            if (message) return `Failed to load feature toggles: ${message}${status ? ` (HTTP ${status})` : ''}`;
+            return `Failed to load feature toggles${status ? ` (HTTP ${status})` : ''}.`;
+          })()}
         </div>
       )}
 
@@ -57,9 +113,9 @@ export default function FeatureTogglesCommunityReporter() {
               </p>
             </div>
             <InlineToggleSwitch
-              checked={!!data.communityReporterClosed}
+              checked={currentToggles.communityReporterClosed}
               disabled={!isFounder || saving}
-              onChange={(checked) => mutation.mutate({ communityReporterClosed: checked })}
+              onChange={(checked) => handleToggleChange({ communityReporterClosed: checked })}
             />
           </div>
 
@@ -72,9 +128,9 @@ export default function FeatureTogglesCommunityReporter() {
               </p>
             </div>
             <InlineToggleSwitch
-              checked={!!data.reporterPortalClosed}
+              checked={currentToggles.reporterPortalClosed}
               disabled={!isFounder || saving}
-              onChange={(checked) => mutation.mutate({ reporterPortalClosed: checked })}
+              onChange={(checked) => handleToggleChange({ reporterPortalClosed: checked })}
             />
           </div>
 

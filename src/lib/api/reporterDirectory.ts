@@ -297,7 +297,7 @@ export async function listReporterContacts(params?: {
     // - proxy mode:  /admin-api/admin/community/*
     // - direct mode: /api/admin/community/*
     // (`adminApi` normalizes the mode-specific prefix automatically.)
-    const candidates = ['/community/contributors', '/community/reporters'];
+    const candidates = ['/community/reporters'];
 
     let lastErr: any = null;
     for (const endpointPath of candidates) {

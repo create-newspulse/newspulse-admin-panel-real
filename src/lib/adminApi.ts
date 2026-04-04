@@ -200,26 +200,87 @@ export type FounderFeatureToggles = {
   updatedAt?: string;
 };
 
+type FounderFeatureTogglePayload = Record<string, unknown>;
+
+function readOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  return undefined;
+}
+
+function pickOptionalBoolean(source: FounderFeatureTogglePayload, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const next = readOptionalBoolean(source[key]);
+    if (typeof next === 'boolean') return next;
+  }
+  return undefined;
+}
+
+function normalizeFounderFeatureToggles(raw: unknown): FounderFeatureToggles {
+  const payload = ((raw as any)?.settings ?? raw ?? {}) as FounderFeatureTogglePayload;
+
+  const explicitCommunityClosed = pickOptionalBoolean(payload, ['communityReporterClosed']);
+  const explicitReporterPortalClosed = pickOptionalBoolean(payload, ['reporterPortalClosed']);
+
+  const communityReporterEnabled = pickOptionalBoolean(payload, [
+    'communityReporterEnabled',
+    'allowNewSubmissions',
+  ]);
+
+  const reporterPortalEnabled = pickOptionalBoolean(payload, [
+    'reporterPortalEnabled',
+    'allowMyStoriesPortal',
+    'myStoriesEnabled',
+    'myCommunityStoriesEnabled',
+    'communityMyStoriesEnabled',
+  ]);
+
+  return {
+    communityReporterClosed: explicitCommunityClosed ?? (typeof communityReporterEnabled === 'boolean' ? !communityReporterEnabled : false),
+    reporterPortalClosed: explicitReporterPortalClosed ?? (typeof reporterPortalEnabled === 'boolean' ? !reporterPortalEnabled : false),
+    updatedAt: typeof payload.updatedAt === 'string' ? payload.updatedAt : undefined,
+  };
+}
+
+function serializeFounderFeatureTogglePatch(patch: Partial<FounderFeatureToggles>): FounderFeatureTogglePayload {
+  const payload: FounderFeatureTogglePayload = {};
+
+  if (typeof patch.communityReporterClosed === 'boolean') {
+    const communityReporterEnabled = !patch.communityReporterClosed;
+    payload.communityReporterClosed = patch.communityReporterClosed;
+    payload.communityReporterEnabled = communityReporterEnabled;
+    payload.allowNewSubmissions = communityReporterEnabled;
+  }
+
+  if (typeof patch.reporterPortalClosed === 'boolean') {
+    const reporterPortalEnabled = !patch.reporterPortalClosed;
+    payload.reporterPortalClosed = patch.reporterPortalClosed;
+    payload.reporterPortalEnabled = reporterPortalEnabled;
+    payload.allowMyStoriesPortal = reporterPortalEnabled;
+    payload.myStoriesEnabled = reporterPortalEnabled;
+    payload.myCommunityStoriesEnabled = reporterPortalEnabled;
+    payload.communityMyStoriesEnabled = reporterPortalEnabled;
+  }
+
+  return payload;
+}
+
 export async function getFounderFeatureToggles(): Promise<FounderFeatureToggles> {
   const res = await adminApi.get('/founder/feature-toggles');
-  const raw = res.data as any;
-  const s = raw?.settings ?? raw ?? {};
-  return {
-    communityReporterClosed: !!s.communityReporterClosed,
-    reporterPortalClosed: !!s.reporterPortalClosed,
-    updatedAt: s.updatedAt,
-  };
+  return normalizeFounderFeatureToggles(res.data);
 }
 
 export async function patchFounderFeatureToggles(
   patch: Partial<FounderFeatureToggles>
 ): Promise<FounderFeatureToggles> {
-  const res = await adminApi.patch('/founder/feature-toggles', patch);
-  const raw = res.data as any;
-  const s = raw?.settings ?? raw ?? {};
-  return {
-    communityReporterClosed: !!s.communityReporterClosed,
-    reporterPortalClosed: !!s.reporterPortalClosed,
-    updatedAt: s.updatedAt,
-  };
+  const res = await adminApi.patch('/founder/feature-toggles', serializeFounderFeatureTogglePatch(patch));
+  return normalizeFounderFeatureToggles(res.data);
 }

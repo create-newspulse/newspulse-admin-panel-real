@@ -43,19 +43,19 @@ function normalizeList(list: CommunitySubmissionApi[]): CommunitySubmission[] {
 }
 
 export async function listCommunitySubmissions(params: Record<string, any> = {}): Promise<CommunitySubmission[]> {
-  const { data } = await api.get('/api/admin/community-reporter/submissions', { params });
+  const { data } = await api.get('/admin/community-reporter/submissions', { params });
   const raw = data?.submissions || data?.data?.submissions || Array.isArray(data) ? data : [];
   return normalizeList(raw as CommunitySubmissionApi[]);
 }
 
 export async function getCommunitySubmission(id: string): Promise<CommunitySubmission | null> {
-  const { data } = await api.get(`/api/admin/community-reporter/submissions/${id}`);
+  const { data } = await api.get(`/admin/community-reporter/submissions/${id}`);
   const item = (data?.submission ?? data) as CommunitySubmissionApi | undefined;
   return item ? normalizeOne(item) : null;
 }
 
 export async function updateCommunitySubmissionDecision(id: string, decision: 'approve' | 'reject', extra?: { aiHeadline?: string; aiBody?: string; rejectReason?: string }) {
   const { aiHeadline, aiBody, rejectReason } = extra || {};
-  const { data } = await api.post(`/api/admin/community-reporter/submissions/${id}/decision`, { decision, aiHeadline, aiBody, rejectReason });
+  const { data } = await api.post(`/admin/community-reporter/submissions/${id}/decision`, { decision, aiHeadline, aiBody, rejectReason });
   return data;
 }
