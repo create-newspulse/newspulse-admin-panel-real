@@ -69,6 +69,25 @@ function serializeSettingsPatch(payload: Partial<CommunityReporterSettings>) {
   return next;
 }
 
+function assertSettingsPersistence(
+  requestedPatch: Partial<CommunityReporterSettings>,
+  persisted: CommunityReporterSettings,
+) {
+  if (
+    typeof requestedPatch.communityReporterClosed === 'boolean'
+    && persisted.communityReporterClosed !== requestedPatch.communityReporterClosed
+  ) {
+    throw new Error('Production save verification failed for Community Reporter.');
+  }
+
+  if (
+    typeof requestedPatch.reporterPortalClosed === 'boolean'
+    && persisted.reporterPortalClosed !== requestedPatch.reporterPortalClosed
+  ) {
+    throw new Error('Production save verification failed for Reporter Portal.');
+  }
+}
+
 export async function getCommunityReporterSettings(): Promise<CommunityReporterSettings> {
   const res = await api.get('/admin/founder/feature-toggles');
   return normalizeSettings(res.data as CommunityReporterResponse);
@@ -77,6 +96,8 @@ export async function getCommunityReporterSettings(): Promise<CommunityReporterS
 export async function updateCommunityReporterSettings(
   payload: Partial<CommunityReporterSettings>,
 ): Promise<CommunityReporterSettings> {
-  const res = await api.patch('/admin/founder/feature-toggles', serializeSettingsPatch(payload));
-  return normalizeSettings(res.data as CommunityReporterResponse);
+  await api.patch('/admin/founder/feature-toggles', serializeSettingsPatch(payload));
+  const verified = await getCommunityReporterSettings();
+  assertSettingsPersistence(payload, verified);
+  return verified;
 }

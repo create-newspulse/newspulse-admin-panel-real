@@ -273,6 +273,25 @@ function serializeFounderFeatureTogglePatch(patch: Partial<FounderFeatureToggles
   return payload;
 }
 
+function assertFounderFeatureTogglePersistence(
+  requestedPatch: Partial<FounderFeatureToggles>,
+  persisted: FounderFeatureToggles,
+) {
+  if (
+    typeof requestedPatch.communityReporterClosed === 'boolean'
+    && persisted.communityReporterClosed !== requestedPatch.communityReporterClosed
+  ) {
+    throw new Error('Feature toggle save could not be verified for Community Reporter.');
+  }
+
+  if (
+    typeof requestedPatch.reporterPortalClosed === 'boolean'
+    && persisted.reporterPortalClosed !== requestedPatch.reporterPortalClosed
+  ) {
+    throw new Error('Feature toggle save could not be verified for Reporter Portal.');
+  }
+}
+
 export async function getFounderFeatureToggles(): Promise<FounderFeatureToggles> {
   const res = await adminApi.get('/founder/feature-toggles');
   return normalizeFounderFeatureToggles(res.data);
@@ -281,6 +300,8 @@ export async function getFounderFeatureToggles(): Promise<FounderFeatureToggles>
 export async function patchFounderFeatureToggles(
   patch: Partial<FounderFeatureToggles>
 ): Promise<FounderFeatureToggles> {
-  const res = await adminApi.patch('/founder/feature-toggles', serializeFounderFeatureTogglePatch(patch));
-  return normalizeFounderFeatureToggles(res.data);
+  await adminApi.patch('/founder/feature-toggles', serializeFounderFeatureTogglePatch(patch));
+  const verified = await getFounderFeatureToggles();
+  assertFounderFeatureTogglePersistence(patch, verified);
+  return verified;
 }
