@@ -105,10 +105,7 @@ export default function SimpleLogin() {
       if (!ok) {
         // 401 is an expected outcome for wrong credentials.
         // Keep UX calm and show a clear, user-friendly message.
-        const hint = import.meta.env.DEV
-          ? 'Invalid email/password. If this is local dev, seed the founder first (POST /admin-api/admin/seed-founder).'
-          : 'Invalid email or password.';
-        toast.error(hint);
+        toast.error('Invalid email or password.');
         return;
       }
 
@@ -125,10 +122,7 @@ export default function SimpleLogin() {
 
       // Treat 401 as a normal invalid-credentials outcome (no scary console noise).
       if (status === 401) {
-        const hint = import.meta.env.DEV
-          ? 'Invalid email/password. If this is local dev, seed the founder first (POST /admin-api/admin/seed-founder).'
-          : 'Invalid email or password.';
-        toast.error(hint);
+        toast.error('Invalid email or password.');
         return;
       }
 
