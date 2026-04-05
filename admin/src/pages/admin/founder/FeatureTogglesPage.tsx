@@ -143,7 +143,7 @@ function FeatureTogglesInner(){
             <div className="flex items-start justify-between">
               <div>
                 <div className="font-semibold">Reporter Portal</div>
-                <div className="text-sm text-slate-600 mt-1">ON hides and closes the live Reporter Portal. OFF keeps it open and visible so reporters can use their dashboard and story workspace.</div>
+                <div className="text-sm text-slate-600 mt-1">ON hides and closes the live Reporter Portal. OFF keeps it open and visible so reporters can log in by email OTP, open their dashboard, manage submissions, update profile details, and submit stories.</div>
               </div>
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={settings.reporterPortalClosed} onChange={e=> onToggle('reporterPortalClosed', e.target.checked)} disabled={saving} />

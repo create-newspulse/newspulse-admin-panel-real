@@ -96,7 +96,7 @@ export default function CommunityHome() {
         <HubCard
           to="/community/portal"
           title="Reporter Portal"
-          description="Live portal oversight, stats, and recent reporter activity"
+          description="Live portal oversight for login, dashboard, submissions, profile, and submit-story activity"
           icon={<Users className="w-6 h-6" />}
           variant="primary"
         />
@@ -136,7 +136,7 @@ export default function CommunityHome() {
         <HubCard
           to="/founder/feature-toggles"
           title="Community Reporter Feature Toggles – Founder only"
-          description="Open or close the live Reporter Portal and public submission entry."
+          description="Open or close the real Reporter Portal and the public submission entry."
           icon={<LayoutGrid className="w-6 h-6" />}
           variant="secondary"
         />

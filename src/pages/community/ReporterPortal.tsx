@@ -132,7 +132,7 @@ export default function ReporterPortal() {
           </div>
           <div>
             <h1 className="text-2xl font-bold">Reporter Portal</h1>
-            <p className="text-sm text-slate-600 mt-1">Admin oversight for the live Reporter Portal, reporter activity, and reporter-owned story records.</p>
+            <p className="text-sm text-slate-600 mt-1">Admin oversight for the live Reporter Portal login, dashboard, submissions, profile activity, and reporter-owned story records.</p>
             {isLoading && (
               <p className="text-xs text-slate-500 mt-1">Loading portal activity…</p>
             )}
@@ -153,7 +153,7 @@ export default function ReporterPortal() {
       <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 flex items-start gap-2 text-sm">
         <AlertCircle className="w-5 h-5 mt-0.5" />
         <div>
-          This admin view mirrors the live Reporter Portal. Reporters keep ownership of their own records while Founder/Admin can monitor activity here and move into moderation when needed.
+          This admin view mirrors the live Reporter Portal. Reporters keep ownership of their own records while Founder/Admin can monitor login-linked identity context, dashboard activity, submissions, profile signals, and moderation needs here.
         </div>
       </div>
 
@@ -261,7 +261,7 @@ export default function ReporterPortal() {
             <PenSquare className="w-6 h-6" />
             <div>
               <div className="font-semibold">Open Submission Flow</div>
-              <div className="text-xs text-slate-500">Use the same reporter-compatible submission path</div>
+              <div className="text-xs text-slate-500">Use the same reporter-compatible submit story path</div>
             </div>
           </div>
           <ArrowRight className="w-5 h-5" />

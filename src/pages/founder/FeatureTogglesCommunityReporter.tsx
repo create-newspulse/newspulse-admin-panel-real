@@ -124,7 +124,7 @@ export default function FeatureTogglesCommunityReporter() {
               <h2 className="font-semibold">Reporter Portal</h2>
               <p className="text-sm text-slate-400">
                 When <strong>ON</strong>, the live Reporter Portal is hidden and closed for reporters.
-                When <strong>OFF</strong>, reporters can see the portal, access their dashboard, and track their own stories.
+                When <strong>OFF</strong>, reporters can use the email OTP login, open their dashboard, manage submissions, update profile details, and submit stories.
               </p>
             </div>
             <InlineToggleSwitch
