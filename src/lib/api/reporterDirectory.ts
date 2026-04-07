@@ -12,6 +12,15 @@ function extractBackendMessage(data: any): string {
   return '';
 }
 
+function readOptionalBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return null;
+  if (['true', '1', 'yes', 'enabled', 'active', 'verified'].includes(raw)) return true;
+  if (['false', '0', 'no', 'disabled', 'inactive', 'unverified'].includes(raw)) return false;
+  return null;
+}
+
 function mapAdminActionError(err: any, fallback: string): UiNotifyError {
   const status: number | undefined = err?.response?.status;
   const backendMsg = extractBackendMessage(err?.response?.data);
@@ -35,6 +44,7 @@ export interface ReporterContact {
   // Optional legacy contact-record id (when backend still maintains separate contact documents).
   contactId?: string | null;
   reporterKey?: string | null;
+  directoryStatus?: 'active' | 'removed' | string | null;
   name: string | null;
   email: string | null;
   phone: string | null;
@@ -102,6 +112,16 @@ export interface ReporterContactListResponse {
   items?: ReporterContact[];
 }
 
+type ReporterDirectoryLoadOptions = {
+  includeSubmissionFallback?: boolean;
+  view?: 'active' | 'removed';
+};
+
+type SubmissionDerivedReporterAggregate = {
+  row: ReporterContact;
+  storyIds: Set<string>;
+};
+
 export interface ReporterContactListStats {
   totalReporters: number;
   verified: number;
@@ -146,6 +166,35 @@ type ReporterContactQueryParams = {
   sortDir?: 'asc' | 'desc';
 };
 
+const REPORTER_CONTACTS_ACTIVE_PATH = '/community-reporter/contacts';
+const REPORTER_CONTACTS_REMOVED_PATH = '/community-reporter/contacts/removed';
+const REPORTER_CONTACTS_BULK_HIDE_PATH = '/community-reporter/contacts/bulk-hide';
+const REPORTER_CONTACTS_BULK_RESTORE_PATH = '/community-reporter/contacts/bulk-restore';
+const REPORTER_CONTACTS_BULK_DELETE_PATH = '/community-reporter/contacts/bulk-delete';
+
+function logReporterContactsApi(input: {
+  action: string;
+  method: string;
+  url: string;
+  id?: string | null;
+  status?: number | null;
+  count?: number | null;
+}) {
+  if (!import.meta.env.DEV) return;
+  try {
+    console.info('[reporter-contacts-ui-api]', {
+      action: input.action,
+      url: input.url,
+      method: input.method,
+      id: input.id ?? null,
+      status: input.status ?? null,
+      count: input.count ?? null,
+    });
+  } catch {
+    // ignore logging failures
+  }
+}
+
 async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: ReporterContactQueryParams) {
   const requestParams = buildReporterContactParams(params);
   const queryParams = Object.fromEntries(requestParams.entries());
@@ -156,6 +205,7 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     const qs = requestParams.toString();
     return qs ? `${full}?${qs}` : full;
   })();
+  logReporterContactsApi({ action: endpointPath === REPORTER_CONTACTS_REMOVED_PATH ? 'list-removed' : 'list', method: 'GET', url: requestUrl });
 
   const res = await adminApi.get<any>(endpointPath, { params: requestParams });
 
@@ -236,6 +286,10 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       c.reporterMobile,
       c.mobileNumber,
       c.contactNumber,
+      c.contact?.contactNumber,
+      c.profile?.contactNumber,
+      c.identity?.contactNumber,
+      c.reporter?.contactNumber,
       c.reporterPhone,
       c.contactPhoneFull,
       c.contactPhone,
@@ -260,6 +314,8 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       c.identity?.phoneNumber,
       c.identity?.mobile,
       c.reporter?.phone,
+      c.reporter?.mobile,
+      c.reporter?.mobileNumber,
       c.reporter?.phoneRaw,
       c.reporter?.rawPhone,
       c.reporter?.phoneE164,
@@ -290,9 +346,18 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       c.whatsappNumber,
       c.whatsapp,
       c.whatsApp,
+      c.contact?.whatsappNumber,
       c.contact?.whatsapp,
+      c.contact?.whatsApp,
+      c.profile?.whatsappNumber,
       c.profile?.whatsapp,
+      c.profile?.whatsApp,
+      c.identity?.whatsappNumber,
       c.identity?.whatsapp,
+      c.identity?.whatsApp,
+      c.reporter?.whatsapp,
+      c.reporter?.whatsappNumber,
+      c.reporter?.whatsApp,
     ]);
     const phone = phoneRaw || phoneMasked || '';
 
@@ -342,13 +407,13 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       ?? ''
     ).trim();
 
-    const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.location?.city ?? c.locationDetail?.city ?? c.location?.town ?? c.location?.cityTownVillage ?? c.talukaName ?? null);
-    const state = (c.state ?? c.stateName ?? c.stateCode ?? c.location?.state ?? c.locationDetail?.state ?? c.location?.region ?? null);
-    const country = (c.country ?? c.countryName ?? c.location?.country ?? c.locationDetail?.country ?? c.location?.nation ?? null);
-    const district = (c.district ?? c.districtName ?? c.location?.district ?? c.location?.area ?? c.locationDetail?.district ?? c.talukaName ?? null);
-    const area = (c.area ?? c.coverageArea ?? c.location?.area ?? c.location?.locality ?? c.locality ?? c.subLocality ?? null);
-    const areaType = (c.areaType ?? c.location?.areaType ?? c.locationDetail?.areaType ?? null);
-    const coverageScope = (c.coverageScope ?? c.coverage?.scope ?? c.scope ?? null);
+    const city = (c.city ?? c.cityTownVillage ?? c.cityName ?? c.contact?.city ?? c.profile?.city ?? c.identity?.city ?? c.reporter?.city ?? c.location?.city ?? c.locationDetail?.city ?? c.location?.town ?? c.location?.cityTownVillage ?? c.talukaName ?? null);
+    const state = (c.state ?? c.stateName ?? c.stateCode ?? c.contact?.state ?? c.profile?.state ?? c.identity?.state ?? c.reporter?.state ?? c.location?.state ?? c.locationDetail?.state ?? c.location?.region ?? null);
+    const country = (c.country ?? c.countryName ?? c.contact?.country ?? c.profile?.country ?? c.identity?.country ?? c.reporter?.country ?? c.location?.country ?? c.locationDetail?.country ?? c.location?.nation ?? null);
+    const district = (c.district ?? c.districtName ?? c.contact?.district ?? c.profile?.district ?? c.identity?.district ?? c.reporter?.district ?? c.location?.district ?? c.location?.area ?? c.locationDetail?.district ?? c.talukaName ?? null);
+    const area = (c.area ?? c.coverageArea ?? c.contact?.area ?? c.profile?.area ?? c.identity?.area ?? c.reporter?.area ?? c.location?.area ?? c.location?.locality ?? c.locality ?? c.subLocality ?? null);
+    const areaType = (c.areaType ?? c.contact?.areaType ?? c.profile?.areaType ?? c.identity?.areaType ?? c.reporter?.areaType ?? c.location?.areaType ?? c.locationDetail?.areaType ?? null);
+    const coverageScope = (c.coverageScope ?? c.contact?.coverageScope ?? c.profile?.coverageScope ?? c.identity?.coverageScope ?? c.reporter?.coverageScope ?? c.coverage?.scope ?? c.scope ?? null);
     const coverageLanguage = Array.isArray(c.coverageLanguage)
       ? c.coverageLanguage
       : Array.isArray(c.coverageLanguages)
@@ -374,7 +439,7 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     const rootId = String(c.id ?? '').trim();
     const contactIdRaw = c.contactId ?? c.contactID ?? c.contactRecordId ?? c.contactRecordID ?? c.contact?._id ?? c.contact?.id;
     const contactId = String(contactIdRaw ?? '').trim();
-    const endpointContactId = endpointPath === '/community-reporter/contacts'
+    const endpointContactId = endpointPath.startsWith('/community-reporter/contacts')
       ? (rootUnderscoreId || rootId)
       : '';
 
@@ -384,7 +449,7 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     const derivedContactId = !contactId && hasLegacyContactFields && !contributorIdRaw ? legacyRowId : '';
     const resolvedContactId = contactId || endpointContactId || derivedContactId;
 
-    const idRaw = contributorIdRaw ?? derivedContactId ?? c._id ?? c.id ?? c.reporterId ?? c.userId ?? c.reporterKey ?? c.key;
+    const idRaw = resolvedContactId ?? c._id ?? c.id ?? contributorIdRaw ?? c.reporterId ?? c.userId ?? c.reporterKey ?? c.key;
     const idCandidate = String(idRaw ?? '').trim();
 
     const stableId = idCandidate || stableAnonId({
@@ -420,20 +485,16 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
       coverageLanguage: coverageLanguage ? coverageLanguage.map((value: any) => String(value || '').trim()).filter(Boolean) : null,
       assignedSpecialization: assignedSpecialization != null ? String(assignedSpecialization) : null,
       identitySource: identitySource != null ? String(identitySource) : null,
-      emailVerified: typeof (c.emailVerified ?? c.verifiedEmail ?? c.auth?.emailVerified) === 'boolean'
-        ? Boolean(c.emailVerified ?? c.verifiedEmail ?? c.auth?.emailVerified)
+      emailVerified: readOptionalBoolean(c.emailVerified ?? c.verifiedEmail ?? c.auth?.emailVerified ?? c.identity?.emailVerified ?? c.reporter?.emailVerified),
+      authStatus: (c.authStatus ?? c.portalAuthStatus ?? c.reporterAuthStatus ?? c.auth?.status ?? c.identity?.authStatus ?? c.reporter?.authStatus ?? null) != null
+        ? String(c.authStatus ?? c.portalAuthStatus ?? c.reporterAuthStatus ?? c.auth?.status ?? c.identity?.authStatus ?? c.reporter?.authStatus)
         : null,
-      authStatus: (c.authStatus ?? c.portalAuthStatus ?? c.auth?.status ?? null) != null
-        ? String(c.authStatus ?? c.portalAuthStatus ?? c.auth?.status)
+      authProvider: (c.authProvider ?? c.portalAuthProvider ?? c.reporterAuthProvider ?? c.auth?.provider ?? c.identity?.authProvider ?? c.reporter?.authProvider ?? null) != null
+        ? String(c.authProvider ?? c.portalAuthProvider ?? c.reporterAuthProvider ?? c.auth?.provider ?? c.identity?.authProvider ?? c.reporter?.authProvider)
         : null,
-      authProvider: (c.authProvider ?? c.portalAuthProvider ?? c.auth?.provider ?? null) != null
-        ? String(c.authProvider ?? c.portalAuthProvider ?? c.auth?.provider)
-        : null,
-      portalAuthEnabled: typeof (c.portalAuthEnabled ?? c.auth?.enabled) === 'boolean'
-        ? Boolean(c.portalAuthEnabled ?? c.auth?.enabled)
-        : null,
-      lastLoginAt: (c.lastLoginAt ?? c.portalLastLoginAt ?? c.auth?.lastLoginAt ?? null) != null
-        ? String(c.lastLoginAt ?? c.portalLastLoginAt ?? c.auth?.lastLoginAt)
+      portalAuthEnabled: readOptionalBoolean(c.portalAuthEnabled ?? c.auth?.enabled ?? c.identity?.portalAuthEnabled ?? c.identity?.authEnabled ?? c.reporter?.portalAuthEnabled ?? c.reporter?.authEnabled),
+      lastLoginAt: (c.lastLoginAt ?? c.portalLastLoginAt ?? c.reporterLastLoginAt ?? c.auth?.lastLoginAt ?? c.identity?.lastLoginAt ?? c.reporter?.lastLoginAt ?? null) != null
+        ? String(c.lastLoginAt ?? c.portalLastLoginAt ?? c.reporterLastLoginAt ?? c.auth?.lastLoginAt ?? c.identity?.lastLoginAt ?? c.reporter?.lastLoginAt)
         : null,
       createdAt: (c.createdAt ?? c.contact?.createdAt ?? c.profile?.createdAt ?? null) != null
         ? String(c.createdAt ?? c.contact?.createdAt ?? c.profile?.createdAt)
@@ -503,6 +564,14 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     }
   }
 
+  logReporterContactsApi({
+    action: endpointPath === REPORTER_CONTACTS_REMOVED_PATH ? 'list-removed' : 'list',
+    method: 'GET',
+    url: requestUrl,
+    status: typeof res?.status === 'number' ? res.status : null,
+    count: rows.length,
+  });
+
   return {
     ok: payload?.ok === true || payload?.success === true,
     rows,
@@ -520,44 +589,20 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
   } satisfies ReporterContactListResponse;
 }
 
-export async function listReporterContacts(params?: ReporterContactQueryParams): Promise<ReporterContactListResponse> {
+export async function listReporterContacts(params?: ReporterContactQueryParams, options?: ReporterDirectoryLoadOptions): Promise<ReporterContactListResponse> {
   try {
-    // IMPORTANT: Contributor Network must reflect unified contributor identities derived from
-    // community submissions. Prefer the unified contributor dataset route when present.
-    // Backend routes for reporter directory are mounted under:
-    // - proxy mode:  /admin-api/admin/community/*
-    // - direct mode: /api/admin/community/*
-    // (`adminApi` normalizes the mode-specific prefix automatically.)
-    const candidates = [
-      '/community-reporter/contacts',
-      '/community/reporter-contacts',
-      '/community/reporter-directory',
-      '/community/reporters',
-    ];
-
-    let lastErr: any = null;
-    for (const endpointPath of candidates) {
-      try {
-        return await fetchReporterContactsFromEndpoint(endpointPath, params);
-      } catch (err: any) {
-        lastErr = err;
-        const status: number | undefined = err?.response?.status ?? err?.status;
-        if (status === 404 || status === 405) continue;
-        throw err;
-      }
-    }
-
-    throw lastErr || new Error('Failed to load reporter contacts');
+    const endpointPath = options?.view === 'removed' ? REPORTER_CONTACTS_REMOVED_PATH : REPORTER_CONTACTS_ACTIVE_PATH;
+    return await fetchReporterContactsFromEndpoint(endpointPath, params);
   } catch (err: any) {
     throw mapAdminActionError(err, 'Failed to load reporter contacts');
   }
 }
 
-export async function listReporterContactsAll(params?: ReporterContactQueryParams) {
+export async function listReporterContactsAll(params?: ReporterContactQueryParams, options?: ReporterDirectoryLoadOptions) {
   // Fetch all pages so the directory reflects backend totals.
   // This avoids showing an artificially-small dataset when backend has many contributors.
   const limit = Math.max(1, Math.min(Number(params?.limit ?? 500) || 500, 1000));
-  const first = await listReporterContacts({ ...(params || {}), page: 1, limit });
+  const first = await listReporterContacts({ ...(params || {}), page: 1, limit }, options);
   const endpointUsed = first.endpointUsed;
   const pageRequests: ReporterRequestTracePage[] = [...(first.requestTrace?.pageRequests || [])];
 
@@ -627,7 +672,7 @@ export async function listReporterContactsAll(params?: ReporterContactQueryParam
     // If endpointUsed is unknown, fall back to listReporterContacts (it will re-select).
     const pageRes = endpointUsed
       ? await fetchReporterContactsFromEndpoint(endpointUsed, { ...(params || {}), page, limit })
-      : await listReporterContacts({ ...(params || {}), page, limit });
+      : await listReporterContacts({ ...(params || {}), page, limit }, options);
     if (pageRes.requestTrace?.pageRequests?.length) pageRequests.push(...pageRes.requestTrace.pageRequests);
     const pageRows = pageRes.rows || pageRes.items || [];
     if (pageRows.length === 0) break;
@@ -640,21 +685,356 @@ export async function listReporterContactsAll(params?: ReporterContactQueryParam
   }
 
   const rows = Array.from(mergedById.values());
+  const mergedRows = options?.includeSubmissionFallback && options?.view !== 'removed'
+    ? await mergeReporterContactsWithSubmissionFallback(rows)
+    : rows;
   return {
     ok: first.ok,
-    rows,
-    items: rows,
-    total: (Number.isFinite(totalExpected) ? totalExpected : rows.length),
-    stats: parseReporterContactStats(first.stats, rows),
+    rows: mergedRows,
+    items: mergedRows,
+    total: Math.max(Number.isFinite(totalExpected) ? totalExpected : rows.length, mergedRows.length),
+    stats: parseReporterContactStats(first.stats, mergedRows),
     endpointUsed,
     requestTrace: {
       requestUrl: first.requestTrace?.requestUrl || '',
       queryParams: first.requestTrace?.queryParams || {},
       limit,
       pageRequests,
-      responseRowCount: rows.length,
+      responseRowCount: mergedRows.length,
     },
   } satisfies ReporterContactListResponse;
+}
+
+async function mergeReporterContactsWithSubmissionFallback(rows: ReporterContact[]) {
+  const submissionRows = await fetchSubmissionDerivedReporterContacts();
+  if (!submissionRows.length) return rows;
+
+  const mergedById = new Map<string, ReporterContact>();
+  rows.forEach((row) => mergedById.set(row.id, row));
+
+  for (const submissionRow of submissionRows) {
+    const existing = findMatchingReporterContact(Array.from(mergedById.values()), submissionRow);
+    if (!existing) {
+      mergedById.set(submissionRow.id, submissionRow);
+      continue;
+    }
+
+    mergedById.set(existing.id, mergeReporterContactRecords(existing, submissionRow));
+  }
+
+  return Array.from(mergedById.values());
+}
+
+async function fetchSubmissionDerivedReporterContacts() {
+  const limit = 500;
+  const maxPages = 20;
+  const aggregates = new Map<string, SubmissionDerivedReporterAggregate>();
+
+  for (let page = 1; page <= maxPages; page++) {
+    let payload: any;
+    try {
+      const res = await adminApi.get<any>('/community-reporter/submissions', {
+        params: { page, limit, status: 'all' },
+      });
+      payload = res?.data ?? {};
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403 || status === 404 || status === 405) return [];
+      break;
+    }
+
+    const items = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.submissions)
+          ? payload.submissions
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.data?.items)
+              ? payload.data.items
+              : Array.isArray(payload?.data?.submissions)
+                ? payload.data.submissions
+                : [];
+
+    if (!items.length) break;
+
+    for (const submission of items) {
+      const normalized = normalizeSubmissionDerivedReporterContact(submission);
+      if (!normalized) continue;
+
+      const aggregate = aggregates.get(normalized.id);
+      if (!aggregate) {
+        const nextSet = new Set<string>();
+        if (normalized.contactId) nextSet.add(normalized.contactId);
+        aggregates.set(normalized.id, { row: normalized, storyIds: nextSet });
+        continue;
+      }
+
+      if (normalized.contactId) aggregate.storyIds.add(normalized.contactId);
+      aggregate.row = mergeReporterContactRecords(aggregate.row, normalized);
+      aggregate.row.totalStories = aggregate.storyIds.size;
+      aggregate.row.approvedStories = Math.max(aggregate.row.approvedStories, normalized.approvedStories);
+      aggregate.row.pendingStories = Math.max(aggregate.row.pendingStories, normalized.pendingStories);
+      aggregate.row.rejectedStories = Math.max(Number(aggregate.row.rejectedStories || 0), Number(normalized.rejectedStories || 0));
+      aggregate.row.lastSubmissionAt = latestIso(aggregate.row.lastSubmissionAt, normalized.lastSubmissionAt);
+      aggregate.row.lastStoryAt = latestIso(aggregate.row.lastStoryAt, normalized.lastStoryAt) || '';
+    }
+
+    if (items.length < limit) break;
+  }
+
+  return Array.from(aggregates.values()).map(({ row, storyIds }) => ({
+    ...row,
+    totalStories: Math.max(Number(row.totalStories || 0), storyIds.size),
+    linkedStoryCount: Math.max(Number(row.linkedStoryCount || 0), storyIds.size),
+  }));
+}
+
+function normalizeSubmissionDerivedReporterContact(submission: any): ReporterContact | null {
+  const raw = submission && typeof submission === 'object' ? submission : {};
+  const email = pickFirstString([
+    raw.contactEmail,
+    raw.email,
+    raw.reporterEmail,
+    raw.contact?.email,
+    raw.identity?.email,
+    raw.reporter?.email,
+    raw.user?.email,
+  ]).trim();
+  const phone = chooseAdminRawPhone([
+    raw.contactPhone,
+    raw.phone,
+    raw.mobile,
+    raw.mobileNumber,
+    raw.contactNumber,
+    raw.reporterPhone,
+    raw.contact?.phone,
+    raw.contact?.mobile,
+    raw.contact?.mobileNumber,
+    raw.contact?.contactNumber,
+    raw.identity?.phone,
+    raw.identity?.mobile,
+    raw.identity?.contactNumber,
+    raw.reporter?.phone,
+    raw.reporter?.mobile,
+    raw.reporter?.mobileNumber,
+    raw.reporter?.contactNumber,
+    raw.phoneNumber,
+    raw.contactPhoneNumber,
+    raw.whatsapp,
+    raw.whatsappNumber,
+  ]);
+  const contactMethod = String(raw.contactMethod ?? raw.contact?.preferredContact ?? raw.contact?.method ?? '').trim().toLowerCase();
+  const whatsapp = chooseAdminRawPhone([
+    raw.whatsapp,
+    raw.whatsappNumber,
+    raw.whatsApp,
+    raw.contact?.whatsapp,
+    raw.contact?.whatsappNumber,
+    raw.contact?.whatsApp,
+    raw.identity?.whatsapp,
+    raw.identity?.whatsappNumber,
+    raw.identity?.whatsApp,
+    raw.reporter?.whatsapp,
+    raw.reporter?.whatsappNumber,
+    raw.reporter?.whatsApp,
+    contactMethod === 'whatsapp' ? phone : '',
+  ]);
+  const fullName = pickFirstString([
+    raw.contactName,
+    raw.reporterName,
+    raw.userName,
+    raw.name,
+    raw.contact?.name,
+    raw.identity?.name,
+    raw.reporter?.name,
+    raw.reporter?.fullName,
+    raw.user?.name,
+  ]);
+  const city = pickFirstString([raw.city, raw.location?.city, raw.location?.town, raw.cityTownVillage, raw.contact?.city, raw.identity?.city, raw.reporter?.city]);
+  const district = pickFirstString([raw.district, raw.location?.district, raw.location?.area, raw.districtName, raw.contact?.district, raw.identity?.district, raw.reporter?.district]);
+  const state = pickFirstString([raw.state, raw.location?.state, raw.location?.region, raw.stateName, raw.contact?.state, raw.identity?.state, raw.reporter?.state]);
+  const country = pickFirstString([raw.country, raw.location?.country, raw.location?.nation, raw.countryName, raw.contact?.country, raw.identity?.country, raw.reporter?.country]);
+  const contributorId = pickFirstString([raw.reporterContributorId, raw.contributorId, raw.identity?.contributorId, raw.reporter?.contributorId, raw.user?.contributorId]);
+  const reporterKey = pickFirstString([raw.reporterKey, raw.identity?.reporterKey, raw.reporter?.reporterKey, raw.userId, raw.user?.id, contributorId, email.toLowerCase()]);
+  const submissionId = pickFirstString([raw.id, raw._id, raw.ID, raw.uuid, raw.referenceId, raw.refId]);
+  const authStatus = pickFirstString([raw.reporterAuthStatus, raw.authStatus, raw.portalAuthStatus, raw.identity?.authStatus, raw.reporter?.authStatus]);
+  const authProvider = pickFirstString([raw.reporterAuthProvider, raw.authProvider, raw.portalAuthProvider, raw.identity?.authProvider, raw.reporter?.authProvider]);
+  const lastLoginAt = pickFirstString([raw.reporterLastLoginAt, raw.lastLoginAt, raw.identity?.lastLoginAt, raw.reporter?.lastLoginAt]) || null;
+  const verificationLevel = normalizeVerificationLevel(raw.reporterVerificationLevel ?? raw.verificationLevel ?? raw.identity?.verificationLevel ?? raw.reporter?.verificationLevel ?? '');
+  const status = normalizeReporterStatus(raw.reporterStatus ?? raw.status ?? raw.identity?.status ?? raw.reporter?.status ?? '');
+  const createdAt = pickFirstString([raw.createdAt, raw.submittedAt, raw.updatedAt]);
+  const storyStatus = String(raw.status ?? raw.reviewStatus ?? raw.workflowStatus ?? '').trim().toLowerCase();
+
+  if (!fullName && !email && !phone && !whatsapp) return null;
+
+  const stableId = contributorId || reporterKey || stableAnonId({
+    fullName,
+    email: email.toLowerCase(),
+    phone: phone || whatsapp,
+    city,
+    district,
+    state,
+    country,
+  });
+
+  return {
+    id: stableId,
+    contributorId: contributorId || null,
+    contactId: null,
+    reporterKey: reporterKey || stableId,
+    name: fullName || null,
+    email: email || null,
+    phone: phone || null,
+    phoneRaw: phone || null,
+    whatsapp: whatsapp || null,
+    debugSourceUrl: import.meta.env.DEV ? '/community-reporter/submissions' : null,
+    debugRawContact: import.meta.env.DEV ? raw : null,
+    city: city || null,
+    state: state || null,
+    country: country || null,
+    district: district || null,
+    area: pickFirstString([raw.area, raw.location?.area, raw.locality, raw.subLocality]) || null,
+    areaType: pickFirstString([raw.areaType, raw.location?.areaType]) || null,
+    coverageScope: pickFirstString([raw.coverageScope, raw.contact?.coverageScope, raw.identity?.coverageScope]) || null,
+    coverageLanguage: Array.isArray(raw.coverageLanguage)
+      ? raw.coverageLanguage.map((value: any) => String(value || '').trim()).filter(Boolean)
+      : Array.isArray(raw.coverageLanguages)
+        ? raw.coverageLanguages.map((value: any) => String(value || '').trim()).filter(Boolean)
+        : Array.isArray(raw.languages)
+          ? raw.languages.map((value: any) => String(value || '').trim()).filter(Boolean)
+          : null,
+    assignedSpecialization: pickFirstString([raw.assignedSpecialization, raw.specialization, raw.specialisation]) || null,
+    identitySource: 'submission-derived',
+    emailVerified: readOptionalBoolean(raw.reporterEmailVerified ?? raw.emailVerified ?? raw.verifiedEmail ?? raw.identity?.emailVerified ?? raw.reporter?.emailVerified),
+    authStatus: authStatus || null,
+    authProvider: authProvider || null,
+    portalAuthEnabled: readOptionalBoolean(raw.portalAuthEnabled ?? raw.identity?.portalAuthEnabled ?? raw.reporter?.portalAuthEnabled),
+    lastLoginAt,
+    createdAt: createdAt || null,
+    updatedAt: pickFirstString([raw.updatedAt, raw.createdAt]) || null,
+    linkedStoryCount: submissionId ? 1 : 0,
+    lastSubmissionAt: createdAt || null,
+    notes: null,
+    totalStories: submissionId ? 1 : 0,
+    pendingStories: isPendingSubmissionState(storyStatus) ? 1 : 0,
+    approvedStories: isApprovedSubmissionState(storyStatus) ? 1 : 0,
+    rejectedStories: isRejectedSubmissionState(storyStatus) ? 1 : 0,
+    withdrawnStories: 0,
+    publishedStories: isApprovedSubmissionState(storyStatus) ? 1 : 0,
+    lastStoryAt: createdAt || '',
+    reporterType: 'community',
+    verificationLevel,
+    status,
+    ethicsStrikes: null,
+    organisationName: null,
+    organisationType: null,
+    positionTitle: null,
+    beatsProfessional: null,
+    yearsExperience: null,
+    languages: Array.isArray(raw.languages) ? raw.languages.map((value: any) => String(value || '').trim()).filter(Boolean) : null,
+    websiteOrPortfolio: null,
+    socialLinks: null,
+    journalistCharterAccepted: null,
+    charterAcceptedAt: null,
+  } satisfies ReporterContact;
+}
+
+function mergeReporterContactRecords(primary: ReporterContact, secondary: ReporterContact): ReporterContact {
+  return {
+    ...secondary,
+    ...primary,
+    contributorId: primary.contributorId || secondary.contributorId || null,
+    contactId: primary.contactId || secondary.contactId || null,
+    reporterKey: primary.reporterKey || secondary.reporterKey || null,
+    name: primary.name || secondary.name || null,
+    email: primary.email || secondary.email || null,
+    phone: primary.phone || secondary.phone || null,
+    phoneRaw: primary.phoneRaw || secondary.phoneRaw || null,
+    whatsapp: primary.whatsapp || secondary.whatsapp || null,
+    city: primary.city || secondary.city || null,
+    district: primary.district || secondary.district || null,
+    state: primary.state || secondary.state || null,
+    country: primary.country || secondary.country || null,
+    area: primary.area || secondary.area || null,
+    areaType: primary.areaType || secondary.areaType || null,
+    coverageScope: primary.coverageScope || secondary.coverageScope || null,
+    coverageLanguage: primary.coverageLanguage?.length ? primary.coverageLanguage : (secondary.coverageLanguage?.length ? secondary.coverageLanguage : null),
+    assignedSpecialization: primary.assignedSpecialization || secondary.assignedSpecialization || null,
+    identitySource: primary.identitySource || secondary.identitySource || null,
+    emailVerified: primary.emailVerified ?? secondary.emailVerified ?? null,
+    authStatus: primary.authStatus || secondary.authStatus || null,
+    authProvider: primary.authProvider || secondary.authProvider || null,
+    portalAuthEnabled: primary.portalAuthEnabled ?? secondary.portalAuthEnabled ?? null,
+    lastLoginAt: primary.lastLoginAt || secondary.lastLoginAt || null,
+    createdAt: primary.createdAt || secondary.createdAt || null,
+    updatedAt: latestIso(primary.updatedAt, secondary.updatedAt),
+    linkedStoryCount: Math.max(Number(primary.linkedStoryCount || 0), Number(secondary.linkedStoryCount || 0)) || null,
+    lastSubmissionAt: latestIso(primary.lastSubmissionAt, secondary.lastSubmissionAt),
+    notes: primary.notes || secondary.notes || null,
+    totalStories: Math.max(Number(primary.totalStories || 0), Number(secondary.totalStories || 0)),
+    approvedStories: Math.max(Number(primary.approvedStories || 0), Number(secondary.approvedStories || 0)),
+    pendingStories: Math.max(Number(primary.pendingStories || 0), Number(secondary.pendingStories || 0)),
+    rejectedStories: Math.max(Number(primary.rejectedStories || 0), Number(secondary.rejectedStories || 0)),
+    withdrawnStories: Math.max(Number(primary.withdrawnStories || 0), Number(secondary.withdrawnStories || 0)),
+    publishedStories: Math.max(Number(primary.publishedStories || 0), Number(secondary.publishedStories || 0)),
+    lastStoryAt: latestIso(primary.lastStoryAt, secondary.lastStoryAt) || '',
+    reporterType: primary.reporterType || secondary.reporterType,
+    verificationLevel: primary.verificationLevel || secondary.verificationLevel,
+    status: primary.status || secondary.status,
+  };
+}
+
+function findMatchingReporterContact(rows: ReporterContact[], candidate: ReporterContact) {
+  const candidateEmail = String(candidate.email || '').trim().toLowerCase();
+  const candidatePhone = normalizeComparablePhone(candidate.phone || candidate.whatsapp || '');
+  const candidateKey = String(candidate.reporterKey || '').trim().toLowerCase();
+  const candidateContributorId = String(candidate.contributorId || '').trim().toLowerCase();
+
+  return rows.find((row) => {
+    const rowEmail = String(row.email || '').trim().toLowerCase();
+    const rowPhone = normalizeComparablePhone(row.phone || row.whatsapp || '');
+    const rowKey = String(row.reporterKey || '').trim().toLowerCase();
+    const rowContributorId = String(row.contributorId || '').trim().toLowerCase();
+    return (candidateContributorId && rowContributorId === candidateContributorId)
+      || (candidateKey && rowKey === candidateKey)
+      || (candidateEmail && rowEmail === candidateEmail)
+      || (candidatePhone && rowPhone === candidatePhone);
+  });
+}
+
+function normalizeComparablePhone(value: string) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  if (!digits) return '';
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+function pickFirstString(values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function latestIso(left?: string | null, right?: string | null) {
+  const leftTs = daysSinceIso(left) === Number.POSITIVE_INFINITY ? 0 : new Date(String(left || '')).getTime();
+  const rightTs = daysSinceIso(right) === Number.POSITIVE_INFINITY ? 0 : new Date(String(right || '')).getTime();
+  if (rightTs > leftTs) return String(right || '').trim() || null;
+  return String(left || '').trim() || String(right || '').trim() || null;
+}
+
+function isApprovedSubmissionState(value: string) {
+  return ['approved', 'published', 'live', 'accepted'].some((token) => value.includes(token));
+}
+
+function isPendingSubmissionState(value: string) {
+  return ['pending', 'under_review', 'review', 'submitted', 'draft'].some((token) => value.includes(token));
+}
+
+function isRejectedSubmissionState(value: string) {
+  return ['rejected', 'declined', 'trash', 'withdrawn'].some((token) => value.includes(token));
 }
 
 function chooseAdminRawPhone(values: unknown[]) {
@@ -804,58 +1184,41 @@ export interface RebuildReporterDirectoryResult {
   skippedNoEmail?: number;
 }
 
-// Optional repair/rebuild action: prefers a backend "repair" endpoint when available.
-// Falls back to the legacy contacts backfill endpoint.
+// Rebuild/backfill the canonical contacts collection only.
 export async function rebuildReporterDirectory(): Promise<RebuildReporterDirectoryResult> {
-  const candidates: Array<{ method: 'post'; path: string }> = [
-    { method: 'post', path: '/community/reporters/repair' },
-    { method: 'post', path: '/community/reporters/rebuild' },
-    { method: 'post', path: '/community/contributors/repair' },
-    { method: 'post', path: '/community/contributors/rebuild' },
-    { method: 'post', path: '/community-reporter/contacts/backfill' },
-  ];
-
-  let lastErr: any = null;
-  for (const c of candidates) {
-    const requestUrl = adminUrl(c.path);
-    try {
-      const res = await adminApi.post<any>(c.path);
-      const data = res?.data ?? {};
-      if (data?.ok === false || data?.success === false) {
-        throw new Error(extractBackendMessage(data) || 'Rebuild failed');
-      }
-      return {
-        ok: true,
-        endpointUsed: c.path,
-        requestUrl,
-        statusCode: typeof res?.status === 'number' ? res.status : undefined,
-        responseBody: data,
-        message: extractBackendMessage(data) || undefined,
-        upserted: Number(data?.upserted ?? data?.updated ?? data?.rebuilt ?? 0) || undefined,
-        skippedNoEmail: Number(data?.skippedNoEmail ?? data?.skipped ?? 0) || undefined,
-      };
-    } catch (err: any) {
-      lastErr = err;
-      const status: number | undefined = err?.response?.status;
-      // Continue on "not implemented" style responses.
-      if (status === 404 || status === 405) continue;
-      // Abort early on auth errors.
-      if (status === 401 || status === 403) break;
-      // For other errors, keep trying next candidate but preserve message.
-      continue;
+  const path = '/community-reporter/contacts/backfill';
+  const requestUrl = adminUrl(path);
+  logReporterContactsApi({ action: 'rebuild', method: 'POST', url: requestUrl });
+  try {
+    const res = await adminApi.post<any>(path);
+    const data = res?.data ?? {};
+    if (data?.ok === false || data?.success === false) {
+      throw new Error(extractBackendMessage(data) || 'Rebuild failed');
     }
-  }
-
-  const msg = lastErr?.message || 'Rebuild endpoint not available';
-  const mapped = mapAdminActionError(lastErr, msg) as UiNotifyError & {
+    logReporterContactsApi({ action: 'rebuild', method: 'POST', url: requestUrl, status: typeof res?.status === 'number' ? res.status : null });
+    return {
+      ok: true,
+      endpointUsed: path,
+      requestUrl,
+      statusCode: typeof res?.status === 'number' ? res.status : undefined,
+      responseBody: data,
+      message: extractBackendMessage(data) || undefined,
+      upserted: Number(data?.upserted ?? data?.updated ?? data?.rebuilt ?? 0) || undefined,
+      skippedNoEmail: Number(data?.skippedNoEmail ?? data?.skipped ?? 0) || undefined,
+    };
+  } catch (lastErr: any) {
+    logReporterContactsApi({ action: 'rebuild', method: 'POST', url: requestUrl, status: lastErr?.response?.status ?? null });
+    const msg = lastErr?.message || 'Rebuild endpoint not available';
+    const mapped = mapAdminActionError(lastErr, msg) as UiNotifyError & {
     requestUrl?: string;
     statusCode?: number;
     responseBody?: unknown;
-  };
-  mapped.requestUrl = lastErr?.config?.url ? adminUrl(String(lastErr.config.url)) : undefined;
-  mapped.statusCode = lastErr?.response?.status;
-  mapped.responseBody = lastErr?.response?.data;
-  throw mapped;
+    };
+    mapped.requestUrl = requestUrl;
+    mapped.statusCode = lastErr?.response?.status;
+    mapped.responseBody = lastErr?.response?.data;
+    throw mapped;
+  }
 }
 
 // Update private admin-only reporter notes. Backend should secure this route.
@@ -906,70 +1269,73 @@ export async function hideReporterContact(args: {
   reporterKey?: string | null;
   email?: string | null;
 }) {
-  const id = String(args.id || '').trim();
-  if (!id) throw new Error('Missing reporter contact id');
+  return bulkHideReporterContacts([args.id]);
+}
 
-  const path = `/community-reporter/contacts/${encodeURIComponent(id)}/hide`;
-  const requestUrl = adminUrl(path);
-  const method = 'POST';
-
-  if (import.meta.env.DEV) {
-    try {
-      console.info('[reporter-contact-remove] request', {
-        requestUrl,
-        method,
-        reporterKey: args.reporterKey || null,
-        email: args.email || null,
-      });
-    } catch {
-      // ignore logging failures
-    }
-  }
-
+export async function bulkHideReporterContacts(ids: string[]) {
+  const clean = (ids || []).map((x) => String(x || '').trim()).filter(Boolean);
+  if (clean.length === 0) return { ok: true, hidden: 0 };
+  const url = adminUrl(REPORTER_CONTACTS_BULK_HIDE_PATH);
+  const payload = { ids: clean };
+  logReporterContactsApi({ action: 'bulk-hide', method: 'POST', url, id: clean.join(','), count: clean.length });
   try {
-    const res = await adminApi.post<any>(path, {
-      reporterKey: args.reporterKey || undefined,
-      email: args.email || undefined,
-    });
-    const data = res?.data ?? {};
-    if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Hide failed');
-
     if (import.meta.env.DEV) {
       try {
-        console.info('[reporter-contact-remove] response', {
-          requestUrl,
-          method,
-          status: res?.status ?? null,
-          message: extractBackendMessage(data) || null,
+        console.info('[reporter-bulk-remove]', {
+          requestUrl: url,
+          payload,
         });
       } catch {
         // ignore logging failures
       }
     }
-
-    return { ok: true };
+    const res = await adminApi.post<any>(REPORTER_CONTACTS_BULK_HIDE_PATH, payload, { headers: { 'Content-Type': 'application/json' } });
+    const data = res?.data ?? {};
+    if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Bulk hide failed');
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-remove]', {
+          requestUrl: url,
+          responseStatus: res?.status ?? null,
+          payload,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
+    logReporterContactsApi({ action: 'bulk-hide', method: 'POST', url, id: clean.join(','), status: typeof res?.status === 'number' ? res.status : null, count: clean.length });
+    return { ok: true, hidden: clean.length };
   } catch (err: any) {
     if (import.meta.env.DEV) {
       try {
-        console.info('[reporter-contact-remove] response', {
-          requestUrl,
-          method,
-          status: err?.response?.status ?? null,
-          message: extractBackendMessage(err?.response?.data) || err?.message || null,
+        console.info('[reporter-bulk-remove]', {
+          requestUrl: url,
+          responseStatus: err?.response?.status ?? null,
+          payload,
         });
       } catch {
         // ignore logging failures
       }
     }
+    logReporterContactsApi({ action: 'bulk-hide', method: 'POST', url, id: clean.join(','), status: err?.response?.status ?? null, count: clean.length });
+    throw mapAdminActionError(err, 'Failed to remove selected contacts');
+  }
+}
 
-    const status: number | undefined = err?.response?.status;
-    if (status === 404) {
-      const out = new Error(`Remove route not found on backend (${method} ${requestUrl} returned 404)`) as UiNotifyError;
-      out.status = status;
-      throw out;
-    }
-
-    throw mapAdminActionError(err, 'Failed to remove reporter from Directory');
+export async function bulkRestoreReporterContacts(ids: string[]) {
+  const clean = (ids || []).map((x) => String(x || '').trim()).filter(Boolean);
+  if (clean.length === 0) return { ok: true, restored: 0 };
+  const url = adminUrl(REPORTER_CONTACTS_BULK_RESTORE_PATH);
+  logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), count: clean.length });
+  try {
+    const res = await adminApi.post<any>(REPORTER_CONTACTS_BULK_RESTORE_PATH, { ids: clean }, { headers: { 'Content-Type': 'application/json' } });
+    const data = res?.data ?? {};
+    if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Bulk restore failed');
+    logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), status: typeof res?.status === 'number' ? res.status : null, count: clean.length });
+    return { ok: true, restored: clean.length };
+  } catch (err: any) {
+    logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), status: err?.response?.status ?? null, count: clean.length });
+    throw mapAdminActionError(err, 'Failed to restore selected contacts');
   }
 }
 
@@ -979,17 +1345,21 @@ export async function bulkDeleteReporterContacts(args: {
 }) {
   const ids = (args.ids || []).map((x) => String(x || '').trim()).filter(Boolean);
   if (ids.length === 0) return { ok: true, deleted: 0 };
+  const url = adminUrl(REPORTER_CONTACTS_BULK_DELETE_PATH);
+  logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), count: ids.length });
 
   try {
     const res = await adminApi.post<any>(
-      '/admin/community-reporter/contacts/bulk-delete',
+      REPORTER_CONTACTS_BULK_DELETE_PATH,
       { ids },
       { headers: { 'Content-Type': 'application/json' } }
     );
     const data = res?.data ?? {};
     if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Bulk delete failed');
+    logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), status: typeof res?.status === 'number' ? res.status : null, count: ids.length });
     return { ok: true, deleted: ids.length };
   } catch (err: any) {
+    logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), status: err?.response?.status ?? null, count: ids.length });
     throw mapAdminActionError(err, 'Failed to delete selected contacts');
   }
 }
@@ -1002,7 +1372,10 @@ export interface ReporterContactsBackfillResult {
 
 export async function backfillReporterContacts(): Promise<ReporterContactsBackfillResult> {
   try {
-    const res = await adminApi.post<any>('/community-reporter/contacts/backfill');
+    const path = '/community-reporter/contacts/backfill';
+    const url = adminUrl(path);
+    logReporterContactsApi({ action: 'backfill', method: 'POST', url });
+    const res = await adminApi.post<any>(path);
     const data = res?.data ?? {};
     if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Backfill failed');
 
@@ -1077,8 +1450,11 @@ function normalizeStory(raw: any): ReporterStory {
 export async function listReporterStoriesForContact(contactId: string): Promise<{ items: ReporterStory[] }>{
   const id = String(contactId || '').trim();
   if (!id) throw new Error('Missing contact id');
+  const path = `/community-reporter/contacts/${encodeURIComponent(id)}/stories`;
+  const url = adminUrl(path);
+  logReporterContactsApi({ action: 'stories', method: 'GET', url, id });
   try {
-    const res = await adminApi.get<any>(`/admin/community-reporter/contacts/${encodeURIComponent(id)}/stories`);
+    const res = await adminApi.get<any>(path);
     const payload = res?.data ?? {};
     const rawItems: any[] = Array.isArray(payload)
       ? payload
@@ -1091,8 +1467,11 @@ export async function listReporterStoriesForContact(contactId: string): Promise<
             : Array.isArray(payload.data)
               ? payload.data
               : [];
-    return { items: rawItems.map(normalizeStory).filter(s => !!s.id) };
+    const items = rawItems.map(normalizeStory).filter(s => !!s.id);
+    logReporterContactsApi({ action: 'stories', method: 'GET', url, id, status: typeof res?.status === 'number' ? res.status : null, count: items.length });
+    return { items };
   } catch (err: any) {
+    logReporterContactsApi({ action: 'stories', method: 'GET', url, id, status: err?.response?.status ?? null });
     throw mapAdminActionError(err, 'Failed to load reporter stories');
   }
 }

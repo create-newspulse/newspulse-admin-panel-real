@@ -8,7 +8,9 @@ import ReporterProfileDrawer from '../../components/community/ReporterProfileDra
 import ReporterStoriesDrawer from '@/components/community/ReporterStoriesDrawer';
 import { useAuth } from '@/context/AuthContext';
 import {
-  hideReporterContact,
+  bulkDeleteReporterContacts,
+  bulkHideReporterContacts,
+  bulkRestoreReporterContacts,
   listReporterContactsAll,
   type RebuildReporterDirectoryResult,
   type ReporterContactListStats,
@@ -18,7 +20,9 @@ import {
 } from '@/lib/api/reporterDirectory';
 
 type DirectoryTab = 'table';
+type DirectoryView = 'active' | 'removed';
 type ProfileTab = 'overview' | 'contact' | 'coverage' | 'stories' | 'notes' | 'tasks' | 'activity';
+type DirectoryRow = ReporterContact & { contactId: string; directoryStatus: 'active' | 'removed' };
 
 const ALL_OPTION = 'all';
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
@@ -32,6 +36,7 @@ export default function ReporterContactDirectory() {
   const canManage = role === 'founder' || role === 'admin';
 
   const directoryTab: DirectoryTab = 'table';
+  const [directoryView, setDirectoryView] = useState<DirectoryView>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked' | 'archived'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'community' | 'journalist'>('all');
@@ -52,22 +57,51 @@ export default function ReporterContactDirectory() {
   const [storiesTarget, setStoriesTarget] = useState<ReporterContact | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [rebuildOpen, setRebuildOpen] = useState(false);
-  const [bulkActionOpen, setBulkActionOpen] = useState(false);
+  const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+  const [bulkRestoreOpen, setBulkRestoreOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const lastAutoResetSearchRef = useRef('');
   const [latestRebuildResult, setLatestRebuildResult] = useState<RebuildReporterDirectoryResult | null>(null);
 
-  const directoryQuery = useQuery({
-    queryKey: ['reporter-contacts', refreshTick],
-    queryFn: async () => listReporterContactsAll({ limit: 500 }),
+  const fetchDirectoryStateSnapshot = async () => {
+    const [active, removed] = await Promise.all([
+      listReporterContactsAll({ limit: 500 }, { includeSubmissionFallback: true, view: 'active' }),
+      listReporterContactsAll({ limit: 500 }, { view: 'removed' }),
+    ]);
+    return {
+      active,
+      removed,
+    };
+  };
+
+  const directoryStateQuery = useQuery({
+    queryKey: ['reporter-contacts', 'directory-state', refreshTick],
+    queryFn: fetchDirectoryStateSnapshot,
     staleTime: 0,
     refetchOnMount: 'always',
     refetchOnReconnect: true,
   });
 
-  const reporters = useMemo(() => {
-    return ((directoryQuery.data?.items || directoryQuery.data?.rows || (directoryQuery.data as any)?.contacts || []) as ReporterContact[]) || [];
-  }, [directoryQuery.data]);
-  const requestTrace = directoryQuery.data?.requestTrace as ReporterRequestTrace | undefined;
+  const activeDirectorySnapshot = directoryStateQuery.data?.active;
+  const removedDirectorySnapshot = directoryStateQuery.data?.removed;
+  const directoryQuery = directoryStateQuery;
+
+  const activeRows = useMemo(() => {
+    const rows = ((activeDirectorySnapshot?.items || activeDirectorySnapshot?.rows || (activeDirectorySnapshot as any)?.contacts || []) as ReporterContact[]) || [];
+    const normalized = rows.map((row) => normalizeDirectoryRow(row, 'active')).filter(Boolean) as DirectoryRow[];
+    return normalized.filter((row) => row.directoryStatus === 'active');
+  }, [activeDirectorySnapshot]);
+
+  const removedRows = useMemo(() => {
+    const rows = ((removedDirectorySnapshot?.items || removedDirectorySnapshot?.rows || (removedDirectorySnapshot as any)?.contacts || []) as ReporterContact[]) || [];
+    const normalized = rows.map((row) => normalizeDirectoryRow(row, 'removed')).filter(Boolean) as DirectoryRow[];
+    return normalized.filter((row) => row.directoryStatus === 'removed');
+  }, [removedDirectorySnapshot]);
+
+  const activeRequestTrace = activeDirectorySnapshot?.requestTrace as ReporterRequestTrace | undefined;
+  const removedRequestTrace = removedDirectorySnapshot?.requestTrace as ReporterRequestTrace | undefined;
+  const activeReturnedStats = activeDirectorySnapshot?.stats as ReporterContactListStats | undefined;
+  const removedReturnedStats = removedDirectorySnapshot?.stats as ReporterContactListStats | undefined;
   const activeFilters = useMemo(() => {
     return {
       searchQuery: searchQuery.trim(),
@@ -84,8 +118,109 @@ export default function ReporterContactDirectory() {
       missingData: missingDataFilter,
       hasNotesOnly,
       tab: directoryTab,
+      view: directoryView,
     };
-  }, [activityFilter, areaTypeFilter, beatFilter, cityFilter, countryFilter, directoryTab, districtFilter, hasNotesOnly, missingDataFilter, searchQuery, stateFilter, statusFilter, typeFilter, verificationFilter]);
+  }, [activityFilter, areaTypeFilter, beatFilter, cityFilter, countryFilter, directoryTab, directoryView, districtFilter, hasNotesOnly, missingDataFilter, searchQuery, stateFilter, statusFilter, typeFilter, verificationFilter]);
+
+  const globalRows = useMemo(() => {
+    const merged = new Map<string, DirectoryRow>();
+    [...removedRows, ...activeRows].forEach((row) => {
+      const key = row.contactId || row.id;
+      if (!key) return;
+      const existing = merged.get(key);
+      if (!existing || row.directoryStatus === 'active') {
+        merged.set(key, row);
+      }
+    });
+    return Array.from(merged.values());
+  }, [activeRows, removedRows]);
+
+  const globalSummary = useMemo(() => {
+    return {
+      ...buildSummary(globalRows),
+      totalReporters: activeRows.length + removedRows.length,
+    };
+  }, [activeRows.length, globalRows, removedRows.length]);
+
+  const pageState = useMemo(() => {
+    const currentRows = directoryView === 'removed' ? removedRows : activeRows;
+    const query = searchQuery.trim().toLowerCase();
+
+    const filteredRows = currentRows.filter((row) => {
+      const normalizedStatus = normalizeStatus(row.status);
+      const normalizedVerification = normalizeVerification(row.verificationLevel);
+      const normalizedType = String(row.reporterType || '').trim().toLowerCase() || 'unknown';
+      const normalizedActivity = normalizeActivity(row);
+
+      if (directoryView === 'active') {
+        if (row.directoryStatus === 'removed' || normalizedStatus === 'archived') return false;
+        if (statusFilter !== 'all' && normalizedStatus !== statusFilter) return false;
+      } else if (row.directoryStatus !== 'removed' && normalizedStatus !== 'archived') {
+        return false;
+      }
+      if (typeFilter !== 'all' && normalizedType !== typeFilter) return false;
+      if (verificationFilter !== 'all' && normalizedVerification !== verificationFilter) return false;
+      if (activityFilter !== 'all' && normalizedActivity !== activityFilter) return false;
+      if (countryFilter !== ALL_OPTION && !compareText(row.country, countryFilter)) return false;
+      if (stateFilter !== ALL_OPTION && !compareText(row.state, stateFilter)) return false;
+      if (cityFilter !== ALL_OPTION && !compareText(row.city, cityFilter)) return false;
+      if (districtFilter !== ALL_OPTION && !compareText((row as any).district, districtFilter)) return false;
+      if (beatFilter !== ALL_OPTION && !hasBeat(row, beatFilter)) return false;
+      if (areaTypeFilter !== 'all' && String((row as any).areaType || '').trim().toLowerCase() !== areaTypeFilter) return false;
+      if (hasNotesOnly && !hasValue(row.notes)) return false;
+      if (missingDataFilter === 'unresolved_identity' && !missingIdentity(row)) return false;
+      if (missingDataFilter === 'missing_email' && hasValue(row.email)) return false;
+      if (missingDataFilter === 'missing_phone' && hasValue(row.phone)) return false;
+      if (missingDataFilter === 'missing_location' && hasLocation(row)) return false;
+      if (missingDataFilter === 'no_stories' && Number(row.totalStories || 0) > 0) return false;
+      if (missingDataFilter === 'inactive_30' && daysSince(row.lastSubmissionAt || row.lastStoryAt) < 30) return false;
+      if (missingDataFilter === 'inactive_60' && daysSince(row.lastSubmissionAt || row.lastStoryAt) < 60) return false;
+      if (missingDataFilter === 'inactive_90' && daysSince(row.lastSubmissionAt || row.lastStoryAt) < 90) return false;
+      if (query) {
+        const haystack = [
+          row.name,
+          row.email,
+          row.phone,
+          row.whatsapp,
+          row.city,
+          (row as any).district,
+          row.state,
+          row.country,
+          row.reporterKey,
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    });
+
+    const sortedRows = [...filteredRows].sort((left, right) => {
+      const rightTime = storyTimestamp(right);
+      const leftTime = storyTimestamp(left);
+      if (rightTime !== leftTime) return rightTime - leftTime;
+      return String(left.name || left.email || '').localeCompare(String(right.name || right.email || ''));
+    });
+
+    return {
+      activeCount: activeRows.length,
+      removedCount: removedRows.length,
+      globalSummary,
+      currentRows,
+      filteredRows,
+      sortedRows,
+      requestTrace: directoryView === 'removed' ? removedRequestTrace : activeRequestTrace,
+      returnedStats: directoryView === 'removed' ? removedReturnedStats : activeReturnedStats,
+    };
+  }, [activeRequestTrace, activeReturnedStats, activeRows, activityFilter, areaTypeFilter, beatFilter, cityFilter, countryFilter, directoryView, districtFilter, globalSummary, hasNotesOnly, missingDataFilter, removedRequestTrace, removedReturnedStats, removedRows, searchQuery, stateFilter, statusFilter, typeFilter, verificationFilter]);
+
+  const reporters = pageState.currentRows;
+  const sortedRows = pageState.sortedRows;
+  const summary = pageState.globalSummary;
+  const requestTrace = pageState.requestTrace;
+  const returnedStats = pageState.returnedStats;
+  const activeCount = pageState.activeCount;
+  const removedCount = pageState.removedCount;
+  const currentItemCount = reporters.length;
+  const currentCountLabel = `${sortedRows.length} ${directoryView}`;
 
   const countries = useMemo(() => optionize(uniqueValues(reporters.map((row) => row.country)), 'All countries'), [reporters]);
   const states = useMemo(() => {
@@ -193,111 +328,18 @@ export default function ReporterContactDirectory() {
     }
   }, [location.search, reporters]);
 
-  const filteredRows = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    const now = Date.now();
-    const ageDays = (value?: string | null) => {
-      const raw = String(value || '').trim();
-      if (!raw) return Infinity;
-      const timestamp = new Date(raw).getTime();
-      if (!Number.isFinite(timestamp) || timestamp <= 0) return Infinity;
-      return (now - timestamp) / (1000 * 60 * 60 * 24);
-    };
-
-    return reporters.filter((row) => {
-      const normalizedStatus = normalizeStatus(row.status);
-      const normalizedVerification = normalizeVerification(row.verificationLevel);
-      const normalizedType = String(row.reporterType || '').trim().toLowerCase() || 'unknown';
-      const normalizedActivity = normalizeActivity(row);
-
-      if (normalizedStatus === 'archived') return false;
-      if (statusFilter !== 'all' && normalizedStatus !== statusFilter) return false;
-      if (typeFilter !== 'all' && normalizedType !== typeFilter) return false;
-      if (verificationFilter !== 'all' && normalizedVerification !== verificationFilter) return false;
-      if (activityFilter !== 'all' && normalizedActivity !== activityFilter) return false;
-      if (countryFilter !== ALL_OPTION && !compareText(row.country, countryFilter)) return false;
-      if (stateFilter !== ALL_OPTION && !compareText(row.state, stateFilter)) return false;
-      if (cityFilter !== ALL_OPTION && !compareText(row.city, cityFilter)) return false;
-      if (districtFilter !== ALL_OPTION && !compareText((row as any).district, districtFilter)) return false;
-      if (beatFilter !== ALL_OPTION && !hasBeat(row, beatFilter)) return false;
-      if (areaTypeFilter !== 'all' && String((row as any).areaType || '').trim().toLowerCase() !== areaTypeFilter) return false;
-      if (hasNotesOnly && !hasValue(row.notes)) return false;
-      if (missingDataFilter === 'unresolved_identity' && !missingIdentity(row)) return false;
-      if (missingDataFilter === 'missing_email' && hasValue(row.email)) return false;
-      if (missingDataFilter === 'missing_phone' && hasValue(row.phone)) return false;
-      if (missingDataFilter === 'missing_location' && hasLocation(row)) return false;
-      if (missingDataFilter === 'no_stories' && Number(row.totalStories || 0) > 0) return false;
-      if (missingDataFilter === 'inactive_30' && ageDays(row.lastSubmissionAt || row.lastStoryAt) < 30) return false;
-      if (missingDataFilter === 'inactive_60' && ageDays(row.lastSubmissionAt || row.lastStoryAt) < 60) return false;
-      if (missingDataFilter === 'inactive_90' && ageDays(row.lastSubmissionAt || row.lastStoryAt) < 90) return false;
-      if (query) {
-        const haystack = [
-          row.name,
-          row.email,
-          row.phone,
-          row.city,
-          (row as any).district,
-          row.state,
-          row.country,
-          row.reporterKey,
-        ].map((value) => String(value || '').toLowerCase()).join(' ');
-        if (!haystack.includes(query)) return false;
-      }
-      return true;
-    });
-  }, [activityFilter, areaTypeFilter, beatFilter, cityFilter, countryFilter, districtFilter, hasNotesOnly, missingDataFilter, reporters, searchQuery, stateFilter, statusFilter, typeFilter, verificationFilter]);
-
-  const sortedRows = useMemo(() => {
-    return [...filteredRows].sort((left, right) => {
-      const rightTime = storyTimestamp(right);
-      const leftTime = storyTimestamp(left);
-      if (rightTime !== leftTime) return rightTime - leftTime;
-      return String(left.name || left.email || '').localeCompare(String(right.name || right.email || ''));
-    });
-  }, [filteredRows]);
-
-  const isDefaultVisibleFilterState = useMemo(() => {
-    return searchQuery.trim() === ''
-      && statusFilter === 'all'
-      && typeFilter === 'all'
-      && verificationFilter === 'all'
-      && activityFilter === 'all'
-      && countryFilter === ALL_OPTION
-      && stateFilter === ALL_OPTION
-      && cityFilter === ALL_OPTION
-      && districtFilter === ALL_OPTION
-      && beatFilter === ALL_OPTION
-      && areaTypeFilter === 'all'
-      && missingDataFilter === 'all'
-        && !hasNotesOnly;
-      }, [activityFilter, areaTypeFilter, beatFilter, cityFilter, countryFilter, districtFilter, hasNotesOnly, missingDataFilter, searchQuery, stateFilter, statusFilter, typeFilter, verificationFilter]);
-
-  const summary = useMemo(() => {
-    const filteredSummary = buildSummary(sortedRows);
-    const stats = directoryQuery.data?.stats as ReporterContactListStats | undefined;
-    if (!isDefaultVisibleFilterState || !stats) return filteredSummary;
-    return {
-      ...filteredSummary,
-      totalReporters: stats.totalReporters,
-      verified: stats.verified,
-      missingPhone: stats.missingPhone,
-      missingLocation: stats.missingLocation,
-      activeThisMonth: stats.activeThisMonth,
-      newThisMonth: stats.newThisMonth,
-    };
-  }, [directoryQuery.data?.stats, isDefaultVisibleFilterState, sortedRows]);
-
   const selectableRows = useMemo(() => {
-    return sortedRows.filter((row) => !!resolveReporterContactRecordId(row));
-  }, [sortedRows]);
+    if (!canManage) return [] as DirectoryRow[];
+    return sortedRows.filter((row) => !!row.contactId);
+  }, [canManage, sortedRows]);
 
   const selectedRows = useMemo(() => {
-    if (!selectedIds.size) return [] as ReporterContact[];
-    return sortedRows.filter((row) => selectedIds.has(resolveReporterContactRecordId(row)));
+    if (!selectedIds.size) return [] as DirectoryRow[];
+    return sortedRows.filter((row) => selectedIds.has(row.contactId));
   }, [selectedIds, sortedRows]);
 
   const selectedCount = selectedRows.length;
-  const allVisibleSelectableSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(resolveReporterContactRecordId(row)));
+  const allVisibleSelectableSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.contactId));
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search || '');
     const urlQuery = String(searchParams.get('q') || '').trim();
@@ -339,27 +381,52 @@ export default function ReporterContactDirectory() {
   useEffect(() => {
     setSelectedIds((current) => {
       if (!current.size) return current;
-      const visibleIds = new Set(selectableRows.map((row) => resolveReporterContactRecordId(row)));
+      const visibleIds = new Set(selectableRows.map((row) => row.contactId));
       const next = new Set(Array.from(current).filter((id) => visibleIds.has(id)));
       return next.size === current.size ? current : next;
     });
   }, [selectableRows]);
-
-  const fetchDirectorySnapshot = async () => {
-    return listReporterContactsAll({ limit: 500 });
-  };
 
   const refreshDirectory = async () => {
     await queryClient.cancelQueries({ queryKey: ['reporter-contacts'] });
     queryClient.removeQueries({ queryKey: ['reporter-contacts'] });
     const nextTick = Date.now();
     const snapshot = await queryClient.fetchQuery({
-      queryKey: ['reporter-contacts', nextTick],
-      queryFn: fetchDirectorySnapshot,
+      queryKey: ['reporter-contacts', 'directory-state', nextTick],
+      queryFn: fetchDirectoryStateSnapshot,
       staleTime: 0,
     });
     setRefreshTick(nextTick);
-    return snapshot;
+    return {
+      active: snapshot.active,
+      removed: snapshot.removed,
+      current: directoryView === 'removed' ? snapshot.removed : snapshot.active,
+    };
+  };
+
+  const buildBulkActionIds = (rows: ReporterContact[], action: 'hide' | 'restore' | 'delete') => {
+    const selectedRows = rows.map((row) => ({
+      rawRow: row,
+      normalizedRow: normalizeDirectoryRow(row),
+    }));
+    const ids = selectedRows.map(({ normalizedRow }) => String(normalizedRow?.contactId || '').trim()).filter(Boolean);
+
+    if (isLocalhostRuntime()) {
+      console.info(`[reporter-bulk-${action}]`, {
+        selectedRows,
+        ids,
+        payload: { ids },
+      });
+    }
+
+    if (ids.length === 0) {
+      throw new Error('No valid ReporterContact ids found in the selected rows');
+    }
+    if (ids.length !== rows.length) {
+      throw new Error('Some selected rows do not have a valid ReporterContact id');
+    }
+
+    return ids;
   };
 
   const rebuildMutation = useMutation({
@@ -376,8 +443,9 @@ export default function ReporterContactDirectory() {
           statusCode: result.statusCode ?? null,
           responseBody: result.responseBody ?? null,
           endpointUsed: result.endpointUsed || '',
-          postRebuildRowCount: snapshot.rows?.length ?? snapshot.items?.length ?? 0,
-          postRebuildRequestUrl: snapshot.requestTrace?.requestUrl || '',
+          postRebuildActiveCount: snapshot.active.rows?.length ?? snapshot.active.items?.length ?? 0,
+          postRebuildRemovedCount: snapshot.removed.rows?.length ?? snapshot.removed.items?.length ?? 0,
+          postRebuildRequestUrl: snapshot.current.requestTrace?.requestUrl || '',
         });
       }
     },
@@ -395,26 +463,12 @@ export default function ReporterContactDirectory() {
 
   const bulkRemoveMutation = useMutation({
     mutationFn: async (rows: ReporterContact[]) => {
-      const results = await Promise.allSettled(rows.map(async (row) => {
-        const id = resolveReporterContactRecordId(row);
-        if (!id) throw new Error(`Missing contact record id for ${row.name || row.email || 'selected contact'}`);
-        await hideReporterContact({
-          id,
-          reporterKey: row.reporterKey || null,
-          email: row.email || null,
-        });
-        return id;
-      }));
-
-      const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-      return {
-        total: rows.length,
-        successCount: results.length - failed.length,
-        failures: failed,
-      };
+      const ids = buildBulkActionIds(rows, 'hide');
+      await bulkHideReporterContacts(ids);
+      return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
     },
     onSuccess: async (result) => {
-      setBulkActionOpen(false);
+      setBulkRemoveOpen(false);
       setSelectedIds(new Set());
       await refreshDirectory();
 
@@ -436,19 +490,79 @@ export default function ReporterContactDirectory() {
     },
   });
 
+  const bulkRestoreMutation = useMutation({
+    mutationFn: async (rows: ReporterContact[]) => {
+      const ids = buildBulkActionIds(rows, 'restore');
+      await bulkRestoreReporterContacts(ids);
+      return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
+    },
+    onSuccess: async (result) => {
+      setBulkRestoreOpen(false);
+      setSelectedIds(new Set());
+      await refreshDirectory();
+
+      if (result.failures.length === 0) {
+        toast.success(result.successCount === 1 ? 'Restored 1 contact to the directory' : `Restored ${result.successCount} contacts to the directory`);
+        return;
+      }
+
+      if (result.successCount > 0) {
+        toast.error(`Restored ${result.successCount} contacts, ${result.failures.length} failed`);
+        return;
+      }
+
+      const firstFailure = result.failures[0]?.reason as any;
+      toast.error(firstFailure?.message || 'Failed to restore selected contacts');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to restore selected contacts');
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (rows: ReporterContact[]) => {
+      const ids = buildBulkActionIds(rows, 'delete');
+      await bulkDeleteReporterContacts({ ids });
+      return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
+    },
+    onSuccess: async (result) => {
+      setBulkDeleteOpen(false);
+      setSelectedIds(new Set());
+      await refreshDirectory();
+
+      if (result.failures.length === 0) {
+        toast.success(result.successCount === 1 ? 'Permanently deleted 1 contact' : `Permanently deleted ${result.successCount} contacts`);
+        return;
+      }
+
+      if (result.successCount > 0) {
+        toast.error(`Deleted ${result.successCount} contacts, ${result.failures.length} failed`);
+        return;
+      }
+
+      const firstFailure = result.failures[0]?.reason as any;
+      toast.error(firstFailure?.message || 'Failed to permanently delete selected contacts');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Failed to permanently delete selected contacts');
+    },
+  });
+
   useEffect(() => {
     if (!isLocalhostRuntime() || !requestTrace) return;
-    console.info('[ReporterContactDirectory] diagnostics', {
+    console.info('[reporter-directory-sync]', {
+      view: directoryView,
+      activeCount,
+      removedCount,
+      stats: summary,
+      itemCount: currentItemCount,
+      visibleCount: sortedRows.length,
       requestUrl: requestTrace.requestUrl || '',
       queryParams: requestTrace.queryParams || {},
-      limit: requestTrace.limit,
-      page: requestTrace.pageRequests?.[0]?.page ?? 1,
-      backendRowCount: requestTrace.responseRowCount,
-      renderedRowCount: sortedRows.length,
-      parsedStats: directoryQuery.data?.stats ?? null,
+      viewStats: returnedStats ?? null,
       activeFilters,
     });
-  }, [activeFilters, directoryQuery.data?.stats, requestTrace, sortedRows.length]);
+  }, [activeCount, activeFilters, currentItemCount, directoryView, removedCount, requestTrace, returnedStats, sortedRows.length, summary]);
 
   useEffect(() => {
     if (!isLocalhostRuntime() || !latestRebuildResult) return;
@@ -485,12 +599,21 @@ export default function ReporterContactDirectory() {
   }
 
   function toggleSelect(row: ReporterContact) {
-    const id = resolveReporterContactRecordId(row);
+    const normalizedRow = normalizeDirectoryRow(row);
+    const id = normalizedRow?.contactId || '';
     if (!id) return;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      if (isLocalhostRuntime() && directoryView === 'active') {
+        console.info('[reporter-active-selection]', {
+          rawRow: row,
+          normalizedRow,
+          contactId: id,
+          selectedIds: Array.from(next),
+        });
+      }
       return next;
     });
   }
@@ -499,16 +622,24 @@ export default function ReporterContactDirectory() {
     setSelectedIds((current) => {
       if (!selectableRows.length) return current;
       if (allVisibleSelectableSelected) return new Set();
-      return new Set(selectableRows.map((row) => resolveReporterContactRecordId(row)));
+      const next = new Set(selectableRows.map((row) => row.contactId));
+      if (isLocalhostRuntime() && directoryView === 'active') {
+        console.info('[reporter-active-selection]', {
+          rawRow: null,
+          normalizedRow: selectableRows,
+          contactId: null,
+          selectedIds: Array.from(next),
+        });
+      }
+      return next;
     });
   }
 
   function exportCsv() {
-    const headers = ['Name', 'Email', 'Phone', 'City', 'District', 'State', 'Type', 'Verification', 'Stories', 'Approved', 'Pending', 'Last Story'];
+    const headers = ['Name', 'Email', 'City', 'District', 'State', 'Type', 'Verification', 'Stories', 'Approved', 'Pending', 'Last Submission'];
     const rows = sortedRows.map((row) => [
       row.name || '',
       row.email || '',
-      row.phone || '',
       row.city || '',
       String((row as any).district || ''),
       row.state || '',
@@ -550,20 +681,57 @@ export default function ReporterContactDirectory() {
       />
 
       <ConfirmModal
-        open={bulkActionOpen}
+        open={bulkRemoveOpen}
         title={selectedCount === 1 ? 'Remove 1 contact from Directory?' : `Remove ${selectedCount} contacts from Directory?`}
         description={selectedCount <= 0
           ? 'Select one or more contacts to continue.'
-          : 'This hides the selected contacts from the visible directory list. Their records are not permanently deleted and can still be restored from the Profile drawer.'}
+          : 'This will remove the selected contacts from the visible Reporter Contact Directory. It will not permanently delete them.'}
         confirmLabel={selectedCount === 1 ? 'Remove contact' : `Remove ${selectedCount} contacts`}
         confirmDisabled={selectedCount <= 0 || bulkRemoveMutation.isPending}
         confirmBusyLabel={selectedCount === 1 ? 'Removing contact...' : 'Removing contacts...'}
         onCancel={() => {
           if (bulkRemoveMutation.isPending) return;
-          setBulkActionOpen(false);
+          setBulkRemoveOpen(false);
         }}
         onConfirm={async () => {
           await bulkRemoveMutation.mutateAsync(selectedRows);
+        }}
+      />
+
+      <ConfirmModal
+        open={bulkRestoreOpen}
+        title={selectedCount === 1 ? 'Restore 1 contact?' : `Restore ${selectedCount} contacts?`}
+        description={selectedCount <= 0
+          ? 'Select one or more removed contacts to continue.'
+          : 'This will restore the selected contacts back into the visible Reporter Contact Directory.'}
+        confirmLabel={selectedCount === 1 ? 'Restore contact' : `Restore ${selectedCount} contacts`}
+        confirmDisabled={selectedCount <= 0 || bulkRestoreMutation.isPending}
+        confirmBusyLabel={selectedCount === 1 ? 'Restoring contact...' : 'Restoring contacts...'}
+        onCancel={() => {
+          if (bulkRestoreMutation.isPending) return;
+          setBulkRestoreOpen(false);
+        }}
+        onConfirm={async () => {
+          await bulkRestoreMutation.mutateAsync(selectedRows);
+        }}
+      />
+
+      <ConfirmModal
+        open={bulkDeleteOpen}
+        title={selectedCount === 1 ? 'Delete 1 removed contact permanently?' : `Delete ${selectedCount} removed contacts permanently?`}
+        description={selectedCount <= 0
+          ? 'Select one or more removed contacts to continue.'
+          : 'This will permanently delete the selected removed contacts. This action cannot be undone.'}
+        confirmLabel={selectedCount === 1 ? 'Delete Permanently' : `Delete ${selectedCount} Permanently`}
+        confirmVariant="danger"
+        confirmDisabled={selectedCount <= 0 || bulkDeleteMutation.isPending}
+        confirmBusyLabel={selectedCount === 1 ? 'Deleting contact...' : 'Deleting contacts...'}
+        onCancel={() => {
+          if (bulkDeleteMutation.isPending) return;
+          setBulkDeleteOpen(false);
+        }}
+        onConfirm={async () => {
+          await bulkDeleteMutation.mutateAsync(selectedRows);
         }}
       />
 
@@ -578,17 +746,46 @@ export default function ReporterContactDirectory() {
         </div>
       ) : null}
 
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-        <SummaryCard label="Total Reporters" value={summary.totalReporters} />
-        <SummaryCard label="Verified" value={summary.verified} />
-        <SummaryCard label="Missing Phone" value={summary.missingPhone} />
-        <SummaryCard label="Missing Location" value={summary.missingLocation} />
-        <SummaryCard label="Active This Month" value={summary.activeThisMonth} />
-        <SummaryCard label="New This Month" value={summary.newThisMonth} />
-        <SummaryCard label="Last Submission" value={summary.lastSubmissionLabel} isText />
+      <div className="mt-5 space-y-2">
+        <p className="text-sm text-slate-600">Summary cards reflect preserved directory totals across both Active and Removed contacts. Only Delete Permanently removes data.</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          <SummaryCard label="Total Reporters" value={summary.totalReporters} />
+          <SummaryCard label="Verified" value={summary.verified} />
+          <SummaryCard label="Missing Phone" value={summary.missingPhone} />
+          <SummaryCard label="Missing Location" value={summary.missingLocation} />
+          <SummaryCard label="Active This Month" value={summary.activeThisMonth} />
+          <SummaryCard label="New This Month" value={summary.newThisMonth} />
+          <SummaryCard label="Last Submission" value={summary.lastSubmissionLabel} isText />
+        </div>
       </div>
 
       <section className="mt-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setDirectoryView('active')}
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                directoryView === 'active' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              ].join(' ')}
+            >
+              {activeCount} active
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirectoryView('removed')}
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                directoryView === 'removed' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              ].join(' ')}
+            >
+              {removedCount} removed
+            </button>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">{currentCountLabel}</div>
+        </div>
+
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_repeat(3,minmax(160px,0.8fr))]">
@@ -601,10 +798,21 @@ export default function ReporterContactDirectory() {
                 />
               </FilterField>
               <FilterField label="Status">
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as any)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  <option value="all">All</option>
-                  <option value="active">Active</option>
-                  <option value="blocked">Blocked</option>
+                <select
+                  value={directoryView === 'active' ? statusFilter : 'archived'}
+                  onChange={(event) => setStatusFilter(event.target.value as any)}
+                  disabled={directoryView === 'removed'}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+                >
+                  {directoryView === 'active' ? (
+                    <>
+                      <option value="all">All</option>
+                      <option value="active">Active</option>
+                      <option value="blocked">Blocked</option>
+                    </>
+                  ) : (
+                    <option value="archived">Removed only</option>
+                  )}
                 </select>
               </FilterField>
               <FilterField label="Verification">
@@ -629,7 +837,7 @@ export default function ReporterContactDirectory() {
 
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={clearFilters} className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Clear filters</button>
-              <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{sortedRows.length} shown · {reporters.length} total</span>
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{currentCountLabel}</span>
             </div>
           </div>
 
@@ -716,16 +924,41 @@ export default function ReporterContactDirectory() {
                 <RefreshCw className={`h-4 w-4 ${rebuildMutation.isPending ? 'animate-spin' : ''}`} />
                 {rebuildMutation.isPending ? 'Rebuilding...' : 'Rebuild directory'}
               </button>
-              <button
-                type="button"
-                disabled={!canManage || selectedCount <= 0 || bulkRemoveMutation.isPending}
-                onClick={() => setBulkActionOpen(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {bulkRemoveMutation.isPending ? 'Removing...' : `Remove from Directory (${selectedCount})`}
-              </button>
+              {directoryView === 'active' ? (
+                <button
+                  type="button"
+                  disabled={!canManage || selectedCount <= 0 || bulkRemoveMutation.isPending}
+                  onClick={() => setBulkRemoveOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {bulkRemoveMutation.isPending ? 'Removing...' : `Remove from Directory (${selectedCount})`}
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={!canManage || selectedCount <= 0 || bulkRestoreMutation.isPending}
+                    onClick={() => setBulkRestoreOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkRestoreMutation.isPending ? 'Restoring...' : `Restore (${selectedCount})`}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canManage || selectedCount <= 0 || bulkDeleteMutation.isPending}
+                    onClick={() => setBulkDeleteOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bulkDeleteMutation.isPending ? 'Deleting...' : `Delete Permanently (${selectedCount})`}
+                  </button>
+                </>
+              )}
             </div>
-            <div className="text-sm text-slate-600">Bulk Remove hides selected contacts from the active directory.</div>
+            <div className="text-sm text-slate-600">
+              {directoryView === 'active'
+                ? 'Select multiple contacts for bulk cleanup from the active directory.'
+                : 'Removed contacts can be restored or permanently deleted from here.'}
+            </div>
           </div>
         </div>
 
@@ -733,6 +966,7 @@ export default function ReporterContactDirectory() {
           isLoading={directoryQuery.isLoading}
           isError={directoryQuery.isError}
           error={directoryQuery.error as any}
+          directoryView={directoryView}
           items={sortedRows}
           canManage={canManage}
           selectedIds={selectedIds}
@@ -742,22 +976,12 @@ export default function ReporterContactDirectory() {
           onToggleSelectAll={toggleSelectAll}
           onSelect={(row) => openProfile(row, 'overview')}
           onOpenStories={(row) => {
-            const contactId = String((row as any)?.contactId || '').trim();
+            const contactId = row.contactId;
             if (contactId) {
               setStoriesTarget(row);
               return;
             }
-
-            const reporterKey = String(row.reporterKey || row.id || '').trim();
-            if (!reporterKey) {
-              toast.error('Missing reporter key for stories');
-              return;
-            }
-
-            const params = new URLSearchParams();
-            params.set('reporterKey', reporterKey);
-            if (row.name || row.email) params.set('name', String(row.name || row.email || ''));
-            navigate(`/community/reporter-stories?${params.toString()}`, { state: { reporterKey, reporterName: row.name || row.email || '' } });
+            toast.error('Missing contact id for stories');
           }}
         />
       </section>
@@ -811,6 +1035,7 @@ function DirectoryTable({
   isLoading,
   isError,
   error,
+  directoryView,
   items,
   canManage,
   selectedIds,
@@ -824,14 +1049,15 @@ function DirectoryTable({
   isLoading: boolean;
   isError: boolean;
   error: any;
-  items: ReporterContact[];
+  directoryView: DirectoryView;
+  items: DirectoryRow[];
   canManage: boolean;
   selectedIds: Set<string>;
   allVisibleSelectableSelected: boolean;
-  onToggleSelect: (row: ReporterContact) => void;
+  onToggleSelect: (row: DirectoryRow) => void;
   onToggleSelectAll: () => void;
-  onSelect: (row: ReporterContact) => void;
-  onOpenStories: (row: ReporterContact) => void;
+  onSelect: (row: DirectoryRow) => void;
+  onOpenStories: (row: DirectoryRow) => void;
   onGoToLogin: () => void;
 }) {
   if (isLoading) {
@@ -840,7 +1066,7 @@ function DirectoryTable({
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
-              {Array.from({ length: 13 }).map((_, index) => (
+              {Array.from({ length: directoryView === 'active' ? 13 : 12 }).map((_, index) => (
                 <th key={index} className="px-4 py-3 text-left text-xs font-medium text-slate-500">&nbsp;</th>
               ))}
             </tr>
@@ -848,7 +1074,7 @@ function DirectoryTable({
           <tbody className="divide-y divide-slate-200 bg-white">
             {Array.from({ length: 6 }).map((_, rowIndex) => (
               <tr key={rowIndex}>
-                {Array.from({ length: 13 }).map((__, cellIndex) => (
+                {Array.from({ length: directoryView === 'active' ? 13 : 12 }).map((__, cellIndex) => (
                   <td key={cellIndex} className="px-4 py-2.5">
                     <div className="h-4 w-full max-w-[140px] animate-pulse rounded bg-slate-100" />
                   </td>
@@ -884,19 +1110,25 @@ function DirectoryTable({
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">Reporter table</div>
-          <div className="text-xs text-slate-500">Select multiple contacts for bulk cleanup, or open Profile for individual directory actions.</div>
+          <div className="text-xs text-slate-500">
+            {directoryView === 'active'
+              ? 'Select multiple contacts for bulk cleanup from the active directory.'
+              : 'Removed contacts can be restored or permanently deleted from here.'}
+          </div>
         </div>
-        <div className="text-xs text-slate-500">Use Profile for details and View stories for reporting history.</div>
+        <div className="text-xs text-slate-500">
+          {directoryView === 'active' ? 'Use Profile for details and View stories for reporting history.' : 'Use Profile to inspect details before restoring or permanently deleting records.'}
+        </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1120px] w-full divide-y divide-slate-200 whitespace-nowrap">
+        <table className={`w-full divide-y divide-slate-200 whitespace-nowrap ${directoryView === 'active' ? 'min-w-[1120px]' : 'min-w-[1040px]'}`}>
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">
                 <input
                   type="checkbox"
                   checked={allVisibleSelectableSelected}
-                  disabled={!canManage || !items.some((row) => !!resolveReporterContactRecordId(row))}
+                  disabled={!canManage || !items.some((row) => !!row.contactId)}
                   onChange={onToggleSelectAll}
                   aria-label="Select all visible contacts"
                 />
@@ -911,7 +1143,8 @@ function DirectoryTable({
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Stories</th>
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Approved</th>
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Pending</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Last Story</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Last Submission</th>
+              {directoryView === 'removed' ? <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Directory Status</th> : null}
               <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-600">Actions</th>
             </tr>
           </thead>
@@ -921,15 +1154,15 @@ function DirectoryTable({
                 <td className="px-4 py-2.5 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={selectedIds.has(resolveReporterContactRecordId(row))}
-                    disabled={!canManage || !resolveReporterContactRecordId(row)}
+                    checked={selectedIds.has(row.contactId)}
+                    disabled={!canManage || !row.contactId}
                     onChange={() => onToggleSelect(row)}
                     aria-label={`Select ${row.name || row.email || 'reporter'}`}
                   />
                 </td>
                 <td className="px-4 py-2.5 text-sm font-medium text-slate-900">{row.name || row.email || 'Unknown reporter'}</td>
                 <td className="max-w-[240px] px-4 py-2.5 text-sm text-slate-700">
-                  <div className="truncate" title={row.email || 'Missing email'}>{row.email || 'Missing email'}</div>
+                  <div className="truncate" title={row.email || 'Not provided'}>{row.email || 'Not provided'}</div>
                 </td>
                 <td className="px-4 py-2.5 text-sm text-slate-700">{row.city || '—'}</td>
                 <td className="px-4 py-2.5 text-sm text-slate-700">{String((row as any).district || '').trim() || '—'}</td>
@@ -940,16 +1173,19 @@ function DirectoryTable({
                 <td className="px-4 py-2.5 text-sm text-slate-900">{row.approvedStories || 0}</td>
                 <td className="px-4 py-2.5 text-sm text-slate-900">{row.pendingStories || 0}</td>
                 <td className="px-4 py-2.5 text-sm text-slate-700">{formatDateTime(row.lastSubmissionAt || row.lastStoryAt)}</td>
+                {directoryView === 'removed' ? (
+                  <td className="px-4 py-2.5 text-sm"><InlineBadge tone="slate">Removed</InlineBadge></td>
+                ) : null}
                 <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
                   <div className="inline-flex items-center gap-2">
                     <button type="button" onClick={() => onSelect(row)} className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50">Profile</button>
-                    <button type="button" onClick={() => onOpenStories(row)} className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50">View stories</button>
+                    {directoryView === 'active' ? <button type="button" onClick={() => onOpenStories(row)} className="rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50">View stories</button> : null}
                   </div>
                 </td>
               </tr>
             )) : (
               <tr>
-                <td colSpan={13} className="px-6 py-12 text-center text-sm text-slate-500">No reporters match the current filters.</td>
+                <td colSpan={directoryView === 'active' ? 13 : 13} className="px-6 py-12 text-center text-sm text-slate-500">No reporters match the current filters.</td>
               </tr>
             )}
           </tbody>
@@ -1063,12 +1299,25 @@ function buildSummary(rows: ReporterContact[]) {
   };
 }
 
+function normalizeDirectoryRow(row: ReporterContact | null | undefined, fallbackDirectoryStatus: DirectoryView = 'active'): DirectoryRow | null {
+  if (!row) return null;
+  const contactId = resolveReporterContactRecordId(row);
+  if (!contactId) return null;
+  const rawStatus = String((row as any).directoryStatus || '').trim().toLowerCase();
+  const directoryStatus: DirectoryView = rawStatus === 'removed' ? 'removed' : fallbackDirectoryStatus;
+  return {
+    ...row,
+    contactId,
+    directoryStatus,
+  };
+}
+
 function resolveReporterContactRecordId(row: ReporterContact | null | undefined) {
   if (!row) return '';
   const raw = ((row as any)?.debugRawContact && typeof (row as any).debugRawContact === 'object') ? (row as any).debugRawContact : null;
-
-  const directContactId = firstNonEmptyString(
-    (row as any)?.contactId,
+  if (String(row.identitySource || '').trim().toLowerCase() === 'submission-derived') return '';
+  return firstNonEmptyString(
+    row.contactId,
     (row as any)?.contactRecordId,
     raw?.contactId,
     raw?.contactID,
@@ -1076,27 +1325,8 @@ function resolveReporterContactRecordId(row: ReporterContact | null | undefined)
     raw?.contactRecordID,
     raw?.contact?._id,
     raw?.contact?.id,
+    row.id,
   );
-
-  const hasContactShape = Boolean(
-    directContactId
-    || raw?.contact
-    || raw?.contactEmail
-    || raw?.contactPhone
-    || raw?.contactName
-  );
-  const hasContributorShape = Boolean(
-    row.contributorId
-    || raw?.contributorId
-    || raw?.contributorID
-    || raw?.contributor?.id
-    || raw?.contributor?._id
-  );
-  const legacyContactId = hasContactShape && !hasContributorShape
-    ? firstNonEmptyString((row as any)?._id, raw?._id)
-    : '';
-
-  return firstNonEmptyString(directContactId, legacyContactId);
 }
 
 function firstNonEmptyString(...values: unknown[]) {

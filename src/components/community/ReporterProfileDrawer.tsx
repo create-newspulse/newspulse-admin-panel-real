@@ -3,11 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminApi from '@/api/adminApi';
-import ConfirmModal from '@/components/ui/ConfirmModal';
+import { adminUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { updateReporterStatus } from '@/lib/api/communityAdmin';
 import {
-  deleteReporterContact,
   listReporterStoriesForContact,
   updateReporterContactNotes,
   type ReporterContact,
@@ -71,6 +70,7 @@ type NormalizedReporterProfile = {
   contactId: string;
   contributorId: string;
   rawProfile: unknown;
+  fullName: string;
   displayName: string;
   contact: NormalizedReporterContact;
   email: string;
@@ -142,8 +142,6 @@ export default function ReporterProfileDrawer({
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
   const [notesDraft, setNotesDraft] = useState('');
-  const [directoryStatusOverride, setDirectoryStatusOverride] = useState<ReporterContact['status'] | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const role = String(user?.role || '').trim().toLowerCase();
   const canManage = role === 'founder' || role === 'admin';
@@ -157,14 +155,13 @@ export default function ReporterProfileDrawer({
 
   const resolvedReporter = useMemo(() => {
     if (!reporter) return null;
-    const nextReporter = directoryStatusOverride ? { ...reporter, status: directoryStatusOverride } : reporter;
     const detailRaw = detailQuery.data;
-    if (!detailRaw) return nextReporter;
+    if (!detailRaw) return reporter;
     return {
-      ...nextReporter,
+      ...reporter,
       debugRawContact: detailRaw,
     } satisfies ReporterContact;
-  }, [detailQuery.data, directoryStatusOverride, reporter]);
+  }, [detailQuery.data, reporter]);
 
   const profile = useMemo(() => (resolvedReporter ? normalizeReporterProfile(resolvedReporter) : null), [resolvedReporter]);
   const contactId = profile?.contactId || '';
@@ -206,8 +203,6 @@ export default function ReporterProfileDrawer({
   }, [profile?.reporterId, profile?.notes]);
 
   useEffect(() => {
-    setDirectoryStatusOverride(null);
-    setDeleteConfirmOpen(false);
   }, [reporter?.id, reporter?.contactId, reporter?.reporterKey]);
 
   useEffect(() => {
@@ -315,43 +310,10 @@ export default function ReporterProfileDrawer({
     },
   });
 
-  const restoreMutation = useMutation({
-    mutationFn: async () => {
-      if (!reporter?.id) throw new Error('Unable to restore contact: missing reporter id');
-      await updateReporterStatus(reporter.id, { status: 'active' });
-      return 'active' as const;
-    },
-    onSuccess: async (nextStatus) => {
-      setDirectoryStatusOverride(nextStatus);
-      toast.success('Reporter restored to Directory');
-      await invalidateReporterQueries(queryClient, onRefresh);
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Failed to restore reporter');
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async () => {
-      if (!reporter) throw new Error('Missing reporter record');
-      const contactRecordId = resolveDrawerContactRecordId(reporter);
-      if (!contactRecordId) throw new Error('Unable to delete contact: missing contact record id');
-      await deleteReporterContact({ id: contactRecordId, reporterKey: reporter.reporterKey, email: reporter.email });
-    },
-    onSuccess: async () => {
-      toast.success('Reporter permanently deleted');
-      setDeleteConfirmOpen(false);
-      await invalidateReporterQueries(queryClient, onRefresh);
-      onClose();
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Failed to permanently delete reporter');
-    },
-  });
-
   if (!open || !reporter || !profile) return null;
 
-  const isRemovedFromDirectory = normalizeDirectoryStatus(profile.status) === 'archived';
+  const isRemovedFromDirectory = String(reporter?.directoryStatus || '').trim().toLowerCase() === 'removed'
+    || normalizeDirectoryStatus(profile.status) === 'archived';
   const contactRecordId = resolveDrawerContactRecordId(reporter);
 
   const canShowCoverage = [
@@ -371,22 +333,6 @@ export default function ReporterProfileDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35">
-      <ConfirmModal
-        open={deleteConfirmOpen}
-        title="Delete Permanently?"
-        description={`${profile.displayName} will be permanently deleted. This cannot be undone.`}
-        confirmLabel="Delete Permanently"
-        confirmVariant="danger"
-        confirmDisabled={deleteMutation.isPending}
-        confirmBusyLabel={deleteMutation.isPending ? 'Deleting...' : undefined}
-        onCancel={() => {
-          if (deleteMutation.isPending) return;
-          setDeleteConfirmOpen(false);
-        }}
-        onConfirm={async () => {
-          await deleteMutation.mutateAsync();
-        }}
-      />
       <button type="button" aria-label="Close profile drawer" onClick={onClose} className="flex-1 cursor-default" />
       <aside className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
@@ -477,25 +423,27 @@ export default function ReporterProfileDrawer({
 
           {activeTab === 'contact' ? (
             <div className="space-y-4">
-              <Panel title="Direct contact" subtitle="Founder/admin private contact details for immediate outreach.">
+              <Panel title="Reporter contact profile" subtitle="Founder/admin private contact details resolved from directory records and live portal submissions.">
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <DataRow label="Email" value={profile.contact.email} />
-                  <DataRow label="Phone" value={profile.contact.phone || 'Not provided'} />
-                  <DataRow label="WhatsApp" value={profile.contact.whatsapp || 'Not provided'} />
-                  <DataRow label="Portal auth" value={profile.contact.portalAuthLabel} />
-                  <DataRow label="Auth provider" value={profile.contact.authProvider} />
-                  <DataRow label="Last portal login" value={formatDateTime(profile.contact.lastLoginAt)} />
+                  <DataRow label="Full name" value={profile.fullName} missingValue="Not provided" />
+                  <DataRow label="Email" value={profile.contact.email} missingValue="Not provided" />
+                  <DataRow label="Phone" value={profile.contact.phone} missingValue="Not provided" />
+                  <DataRow label="WhatsApp" value={profile.contact.whatsapp} missingValue="Not provided" />
+                  <DataRow label="City" value={profile.city} missingValue="Not provided" />
+                  <DataRow label="District" value={profile.district} missingValue="Not provided" />
+                  <DataRow label="State" value={profile.state} missingValue="Not provided" />
+                  <DataRow label="Country" value={profile.country} missingValue="Not provided" />
+                  <DataRow label="Portal auth" value={buildPortalAuthDisplay(profile)} missingValue="Not provided" />
+                  <DataRow label="Last portal login" value={formatDateTime(profile.contact.lastLoginAt, 'Not provided')} missingValue="Not provided" />
                 </dl>
               </Panel>
 
-              <Panel title="Location details" subtitle="Location fields used for beat routing and local follow-up.">
+              <Panel title="Additional routing details" subtitle="Operational location fields that help routing and assignment decisions.">
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <DataRow label="Area" value={profile.area} />
-                  <DataRow label="City" value={profile.city} />
-                  <DataRow label="District" value={profile.district} />
-                  <DataRow label="State" value={profile.state} />
-                  <DataRow label="Country" value={profile.country} />
-                  <DataRow label="Area type" value={profile.areaType} />
+                  <DataRow label="Area" value={profile.area} missingValue="Not provided" />
+                  <DataRow label="Area type" value={profile.areaType} missingValue="Not provided" />
+                  <DataRow label="Coverage scope" value={profile.coverageScope} missingValue="Not provided" />
+                  <DataRow label="Auth provider" value={profile.contact.authProvider} missingValue="Not provided" />
                 </dl>
               </Panel>
             </div>
@@ -682,29 +630,21 @@ export default function ReporterProfileDrawer({
 
           {canManage ? (
             <div className="mt-5">
-              <Panel title="Record controls" subtitle="Restore this contact to the Reporter Contact Directory or permanently delete the record.">
+              <Panel title="Directory status" subtitle="Current visibility of this contact inside the Reporter Contact Directory.">
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    This contact can be restored to the Reporter Contact Directory or permanently deleted.
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={restoreMutation.isPending || deleteMutation.isPending || !reporter.id || !isRemovedFromDirectory}
-                      onClick={() => restoreMutation.mutate()}
-                      className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      {restoreMutation.isPending ? 'Restoring...' : 'Restore'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={restoreMutation.isPending || deleteMutation.isPending || !contactRecordId}
-                      onClick={() => setDeleteConfirmOpen(true)}
-                      className="rounded-md border border-rose-300 bg-rose-50 px-4 py-2 text-sm text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                    >
-                      Delete Permanently
-                    </button>
-                  </div>
+                  <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <DataRow label="Directory Status" value={isRemovedFromDirectory ? 'Removed' : 'Active'} />
+                    <DataRow label="Contact record id" value={contactRecordId || '—'} />
+                  </dl>
+                  {isRemovedFromDirectory ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      This contact is currently removed from the visible Reporter Contact Directory.
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                      This contact is currently visible in the active Reporter Contact Directory.
+                    </div>
+                  )}
                 </div>
               </Panel>
             </div>
@@ -736,11 +676,11 @@ function Panel({ title, subtitle, children }: { title: string; subtitle?: string
   );
 }
 
-function DataRow({ label, value }: { label: string; value: string }) {
+function DataRow({ label, value, missingValue = '—' }: { label: string; value: string; missingValue?: string }) {
   return (
     <div>
       <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="mt-1 text-sm text-slate-900">{value || '—'}</dd>
+      <dd className="mt-1 text-sm text-slate-900">{value || missingValue}</dd>
     </div>
   );
 }
@@ -800,39 +740,37 @@ function normalizeReporterProfile(reporter: ReporterContact): NormalizedReporter
   const beats = uniqueStrings(reporter.beatsProfessional, raw.beatsProfessional, raw.beats, raw.coverage?.beats);
   const phone = resolvePrivateAdminPhone(reporter, raw);
   const whatsapp = resolvePrivateAdminWhatsapp(buildPrivateAdminWhatsappCandidates(reporter, raw));
-  const city = pickString(reporter.city, raw.city, raw.cityTownVillage, raw.location?.city);
-  const district = pickString(reporter.district, raw.district, raw.districtName, raw.location?.district);
-  const state = pickString(reporter.state, raw.state, raw.stateName, raw.location?.state);
-  const country = pickString(reporter.country, raw.country, raw.countryName, raw.location?.country);
-  const area = pickString(reporter.area, raw.area, raw.coverageArea, raw.location?.area, raw.locality, raw.subLocality);
-  const areaType = formatEnumLabel(pickString(reporter.areaType, raw.areaType, raw.location?.areaType));
-  const coverageScope = formatEnumLabel(pickString(reporter.coverageScope, raw.coverageScope, raw.coverage?.scope, raw.scope));
+  const city = pickString(reporter.city, raw.city, raw.cityTownVillage, raw.cityName, raw.contact?.city, raw.profile?.city, raw.identity?.city, raw.reporter?.city, raw.location?.city, raw.locationDetail?.city, raw.location?.town, raw.location?.cityTownVillage);
+  const district = pickString(reporter.district, raw.district, raw.districtName, raw.contact?.district, raw.profile?.district, raw.identity?.district, raw.reporter?.district, raw.location?.district, raw.locationDetail?.district, raw.talukaName);
+  const state = pickString(reporter.state, raw.state, raw.stateName, raw.stateCode, raw.contact?.state, raw.profile?.state, raw.identity?.state, raw.reporter?.state, raw.location?.state, raw.locationDetail?.state, raw.location?.region);
+  const country = pickString(reporter.country, raw.country, raw.countryName, raw.contact?.country, raw.profile?.country, raw.identity?.country, raw.reporter?.country, raw.location?.country, raw.locationDetail?.country, raw.location?.nation);
+  const area = pickString(reporter.area, raw.area, raw.coverageArea, raw.contact?.area, raw.profile?.area, raw.identity?.area, raw.reporter?.area, raw.location?.area, raw.location?.locality, raw.locality, raw.subLocality);
+  const areaType = formatEnumLabel(pickString(reporter.areaType, raw.areaType, raw.contact?.areaType, raw.profile?.areaType, raw.identity?.areaType, raw.reporter?.areaType, raw.location?.areaType, raw.locationDetail?.areaType));
+  const coverageScope = formatEnumLabel(pickString(reporter.coverageScope, raw.coverageScope, raw.contact?.coverageScope, raw.profile?.coverageScope, raw.identity?.coverageScope, raw.reporter?.coverageScope, raw.coverage?.scope, raw.scope));
   const specialization = pickString(reporter.assignedSpecialization, raw.assignedSpecialization, raw.specialization, raw.specialisation, raw.coverage?.specialization);
   const organization = pickString(reporter.organisationName, raw.organisationName, raw.organizationName, raw.organization, raw.publication);
   const position = pickString(reporter.positionTitle, raw.positionTitle, raw.position, raw.designation);
   const website = pickString(reporter.websiteOrPortfolio, raw.websiteOrPortfolio, raw.website, raw.websiteUrl);
   const social = formatSocialLinks((reporter.socialLinks as any) ?? raw.socialLinks ?? raw.social);
-  const displayName = pickString(reporter.name, raw.fullName, raw.name, raw.displayName, reporter.email, reporter.reporterKey) || 'Reporter profile';
-  const email = pickString(reporter.email, raw.email, raw.contactEmail, raw.contact?.email, raw.identity?.email);
-  const authStatus = pickString(reporter.authStatus, raw.authStatus, raw.portalAuthStatus, raw.auth?.status, raw.identity?.authStatus);
-  const authProvider = pickString(reporter.authProvider, raw.authProvider, raw.portalAuthProvider, raw.auth?.provider, raw.identity?.authProvider);
+  const fullName = pickString(reporter.name, raw.fullName, raw.name, raw.displayName, raw.userName, raw.contactName, raw.contact?.name, raw.profile?.name, raw.identity?.name, raw.reporter?.name, raw.reporter?.fullName, raw.user?.name);
+  const email = pickString(reporter.email, raw.email, raw.contactEmail, raw.contact?.email, raw.profile?.email, raw.identity?.email, raw.reporter?.email, raw.user?.email);
+  const displayName = fullName || pickString(email, reporter.reporterKey, reporter.id) || 'Reporter profile';
+  const authStatus = pickString(reporter.authStatus, raw.authStatus, raw.portalAuthStatus, raw.reporterAuthStatus, raw.auth?.status, raw.identity?.authStatus, raw.reporter?.authStatus);
+  const authProvider = pickString(reporter.authProvider, raw.authProvider, raw.portalAuthProvider, raw.reporterAuthProvider, raw.auth?.provider, raw.identity?.authProvider, raw.reporter?.authProvider);
   const emailVerified = typeof reporter.emailVerified === 'boolean'
     ? reporter.emailVerified
-    : typeof raw.emailVerified === 'boolean'
-      ? raw.emailVerified
-      : typeof raw.verifiedEmail === 'boolean'
-        ? raw.verifiedEmail
-        : null;
-  const portalAuthEnabled = typeof reporter.portalAuthEnabled === 'boolean'
+    : readOptionalBoolean(raw.emailVerified ?? raw.verifiedEmail ?? raw.identity?.emailVerified ?? raw.reporter?.emailVerified);
+  const explicitPortalAuthEnabled = typeof reporter.portalAuthEnabled === 'boolean'
     ? reporter.portalAuthEnabled
-    : looksEnabledAuthStatus(authStatus);
+    : readOptionalBoolean(raw.portalAuthEnabled ?? raw.auth?.enabled ?? raw.identity?.portalAuthEnabled ?? raw.identity?.authEnabled ?? raw.reporter?.portalAuthEnabled ?? raw.reporter?.authEnabled);
+  const portalAuthEnabled = explicitPortalAuthEnabled ?? looksEnabledAuthStatus(authStatus);
   const contact: NormalizedReporterContact = {
     email,
     phone,
     whatsapp,
     portalAuthLabel: buildPortalAuthLabel(authStatus, authProvider, emailVerified, portalAuthEnabled),
     authProvider,
-    lastLoginAt: pickString(reporter.lastLoginAt, raw.lastLoginAt, raw.portalLastLoginAt, raw.auth?.lastLoginAt) || null,
+    lastLoginAt: pickString(reporter.lastLoginAt, raw.lastLoginAt, raw.portalLastLoginAt, raw.reporterLastLoginAt, raw.auth?.lastLoginAt, raw.identity?.lastLoginAt, raw.reporter?.lastLoginAt) || null,
   };
   const locationSummary = buildLocationSummary([area, city, district, state, country]) || 'Missing location';
   const missingFields = buildMissingFieldItems({
@@ -857,6 +795,7 @@ function normalizeReporterProfile(reporter: ReporterContact): NormalizedReporter
     contactId: String(reporter.contactId || '').trim(),
     contributorId: String(reporter.contributorId || '').trim(),
     rawProfile: (reporter as any)?.debugRawContact ?? reporter,
+    fullName,
     displayName,
     contact,
     email,
@@ -1051,11 +990,18 @@ function buildPrivateAdminWhatsappCandidates(reporter: ReporterContact, raw: Rec
     'whatsapp',
     'whatsappNumber',
     'whatsApp',
+    'contact.whatsappNumber',
     'contact.whatsapp',
+    'contact.whatsApp',
+    'profile.whatsappNumber',
     'profile.whatsapp',
+    'profile.whatsApp',
+    'identity.whatsappNumber',
     'identity.whatsapp',
+    'identity.whatsApp',
     'reporter.whatsapp',
     'reporter.whatsappNumber',
+    'reporter.whatsApp',
   ]);
 }
 
@@ -1073,10 +1019,17 @@ const PHONE_DIRECT_PRIORITY_GROUPS = [
   ['rawPhone', 'phoneRaw', 'contact.phoneRaw', 'contact.rawPhone', 'profile.phoneRaw', 'profile.rawPhone', 'identity.phoneRaw', 'identity.rawPhone', 'reporter.phoneRaw', 'reporter.rawPhone', 'phone.raw', 'phoneFull', 'contactPhoneFull', 'contact.phoneFull', 'unmaskedPhone', 'originalPhone', 'phone.full', 'phoneE164', 'contact.phoneE164', 'profile.phoneE164', 'identity.phoneE164', 'reporter.phoneE164', 'phone.e164'],
   ['mobile', 'contact.mobile', 'profile.mobile', 'reporter.mobile', 'identity.mobile'],
   ['mobileNumber', 'contact.mobileNumber', 'reporter.mobileNumber'],
-  ['contactNumber', 'contact.phoneNumber', 'identity.phoneNumber', 'phoneNumber', 'contactPhoneNumber', 'phone.number'],
+  ['contactNumber', 'contact.contactNumber', 'profile.contactNumber', 'identity.contactNumber', 'reporter.contactNumber', 'contact.phoneNumber', 'identity.phoneNumber', 'reporter.phoneNumber', 'phoneNumber', 'contactPhoneNumber', 'phone.number'],
   ['reporterPhone', 'contactPhone'],
   ['reporterMobile'],
 ] as const;
+
+function buildPortalAuthDisplay(profile: NormalizedReporterProfile) {
+  if (hasValue(profile.authStatus) || hasValue(profile.authProvider) || typeof profile.emailVerified === 'boolean' || profile.portalAuthEnabled) {
+    return profile.contact.portalAuthLabel;
+  }
+  return '';
+}
 
 const PHONE_PREVIEW_PRIORITY_PATHS = [
   'maskedPhone',
@@ -1093,6 +1046,15 @@ const PHONE_PREVIEW_PRIORITY_PATHS = [
 function pickPreferredPhoneCandidate(candidates: string[], allowMasked: boolean) {
   if (allowMasked) return candidates[0] || '';
   return candidates.find((value) => !looksMaskedPhone(value)) || '';
+}
+
+function readOptionalBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return null;
+  if (['true', '1', 'yes', 'enabled', 'active', 'verified'].includes(raw)) return true;
+  if (['false', '0', 'no', 'disabled', 'inactive', 'unverified'].includes(raw)) return false;
+  return null;
 }
 
 
@@ -1251,51 +1213,46 @@ function looksMaskedPhone(value: string) {
 async function loadReporterContactDetail(reporter: ReporterContact | null) {
   if (!reporter) return null;
 
-  const candidateIds = Array.from(new Set([
-    String(reporter.contactId || '').trim(),
-    String(reporter.id || '').trim(),
-    String(reporter.reporterKey || '').trim(),
-    String(reporter.contributorId || '').trim(),
-  ].filter(Boolean)));
+  const id = String(reporter.id || '').trim();
+  if (!id) return null;
 
-  const candidatePaths = candidateIds.flatMap((id) => [
-    `/admin/community-reporter/contacts/${encodeURIComponent(id)}`,
-    `/community-reporter/contacts/${encodeURIComponent(id)}`,
-    `/community/reporter-contacts/${encodeURIComponent(id)}`,
-    `/admin/community/contributors/${encodeURIComponent(id)}`,
-    `/community/contributors/${encodeURIComponent(id)}`,
-    `/admin/community/reporters/${encodeURIComponent(id)}`,
-    `/community/reporters/${encodeURIComponent(id)}`,
-  ]);
-
-  let lastError: any = null;
-  for (const path of candidatePaths) {
-    try {
-      const res = await adminApi.get<any>(path);
-      const payload = unwrapReporterContactDetail(res?.data);
-      if (payload && typeof payload === 'object') return payload;
-    } catch (error: any) {
-      lastError = error;
-      const status = error?.response?.status;
-      if (status === 404 || status === 405) continue;
-      break;
+  const path = `/community-reporter/contacts/${encodeURIComponent(id)}`;
+  try {
+    const res = await adminApi.get<any>(path);
+    const payload = unwrapReporterContactDetail(res?.data);
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-contacts-ui-api]', {
+          action: 'detail',
+          url: adminUrl(path),
+          method: 'GET',
+          id,
+          status: res?.status ?? null,
+          count: payload ? 1 : 0,
+        });
+      } catch {
+        // ignore logging failures
+      }
     }
-  }
-
-  if (import.meta.env.DEV && lastError) {
-    try {
-      console.info('[reporter-contact-ui-phone-detail-miss]', {
-        reporterId: reporter.id,
-        contactId: reporter.contactId,
-        reporterKey: reporter.reporterKey,
-        message: lastError?.message || 'detail endpoint unavailable',
-      });
-    } catch {
-      // ignore logging failures
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch (lastError: any) {
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-contacts-ui-api]', {
+          action: 'detail',
+          url: adminUrl(path),
+          method: 'GET',
+          id,
+          status: lastError?.response?.status ?? null,
+          count: null,
+        });
+      } catch {
+        // ignore logging failures
+      }
     }
-  }
 
-  return null;
+    return null;
+  }
 }
 
 function unwrapReporterContactDetail(payload: any) {
@@ -1363,11 +1320,11 @@ function statusTone(value: ReporterContact['status']): Tone {
   return 'rose';
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, missingValue = '—') {
   const raw = String(value || '').trim();
-  if (!raw) return '—';
+  if (!raw) return missingValue;
   const timestamp = new Date(raw).getTime();
-  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toLocaleString() : '—';
+  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toLocaleString() : missingValue;
 }
 
 function formatIdentitySource(value: unknown) {

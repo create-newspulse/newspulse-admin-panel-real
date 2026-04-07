@@ -173,6 +173,8 @@ export default function SubmitCommunityStory() {
     const reporterName = (contactName || '').trim();
     const reporterPhone = (contactPhone || '').trim();
     const reporterKey = reporterEmail.toLowerCase();
+    const preferredContact = contactMethod ? contactMethod : 'no_preference';
+    const whatsappValue = preferredContact === 'whatsapp' ? reporterPhone : undefined;
 
     const payload: any = {
       title,
@@ -187,6 +189,12 @@ export default function SubmitCommunityStory() {
       contactMethod: contactMethod || undefined,
       contactOk: !!contactOk,
       futureContactOk: !!futureContactOk,
+      phone: reporterPhone || undefined,
+      mobile: reporterPhone || undefined,
+      mobileNumber: reporterPhone || undefined,
+      contactNumber: reporterPhone || undefined,
+      whatsapp: whatsappValue,
+      whatsappNumber: whatsappValue,
       // Reporter identity fields (for directory enrichment)
       reporterName: reporterName || undefined,
       reporterEmail: reporterEmail || undefined,
@@ -207,7 +215,11 @@ export default function SubmitCommunityStory() {
         name: reporterName || undefined,
         email: reporterEmail || undefined,
         phone: reporterPhone || undefined,
-        preferredContact: (contactMethod ? contactMethod : 'no_preference'),
+        mobile: reporterPhone || undefined,
+        contactNumber: reporterPhone || undefined,
+        whatsapp: whatsappValue,
+        whatsappNumber: whatsappValue,
+        preferredContact,
         canContactForThisStory: !!contactOk,
         canContactForFutureStories: !!futureContactOk,
       },
