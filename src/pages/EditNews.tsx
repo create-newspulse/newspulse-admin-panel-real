@@ -24,7 +24,7 @@ interface NewsForm {
 const CATEGORY_OPTIONS = [
   'Breaking News', 'Regional', 'Politics', 'National', 'International',
   'Business', 'Tech', 'Lifestyle', 'Glamorous', 'Sports',
-  'Viral Videos', 'Web Stories', 'Editorial', 'Login'
+  'Web Stories', 'Editorial', 'Login'
 ];
 
 const LANGUAGE_OPTIONS = ['English', 'Hindi', 'Gujarati'];

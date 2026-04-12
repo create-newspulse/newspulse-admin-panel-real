@@ -48,8 +48,6 @@ export const ArticleFilters: React.FC<Props> = ({ params, onChange, hideSearch =
       editorial: 'editorial',
       webstories: 'web-stories',
       'web-stories': 'web-stories',
-      viralvideos: 'viral-videos',
-      'viral-videos': 'viral-videos',
       youthpulse: 'youth-pulse',
       'youth-pulse': 'youth-pulse',
       inspirationhub: 'inspiration-hub',
