@@ -80,7 +80,6 @@ import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
 import DraftDeskPage from '@pages/admin/DraftDeskPage';
 import DraftWorkspacePage from '@pages/admin/DraftWorkspacePage';
-import SubmitCommunityStory from '@pages/community/SubmitCommunityStory';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
 import ReporterPortal from '@pages/community/ReporterPortal';
 import CommunityHome from '@pages/community/CommunityHome';
@@ -150,6 +149,17 @@ function LegacyCommunityReporterQueueDetailRedirect() {
   const location = useLocation();
   const safeId = encodeURIComponent(String(id || ''));
   return <Navigate to={`/admin/community-reporter/${safeId}${location.search || ''}`} replace />;
+}
+
+function CommunitySubmitRedirect() {
+  useEffect(() => {
+    const target = (import.meta.env.VITE_PUBLIC_REPORTER_PORTAL_URL || 'https://newspulse.co.in/community-reporter').toString().trim();
+    if (target) {
+      window.location.replace(target);
+    }
+  }, []);
+
+  return null;
 }
 
 function App() {
@@ -257,8 +267,8 @@ function App() {
               <Route path="/community" element={<ProtectedRoute><LockCheckWrapper><CommunityHome /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
               {/* Community Reporter – Submit Story (admin + public alias) */}
-              <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><SubmitCommunityStory /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/community/submit" element={<ProtectedRoute><LockCheckWrapper><SubmitCommunityStory /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><CommunitySubmitRedirect /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/community/submit" element={<ProtectedRoute><LockCheckWrapper><CommunitySubmitRedirect /></LockCheckWrapper></ProtectedRoute>} />
               {/* Community Reporter – My Stories (admin + public alias) */}
               <Route path="/admin/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/my-stories" element={<ProtectedRoute><LockCheckWrapper><MyCommunityStories /></LockCheckWrapper></ProtectedRoute>} />
