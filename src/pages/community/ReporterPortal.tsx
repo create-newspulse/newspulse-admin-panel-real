@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchCommunityStats, fetchCommunitySubmissions } from '@/lib/communityAdminApi';
 import { listReporterContacts } from '@/lib/api/reporterDirectory';
 import { Users, FileText, PenSquare, BarChart3, ArrowRight, AlertCircle } from 'lucide-react';
-import MyCommunityStories from '@/pages/community/MyCommunityStories';
 
 interface StatsShape { total: number; pending: number; approved: number; rejected: number; }
 
@@ -122,7 +121,7 @@ export default function ReporterPortal() {
   return (
     <div className="px-6 py-4 max-w-6xl mx-auto space-y-6">
       {/* Breadcrumb */}
-      <div className="text-xs text-slate-500">Home {'>'} Community {'>'} Reporter Portal</div>
+      <div className="text-xs text-slate-500">Home {'>'} Community {'>'} Reporter Portal Admin</div>
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -131,7 +130,7 @@ export default function ReporterPortal() {
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Reporter Portal</h1>
+            <h1 className="text-2xl font-bold">Reporter Portal Admin</h1>
             <p className="text-sm text-slate-600 mt-1">Admin oversight for the live Reporter Portal login, dashboard, submissions, profile activity, and reporter-owned story records.</p>
             {isLoading && (
               <p className="text-xs text-slate-500 mt-1">Loading portal activity…</p>
@@ -260,17 +259,25 @@ export default function ReporterPortal() {
           <div className="flex items-center gap-3">
             <PenSquare className="w-6 h-6" />
             <div>
-              <div className="font-semibold">Open Submission Flow</div>
-              <div className="text-xs text-slate-500">Use the same reporter-compatible submit story path</div>
+              <div className="font-semibold">Open Public Submit Form</div>
+              <div className="text-xs text-slate-500">Redirect to the live public Reporter Portal submission flow</div>
             </div>
           </div>
           <ArrowRight className="w-5 h-5" />
         </Link>
       </div>
 
-      {/* Recent stories */}
+      {/* Recent stories preview */}
       <div className="space-y-3 mt-6">
-        <h2 className="text-lg font-semibold">Recent stories</h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Recent stories preview</h2>
+            <p className="text-sm text-slate-600">A lightweight snapshot of recent reporter-owned records. Use Community Story Desk for full review, deleted-record handling, restore, and permanent delete workflows.</p>
+          </div>
+          <Link to="/community/my-stories" className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+            Open Community Story Desk
+          </Link>
+        </div>
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           {isLoading && (
             <div className="p-4 text-sm text-slate-600">Loading…</div>
@@ -279,7 +286,7 @@ export default function ReporterPortal() {
             <div className="p-4 text-sm text-red-600">{(error as any)?.message || 'Failed to load your stories.'}</div>
           )}
           {!isLoading && !isError && recent.length === 0 && (
-            <div className="p-4 text-sm text-slate-600">No stories yet. Use “Submit New Story” to send your first report.</div>
+            <div className="p-4 text-sm text-slate-600">No recent reporter-owned stories yet. Open Community Story Desk to review submissions as records arrive.</div>
           )}
           {!isLoading && !isError && recent.length > 0 && (
             <table className="w-full text-sm">
@@ -306,12 +313,6 @@ export default function ReporterPortal() {
             </table>
           )}
         </div>
-      </div>
-
-      {/* Embedded My Community Stories table for reuse */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold mb-3">My Community Stories</h2>
-        <MyCommunityStories />
       </div>
     </div>
   );

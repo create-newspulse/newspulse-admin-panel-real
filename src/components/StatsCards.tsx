@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export type DashboardStatsValues = {
-  totalNews: number;
-  categoriesCount: number;
-  languagesCount: number;
-  activeUsersCount: number;
-  aiLogsCount: number;
+  totalNewsRecords: number;
+  publishedNews: number;
+  draftNews: number;
+  archivedNews: number;
+  latestPublicVisible: number;
+  configuredCategoriesCount: number;
+  activeCategoriesInUseCount: number;
 };
 
 type StatsCardsProps = {
@@ -46,50 +48,66 @@ export default function StatsCards({
   const cards = useMemo(() => {
     const v = values;
     const readyVals: DashboardStatsValues = v || {
-      totalNews: 0,
-      categoriesCount: 0,
-      languagesCount: 0,
-      activeUsersCount: 0,
-      aiLogsCount: 0,
+      totalNewsRecords: 0,
+      publishedNews: 0,
+      draftNews: 0,
+      archivedNews: 0,
+      latestPublicVisible: 0,
+      configuredCategoriesCount: 0,
+      activeCategoriesInUseCount: 0,
     };
 
     const helperText = (value: number, whenPositive: string, whenZero: string) => (value > 0 ? whenPositive : whenZero);
 
     return [
       {
-        key: 'totalNews',
-        label: 'Total News',
-        value: readyVals.totalNews,
-        helperText: helperText(readyVals.totalNews, 'All time', 'No news yet'),
+        key: 'totalNewsRecords',
+        label: 'Total News Records',
+        value: readyVals.totalNewsRecords,
+        helperText: helperText(readyVals.totalNewsRecords, 'All statuses in admin records', 'No news records yet'),
         link: '/admin/articles',
       },
       {
-        key: 'categoriesCount',
-        label: 'Categories',
-        value: readyVals.categoriesCount,
-        helperText: helperText(readyVals.categoriesCount, 'Configured', 'No categories configured'),
+        key: 'publishedNews',
+        label: 'Published News',
+        value: readyVals.publishedNews,
+        helperText: helperText(readyVals.publishedNews, 'Published/article-live scope', 'No published records'),
+        link: '/admin/articles',
+      },
+      {
+        key: 'draftNews',
+        label: 'Draft News',
+        value: readyVals.draftNews,
+        helperText: helperText(readyVals.draftNews, 'Draft/editorial scope', 'No draft records'),
+        link: '/draft-desk',
+      },
+      {
+        key: 'archivedNews',
+        label: 'Archived News',
+        value: readyVals.archivedNews,
+        helperText: helperText(readyVals.archivedNews, 'Archived admin records', 'No archived records'),
+        link: '/admin/articles',
+      },
+      {
+        key: 'latestPublicVisible',
+        label: 'Latest/Public Visible',
+        value: readyVals.latestPublicVisible,
+        helperText: helperText(readyVals.latestPublicVisible, 'Public-facing published scope', 'No public-facing records'),
+        link: '/admin/articles',
+      },
+      {
+        key: 'configuredCategoriesCount',
+        label: 'Configured Categories',
+        value: readyVals.configuredCategoriesCount,
+        helperText: helperText(readyVals.configuredCategoriesCount, 'Category registry', 'No configured categories'),
         link: '/add-category',
       },
       {
-        key: 'languagesCount',
-        label: 'Languages',
-        value: readyVals.languagesCount,
-        helperText: helperText(readyVals.languagesCount, 'Supported', 'No languages configured'),
-        link: '/admin/settings/public-site/language-theme',
-      },
-      {
-        key: 'activeUsersCount',
-        label: 'Active Users',
-        value: readyVals.activeUsersCount,
-        helperText: helperText(readyVals.activeUsersCount, 'Currently active', 'No active users'),
-        link: '/admin/users',
-      },
-      {
-        key: 'aiLogsCount',
-        label: 'AI Logs',
-        value: readyVals.aiLogsCount,
-        helperText: helperText(readyVals.aiLogsCount, 'Recorded', 'No AI activity recorded'),
-        link: '/admin/ai-logs',
+        key: 'activeCategoriesInUseCount',
+        label: 'Active Categories in Use',
+        value: readyVals.activeCategoriesInUseCount,
+        helperText: helperText(readyVals.activeCategoriesInUseCount, 'Seen in article records', 'No categories used yet'),
+        link: '/admin/articles',
       },
     ];
   }, [values]);

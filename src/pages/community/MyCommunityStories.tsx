@@ -21,9 +21,6 @@ type GroupBy = 'none' | 'month' | 'year' | 'reporter' | 'status' | 'category';
 
 type DatePreset = 'today' | 'last7' | 'thisMonth' | 'thisYear' | 'allTime' | 'custom';
 
-const REPORTER_PORTAL_URL =
-  import.meta.env.VITE_PUBLIC_REPORTER_PORTAL_URL || 'https://newspulse.co.in/community-reporter';
-
 const PUBLIC_SITE_ORIGIN = ((import.meta.env as any).VITE_PUBLIC_SITE_ORIGIN || 'https://www.newspulse.co.in').toString().replace(/\/+$/, '');
 
 function safeText(v: any): string {
@@ -665,25 +662,10 @@ const MyCommunityStoriesPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => navigate('/community/submit')}
-            className="text-sm px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            + New Story
-          </button>
-          <button
-            type="button"
             onClick={() => loadStories()}
             className="text-sm px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
           >
             Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open(REPORTER_PORTAL_URL, '_blank', 'noopener,noreferrer')}
-            className="text-sm px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50"
-            title="Open the live reporter portal"
-          >
-            Reporter Portal
           </button>
         </div>
       </div>

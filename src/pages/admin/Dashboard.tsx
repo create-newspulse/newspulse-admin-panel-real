@@ -9,16 +9,19 @@ import SystemHealthBadge from '@components/SystemHealthBadge';
 import { apiUrl } from '@/lib/apiBase';
 import api from '@/utils/api';
 import { listArticles } from '@/lib/api/articles';
+import { ARTICLE_CATEGORY_KEYS } from '@/lib/articleCategories';
 import { supportedLanguages } from '@/lib/languageConfig';
 import { getAdminAnalyticsDashboard, type DashboardAnalyticsResponse } from '@/lib/api/adminAnalytics';
 import { ReadershipCards, type ReadershipSummary } from '@/components/analytics/ReadershipCards';
 
 type AdminStats = {
-  totalNews: number;
-  categoriesCount: number;
-  languagesCount: number;
-  activeUsersCount: number;
-  aiLogsCount: number;
+  totalNewsRecords: number;
+  publishedNews: number;
+  draftNews: number;
+  archivedNews: number;
+  latestPublicVisible: number;
+  configuredCategoriesCount: number;
+  activeCategoriesInUseCount: number;
 };
 
 function toFiniteNonNegativeNumber(v: unknown): number | null {
@@ -213,7 +216,7 @@ function mapAdminStatsPayload(payload: any): {
 
   return {
     mapped: {
-      ...(totalNews != null ? { totalNews } : {}),
+      ...(totalNews != null ? { totalNewsRecords: totalNews } : {}),
       ...(categoriesCount != null ? { categoriesCount } : {}),
       ...(languagesCount != null ? { languagesCount } : {}),
       ...(activeUsersCount != null ? { activeUsersCount } : {}),
@@ -287,7 +290,7 @@ const Dashboard = () => {
 
         // If the backend returns a 200 with an unexpected JSON shape, don't silently render zeros.
         // Fall back to computing counts from the stable /articles list contract.
-        const needsTotal = mapped.totalNews == null;
+        const needsTotal = mapped.totalNewsRecords == null;
         const needsCategories = mapped.categoriesCount == null;
         const needsLanguages = false;
 
@@ -308,10 +311,21 @@ const Dashboard = () => {
 
         let computedTotal: number | null = null;
         let computedCategories: number | null = null;
+        let publishedNews = 0;
+        let draftNews = 0;
+        let archivedNews = 0;
 
         if (shouldComputeFromArticles) {
-          const first = await listArticles({ status: 'all', page: 1, limit: 200 });
+          const [first, publishedList, draftList, archivedList] = await Promise.all([
+            listArticles({ status: 'all', page: 1, limit: 200 }),
+            listArticles({ status: 'published', page: 1, limit: 1 }),
+            listArticles({ status: 'draft', page: 1, limit: 1 }),
+            listArticles({ status: 'archived', page: 1, limit: 1 }),
+          ]);
           computedTotal = toFiniteNonNegativeInt(first.total) ?? 0;
+          publishedNews = toFiniteNonNegativeInt(publishedList.total) ?? 0;
+          draftNews = toFiniteNonNegativeInt(draftList.total) ?? 0;
+          archivedNews = toFiniteNonNegativeInt(archivedList.total) ?? 0;
 
           // Only scan pages when we truly need distinct counts.
           if (needsCategories || needsLanguages) {
@@ -339,12 +353,25 @@ const Dashboard = () => {
           }
         }
 
+        if (!shouldComputeFromArticles) {
+          const [publishedList, draftList, archivedList] = await Promise.all([
+            listArticles({ status: 'published', page: 1, limit: 1 }),
+            listArticles({ status: 'draft', page: 1, limit: 1 }),
+            listArticles({ status: 'archived', page: 1, limit: 1 }),
+          ]);
+          publishedNews = toFiniteNonNegativeInt(publishedList.total) ?? 0;
+          draftNews = toFiniteNonNegativeInt(draftList.total) ?? 0;
+          archivedNews = toFiniteNonNegativeInt(archivedList.total) ?? 0;
+        }
+
         const result: AdminStats = {
-          totalNews: mapped.totalNews ?? computedTotal ?? 0,
-          categoriesCount: mapped.categoriesCount ?? computedCategories ?? 0,
-          languagesCount: supportedLanguagesCount,
-          activeUsersCount: mapped.activeUsersCount ?? 0,
-          aiLogsCount: mapped.aiLogsCount ?? 0,
+          totalNewsRecords: mapped.totalNewsRecords ?? computedTotal ?? 0,
+          publishedNews,
+          draftNews,
+          archivedNews,
+          latestPublicVisible: publishedNews,
+          configuredCategoriesCount: ARTICLE_CATEGORY_KEYS.length,
+          activeCategoriesInUseCount: mapped.categoriesCount ?? computedCategories ?? 0,
         };
 
         if (import.meta.env.DEV) {
@@ -352,14 +379,14 @@ const Dashboard = () => {
         }
 
         // If we still couldn't derive the core cards, surface a real error.
-        if (!Number.isFinite(result.totalNews) || result.totalNews < 0) {
-          throw new Error('Dashboard stats: failed to derive totalNews');
+        if (!Number.isFinite(result.totalNewsRecords) || result.totalNewsRecords < 0) {
+          throw new Error('Dashboard stats: failed to derive totalNewsRecords');
         }
-        if (!Number.isFinite(result.categoriesCount) || result.categoriesCount < 0) {
-          throw new Error('Dashboard stats: failed to derive categoriesCount');
+        if (!Number.isFinite(result.activeCategoriesInUseCount) || result.activeCategoriesInUseCount < 0) {
+          throw new Error('Dashboard stats: failed to derive activeCategoriesInUseCount');
         }
-        if (!Number.isFinite(result.languagesCount) || result.languagesCount < 0) {
-          throw new Error('Dashboard stats: failed to derive languagesCount');
+        if (!Number.isFinite(result.configuredCategoriesCount) || result.configuredCategoriesCount < 0) {
+          throw new Error('Dashboard stats: failed to derive configuredCategoriesCount');
         }
 
         return result;
@@ -497,11 +524,13 @@ const Dashboard = () => {
             values={
               stats
                 ? {
-                    totalNews: stats.totalNews,
-                    categoriesCount: stats.categoriesCount,
-                    languagesCount: stats.languagesCount,
-                    activeUsersCount: stats.activeUsersCount,
-                    aiLogsCount: stats.aiLogsCount,
+                    totalNewsRecords: stats.totalNewsRecords,
+                    publishedNews: stats.publishedNews,
+                    draftNews: stats.draftNews,
+                    archivedNews: stats.archivedNews,
+                    latestPublicVisible: stats.latestPublicVisible,
+                    configuredCategoriesCount: stats.configuredCategoriesCount,
+                    activeCategoriesInUseCount: stats.activeCategoriesInUseCount,
                   }
                 : undefined
             }

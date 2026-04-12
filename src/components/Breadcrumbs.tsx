@@ -38,6 +38,8 @@ const Breadcrumbs = () => {
     "/safeownerzone/security": "Security Center",
     "/admin/safe-owner-zone/security-lockdown": "Security Center",
     "/community/reporter": "Community Reporter Queue",
+    "/community/portal": "Reporter Portal Admin",
+    "/admin/community/portal": "Reporter Portal Admin",
     "/broadcast-center": "Broadcast Center",
     "/admin/broadcast-center": "Broadcast Center",
 

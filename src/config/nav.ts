@@ -22,7 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'drafts', label:'Draft Desk', path:'/draft-desk', roles:['editor','admin','founder'], icon:'📰' },
   { key:'community-reporter', label:'Community Reporter Queue', path:'/community/reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   // Founder/Admin oversight for the live reporter workspace
-  { key:'reporter-portal', label:'Reporter Portal', path:'/community/portal', roles:['admin','founder'], icon:'👥' },
+  { key:'reporter-portal', label:'Reporter Portal Admin', path:'/community/portal', roles:['admin','founder'], icon:'👥' },
   { key:'livetv', label:'Live TV', path:'/admin/live', roles:['editor','admin','founder'], icon:'🎥' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠' },
   { key:'aira', label:'AIRA', path:'/admin/aira', roles:['admin','founder'], icon:'🧍‍♀️' },
