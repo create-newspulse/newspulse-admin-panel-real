@@ -436,7 +436,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const { publishEnabled } = usePublishFlag();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [qualityToolsCollapsed, setQualityToolsCollapsed] = useState(false);
-  const [breakingControlsCollapsed, setBreakingControlsCollapsed] = useState(false);
   const [locationTagsCollapsed, setLocationTagsCollapsed] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState<null | {
     viewUrl: string;
@@ -800,42 +799,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setTags((prev) => (Array.isArray(prev) ? prev : []).filter((t) => normalizeTagKey(t) !== key));
   }
 
-  function toggleTag(tag: string) {
-    if (hasTag(tag)) removeTag(tag);
-    else ensureTag(tag);
-  }
-
   function setTagsSafe(next: string[]) {
     setTags(dedupeTags(next));
   }
 
-  const gujaratRegionalChecked = useMemo(() => {
-    return hasTag('state:gujarat') || hasTag('gujarat');
-  }, [tags]);
-
   const breakingChecked = useMemo(() => {
     return isBreaking || hasTag('breaking') || String(category || '').trim() === 'breaking';
   }, [isBreaking, category, tags]);
-
-  function handleBreakingToggle(checked: boolean) {
-    setIsBreaking(checked);
-    if (checked) {
-      ensureTag('breaking');
-      return;
-    }
-
-    removeTag('breaking');
-    // If legacy data had category="breaking", clear it so the editor must pick a real category.
-    if (String(category || '').trim() === 'breaking') setCategory('');
-  }
-
-  function handleGujaratToggle(checked: boolean) {
-    if (checked) {
-      ensureTag('state:gujarat');
-      return;
-    }
-    removeTag('state:gujarat');
-  }
 
   function toggleGujaratLocationTag(tag: string) {
     const rawTag = String(tag || '').trim();
@@ -2337,46 +2307,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   </select>
                 </div>
               )}
-
-              <div className="pt-2 border-t border-slate-200">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div className="text-xs font-medium">Breaking Controls</div>
-                  <button
-                    type="button"
-                    className="text-[11px] text-slate-600 hover:text-slate-900 underline"
-                    onClick={() => setBreakingControlsCollapsed((v) => !v)}
-                  >
-                    {breakingControlsCollapsed ? 'Show' : 'Minimize'}
-                  </button>
-                </div>
-                {!breakingControlsCollapsed && (
-                  <div className="space-y-2">
-                    <label className="flex items-start gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={breakingChecked}
-                        onChange={(e) => handleBreakingToggle(e.target.checked)}
-                      />
-                      <span>
-                        <span className="font-medium">Mark as Breaking</span>
-                        <span className="block text-[11px] text-slate-600">Adds tag <span className="font-mono">breaking</span> and sets <span className="font-mono">isBreaking</span> (does not change category).</span>
-                      </span>
-                    </label>
-
-                    <label className="flex items-start gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={gujaratRegionalChecked}
-                        onChange={(e) => handleGujaratToggle(e.target.checked)}
-                      />
-                      <span>
-                        <span className="font-medium">Gujarat Regional</span>
-                        <span className="block text-[11px] text-slate-600">Adds tag <span className="font-mono">state:gujarat</span>.</span>
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
 
               <div className="pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between gap-3 mb-2">
