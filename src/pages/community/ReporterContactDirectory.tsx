@@ -404,18 +404,46 @@ export default function ReporterContactDirectory() {
     };
   };
 
-  const buildBulkActionIds = (rows: ReporterContact[], action: 'hide' | 'restore' | 'delete') => {
+  const buildBulkActionSelection = (rows: ReporterContact[], action: 'hide' | 'restore' | 'delete') => {
     const selectedRows = rows.map((row) => ({
       rawRow: row,
       normalizedRow: normalizeDirectoryRow(row),
     }));
     const ids = selectedRows.map(({ normalizedRow }) => String(normalizedRow?.contactId || '').trim()).filter(Boolean);
+    const contributorIds = selectedRows
+      .map(({ normalizedRow }) => String(normalizedRow?.contributorId || '').trim())
+      .filter(Boolean);
+    const reporterKeys = selectedRows
+      .map(({ normalizedRow }) => String(normalizedRow?.reporterKey || '').trim())
+      .filter(Boolean);
+    const emails = selectedRows
+      .map(({ normalizedRow }) => String(normalizedRow?.email || '').trim())
+      .filter(Boolean);
+    const payload = {
+      ids,
+      contactIds: ids,
+      selectedContactIds: ids,
+      contributorIds,
+      reporterKeys,
+      emails,
+      sourceView: directoryView,
+      ...(action === 'delete'
+        ? {
+            permanent: true,
+            hardDelete: true,
+            confirmPermanentDelete: true,
+            action: 'delete-permanently',
+          }
+        : action === 'restore'
+          ? { action: 'restore' }
+          : { action: 'hide' }),
+    };
 
     if (isLocalhostRuntime()) {
       console.info(`[reporter-bulk-${action}]`, {
         selectedRows,
         ids,
-        payload: { ids },
+        payload,
       });
     }
 
@@ -426,7 +454,7 @@ export default function ReporterContactDirectory() {
       throw new Error('Some selected rows do not have a valid ReporterContact id');
     }
 
-    return ids;
+    return payload;
   };
 
   const rebuildMutation = useMutation({
@@ -463,8 +491,8 @@ export default function ReporterContactDirectory() {
 
   const bulkRemoveMutation = useMutation({
     mutationFn: async (rows: ReporterContact[]) => {
-      const ids = buildBulkActionIds(rows, 'hide');
-      await bulkHideReporterContacts(ids);
+      const selection = buildBulkActionSelection(rows, 'hide');
+      await bulkHideReporterContacts(selection.ids);
       return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
     },
     onSuccess: async (result) => {
@@ -492,8 +520,8 @@ export default function ReporterContactDirectory() {
 
   const bulkRestoreMutation = useMutation({
     mutationFn: async (rows: ReporterContact[]) => {
-      const ids = buildBulkActionIds(rows, 'restore');
-      await bulkRestoreReporterContacts(ids);
+      const selection = buildBulkActionSelection(rows, 'restore');
+      await bulkRestoreReporterContacts(selection);
       return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
     },
     onSuccess: async (result) => {
@@ -521,9 +549,16 @@ export default function ReporterContactDirectory() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: async (rows: ReporterContact[]) => {
-      const ids = buildBulkActionIds(rows, 'delete');
-      await bulkDeleteReporterContacts({ ids });
-      return { total: rows.length, successCount: rows.length, failures: [] as PromiseRejectedResult[] };
+      const selection = buildBulkActionSelection(rows, 'delete');
+      const result = await bulkDeleteReporterContacts(selection);
+      return {
+        total: rows.length,
+        successCount: Number(result.deletedCount ?? result.deleted ?? 0) || 0,
+        failures: (result.failures || []).map((failure) => ({ reason: failure })) as PromiseRejectedResult[],
+        failedIds: result.failedIds || [],
+        missingIds: result.missingIds || [],
+        invalidStateIds: result.invalidStateIds || [],
+      };
     },
     onSuccess: async (result) => {
       setBulkDeleteOpen(false);

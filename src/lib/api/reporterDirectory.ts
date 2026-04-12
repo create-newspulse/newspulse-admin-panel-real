@@ -26,11 +26,11 @@ function mapAdminActionError(err: any, fallback: string): UiNotifyError {
   const backendMsg = extractBackendMessage(err?.response?.data);
 
   let message = backendMsg || err?.message || fallback;
-  if (status === 404) message = 'Backend route not found';
-  if (status === 403) message = 'Not allowed';
+  if (status === 404) message = backendMsg || 'Backend route not found';
+  if (status === 403) message = backendMsg || 'Not allowed';
   if (status === 400) message = backendMsg || fallback;
   if (status === 503) message = 'Backend unavailable (Render restarting)';
-  if (typeof status === 'number' && status >= 500) message = 'Something went wrong. Please try again.';
+  if (typeof status === 'number' && status >= 500) message = backendMsg || 'Something went wrong. Please try again.';
 
   const out: UiNotifyError = new Error(message) as UiNotifyError;
   out.status = status;
@@ -1322,18 +1322,77 @@ export async function bulkHideReporterContacts(ids: string[]) {
   }
 }
 
-export async function bulkRestoreReporterContacts(ids: string[]) {
-  const clean = (ids || []).map((x) => String(x || '').trim()).filter(Boolean);
+type ReporterContactBulkMutationArgs = {
+  ids: string[];
+  contributorIds?: string[];
+  reporterKeys?: string[];
+  emails?: string[];
+  sourceView?: 'active' | 'removed';
+};
+
+function cleanReporterMutationValues(values: string[] | undefined) {
+  return (values || []).map((x) => String(x || '').trim()).filter(Boolean);
+}
+
+export async function bulkRestoreReporterContacts(args: ReporterContactBulkMutationArgs | string[]) {
+  const clean = Array.isArray(args)
+    ? cleanReporterMutationValues(args)
+    : cleanReporterMutationValues(args.ids);
   if (clean.length === 0) return { ok: true, restored: 0 };
   const url = adminUrl(REPORTER_CONTACTS_BULK_RESTORE_PATH);
+  const payload = Array.isArray(args)
+    ? { ids: clean }
+    : {
+        ids: clean,
+        contactIds: clean,
+        selectedContactIds: clean,
+        contributorIds: cleanReporterMutationValues(args.contributorIds),
+        reporterKeys: cleanReporterMutationValues(args.reporterKeys),
+        emails: cleanReporterMutationValues(args.emails),
+        sourceView: args.sourceView || 'removed',
+        action: 'restore',
+      };
   logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), count: clean.length });
   try {
-    const res = await adminApi.post<any>(REPORTER_CONTACTS_BULK_RESTORE_PATH, { ids: clean }, { headers: { 'Content-Type': 'application/json' } });
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-restore]', {
+          requestUrl: url,
+          payload,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
+    const res = await adminApi.post<any>(REPORTER_CONTACTS_BULK_RESTORE_PATH, payload, { headers: { 'Content-Type': 'application/json' } });
     const data = res?.data ?? {};
     if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Bulk restore failed');
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-restore]', {
+          requestUrl: url,
+          responseStatus: res?.status ?? null,
+          payload,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
     logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), status: typeof res?.status === 'number' ? res.status : null, count: clean.length });
     return { ok: true, restored: clean.length };
   } catch (err: any) {
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-restore]', {
+          requestUrl: url,
+          responseStatus: err?.response?.status ?? null,
+          payload,
+          responseBody: err?.response?.data ?? null,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
     logReporterContactsApi({ action: 'bulk-restore', method: 'POST', url, id: clean.join(','), status: err?.response?.status ?? null, count: clean.length });
     throw mapAdminActionError(err, 'Failed to restore selected contacts');
   }
@@ -1341,24 +1400,93 @@ export async function bulkRestoreReporterContacts(ids: string[]) {
 
 export async function bulkDeleteReporterContacts(args: {
   ids: string[];
-  contactsById?: Map<string, Pick<ReporterContact, 'id' | 'reporterKey' | 'email'>>;
+  contributorIds?: string[];
+  reporterKeys?: string[];
+  emails?: string[];
+  sourceView?: 'active' | 'removed';
+  confirmPermanentDelete?: boolean;
 }) {
-  const ids = (args.ids || []).map((x) => String(x || '').trim()).filter(Boolean);
+  const ids = cleanReporterMutationValues(args.ids);
   if (ids.length === 0) return { ok: true, deleted: 0 };
-  const url = adminUrl(REPORTER_CONTACTS_BULK_DELETE_PATH);
+  const requestPath = REPORTER_CONTACTS_BULK_DELETE_PATH;
+  const url = adminUrl(requestPath);
+  const payload = {
+    ids,
+    contactIds: ids,
+    selectedContactIds: ids,
+    contributorIds: cleanReporterMutationValues(args.contributorIds),
+    reporterKeys: cleanReporterMutationValues(args.reporterKeys),
+    emails: cleanReporterMutationValues(args.emails),
+    sourceView: args.sourceView || 'removed',
+    action: 'delete-permanently',
+    permanent: true,
+    hardDelete: true,
+    confirmPermanentDelete: args.confirmPermanentDelete !== false,
+  };
   logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), count: ids.length });
 
   try {
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-delete]', {
+          requestUrl: url,
+          payload,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
     const res = await adminApi.post<any>(
-      REPORTER_CONTACTS_BULK_DELETE_PATH,
-      { ids },
+      requestPath,
+      payload,
       { headers: { 'Content-Type': 'application/json' } }
     );
     const data = res?.data ?? {};
     if (data?.ok === false) throw new Error(extractBackendMessage(data) || 'Bulk delete failed');
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-delete]', {
+          requestUrl: url,
+          responseStatus: res?.status ?? null,
+          payload,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
     logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), status: typeof res?.status === 'number' ? res.status : null, count: ids.length });
-    return { ok: true, deleted: ids.length };
+    return {
+      ok: true,
+      deleted: Number(data?.deletedCount ?? data?.successCount ?? ids.length) || 0,
+      deletedCount: Number(data?.deletedCount ?? data?.successCount ?? ids.length) || 0,
+      failedIds: Array.isArray(data?.failedIds) ? data.failedIds.map((value: unknown) => String(value || '').trim()).filter(Boolean) : [],
+      missingIds: Array.isArray(data?.missingIds) ? data.missingIds.map((value: unknown) => String(value || '').trim()).filter(Boolean) : [],
+      invalidStateIds: Array.isArray(data?.invalidStateIds) ? data.invalidStateIds.map((value: unknown) => String(value || '').trim()).filter(Boolean) : [],
+      failures: Array.isArray(data?.failures)
+        ? data.failures
+            .filter((value: unknown) => value && typeof value === 'object')
+            .map((value: any) => ({
+              id: String(value?.id || '').trim(),
+              code: String(value?.code || '').trim(),
+              message: String(value?.message || '').trim(),
+              details: value?.details,
+            }))
+        : [],
+      invalidConfirmation: Boolean(data?.invalidConfirmation),
+    };
   } catch (err: any) {
+    if (import.meta.env.DEV) {
+      try {
+        console.info('[reporter-bulk-delete]', {
+          requestUrl: url,
+          responseStatus: err?.response?.status ?? null,
+          payload,
+          responseBody: err?.response?.data ?? null,
+        });
+      } catch {
+        // ignore logging failures
+      }
+    }
     logReporterContactsApi({ action: 'bulk-delete', method: 'POST', url, id: ids.join(','), status: err?.response?.status ?? null, count: ids.length });
     throw mapAdminActionError(err, 'Failed to delete selected contacts');
   }
