@@ -26,8 +26,8 @@ interface Props {
   onSelectIds?: (ids: string[]) => void;
   onPageChange?: (page: number) => void;
   highlightId?: string;
-  quickView?: 'all' | 'breaking' | 'gujarat-breaking';
-  onQuickViewCounts?: (counts: { all: number; breaking: number; gujaratBreaking: number }) => void;
+  quickView?: 'all' | 'breaking' | 'regional';
+  onQuickViewCounts?: (counts: { all: number; breaking: number; regional: number }) => void;
 }
 
 export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChange, highlightId, quickView = 'all', onQuickViewCounts }) => {
@@ -230,8 +230,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     return cat === 'breaking' || tags.includes('breaking');
   }
 
-  function isGujaratBreakingStory(a: Article): boolean {
-    if (!isBreakingStory(a)) return false;
+  function isRegionalStory(a: Article): boolean {
     const tags = getTags(a).map((t) => norm(t));
     return (
       tags.includes('state:gujarat')
@@ -244,8 +243,8 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
   const quickCounts = React.useMemo(() => {
     const all = baseRows.length;
     const breaking = baseRows.filter(isBreakingStory).length;
-    const gujaratBreaking = baseRows.filter(isGujaratBreakingStory).length;
-    return { all, breaking, gujaratBreaking };
+    const regional = baseRows.filter(isRegionalStory).length;
+    return { all, breaking, regional };
   }, [baseRows]);
 
   React.useEffect(() => {
@@ -254,7 +253,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
 
   const rows: Article[] = React.useMemo(() => {
     if (quickView === 'breaking') return baseRows.filter(isBreakingStory);
-    if (quickView === 'gujarat-breaking') return baseRows.filter(isGujaratBreakingStory);
+    if (quickView === 'regional') return baseRows.filter(isRegionalStory);
     return baseRows;
   }, [baseRows, quickView]);
 
@@ -284,7 +283,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
     return <div className="text-red-600">{n.message}</div>;
   }
 
-  if (!rows.length && (quickView === 'breaking' || quickView === 'gujarat-breaking')) {
+  if (!rows.length && quickView === 'breaking') {
     return (
       <div className="rounded border bg-white p-4 text-sm text-slate-700">
         <div className="font-semibold">No breaking stories found.</div>
@@ -337,10 +336,10 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
                   <span>{r.title}</span>
                   <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px]">{r.language?.toUpperCase()}</span>
                   <span className="px-1 py-0.5 rounded bg-sky-700 text-white text-[10px]">{r.category}</span>
-                  {(quickView === 'breaking' || quickView === 'gujarat-breaking') && isBreakingStory(r) && (
+                  {quickView === 'breaking' && isBreakingStory(r) && (
                     <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px]">⚡ Breaking</span>
                   )}
-                  {(quickView === 'breaking' || quickView === 'gujarat-breaking') && (() => {
+                  {quickView === 'regional' && (() => {
                     const tags = getTags(r).map((t) => norm(t));
                     const hasLoc = tags.some((t) => t.startsWith('district:')) || tags.some((t) => t.startsWith('city:'));
                     if (!hasLoc) return null;

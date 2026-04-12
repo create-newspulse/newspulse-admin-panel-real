@@ -4,7 +4,6 @@ export type QuickViewKey =
   | 'draft'
   | 'scheduled'
   | 'breaking'
-  | 'gujarat-breaking'
   | 'regional'
   | 'pti'
   | 'flagged';
@@ -15,7 +14,6 @@ export interface QuickViewCounts {
   draft: number;
   scheduled: number;
   breaking: number;
-  'gujarat-breaking': number;
   regional: number;
   pti: number;
   flagged: number;
@@ -27,7 +25,6 @@ const VIEW_LABELS: Record<QuickViewKey, string> = {
   draft: 'Draft',
   scheduled: 'Scheduled',
   breaking: 'Breaking',
-  'gujarat-breaking': 'Gujarat Breaking',
   regional: 'Regional (Gujarat)',
   pti: 'PTI Needs Review',
   flagged: 'Flagged',
@@ -41,7 +38,7 @@ interface Props {
 }
 
 export function QuickViewsBar({ value, counts, onChange, onOpenFilters }: Props) {
-  const items: QuickViewKey[] = ['all', 'published', 'draft', 'scheduled', 'breaking', 'gujarat-breaking', 'regional', 'pti', 'flagged'];
+  const items: QuickViewKey[] = ['all', 'published', 'draft', 'scheduled', 'breaking', 'regional', 'pti', 'flagged'];
 
   return (
     <div className="sticky top-0 z-30 border-b bg-white/95 backdrop-blur">

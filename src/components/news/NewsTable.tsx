@@ -51,10 +51,6 @@ function isGujaratRegional(a: Article): boolean {
   );
 }
 
-function isGujaratBreaking(a: Article): boolean {
-  return isBreakingStory(a) && isGujaratRegional(a);
-}
-
 function needsPtiReview(a: Article): boolean {
   const v = norm((a as any)?.ptiCompliance);
   if (!v) return false;
@@ -454,7 +450,6 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     const draft = searchedRows.filter((a) => (a.status ?? 'draft') === 'draft').length;
     const scheduled = searchedRows.filter((a) => (a.status ?? 'draft') === 'scheduled').length;
     const breaking = searchedRows.filter(isBreakingStory).length;
-    const gujaratBreaking = searchedRows.filter(isGujaratBreaking).length;
     const regional = searchedRows.filter(isGujaratRegional).length;
     const pti = searchedRows.filter(needsPtiReview).length;
     const flagged = searchedRows.filter(isFlagged).length;
@@ -464,7 +459,6 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       draft,
       scheduled,
       breaking,
-      'gujarat-breaking': gujaratBreaking,
       regional,
       pti,
       flagged,
@@ -492,8 +486,6 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
         return searchedRows.filter((a) => (a.status ?? 'draft') === 'scheduled');
       case 'breaking':
         return searchedRows.filter(isBreakingStory);
-      case 'gujarat-breaking':
-        return searchedRows.filter(isGujaratBreaking);
       case 'regional':
         return searchedRows.filter(isGujaratRegional);
       case 'pti':
