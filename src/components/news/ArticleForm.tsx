@@ -348,6 +348,7 @@ const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
   { label: 'Tapi', slug: 'tapi' },
   { label: 'Vadodara', slug: 'vadodara' },
   { label: 'Valsad', slug: 'valsad' },
+  { label: 'Vav-Tharad', slug: 'vav-tharad' },
 ];
 
 // Key cities (Mahanagarpalika / major metros)
