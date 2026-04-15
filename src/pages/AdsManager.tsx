@@ -1123,7 +1123,7 @@ export default function AdsManager() {
     setMediaKitLoading(true);
     setMediaKitError(null);
     try {
-      const res = await api.get('/media-kit');
+      const res = await api.get('/admin/media-kit');
       const payload = res?.data;
       const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
       const normalized = normalizeMediaKit(raw);
@@ -1232,7 +1232,7 @@ export default function AdsManager() {
 
     setMediaKitSaving(true);
     try {
-      const res = await api.put('/media-kit', normalized);
+      const res = await api.put('/admin/media-kit', normalized);
       const payload = res?.data;
       const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
       const next = normalizeMediaKit(raw) || normalized;
@@ -1252,7 +1252,7 @@ export default function AdsManager() {
     if (mediaKitResetting) return;
     setMediaKitResetting(true);
     try {
-      const res = await api.post('/media-kit/reset');
+      const res = await api.post('/admin/media-kit/reset');
       const payload = res?.data;
       const raw = payload?.mediaKit || payload?.data?.mediaKit || payload?.data || payload;
       const next = normalizeMediaKit(raw);
