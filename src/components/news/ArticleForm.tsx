@@ -348,7 +348,6 @@ const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
   { label: 'Tapi', slug: 'tapi' },
   { label: 'Vadodara', slug: 'vadodara' },
   { label: 'Valsad', slug: 'valsad' },
-  { label: 'Vav-Tharad', slug: 'vav-tharad' },
 ];
 
 // Key cities (Mahanagarpalika / major metros)
@@ -463,7 +462,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const coverUploadEnabled = mediaStatusQuery.data?.uploadEnabled === true;
   const coverUploadStatusText = (() => {
-    if (mediaStatusQuery.isLoading) return 'Checking upload availability‚Ä¶';
+    if (mediaStatusQuery.isLoading) return 'Checking upload availabilityG«™';
     if (coverUploadEnabled) return null;
 
     const s = mediaStatusQuery.data;
@@ -1314,29 +1313,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function generateSummary(titleText: string, contentText: string): string {
     const t = (titleText || '').trim();
     const c = stripHtmlToText(contentText || '').trim();
-    // If there's no content yet, synthesize a 2‚Äì3 line summary from the title in chosen language
+    // If there's no content yet, synthesize a 2G«Ù3 line summary from the title in chosen language
     if (!c && t) {
       const base = t.replace(/\s+/g, ' ');
       if (language === 'gu') {
         // Gujarati localized template
-        const s1 = `‡™Ü ‡™≤‡´á‡™ñ ${base} ‡™µ‡™ø‡™∑‡™Ø‡™®‡´á ‡™Ü‡™µ‡™∞‡´Ä ‡™≤‡´á ‡™õ‡´á.`;
-        const s2 = `‡™§‡´á‡™Æ‡™æ‡™Ç ‡™Æ‡´Å‡™ñ‡´ç‡™Ø ‡™§‡™•‡´ç‡™Ø‡´ã, ‡™™‡™∞‡™ø‡™∏‡´ç‡™•‡™ø‡™§‡™ø ‡™Ö‡™®‡´á ‡™Ü‡™ó‡™≥ ‡™∂‡´Å‡™Ç ‡™ß‡´ç‡™Ø‡™æ‡™®‡™Æ‡™æ‡™Ç ‡™∞‡™æ‡™ñ‡™µ‡´Å‡™Ç ‡™§‡´á ‡™ú‡™£‡™æ‡™µ‡´á ‡™õ‡´á.`;
-        const s3 = `‡™Ü‡™®‡´ã ‡™Ö‡™∞‡´ç‡™• ‡™Ö‡™®‡´á ‡™Æ‡™π‡™§‡´ç‡™µ ‡™∏‡™Æ‡™ú‡™µ‡™æ ‡™Æ‡™æ‡™ü‡´á ‡™Ü‡™ó‡™≥ ‡™µ‡™æ‡™Ç‡™ö‡´ã.`;
+        const s1 = `a¨Â a¨¶aΩÁa¨˚ ${base} a¨¶a¨+a¨+a¨ªa¨øaΩÁ a¨Âa¨¶a¨¶aΩ« a¨¶aΩÁ a¨¢aΩÁ.`;
+        const s2 = `a¨ÒaΩÁa¨´a¨+a¨È a¨´aΩ¸a¨˚aΩÏa¨ª a¨Òa¨—aΩÏa¨ªaΩÔ, a¨¨a¨¶a¨+a¨+aΩÏa¨—a¨+a¨Òa¨+ a¨‡a¨øaΩÁ a¨Âa¨˘a¨¶ a¨¶aΩ¸a¨È a¨∫aΩÏa¨ªa¨+a¨øa¨´a¨+a¨È a¨¶a¨+a¨˚a¨¶aΩ¸a¨È a¨ÒaΩÁ a¨£a¨˙a¨+a¨¶aΩÁ a¨¢aΩÁ.`;
+        const s3 = `a¨Âa¨øaΩÔ a¨‡a¨¶aΩÏa¨— a¨‡a¨øaΩÁ a¨´a¨¶a¨ÒaΩÏa¨¶ a¨+a¨´a¨£a¨¶a¨+ a¨´a¨+a¨ÉaΩÁ a¨Âa¨˘a¨¶ a¨¶a¨+a¨Èa¨‹aΩÔ.`;
         const combinedGu = `${s1} ${s2} ${s3}`;
-        return combinedGu.length > 300 ? combinedGu.slice(0, 297) + '‚Ä¶' : combinedGu;
+        return combinedGu.length > 300 ? combinedGu.slice(0, 297) + 'G«™' : combinedGu;
       } else if (language === 'hi') {
         // Hindi template (simple neutral tone)
-        const s1 = `‡§Ø‡§π ‡§≤‡•á‡§ñ ${base} ‡§µ‡§ø‡§∑‡§Ø ‡§ï‡•ã ‡§ï‡§µ‡§∞ ‡§ï‡§∞‡§§‡§æ ‡§π‡•à.`;
-        const s2 = `‡§á‡§∏‡§Æ‡•á‡§Ç ‡§Æ‡•Å‡§ñ‡•ç‡§Ø ‡§§‡§•‡•ç‡§Ø, ‡§∏‡§Ç‡§¶‡§∞‡•ç‡§≠ ‡§î‡§∞ ‡§Ü‡§ó‡•á ‡§ï‡•ç‡§Ø‡§æ ‡§¶‡•á‡§ñ‡§®‡§æ ‡§π‡•à ‡§¨‡§§‡§æ‡§Ø‡§æ ‡§ó‡§Ø‡§æ ‡§π‡•à.`;
-        const s3 = `‡§á‡§∏‡§ï‡•á ‡§Ö‡§∞‡•ç‡§• ‡§î‡§∞ ‡§Æ‡§π‡§§‡•ç‡§µ ‡§ï‡•ã ‡§∏‡§Æ‡§ù‡§®‡•á ‡§ï‡•á ‡§≤‡§ø‡§è ‡§Ü‡§ó‡•á ‡§™‡§¢‡§º‡•á‡§Ç.`;
+        const s1 = `aÒªaÒ¶ aÒ¶a—ÁaÒ˚ ${base} aÒ¶aÒ+aÒ+aÒª aÒÚa—Ô aÒÚaÒ¶aÒ¶ aÒÚaÒ¶aÒÒaÒ+ aÒ¶a—Í.`;
+        const s2 = `aÒÁaÒ+aÒ´a—ÁaÒÈ aÒ´a—¸aÒ˚a—ÏaÒª aÒÒaÒ—a—ÏaÒª, aÒ+aÒÈaÒ™aÒ¶a—ÏaÒ° aÒˆaÒ¶ aÒÂaÒ˘a—Á aÒÚa—ÏaÒªaÒ+ aÒ™a—ÁaÒ˚aÒøaÒ+ aÒ¶a—Í aÒºaÒÒaÒ+aÒªaÒ+ aÒ˘aÒªaÒ+ aÒ¶a—Í.`;
+        const s3 = `aÒÁaÒ+aÒÚa—Á aÒ‡aÒ¶a—ÏaÒ— aÒˆaÒ¶ aÒ´aÒ¶aÒÒa—ÏaÒ¶ aÒÚa—Ô aÒ+aÒ´aÒ•aÒøa—Á aÒÚa—Á aÒ¶aÒ+aÒ≈ aÒÂaÒ˘a—Á aÒ¨aÒÛaÒ+a—ÁaÒÈ.`;
         const combinedHi = `${s1} ${s2} ${s3}`;
-        return combinedHi.length > 300 ? combinedHi.slice(0, 297) + '‚Ä¶' : combinedHi;
+        return combinedHi.length > 300 ? combinedHi.slice(0, 297) + 'G«™' : combinedHi;
       } else {
         const s1 = `This story covers ${base}.`;
         const s2 = `It outlines key facts, context, and what to look for next.`;
         const s3 = `Read on to understand what it means and why it matters.`;
         const combined = `${s1} ${s2} ${s3}`;
-        return combined.length > 300 ? combined.slice(0, 297) + '‚Ä¶' : combined;
+        return combined.length > 300 ? combined.slice(0, 297) + 'G«™' : combined;
       }
     }
     const tLow = t.toLowerCase();
@@ -1346,7 +1345,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     const words = take.split(/\s+/).filter(Boolean);
     const targetCount = Math.min(Math.max(25, words.length), 45);
     const summary = words.slice(0,targetCount).join(' ');
-    return summary.length > 300 ? summary.slice(0,297) + '‚Ä¶' : summary;
+    return summary.length > 300 ? summary.slice(0,297) + 'G«™' : summary;
   }
 
   useEffect(()=> {
@@ -1399,7 +1398,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function addAttribution(){
     setSummary(s => (/\b(as per|according to|officials|police|sources|report|pti|agency)\b/i.test(s) ? s : s.replace(/\.*$/, '') + '. As per officials, details are being verified.'));
   }
-  function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '‚Ä¶')); }
+  function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + 'G«™')); }
 
   const lastSubmitRef = useRef<null | {
     statusToSend: 'draft'|'published';
@@ -1975,20 +1974,20 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, []);
 
   const saveStatusText = useMemo(() => {
-    if (isPublishing) return 'Publishing‚Ä¶';
-    if (isSaving || mutation.isPending) return 'Saving‚Ä¶';
-    if (autosaveFailed) return 'Autosave failed ‚Äî retry';
+    if (isPublishing) return 'PublishingG«™';
+    if (isSaving || mutation.isPending) return 'SavingG«™';
+    if (autosaveFailed) return 'Autosave failed G«ˆ retry';
     if (!lastSavedAt) return isDirty ? 'Unsaved changes' : 'Not saved yet';
     const time = new Date(lastSavedAt);
     const timeLabel = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     if (isDirty) return 'Unsaved changes';
-    return `All changes saved ¬∑ ${timeLabel}`;
+    return `All changes saved -+ ${timeLabel}`;
   }, [autosaveFailed, isDirty, isPublishing, isSaving, lastSavedAt, mutation.isPending]);
 
   const ptiOk = ptiStatus === 'compliant' || founderOverride;
   const languageOk = founderOverride || ['en', 'hi', 'gu'].every((l) => ((langIssues as any)[l] || []).length === 0);
-  const seoBadgeText = checks.seo ? 'preview' : '‚Äî';
-  const readabilityBadgeText = typeof readabilityGrade === 'number' ? String(readabilityGrade) : '‚Äî';
+  const seoBadgeText = checks.seo ? 'preview' : 'G«ˆ';
+  const readabilityBadgeText = typeof readabilityGrade === 'number' ? String(readabilityGrade) : 'G«ˆ';
   const aiBadgeText = suggestions ? 'AI' : 'Offline';
 
   const accordionItems: AccordionItem[] = useMemo(() => {
@@ -2019,21 +2018,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       {
         id: 'pti',
         title: 'PTI Compliance',
-        badge: <span className={ptiOk ? badgeClsOk : badgeClsWarn}>{ptiOk ? '‚úÖ' : '‚ö†Ô∏è'}</span>,
+        badge: <span className={ptiOk ? badgeClsOk : badgeClsWarn}>{ptiOk ? 'G£‡' : 'G‹·n+≈'}</span>,
         defaultOpen: false,
         forceOpenWhen: hasPtiIssues,
         children: (
           <div className="space-y-2">
             <button type="button" onClick={runPti} className="btn-secondary text-xs">Run PTI Check</button>
-            <div className="text-sm">Status: {ptiStatus === 'compliant' ? '‚úÖ Compliant' : '‚ö†Ô∏è Needs Review'}</div>
-            {ptiReasons.map(r=> <div key={r} className="text-xs text-red-600">‚Ä¢ {r}</div>)}
+            <div className="text-sm">Status: {ptiStatus === 'compliant' ? 'G£‡ Compliant' : 'G‹·n+≈ Needs Review'}</div>
+            {ptiReasons.map(r=> <div key={r} className="text-xs text-red-600">G«Û {r}</div>)}
           </div>
         ),
       },
       {
         id: 'lang',
         title: 'Language Guard',
-        badge: <span className={languageOk ? badgeClsOk : badgeClsWarn}>{languageOk ? '‚úÖ' : '‚ö†Ô∏è'}</span>,
+        badge: <span className={languageOk ? badgeClsOk : badgeClsWarn}>{languageOk ? 'G£‡' : 'G‹·n+≈'}</span>,
         defaultOpen: false,
         forceOpenWhen: hasLangIssues,
         children: (
@@ -2046,8 +2045,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             <div className="space-y-2">
               {(['en','hi','gu'] as const).map(l => (
                 <div key={l} className="text-xs">
-                  <strong>{l.toUpperCase()}:</strong> {(langIssues[l]||[]).length === 0 ? 'No issues ‚úÖ' : `${(langIssues[l]||[]).length} issues`}
-                  {(langIssues[l]||[]).map((iss,i)=>(<div key={i} className="text-red-600">‚Ä¢ {iss.message}</div>))}
+                  <strong>{l.toUpperCase()}:</strong> {(langIssues[l]||[]).length === 0 ? 'No issues G£‡' : `${(langIssues[l]||[]).length} issues`}
+                  {(langIssues[l]||[]).map((iss,i)=>(<div key={i} className="text-red-600">G«Û {iss.message}</div>))}
                 </div>
               ))}
             </div>
@@ -2065,7 +2064,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             <div className="text-xs">Title Tag Preview: {title || 'Untitled'} | News Pulse</div>
             <div className="text-xs">Meta Description: {(summary||'').slice(0,140)}</div>
             {checks.seo && (
-              <div className="text-[11px] text-gray-600">Hook score: {checks.seo.titleHookScore} ¬∑ Keywords: {checks.seo.keywords.join(', ')}</div>
+              <div className="text-[11px] text-gray-600">Hook score: {checks.seo.titleHookScore} -+ Keywords: {checks.seo.keywords.join(', ')}</div>
             )}
           </div>
         ),
@@ -2079,8 +2078,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         children: (
           <div className="space-y-2">
             <button type="button" onClick={runReadability} className="btn-secondary text-xs">Analyze</button>
-            <div className="text-xs">Grade: {readabilityGrade ?? '‚Äî'}</div>
-            <div className="text-xs">Reading Time: {readingSeconds ? `${readingSeconds}s` : '‚Äî'}</div>
+            <div className="text-xs">Grade: {readabilityGrade ?? 'G«ˆ'}</div>
+            <div className="text-xs">Reading Time: {readingSeconds ? `${readingSeconds}s` : 'G«ˆ'}</div>
           </div>
         ),
       },
@@ -2122,7 +2121,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
     if (needsPtiConfirm) {
       setConfirmState({
-        title: 'PTI review not cleared ‚Äî publish anyway?',
+        title: 'PTI review not cleared G«ˆ publish anyway?',
         description: 'PTI compliance is not marked as compliant (or not run yet). You can publish anyway, but review is recommended.',
         confirmLabel: 'Publish Anyway',
         cancelLabel: 'Cancel',
@@ -2130,7 +2129,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           setConfirmState(null);
           if (needsLangConfirm) {
             setConfirmState({
-              title: 'Language issues detected ‚Äî publish anyway?',
+              title: 'Language issues detected G«ˆ publish anyway?',
               description: 'Language Guard found issues. You can publish anyway, but review is recommended.',
               confirmLabel: 'Publish Anyway',
               cancelLabel: 'Cancel',
@@ -2146,7 +2145,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
     if (needsLangConfirm) {
       setConfirmState({
-        title: 'Language issues detected ‚Äî publish anyway?',
+        title: 'Language issues detected G«ˆ publish anyway?',
         description: 'Language Guard found issues. You can publish anyway, but review is recommended.',
         confirmLabel: 'Publish Anyway',
         cancelLabel: 'Cancel',
@@ -2198,8 +2197,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
               <div className="mt-2 text-xs">
                 <div className="text-slate-600">Preview: /story/{ensureValidSlug(slug, title) || '<slug>'}</div>
-                {slugCheck.status === 'checking' && <span className="text-slate-600">Checking‚Ä¶</span>}
-                {slugCheck.status === 'available' && <span className="text-green-700">‚úÖ Slug available</span>}
+                {slugCheck.status === 'checking' && <span className="text-slate-600">CheckingG«™</span>}
+                {slugCheck.status === 'available' && <span className="text-green-700">G£‡ Slug available</span>}
                 {slugCheck.status === 'taken' && <span className="text-red-600">Slug already exists</span>}
                 {slugCheck.status === 'error' && <span className="text-amber-700">{slugCheck.message || 'Could not verify slug availability'}</span>}
               </div>
@@ -2248,11 +2247,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     <button type="button" key={t} onClick={()=> { setTone(t); setSummary(suggestions.summary[t]); setAutoSummary(false); }}
                       className={`px-2 py-1 rounded text-xs border ${tone===t? 'bg-black text-white':'bg-white'}`}>{t}</button>
                   ))}
-                  <span className={`text-[11px] ${summary.length>=120 && summary.length<=180 ? 'text-green-600' : 'text-amber-600'}`}>{summary.length} chars (aim 120‚Äì180)</span>
+                  <span className={`text-[11px] ${summary.length>=120 && summary.length<=180 ? 'text-green-600' : 'text-amber-600'}`}>{summary.length} chars (aim 120G«Ù180)</span>
                 </div>
               )}
               {checks.compliance?.ptiFlags?.length > 0 && (
-                <div className="mt-2 text-xs text-red-600">PTI flags: {checks.compliance.ptiFlags.join(' ¬∑ ')} <button type="button" className="underline" onClick={addAttribution}>Add attribution</button></div>
+                <div className="mt-2 text-xs text-red-600">PTI flags: {checks.compliance.ptiFlags.join(' -+ ')} <button type="button" className="underline" onClick={addAttribution}>Add attribution</button></div>
               )}
               {checks.duplicate && checks.duplicate.score >= 0.78 && (
                 <div className="mt-1 text-xs text-amber-700">Similar headline ({Math.round(checks.duplicate.score*100)}%). {checks.duplicate.closestId && <a className="underline" href={`/admin/articles/${checks.duplicate.closestId}`} target="_blank" rel="noreferrer">View closest</a>}</div>
@@ -2270,7 +2269,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               <RichTextEditor
                 value={content}
                 onChange={setContent}
-                placeholder="Write article content‚Ä¶"
+                placeholder="Write article contentG«™"
               />
             </div>
           </div>
@@ -2284,7 +2283,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               <div>
                 <label className="block text-xs font-medium">Category</label>
                 <select value={category} onChange={e=> setCategory(e.target.value)} className="w-full border px-2 py-2 rounded">
-                  <option value="" disabled>Select category‚Ä¶</option>
+                  <option value="" disabled>Select categoryG«™</option>
                   {ARTICLE_CATEGORY_OPTIONS.map((opt) => (
                     <option key={opt.key} value={opt.key}>{opt.label}</option>
                   ))}
@@ -2301,7 +2300,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <div>
                   <label className="block text-xs font-medium">Youth Pulse Track</label>
                   <select value={youthPulseTrack} onChange={e=> setYouthPulseTrack((e.target.value || '') as YouthPulseTrack | '')} className="w-full border px-2 py-2 rounded">
-                    <option value="">Select Youth Pulse track‚Ä¶</option>
+                    <option value="">Select Youth Pulse trackG«™</option>
                     {YOUTH_PULSE_TRACK_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -2326,7 +2325,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       value={locationSearch}
                       onChange={(e) => setLocationSearch(e.target.value)}
                       className="w-full border px-2 py-2 rounded text-sm"
-                      placeholder="Search districts / cities‚Ä¶"
+                      placeholder="Search districts / citiesG«™"
                     />
 
                     <div className="mt-2 text-[11px] text-slate-600">Districts</div>
@@ -2415,7 +2414,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-xs font-semibold">Translations</div>
                       <div className="text-[11px] text-slate-600">
-                        {groupStatus ? `Group Status: ${groupStatus}` : 'Group Status: ‚Äî'}
+                        {groupStatus ? `Group Status: ${groupStatus}` : 'Group Status: G«ˆ'}
                       </div>
                     </div>
 
@@ -2456,7 +2455,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     </div>
 
                     {translationGroupQuery.isFetching ? (
-                      <div className="mt-2 text-[11px] text-slate-500">Loading variants‚Ä¶</div>
+                      <div className="mt-2 text-[11px] text-slate-500">Loading variantsG«™</div>
                     ) : null}
                     {translationGroupQuery.isError ? (
                       <div className="mt-2 text-[11px] text-amber-700">Could not load translation variants.</div>
@@ -2635,7 +2634,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     setCoverUploadError(null);
                   }}
                 />
-                {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading‚Ä¶</div>}
+                {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">UploadingG«™</div>}
                 {!isUploadingCover && coverUploadOk && coverImageUrl ? (
                   <div className="mt-1 text-[11px] text-slate-600">Uploaded</div>
                 ) : null}
@@ -2693,7 +2692,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
             <div className="text-sm font-semibold text-slate-900">
-              {publishSuccess.syncResults ? 'Published and synced' : 'Published ‚úÖ (Translations pending)'}
+              {publishSuccess.syncResults ? 'Published and synced' : 'Published G£‡ (Translations pending)'}
             </div>
             <div className="mt-1 text-xs text-slate-600">
               {publishSuccess.id ? `Article ID: ${publishSuccess.id}` : 'Article published'}
@@ -2800,7 +2799,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 className="btn-secondary"
                 disabled={retryTranslationMutation.isPending || isSaving || isPublishing}
               >
-                {retryTranslationMutation.isPending ? 'Retrying‚Ä¶' : 'Retry Translation'}
+                {retryTranslationMutation.isPending ? 'RetryingG«™' : 'Retry Translation'}
               </button>
             )}
             <button type="button" onClick={saveDraft} className="btn-secondary" disabled={isSaving || isPublishing || mutation.isPending}>Save Draft</button>
@@ -2818,7 +2817,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 className="btn"
                 disabled={!canPublish || isSaving || isPublishing}
               >
-                {isPublishing ? 'Publishing‚Ä¶' : 'Publish'}
+                {isPublishing ? 'PublishingG«™' : 'Publish'}
               </button>
             </span>
           </div>
