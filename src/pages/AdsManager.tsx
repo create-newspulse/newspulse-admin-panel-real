@@ -569,6 +569,49 @@ function safeDateLabel(value?: string | null): string {
   return d.toLocaleString();
 }
 
+function formatAdScheduleDateTime(value?: string | null): string {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(d);
+
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '';
+  const day = get('day');
+  const month = get('month');
+  const year = get('year');
+  const hour = get('hour');
+  const minute = get('minute');
+  const dayPeriod = get('dayPeriod').toUpperCase();
+
+  if (!day || !month || !year || !hour || !minute || !dayPeriod) {
+    return d.toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).replace(' am', ' AM').replace(' pm', ' PM');
+  }
+
+  return `${day} ${month} ${year}, ${hour}:${minute} ${dayPeriod}`;
+}
+
+function formatAdScheduleRange(startAt?: string | null, endAt?: string | null): string {
+  if (!startAt && !endAt) return '-';
+  if (startAt && endAt) return `${formatAdScheduleDateTime(startAt)} → ${formatAdScheduleDateTime(endAt)}`;
+  if (startAt) return `Starts: ${formatAdScheduleDateTime(startAt)}`;
+  return `Ends: ${formatAdScheduleDateTime(endAt)}`;
+}
+
 function toDatetimeLocalValue(value?: string | null): string {
   if (!value) return '';
   const d = new Date(value);
@@ -3269,7 +3312,7 @@ export default function AdsManager() {
               filteredAds.map(ad => {
                 const busy = Boolean(rowBusy[ad.id]);
                 const updatedLabel = safeDateLabel(ad.updatedAt || ad.createdAt);
-                const scheduleLabel = `${safeDateLabel(ad.startAt)} → ${safeDateLabel(ad.endAt)}`;
+                const scheduleLabel = formatAdScheduleRange(ad.startAt, ad.endAt);
                 const isBrokenImage = Boolean(ad.imageUrl) && Boolean(brokenImageByAdId[ad.id]);
 
                 return (
@@ -3539,6 +3582,9 @@ export default function AdsManager() {
                     value={form.startAt}
                     onChange={(e) => setForm(prev => ({ ...prev, startAt: e.target.value }))}
                   />
+                  <div className="text-[11px] text-slate-500">
+                    Time format: AM/PM{form.startAt ? ` • ${formatAdScheduleDateTime(form.startAt)}` : ''}
+                  </div>
                 </div>
 
                 <div className="space-y-1">
@@ -3549,6 +3595,9 @@ export default function AdsManager() {
                     value={form.endAt}
                     onChange={(e) => setForm(prev => ({ ...prev, endAt: e.target.value }))}
                   />
+                  <div className="text-[11px] text-slate-500">
+                    Time format: AM/PM{form.endAt ? ` • ${formatAdScheduleDateTime(form.endAt)}` : ''}
+                  </div>
                 </div>
                   </div>
 
@@ -3567,6 +3616,8 @@ export default function AdsManager() {
                   <div className="text-xs text-slate-600 dark:text-slate-300">
                     <div className="font-medium">Click target</div>
                     <div className="break-all">{(!form.clickable || !form.targetUrl.trim()) ? '(none)' : form.targetUrl.trim()}</div>
+                    <div className="mt-3 font-medium">Schedule</div>
+                    <div>{formatAdScheduleRange(form.startAt, form.endAt)}</div>
                   </div>
                 </div>
               </div>
