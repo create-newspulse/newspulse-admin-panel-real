@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -118,6 +118,8 @@ function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCod
         ...(entity && typeof entity === 'object' ? entity : {}),
         lang: code,
         language: code,
+        translationStatus: (entity as any)?.translationStatus ?? (raw as any)?.translationStatus ?? (raw as any)?.status,
+        translationError: (entity as any)?.translationError ?? (raw as any)?.translationError ?? (raw as any)?.error,
         status: (entity as any)?.status ?? (raw as any)?.status,
         state: (entity as any)?.state ?? (raw as any)?.state,
         publishStatus: (entity as any)?.publishStatus ?? (raw as any)?.publishStatus,
@@ -138,12 +140,22 @@ function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCod
 
 type TranslationBadgeTone = 'ok' | 'warn' | 'muted';
 
-type TranslationSyncState = 'source' | 'synced' | 'needs-refresh' | 'regenerating' | 'failed';
+type TranslationSyncState = 'source' | 'ready' | 'pending' | 'failed';
 
 type TranslationSyncEntry = {
   state: TranslationSyncState;
   detail?: string;
 };
+
+function normalizeTranslationJobState(input: any): TranslationSyncState | '' {
+  const raw = String(input || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (['source'].includes(raw)) return 'source';
+  if (['ready', 'synced', 'completed', 'published', 'success'].includes(raw)) return 'ready';
+  if (['failed', 'error'].includes(raw)) return 'failed';
+  if (['pending', 'queued', 'retrying', 'requeued', 'processing', 'in-progress', 'in_progress', 'regenerating', 'needs-refresh', 'needs_refresh'].includes(raw)) return 'pending';
+  return '';
+}
 
 function getTranslationBadges(v: any | null): Array<{ text: string; tone: TranslationBadgeTone }> {
   if (!v) return [{ text: 'Missing', tone: 'warn' }];
@@ -221,16 +233,15 @@ function computeRemovedSharedUrls(previousContent: string, nextContent: string):
 
 function getTranslationSyncTone(state: TranslationSyncState): TranslationBadgeTone {
   if (state === 'source') return 'muted';
-  if (state === 'synced') return 'ok';
+  if (state === 'ready') return 'ok';
   if (state === 'failed') return 'warn';
   return 'muted';
 }
 
 function getTranslationSyncLabel(state: TranslationSyncState): string {
   if (state === 'source') return 'Source';
-  if (state === 'synced') return 'Synced';
-  if (state === 'needs-refresh') return 'Needs Refresh';
-  if (state === 'regenerating') return 'Regenerating';
+  if (state === 'ready') return 'Ready';
+  if (state === 'pending') return 'Pending';
   return 'Failed';
 }
 
@@ -347,6 +358,7 @@ const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
   { label: 'Surendranagar', slug: 'surendranagar' },
   { label: 'Tapi', slug: 'tapi' },
   { label: 'Vadodara', slug: 'vadodara' },
+  { label: 'Vav-Tharad', slug: 'vav-tharad' },
   { label: 'Valsad', slug: 'valsad' },
 ];
 
@@ -1022,9 +1034,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [initialValues, data, computedMode]);
 
   const retryTranslationMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (opts?: { languages?: LangCode[] }) => {
       if (!effectiveId) throw new Error('Missing article id');
-      return retryArticleTranslation(effectiveId);
+      return retryArticleTranslation(effectiveId, opts);
     },
     onSuccess: (res: any) => {
       // Best-effort: update local status if backend returns it; otherwise rely on refetch.
@@ -1033,9 +1045,28 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const next = extractTranslationStatus(article);
       setTranslationStatus(next || 'pending');
       qc.invalidateQueries({ queryKey: ['articles','one',effectiveId] });
+      qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed] });
     },
     onError: (err: any) => {
       toast.error(normalizeError(err, 'Retry translation failed').message);
+    },
+  });
+
+  const requeueTranslationsMutation = useMutation({
+    mutationFn: async (languages?: LangCode[]) => {
+      if (!effectiveId) throw new Error('Missing article id');
+      return requeueArticleTranslations(effectiveId, { languages });
+    },
+    onSuccess: (res: any) => {
+      const raw = res as any;
+      const article = raw?.article || raw?.data?.article || raw?.data || raw;
+      const next = extractTranslationStatus(article);
+      setTranslationStatus(next || 'pending');
+      qc.invalidateQueries({ queryKey: ['articles','one',effectiveId] });
+      qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed] });
+    },
+    onError: (err: any) => {
+      toast.error(normalizeError(err, 'Requeue translations failed').message);
     },
   });
 
@@ -1059,6 +1090,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const translationSourceArticle = useMemo(() => {
     return extractSourceArticle(translationGroupPayload, currentArticleRecord);
   }, [translationGroupPayload, currentArticleRecord]);
+
+  const translationMetadataMap = useMemo(() => {
+    return extractTranslationMetadataMap(translationGroupPayload, currentArticleRecord, translationSourceArticle);
+  }, [translationGroupPayload, currentArticleRecord, translationSourceArticle]);
 
   const translationSourceLanguage = useMemo<LangCode | null>(() => {
     const explicit = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
@@ -1220,16 +1255,38 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         continue;
       }
 
+       const meta = translationMetadataMap[code];
+       const metaState = normalizeTranslationJobState(meta?.translationStatus ?? meta?.status);
+       if (metaState) {
+         const detailParts = [
+           meta?.translationError ? String(meta.translationError) : '',
+           metaState === 'ready' && getVariantStatus(meta) === 'published' ? 'Published' : '',
+           metaState === 'ready' && getVariantStatus(meta) === 'scheduled' ? 'Scheduled' : '',
+           metaState === 'ready' && !getVariantStatus(meta) ? 'Linked version ready' : '',
+         ].filter(Boolean);
+         base[code] = { state: metaState, detail: detailParts[0] || undefined };
+         continue;
+       }
+
       if (translationVariants[code]) {
-        base[code] = { state: 'synced', detail: 'Linked version ready' };
+        const variantStatus = getVariantStatus(translationVariants[code]);
+        const detail = variantStatus === 'published'
+          ? 'Published'
+          : variantStatus === 'scheduled'
+            ? 'Scheduled'
+            : 'Linked version ready';
+        base[code] = { state: 'ready', detail };
         continue;
       }
 
-      base[code] = { state: 'needs-refresh', detail: 'No linked version yet' };
+      base[code] = {
+        state: 'pending',
+        detail: status === 'published' ? 'Translation queued or not created yet' : 'Will start after publish',
+      };
     }
 
     return base as Record<LangCode, TranslationSyncEntry>;
-  }, [translationSyncOverrides, translationSourceLanguage, translationVariants]);
+  }, [status, translationMetadataMap, translationSyncOverrides, translationSourceLanguage, translationVariants]);
 
   useEffect(() => {
     setTranslationSyncOverrides({});
@@ -1242,6 +1299,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (variants.length > 0) return 'Draft';
     return null;
   }, [translationVariants]);
+
+  const failedTranslationLanguages = useMemo(() => {
+    return (['en', 'hi', 'gu'] as const).filter((code) => translationSyncStatuses[code]?.state === 'failed');
+  }, [translationSyncStatuses]);
+
+  const pendingTranslationLanguages = useMemo(() => {
+    return (['en', 'hi', 'gu'] as const).filter((code) => translationSyncStatuses[code]?.state === 'pending');
+  }, [translationSyncStatuses]);
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
   useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
@@ -1654,7 +1719,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const safeSlug = lastSubmitRef.current?.safeSlug || ensureValidSlug(slug, title);
       const statusToSend = lastSubmitRef.current?.statusToSend || status;
       const wasNew = lastSubmitRef.current?.wasNew ?? (!effectiveId);
-      let syncResults: Partial<Record<LangCode, string>> | undefined;
+      const syncResults = ((raw?.syncResults || raw?.data?.syncResults || null) as Partial<Record<LangCode, string>> | null) || undefined;
 
       // Persist id after create so subsequent saves update (PUT) instead of creating duplicates.
       if (!effectiveId && savedId) {
@@ -1693,21 +1758,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           language,
           translationGroupId: savedGroupId || translationGroupId || undefined,
           relatedArticleIds: getRelatedArticleIds(saved),
-          note: 'Publish is scoped to the current article only. Linked variants are not auto-published.',
+          syncResults,
         });
       }
 
-      if (saveKindRef.current === 'publish' && savedGroupId && isMasterArticle) {
-        setTranslationSyncOverrides((prev) => {
-          const next: Partial<Record<LangCode, TranslationSyncEntry>> = { ...prev };
-          for (const code of ['en', 'hi', 'gu'] as const) {
-            const variant = translationVariants[code];
-            const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
-            if (!variant || !variantId || variantId === String(savedId)) continue;
-            next[code] = { state: 'needs-refresh', detail: 'Publish separately when ready' };
-          }
-          return next;
-        });
+      if (saveKindRef.current === 'publish' && savedGroupId) {
         qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', savedGroupId] });
       }
 
@@ -2449,7 +2504,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
                       {isMasterArticle ? (
                         <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
-                          Linked language versions stay separate. Publishing or changing media here does not update other stories.
+                          Publishing the master article starts the multilingual pipeline. Linked variants remain editable, but pipeline status is tracked here.
                         </div>
                       ) : null}
                     </div>
@@ -2486,6 +2541,27 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                           );
                         })}
                       </div>
+
+                      {effectiveId && isMasterArticle ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50 disabled:opacity-60"
+                            onClick={() => requeueTranslationsMutation.mutate(pendingTranslationLanguages.length > 0 ? pendingTranslationLanguages : undefined)}
+                            disabled={requeueTranslationsMutation.isPending || retryTranslationMutation.isPending}
+                          >
+                            {requeueTranslationsMutation.isPending ? 'Requeueing…' : 'Requeue Pending'}
+                          </button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50 disabled:opacity-60"
+                            onClick={() => retryTranslationMutation.mutate(failedTranslationLanguages.length > 0 ? { languages: failedTranslationLanguages } : undefined as any)}
+                            disabled={failedTranslationLanguages.length === 0 || retryTranslationMutation.isPending || requeueTranslationsMutation.isPending}
+                          >
+                            {retryTranslationMutation.isPending ? 'Retrying…' : 'Retry Failed'}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="mt-2 space-y-2">
@@ -2561,27 +2637,35 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
                     <div className="mt-2 text-[11px] text-slate-600">
                       {isMasterArticle
-                        ? 'Publishing this story affects only this story. Linked versions must be reviewed and published separately.'
-                        : 'This linked version stays separate from the master article for publish and media changes.'}
+                        ? 'Use this story as the source language article. EN, HI, and GU statuses above reflect pipeline progress and retry state.'
+                        : 'This linked version belongs to the multilingual group but can still be edited separately when needed.'}
                     </div>
                   </div>
                 ) : null}
 
                 {effectiveId && String(translationGroupId || '').trim() ? (
                   <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="w-full text-[11px] text-slate-500">Manual linked variants are fallback tools. Automatic multilingual publishing uses the pipeline above.</div>
                     {language !== 'hi' ? (
                       <button
                         type="button"
                         className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
                         onClick={() => createLinkedTranslation('hi')}
-                      >Create Hindi version</button>
+                      >Create manual Hindi version</button>
                     ) : null}
                     {language !== 'gu' ? (
                       <button
                         type="button"
                         className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
                         onClick={() => createLinkedTranslation('gu')}
-                      >Create Gujarati version</button>
+                      >Create manual Gujarati version</button>
+                    ) : null}
+                    {language !== 'en' ? (
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded border text-xs bg-white hover:bg-slate-50"
+                        onClick={() => createLinkedTranslation('en')}
+                      >Create manual English version</button>
                     ) : null}
                   </div>
                 ) : null}
@@ -2692,7 +2776,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
             <div className="text-sm font-semibold text-slate-900">
-              {publishSuccess.syncResults ? 'Published and synced' : 'Published ✅ (Translations pending)'}
+              {publishSuccess.syncResults ? 'Published with multilingual status' : 'Published ✅ (Translations pending)'}
             </div>
             <div className="mt-1 text-xs text-slate-600">
               {publishSuccess.id ? `Article ID: ${publishSuccess.id}` : 'Article published'}
@@ -2792,12 +2876,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {(effectiveId && translationStatus === 'failed') && (
+            {(effectiveId && (translationStatus === 'failed' || failedTranslationLanguages.length > 0)) && (
               <button
                 type="button"
-                onClick={() => retryTranslationMutation.mutate()}
+                onClick={() => retryTranslationMutation.mutate(failedTranslationLanguages.length > 0 ? { languages: failedTranslationLanguages } : undefined as any)}
                 className="btn-secondary"
-                disabled={retryTranslationMutation.isPending || isSaving || isPublishing}
+                disabled={retryTranslationMutation.isPending || requeueTranslationsMutation.isPending || isSaving || isPublishing}
               >
                 {retryTranslationMutation.isPending ? 'Retrying…' : 'Retry Translation'}
               </button>
