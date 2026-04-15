@@ -314,6 +314,23 @@ function mixedScriptWarning(lang: LangCode, label: 'Title' | 'Summary', text: st
   return null;
 }
 
+function toDateTimeLocalValue(input: any): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function toIsoDateTime(input: string): string | undefined {
+  const raw = String(input || '').trim();
+  if (!raw) return undefined;
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
 const GUJARAT_DISTRICTS: ReadonlyArray<{ label: string; slug: string }> = [
   { label: 'Ahmedabad', slug: 'ahmedabad' },
   { label: 'Amreli', slug: 'amreli' },
@@ -551,6 +568,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   // Admin publish contract fields
   const [isBreaking, setIsBreaking] = useState(false);
+  const [spotlightEnabled, setSpotlightEnabled] = useState(false);
+  const [spotlightPinned, setSpotlightPinned] = useState(false);
+  const [spotlightPriority, setSpotlightPriority] = useState('');
+  const [spotlightExpiryTime, setSpotlightExpiryTime] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
   // ISO string (or empty). Set automatically when publishing if empty.
   const [publishedAt, setPublishedAt] = useState('');
@@ -572,6 +593,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     coverImage: string;
     coverImagePublicId: string;
     isBreaking: boolean;
+    spotlightEnabled: boolean;
+    spotlightPinned: boolean;
+    spotlightPriority: string;
+    spotlightExpiryTime: string;
     publishedAt: string;
     state: string;
     district: string;
@@ -593,6 +618,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     coverImage: '',
     coverImagePublicId: '',
     isBreaking: false,
+    spotlightEnabled: false,
+    spotlightPinned: false,
+    spotlightPriority: '',
+    spotlightExpiryTime: '',
     publishedAt: '',
     state: '',
     district: '',
@@ -617,6 +646,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setTags([]);
     setScheduledAt('');
     setIsBreaking(false);
+    setSpotlightEnabled(false);
+    setSpotlightPinned(false);
+    setSpotlightPriority('');
+    setSpotlightExpiryTime('');
     setPublishedAt('');
     setState('');
     setDistrict('');
@@ -660,6 +693,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       coverImage: (next?.coverImage ?? coverImageUrl ?? '').toString(),
       coverImagePublicId: (next?.coverImagePublicId ?? coverImagePublicId ?? '').toString(),
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
+      spotlightEnabled: (typeof next?.spotlightEnabled === 'boolean') ? next.spotlightEnabled : spotlightEnabled,
+      spotlightPinned: (typeof next?.spotlightPinned === 'boolean') ? next.spotlightPinned : spotlightPinned,
+      spotlightPriority: (next?.spotlightPriority ?? spotlightPriority ?? '').toString(),
+      spotlightExpiryTime: (next?.spotlightExpiryTime ?? spotlightExpiryTime ?? '').toString(),
       publishedAt: (next?.publishedAt ?? publishedAt ?? '').toString(),
       state: (next?.state ?? state ?? '').toString(),
       district: (next?.district ?? district ?? '').toString(),
@@ -682,6 +719,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       coverImage: (s.coverImage || ''),
       coverImagePublicId: (s.coverImagePublicId || ''),
       isBreaking: !!s.isBreaking,
+      spotlightEnabled: !!s.spotlightEnabled,
+      spotlightPinned: !!s.spotlightPinned,
+      spotlightPriority: (s.spotlightPriority || ''),
+      spotlightExpiryTime: (s.spotlightExpiryTime || ''),
       publishedAt: (s.publishedAt || ''),
       state: (s.state || ''),
       district: (s.district || ''),
@@ -949,6 +990,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const incomingCategoryKey = String(categorySlug || '').trim();
       const hasBreakingTag0 = (normalizedTags || []).some((t) => normalizeTagKey(t) === 'breaking');
       setIsBreaking(!!(src as any).isBreaking || hasBreakingTag0 || incomingCategoryKey === 'breaking');
+      setSpotlightEnabled(!!(src as any).spotlightEnabled);
+      setSpotlightPinned(!!(src as any).spotlightPinned);
+      setSpotlightPriority(
+        (src as any).spotlightPriority == null || (src as any).spotlightPriority === ''
+          ? ''
+          : String((src as any).spotlightPriority)
+      );
+      setSpotlightExpiryTime(toDateTimeLocalValue(
+        (src as any).spotlightExpiryTime
+        || (src as any).spotlightExpiresAt
+        || (src as any).spotlightExpiry
+        || ''
+      ));
       const incomingPublishedAt = (src as any).publishedAt || (src as any).publishAt || '';
       setPublishedAt(incomingPublishedAt ? new Date(incomingPublishedAt).toISOString() : '');
       setState(String((src as any).state || ''));
@@ -1007,6 +1061,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           coverImage: String(incomingCoverUrl || ''),
           coverImagePublicId: String(incomingCoverPid || ''),
           isBreaking: !!(src as any).isBreaking,
+          spotlightEnabled: !!(src as any).spotlightEnabled,
+          spotlightPinned: !!(src as any).spotlightPinned,
+          spotlightPriority: (src as any).spotlightPriority == null ? '' : String((src as any).spotlightPriority),
+          spotlightExpiryTime: toDateTimeLocalValue(
+            (src as any).spotlightExpiryTime
+            || (src as any).spotlightExpiresAt
+            || (src as any).spotlightExpiry
+            || ''
+          ),
           publishedAt: incomingPublishedAt ? new Date(incomingPublishedAt).toISOString() : '',
           state: String((src as any).state || ''),
           district: String((src as any).district || ''),
@@ -1436,6 +1499,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         publishAt?: string;
         scheduledAt?: string;
         isBreaking: boolean;
+        spotlightEnabled: boolean;
+        spotlightPinned: boolean;
+        spotlightPriority?: number;
+        spotlightExpiryTime?: string;
+        spotlightExpiresAt?: string;
         state?: string;
         district?: string;
         city?: string;
@@ -1470,6 +1538,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
         const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
+        const spotlightPriorityNumber = (() => {
+          const raw = String(spotlightPriority || '').trim();
+          if (!raw) return undefined;
+          const parsed = Number(raw);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        })();
+        const spotlightExpiryIso = toIsoDateTime(spotlightExpiryTime);
 
         const geoState = trimOrUndef(state);
         const geoDistrict = trimOrUndef(district);
@@ -1498,6 +1573,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           publishAt: scheduledAtToSend,
           scheduledAt: scheduledAtToSend,
           isBreaking,
+          spotlightEnabled,
+          spotlightPinned: spotlightEnabled ? spotlightPinned : false,
+          spotlightPriority: spotlightPriorityNumber,
+          spotlightExpiryTime: spotlightExpiryIso,
+          spotlightExpiresAt: spotlightExpiryIso,
           state: trimOrUndef(state),
           district: trimOrUndef(district),
           city: trimOrUndef(city),
@@ -2613,6 +2693,114 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <label className="block text-xs font-medium mb-1">Tags</label>
                 <TagInput value={tags} onChange={setTagsSafe} />
               </div>
+
+              {(userRole === 'admin' || userRole === 'founder') && (
+                <div className="rounded-xl border border-amber-200 bg-[linear-gradient(135deg,rgba(255,251,235,1),rgba(255,255,255,1))] p-3 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Homepage Spotlight</div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Control whether this story appears in the homepage spotlight.
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                      <span className="text-xs font-semibold text-slate-900">Show in Spotlight</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={spotlightEnabled}
+                        aria-label="Show in Spotlight"
+                        onClick={() => {
+                          setSpotlightEnabled((current) => {
+                            const next = !current;
+                            if (!next) setSpotlightPinned(false);
+                            return next;
+                          });
+                        }}
+                        className={
+                          'relative inline-flex h-6 w-11 items-center rounded-full transition '
+                          + (spotlightEnabled ? 'bg-amber-500' : 'bg-slate-300')
+                        }
+                      >
+                        <span
+                          className={
+                            'inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform '
+                            + (spotlightEnabled ? 'translate-x-5' : 'translate-x-1')
+                          }
+                        />
+                      </button>
+                    </label>
+                  </div>
+
+                  <div className="mt-3 rounded-lg border border-white/80 bg-white/80 px-3 py-3">
+                    <div className="text-xs font-medium text-slate-900">Current Spotlight Status</div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      {spotlightEnabled ? 'This story is showing in Homepage Spotlight' : 'This story is not showing in Homepage Spotlight'}
+                    </div>
+                    {spotlightEnabled ? (
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-700">
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">
+                          {spotlightPriority.trim() ? `Order: ${spotlightPriority.trim()}` : 'Order: Automatic'}
+                        </span>
+                        {spotlightPinned ? (
+                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-amber-900">
+                            Position: Fixed at top
+                          </span>
+                        ) : null}
+                        {spotlightExpiryTime ? (
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">
+                            Stops showing: {new Date(spotlightExpiryTime).toLocaleString()}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {spotlightEnabled ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                        <span className="block font-medium text-slate-900">Keep at top</span>
+                        <span className="mt-0.5 block text-[11px] text-slate-500">Show this story before other spotlight stories</span>
+                        <span className="mt-2 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={spotlightPinned}
+                            onChange={(e) => setSpotlightPinned(e.target.checked)}
+                          />
+                          <span>{spotlightPinned ? 'Enabled' : 'Off'}</span>
+                        </span>
+                      </label>
+
+                      <div className="grid gap-3 sm:grid-cols-2 sm:col-span-1">
+                        <label className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                          <span className="block font-medium text-slate-900">Order</span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">Lower number shows first. Leave blank for automatic order</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={spotlightPriority}
+                            onChange={(e) => setSpotlightPriority(e.target.value)}
+                            className="mt-2 w-full rounded border border-slate-200 px-2 py-2 text-sm"
+                            placeholder="Automatic"
+                          />
+                        </label>
+
+                        <label className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                          <span className="block font-medium text-slate-900">Stop showing after</span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">Optional. After this time, the story leaves Spotlight automatically</span>
+                          <input
+                            type="datetime-local"
+                            value={spotlightExpiryTime}
+                            onChange={(e) => setSpotlightExpiryTime(e.target.value)}
+                            className="mt-2 w-full rounded border border-slate-200 px-2 py-2 text-sm"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               {/* Cover Image (Upload-only) */}
               <div className="pt-3 border-t border-slate-200">

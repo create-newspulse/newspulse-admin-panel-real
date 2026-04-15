@@ -10,6 +10,7 @@ import {
   archiveArticle,
   restoreArticle,
   deleteArticle,
+  updateArticlePartial,
   updateArticleStatus,
   scheduleArticle,
   unscheduleArticle,
@@ -68,6 +69,22 @@ function isFlagged(a: Article): boolean {
 
 function isAiVerified(a: Article): boolean {
   return !!((a as any)?.aiVerified || (a as any)?.ai_verified || (a as any)?.ai_verified === true || (a as any)?.aiVerifiedAt);
+}
+
+function isSpotlightStory(a: Article): boolean {
+  return !!((a as any)?.spotlightEnabled);
+}
+
+function isSpotlightPinnedStory(a: Article): boolean {
+  return !!((a as any)?.spotlightPinned);
+}
+
+function formatSpotlightExpiry(a: Article): string {
+  const raw = String((a as any)?.spotlightExpiryTime || (a as any)?.spotlightExpiresAt || (a as any)?.spotlightExpiry || '').trim();
+  if (!raw) return '';
+  const ts = Date.parse(raw);
+  if (Number.isNaN(ts)) return '';
+  return new Date(ts).toLocaleString();
 }
 
 function getLocationTags(a: Article): string[] {
@@ -212,6 +229,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
+  const canManageSpotlight = role === 'admin' || role === 'founder';
 
   // Build a stable fetch params object so react-query doesn't refetch on every render
   // when the parent passes a freshly-created `params` object.
@@ -297,6 +315,12 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     mutationFn: (id: string) => unscheduleArticle(id),
     onSuccess: () => toast.success('Unscheduled'),
     onError: (err: any) => toast.error(normalizeError(err, 'Unschedule failed').message),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
+  });
+  const mutateSpotlight = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<Article>; successMessage: string }) => updateArticlePartial(id, patch),
+    onSuccess: (_data, vars) => toast.success(vars.successMessage),
+    onError: (err: any) => toast.error(normalizeError(err, 'Spotlight update failed').message),
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
   });
   const mutateDeleteHard = useMutation({
@@ -682,14 +706,35 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     const tags = getTags(a).map((t) => norm(t));
     const pti = needsPtiReview(a);
     const ai = isAiVerified(a);
+    const spotlight = isSpotlightStory(a);
+    const spotlightPinned = isSpotlightPinnedStory(a);
+    const spotlightPriority = (a as any)?.spotlightPriority;
 
     return (
       <div className="flex flex-wrap gap-1">
         {pti && <span className="px-2 py-0.5 rounded-full bg-amber-700 text-white text-[10px]">PTI</span>}
         {ai && <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px]">AI-Verified</span>}
+        {spotlight && <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px]">Spotlight</span>}
+        {spotlightPinned && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] border border-amber-300">Pinned</span>}
+        {spotlight && spotlightPriority != null && spotlightPriority !== '' ? (
+          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] border border-slate-200">Priority {spotlightPriority}</span>
+        ) : null}
         {tags.includes('flagged') && <span className="px-2 py-0.5 rounded-full bg-red-700 text-white text-[10px]">Flagged</span>}
       </div>
     );
+  };
+
+  const SpotlightMeta = ({ a }: { a: Article }) => {
+    if (!isSpotlightStory(a)) return null;
+    const expiry = formatSpotlightExpiry(a);
+    const priority = (a as any)?.spotlightPriority;
+    const bits = [
+      isSpotlightPinnedStory(a) ? 'Pinned' : '',
+      priority != null && priority !== '' ? `Priority ${priority}` : '',
+      expiry ? `Expires ${expiry}` : '',
+    ].filter(Boolean);
+    if (!bits.length) return null;
+    return <div className="mt-1 text-[11px] text-amber-800">{bits.join(' • ')}</div>;
   };
 
   const LocationBadge = ({ a }: { a: Article }) => {
@@ -718,6 +763,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       status: st,
       relatedArticleIds: [],
     };
+    const spotlightEnabled = isSpotlightStory(a);
+    const spotlightPinned = isSpotlightPinnedStory(a);
 
     return (
       <div className="flex items-center justify-end gap-3 flex-nowrap whitespace-nowrap">
@@ -732,6 +779,55 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             navigate(`/admin/articles/${id}/edit`);
           }}
         />
+
+        {canManageSpotlight && !spotlightEnabled && (
+          <ActionLink
+            label="Add to Spotlight"
+            tone="amber"
+            onClick={() => {
+              logNewsTableAction('spotlight add click', {
+                ...baseLogPayload,
+                route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                payload: { spotlightEnabled: true },
+              });
+              mutateSpotlight.mutate({ id, patch: { spotlightEnabled: true }, successMessage: 'Added to Spotlight' });
+            }}
+          />
+        )}
+
+        {canManageSpotlight && spotlightEnabled && (
+          <ActionLink
+            label="Remove from Spotlight"
+            tone="slate"
+            onClick={() => {
+              logNewsTableAction('spotlight remove click', {
+                ...baseLogPayload,
+                route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                payload: { spotlightEnabled: false, spotlightPinned: false },
+              });
+              mutateSpotlight.mutate({ id, patch: { spotlightEnabled: false, spotlightPinned: false }, successMessage: 'Removed from Spotlight' });
+            }}
+          />
+        )}
+
+        {canManageSpotlight && spotlightEnabled && (
+          <ActionLink
+            label={spotlightPinned ? 'Unpin Spotlight' : 'Pin to Spotlight'}
+            tone="amber"
+            onClick={() => {
+              logNewsTableAction('spotlight pin click', {
+                ...baseLogPayload,
+                route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                payload: { spotlightEnabled: true, spotlightPinned: !spotlightPinned },
+              });
+              mutateSpotlight.mutate({
+                id,
+                patch: { spotlightEnabled: true, spotlightPinned: !spotlightPinned },
+                successMessage: spotlightPinned ? 'Spotlight pin removed' : 'Pinned to Spotlight',
+              });
+            }}
+          />
+        )}
 
         {st === 'draft' && (
           <>
@@ -1043,6 +1139,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                                 <div className="mt-0.5 text-xs text-slate-500">By {author}</div>
                               ) : null}
                               <div className="mt-1"><RowBadges a={a} /></div>
+                              <SpotlightMeta a={a} />
                             </div>
                           </div>
                         </td>
@@ -1100,6 +1197,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                         <div className="mt-0.5 text-xs text-slate-500">By {getAuthorName(a)}</div>
                       ) : null}
                       <div className="mt-1"><RowBadges a={a} /></div>
+                      <SpotlightMeta a={a} />
                     </div>
                     <div onClick={(e) => e.stopPropagation()}>{renderActions(a)}</div>
                   </div>

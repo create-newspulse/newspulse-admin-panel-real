@@ -47,6 +47,12 @@ export interface Article {
   trustScore?: number;
   // Flags + metadata used by frontend filters
   isBreaking?: boolean;
+  spotlightEnabled?: boolean;
+  spotlightPinned?: boolean;
+  spotlightPriority?: number;
+  spotlightExpiryTime?: string;
+  spotlightExpiresAt?: string;
+  spotlightExpiry?: string;
   tags?: string[];
   track?: string;
   trackName?: string;
@@ -366,10 +372,21 @@ export async function publishArticle(id: string, publishedAt?: string, extra?: P
   return res.data as any;
 }
 
-export async function retryArticleTranslation(id: string) {
-  // Contract: POST /admin-api/articles/:id/retry-translation
+export async function retryArticleTranslation(id: string, opts?: { languages?: string[] }) {
   const encoded = encodeURIComponent(id);
-  const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/retry-translation`);
+  const payload = Array.isArray(opts?.languages) && opts?.languages.length > 0
+    ? { languages: opts.languages }
+    : undefined;
+  const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/retry-translation`, payload);
+  return res.data as any;
+}
+
+export async function requeueArticleTranslations(id: string, opts?: { languages?: string[] }) {
+  const encoded = encodeURIComponent(id);
+  const payload = Array.isArray(opts?.languages) && opts?.languages.length > 0
+    ? { languages: opts.languages }
+    : undefined;
+  const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/requeue-translations`, payload);
   return res.data as any;
 }
 
