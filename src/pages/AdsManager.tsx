@@ -2,6 +2,7 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi, api } from '@/lib/api';
+import { listArticles, type Article } from '@/lib/api/articles';
 import { useAuth } from '@context/AuthContext';
 import {
   type AdInquiry,
@@ -274,88 +275,6 @@ function defaultMediaKit(): MediaKitDoc {
         {
           title: 'Intro Price (Current)',
           subtitle: 'Best for early partners',
-      brandedProducts: [
-        {
-          productKey: 'SPONSORED_FEATURE',
-          name: 'Sponsored Feature',
-          description: 'Premium branded content block inside the homepage content flow with image, headline, short summary, CTA, and clear Sponsored Feature label.',
-          pricingPeriods: ['1d', '3d', '7d', '15d', '1m'],
-          pricingTables: [
-            {
-              title: 'Intro Price (Current)',
-              subtitle: 'Best for early partners',
-              prices: {
-                '1d': 1500,
-                '3d': 4200,
-                '7d': 8500,
-                '15d': 16000,
-                '1m': 28000,
-              },
-            },
-            {
-              title: 'Standard Price (Official)',
-              subtitle: 'Regular rate card',
-              prices: {
-                '1d': 2000,
-                '3d': 5500,
-                '7d': 12000,
-                '15d': 22000,
-                '1m': 40000,
-              },
-            },
-          ],
-        },
-        {
-          productKey: 'SPONSORED_ARTICLE',
-          name: 'Sponsored Article',
-          description: 'Hosted branded article page on NewsPulse with clear sponsored label, feature image, article body, CTA, and linked destination.',
-          pricingPeriods: ['perArticle'],
-          pricingTables: [
-            {
-              title: 'Intro Price (Current)',
-              subtitle: 'Best for early partners',
-              prices: {
-                perArticle: 6000,
-              },
-            },
-            {
-              title: 'Standard Price (Official)',
-              subtitle: 'Regular rate card',
-              prices: {
-                perArticle: 9000,
-              },
-            },
-          ],
-        },
-        {
-          productKey: 'SPONSORED_FEATURE_ARTICLE_COMBO',
-          name: 'Combo - Sponsored Feature + Sponsored Article',
-          description: 'Homepage Sponsored Feature placement plus full hosted Sponsored Article as one bundled campaign.',
-          pricingPeriods: ['3d', '7d', '15d', '1m'],
-          pricingTables: [
-            {
-              title: 'Intro Price (Current)',
-              subtitle: 'Best for early partners',
-              prices: {
-                '3d': 9500,
-                '7d': 18000,
-                '15d': 26000,
-                '1m': 35000,
-              },
-            },
-            {
-              title: 'Standard Price (Official)',
-              subtitle: 'Regular rate card',
-              prices: {
-                '3d': 12000,
-                '7d': 24000,
-                '15d': 34000,
-                '1m': 45000,
-              },
-            },
-          ],
-        },
-      ],
           prices: {
             '1d': 1500,
             '3d': 4000,
@@ -382,6 +301,89 @@ function defaultMediaKit(): MediaKitDoc {
       ],
       bookingEmail: 'newspulse.ads@gmail.com',
     },
+    brandedProducts: [
+      {
+        productKey: 'SPONSORED_FEATURE',
+        name: 'Sponsored Feature',
+        description: 'Premium homepage promo card with image, headline, short summary, CTA, and click destination.',
+        pricingPeriods: ['1d', '3d', '7d', '15d', '1m'],
+        pricingTables: [
+          {
+            title: 'Intro Price (Current)',
+            subtitle: 'Best for early partners',
+            prices: {
+              '1d': 1500,
+              '3d': 4200,
+              '7d': 8500,
+              '15d': 16000,
+              '1m': 28000,
+            },
+          },
+          {
+            title: 'Standard Price (Official)',
+            subtitle: 'Regular rate card',
+            prices: {
+              '1d': 2000,
+              '3d': 5500,
+              '7d': 12000,
+              '15d': 22000,
+              '1m': 40000,
+            },
+          },
+        ],
+      },
+      {
+        productKey: 'SPONSORED_ARTICLE',
+        name: 'Sponsored Article',
+        description: 'Full sponsored article page on NewsPulse with sponsor disclosure, CTA, and destination link.',
+        pricingPeriods: ['perArticle'],
+        pricingTables: [
+          {
+            title: 'Intro Price (Current)',
+            subtitle: 'Best for early partners',
+            prices: {
+              perArticle: 6000,
+            },
+          },
+          {
+            title: 'Standard Price (Official)',
+            subtitle: 'Regular rate card',
+            prices: {
+              perArticle: 9000,
+            },
+          },
+        ],
+      },
+      {
+        productKey: 'SPONSORED_FEATURE_ARTICLE_COMBO',
+        name: 'Combo — Sponsored Feature + Sponsored Article',
+        description: 'Sponsored Feature on the homepage plus one full Sponsored Article as one combo campaign.',
+        pricingPeriods: ['3d', '7d', '15d', '1m'],
+        pricingTables: [
+          {
+            title: 'Intro Price (Current)',
+            subtitle: 'Best for early partners',
+            prices: {
+              '3d': 9500,
+              '7d': 18000,
+              '15d': 26000,
+              '1m': 35000,
+            },
+            notes: ['For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.'],
+          },
+          {
+            title: 'Standard Price (Official)',
+            subtitle: 'Regular rate card',
+            prices: {
+              '3d': 12000,
+              '7d': 24000,
+              '15d': 34000,
+              '1m': 45000,
+            },
+          },
+        ],
+      },
+    ],
     rateCards: [
       normalizeRateCard({
         placementKey: 'HOME_728x90',
@@ -607,6 +609,34 @@ type SponsorAd = {
   isActive: boolean;
   updatedAt?: string | null;
   createdAt?: string | null;
+  productType?: 'STANDARD_AD' | 'SPONSORED_FEATURE' | null;
+  sponsorBrandName?: string | null;
+  internalCampaignName?: string | null;
+  headline?: string | null;
+  shortSummary?: string | null;
+  ctaText?: string | null;
+  destinationUrl?: string | null;
+  placement?: string | null;
+  linkedSponsoredArticleId?: string | null;
+  linkedSponsoredArticleTitle?: string | null;
+  linkedSponsoredArticleUrl?: string | null;
+};
+
+type SponsoredFeaturePlacement = 'HOMEPAGE_SPONSORED_FEATURE';
+type AdProductMode = 'standard-ad' | 'sponsored-feature';
+
+const SPONSORED_FEATURE_STORAGE_SLOT: AdSlot = 'HOME_BILLBOARD_970x250';
+const SPONSORED_FEATURE_PRODUCT_TYPE = 'SPONSORED_FEATURE';
+const SPONSORED_FEATURE_PLACEMENT_LABEL = 'Homepage Sponsored Feature';
+const SPONSORED_FEATURE_PLACEMENTS: Array<{ value: SponsoredFeaturePlacement; label: string }> = [
+  { value: 'HOMEPAGE_SPONSORED_FEATURE', label: SPONSORED_FEATURE_PLACEMENT_LABEL },
+];
+
+type SponsoredArticleOption = {
+  id: string;
+  title: string;
+  slug?: string;
+  status?: string;
 };
 
 // Slots that have placement toggles in the UI.
@@ -743,6 +773,35 @@ function formatAdScheduleRange(startAt?: string | null, endAt?: string | null): 
   if (startAt && endAt) return `${formatAdScheduleDateTime(startAt)} → ${formatAdScheduleDateTime(endAt)}`;
   if (startAt) return `Starts: ${formatAdScheduleDateTime(startAt)}`;
   return `Ends: ${formatAdScheduleDateTime(endAt)}`;
+}
+
+function normalizeSponsoredFeaturePlacement(value: unknown): SponsoredFeaturePlacement | '' {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  if (raw === 'HOMEPAGE_SPONSORED_FEATURE') return 'HOMEPAGE_SPONSORED_FEATURE';
+  if (raw === 'HOME_PAGE_SPONSORED_FEATURE') return 'HOMEPAGE_SPONSORED_FEATURE';
+  return '';
+}
+
+function isSponsoredArticleRecord(article: any): boolean {
+  if (!article || typeof article !== 'object') return false;
+  if (article.isSponsored === true || article.sponsored === true) return true;
+
+  const tags = Array.isArray(article.tags) ? article.tags : [];
+  return tags.some((tag) => {
+    const normalized = String(tag || '').trim().toLowerCase();
+    return normalized === 'sponsored' || normalized === 'sponsored-article';
+  });
+}
+
+function isSponsoredFeatureAd(ad: SponsorAd | null | undefined): boolean {
+  if (!ad) return false;
+  return ad.productType === SPONSORED_FEATURE_PRODUCT_TYPE || normalizeSponsoredFeaturePlacement(ad.placement) === 'HOMEPAGE_SPONSORED_FEATURE';
+}
+
+function displayPlacementLabel(ad: SponsorAd): string {
+  if (isSponsoredFeatureAd(ad)) return SPONSORED_FEATURE_PLACEMENT_LABEL;
+  return slotLabel(String(ad.slot || ''));
 }
 
 function toDatetimeLocalValue(value?: string | null): string {
@@ -893,6 +952,7 @@ function emptyPlacementFieldShape(): Record<PlacementSlotOption, PlacementFieldS
 }
 
 type AdFormState = {
+  mode: AdProductMode;
   slot: AdSlot | '';
   title: string;
   imageUrl: string;
@@ -902,9 +962,20 @@ type AdFormState = {
   startAt: string; // datetime-local string
   endAt: string;
   isActive: boolean;
+  sponsorBrandName: string;
+  internalCampaignName: string;
+  headline: string;
+  shortSummary: string;
+  ctaText: string;
+  destinationUrl: string;
+  placement: SponsoredFeaturePlacement | '';
+  linkedSponsoredArticleId: string;
+  linkedSponsoredArticleTitle: string;
+  linkedSponsoredArticleUrl: string;
 };
 
 const emptyForm = (): AdFormState => ({
+  mode: 'standard-ad',
   slot: '',
   title: '',
   imageUrl: '',
@@ -914,9 +985,24 @@ const emptyForm = (): AdFormState => ({
   startAt: '',
   endAt: '',
   isActive: true,
+  sponsorBrandName: '',
+  internalCampaignName: '',
+  headline: '',
+  shortSummary: '',
+  ctaText: '',
+  destinationUrl: '',
+  placement: 'HOMEPAGE_SPONSORED_FEATURE',
+  linkedSponsoredArticleId: '',
+  linkedSponsoredArticleTitle: '',
+  linkedSponsoredArticleUrl: '',
 });
 
 function normalizeAd(raw: any): SponsorAd {
+  const sponsoredFeature = raw?.sponsoredFeature && typeof raw.sponsoredFeature === 'object'
+    ? raw.sponsoredFeature
+    : {};
+  const productType = String(raw?.productType ?? raw?.product_type ?? sponsoredFeature?.productType ?? '').trim().toUpperCase();
+  const placement = normalizeSponsoredFeaturePlacement(raw?.placement ?? raw?.sponsoredPlacement ?? sponsoredFeature?.placement);
   return {
     id: String(raw?.id ?? raw?._id ?? ''),
     slot: canonicalSlot(raw?.slot ?? ''),
@@ -930,6 +1016,17 @@ function normalizeAd(raw: any): SponsorAd {
     isActive: Boolean(raw?.isActive ?? raw?.active ?? false),
     updatedAt: raw?.updatedAt ?? raw?.updated ?? null,
     createdAt: raw?.createdAt ?? null,
+    productType: productType === SPONSORED_FEATURE_PRODUCT_TYPE ? 'SPONSORED_FEATURE' : 'STANDARD_AD',
+    sponsorBrandName: String(raw?.sponsorBrandName ?? raw?.sponsorName ?? sponsoredFeature?.sponsorBrandName ?? '').trim() || null,
+    internalCampaignName: String(raw?.internalCampaignName ?? sponsoredFeature?.internalCampaignName ?? '').trim() || null,
+    headline: String(raw?.headline ?? sponsoredFeature?.headline ?? raw?.title ?? '').trim() || null,
+    shortSummary: String(raw?.shortSummary ?? sponsoredFeature?.shortSummary ?? '').trim() || null,
+    ctaText: String(raw?.ctaText ?? sponsoredFeature?.ctaText ?? '').trim() || null,
+    destinationUrl: String(raw?.destinationUrl ?? sponsoredFeature?.destinationUrl ?? raw?.targetUrl ?? raw?.target_url ?? '').trim() || null,
+    placement: placement || null,
+    linkedSponsoredArticleId: String(raw?.linkedSponsoredArticleId ?? sponsoredFeature?.linkedSponsoredArticleId ?? '').trim() || null,
+    linkedSponsoredArticleTitle: String(raw?.linkedSponsoredArticleTitle ?? sponsoredFeature?.linkedSponsoredArticleTitle ?? '').trim() || null,
+    linkedSponsoredArticleUrl: String(raw?.linkedSponsoredArticleUrl ?? sponsoredFeature?.linkedSponsoredArticleUrl ?? '').trim() || null,
   };
 }
 
@@ -969,6 +1066,8 @@ export default function AdsManager() {
 
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [sponsoredArticleOptions, setSponsoredArticleOptions] = React.useState<SponsoredArticleOption[]>([]);
+  const [sponsoredArticlesLoading, setSponsoredArticlesLoading] = React.useState(false);
 
   const [mediaKit, setMediaKit] = React.useState<MediaKitDoc>(() => defaultMediaKit());
   const [mediaKitSource, setMediaKitSource] = React.useState<'default' | 'saved'>('default');
@@ -1699,6 +1798,11 @@ export default function AdsManager() {
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
 
+  const sponsoredFeatureAds = React.useMemo(
+    () => ads.filter((ad) => isSponsoredFeatureAd(ad)),
+    [ads]
+  );
+
   React.useEffect(() => {
     setAdImagePreviewBroken(false);
   }, [form.imageUrl]);
@@ -1784,62 +1888,158 @@ export default function AdsManager() {
     return true;
   }, []);
 
+  const loadSponsoredArticles = React.useCallback(async () => {
+    setSponsoredArticlesLoading(true);
+    try {
+      const result = await listArticles({ page: 1, limit: 100, sort: '-updatedAt' });
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const next = rows
+        .filter((article) => isSponsoredArticleRecord(article))
+        .map((article: Article) => ({
+          id: String(article._id || '').trim(),
+          title: String(article.title || 'Untitled').trim() || 'Untitled',
+          slug: String(article.slug || '').trim() || undefined,
+          status: String(article.status || article.state || '').trim() || undefined,
+        }))
+        .filter((article) => article.id);
+      setSponsoredArticleOptions(next);
+    } catch {
+      setSponsoredArticleOptions([]);
+    } finally {
+      setSponsoredArticlesLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadSponsoredArticles();
+  }, [loadSponsoredArticles]);
+
+  const buildAdPayloadFromForm = React.useCallback((draft: AdFormState) => {
+    const priorityNum = Number(draft.priority);
+    if (!Number.isFinite(priorityNum)) {
+      throw new Error('Priority must be a number');
+    }
+
+    const startAtIso = fromDatetimeLocalValue(draft.startAt);
+    const endAtIso = fromDatetimeLocalValue(draft.endAt);
+
+    if (draft.startAt.trim() && !startAtIso) {
+      throw new Error('Start Date & Time must be a valid date/time');
+    }
+    if (draft.endAt.trim() && !endAtIso) {
+      throw new Error('End Date & Time must be a valid date/time');
+    }
+    if (startAtIso && endAtIso && new Date(startAtIso).getTime() > new Date(endAtIso).getTime()) {
+      throw new Error('Start Date & Time must be before End Date & Time');
+    }
+
+    const imageUrl = String(draft.imageUrl || '').trim();
+    if (!imageUrl) {
+      throw new Error(draft.mode === 'sponsored-feature' ? 'Cover Image is required' : 'Image URL is required');
+    }
+
+    if (draft.mode === 'sponsored-feature') {
+      const sponsorBrandName = String(draft.sponsorBrandName || '').trim();
+      const internalCampaignName = String(draft.internalCampaignName || '').trim();
+      const headline = String(draft.headline || '').trim();
+      const shortSummary = String(draft.shortSummary || '').trim();
+      const ctaText = String(draft.ctaText || '').trim();
+      const destinationUrl = String(draft.destinationUrl || '').trim();
+      const placement = normalizeSponsoredFeaturePlacement(draft.placement) || 'HOMEPAGE_SPONSORED_FEATURE';
+
+      if (!sponsorBrandName) throw new Error('Sponsor / Brand Name is required');
+      if (!internalCampaignName) throw new Error('Internal Campaign Name is required');
+      if (!headline) throw new Error('Headline is required');
+      if (!shortSummary) throw new Error('Short Summary is required');
+      if (!ctaText) throw new Error('CTA Text is required');
+      if (!destinationUrl) throw new Error('Destination URL is required');
+
+      const linkedSponsoredArticleId = String(draft.linkedSponsoredArticleId || '').trim() || null;
+      const linkedSponsoredArticleTitle = String(draft.linkedSponsoredArticleTitle || '').trim() || null;
+      const linkedSponsoredArticleUrl = String(draft.linkedSponsoredArticleUrl || '').trim() || null;
+
+      const payload: any = {
+        slot: SPONSORED_FEATURE_STORAGE_SLOT,
+        title: headline,
+        imageUrl,
+        clickable: true,
+        isClickable: true,
+        targetUrl: destinationUrl,
+        destinationUrl,
+        priority: priorityNum,
+        startAt: startAtIso,
+        endAt: endAtIso,
+        isActive: Boolean(draft.isActive),
+        active: Boolean(draft.isActive),
+        productType: SPONSORED_FEATURE_PRODUCT_TYPE,
+        sponsorBrandName,
+        sponsorName: sponsorBrandName,
+        internalCampaignName,
+        headline,
+        shortSummary,
+        ctaText,
+        placement,
+        linkedSponsoredArticleId,
+        linkedSponsoredArticleTitle,
+        linkedSponsoredArticleUrl,
+      };
+
+      payload.sponsoredFeature = {
+        sponsorBrandName,
+        internalCampaignName,
+        headline,
+        shortSummary,
+        ctaText,
+        destinationUrl,
+        placement,
+        linkedSponsoredArticleId,
+        linkedSponsoredArticleTitle,
+        linkedSponsoredArticleUrl,
+      };
+
+      return payload;
+    }
+
+    if (!draft.slot) {
+      throw new Error('Slot is required');
+    }
+    if (!String(draft.title || '').trim()) {
+      throw new Error('Title is required');
+    }
+    if (draft.clickable && !String(draft.targetUrl || '').trim()) {
+      throw new Error('Target URL is required when Clickable Ad is enabled');
+    }
+
+    return {
+      slot: canonicalSlot(draft.slot),
+      title: String(draft.title || '').trim(),
+      imageUrl,
+      clickable: Boolean(draft.clickable),
+      isClickable: Boolean(draft.clickable),
+      targetUrl: draft.clickable ? String(draft.targetUrl || '').trim() : null,
+      priority: priorityNum,
+      startAt: startAtIso,
+      endAt: endAtIso,
+      isActive: Boolean(draft.isActive),
+      active: Boolean(draft.isActive),
+      productType: 'STANDARD_AD',
+    };
+  }, []);
+
   const hostExternalImageNow = React.useCallback(async () => {
     if (!editingId) return;
     const imageUrl = String(form.imageUrl || '').trim();
     if (!isExternalImageUrl(imageUrl)) return;
-    if (!form.slot) {
-      toast.error('Slot is required');
-      return;
-    }
-    if (!form.title.trim()) {
-      toast.error('Title is required');
-      return;
-    }
-    if (!imageUrl) {
-      toast.error('Image URL is required');
-      return;
-    }
-    if (form.clickable && !form.targetUrl.trim()) {
-      toast.error('Target URL is required when Clickable Ad is enabled');
-      return;
-    }
-    const priorityNum = Number(form.priority);
-    if (!Number.isFinite(priorityNum)) {
-      toast.error('Priority must be a number');
-      return;
-    }
-
-    const startAtIso = fromDatetimeLocalValue(form.startAt);
-    const endAtIso = fromDatetimeLocalValue(form.endAt);
-    if (form.startAt.trim() && !startAtIso) {
-      toast.error('Start At must be a valid date/time');
-      return;
-    }
-    if (form.endAt.trim() && !endAtIso) {
-      toast.error('End At must be a valid date/time');
-      return;
-    }
-    if (startAtIso && endAtIso && new Date(startAtIso).getTime() > new Date(endAtIso).getTime()) {
-      toast.error('Start At must be before End At');
+    try {
+      buildAdPayloadFromForm(form);
+    } catch (err: any) {
+      toast.error(err?.message || 'Please complete the required fields first');
       return;
     }
 
     setHostingExternalImage(true);
     try {
-      const payload: any = {
-        slot: canonicalSlot(form.slot),
-        title: form.title.trim(),
-        imageUrl,
-        clickable: Boolean(form.clickable),
-        isClickable: Boolean(form.clickable),
-        targetUrl: form.clickable ? form.targetUrl.trim() : null,
-        priority: priorityNum,
-        startAt: startAtIso,
-        endAt: endAtIso,
-        isActive: Boolean(form.isActive),
-      };
-      payload.active = payload.isActive;
+      const payload = buildAdPayloadFromForm(form);
 
       const res = await adminApi.put(`/admin/ads/${editingId}`, payload);
       const updated = normalizeAd(res?.data?.ad ?? res?.data);
@@ -1852,7 +2052,7 @@ export default function AdsManager() {
     } finally {
       setHostingExternalImage(false);
     }
-  }, [adminApi, editingId, form, isExternalImageUrl]);
+  }, [adminApi, buildAdPayloadFromForm, editingId, form, isExternalImageUrl]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -1865,19 +2065,49 @@ export default function AdsManager() {
     setModalOpen(true);
   };
 
+  const openCreateSponsoredFeature = () => {
+    setEditingId(null);
+    setForm({
+      ...emptyForm(),
+      mode: 'sponsored-feature',
+      slot: SPONSORED_FEATURE_STORAGE_SLOT,
+      clickable: true,
+      placement: 'HOMEPAGE_SPONSORED_FEATURE',
+    });
+    setAdImageFile(null);
+    setAdImageUploading(false);
+    setAdImageUploadProgress(null);
+    setHostingExternalImage(false);
+    setAdImagePreviewBroken(false);
+    setModalOpen(true);
+  };
+
   const openEdit = (ad: SponsorAd) => {
     setEditingId(ad.id);
-    const clickable = typeof ad.clickable === 'boolean' ? ad.clickable : Boolean((ad.targetUrl || '').toString().trim());
+    const isSponsored = isSponsoredFeatureAd(ad);
+    const clickable = isSponsored ? true : (typeof ad.clickable === 'boolean' ? ad.clickable : Boolean((ad.targetUrl || '').toString().trim()));
     setForm({
+      ...emptyForm(),
+      mode: isSponsored ? 'sponsored-feature' : 'standard-ad',
       slot: (canonicalSlot(ad.slot) as AdSlot) || '',
-      title: String(ad.title ?? ''),
+      title: isSponsored ? '' : String(ad.title ?? ''),
       imageUrl: ad.imageUrl || '',
-      targetUrl: String(ad.targetUrl ?? ''),
+      targetUrl: isSponsored ? '' : String(ad.targetUrl ?? ''),
       clickable,
       priority: String(ad.priority ?? 0),
       startAt: toDatetimeLocalValue(ad.startAt),
       endAt: toDatetimeLocalValue(ad.endAt),
       isActive: Boolean(ad.isActive),
+      sponsorBrandName: String(ad.sponsorBrandName ?? ''),
+      internalCampaignName: String(ad.internalCampaignName ?? ''),
+      headline: String(ad.headline ?? ad.title ?? ''),
+      shortSummary: String(ad.shortSummary ?? ''),
+      ctaText: String(ad.ctaText ?? ''),
+      destinationUrl: String(ad.destinationUrl ?? ad.targetUrl ?? ''),
+      placement: normalizeSponsoredFeaturePlacement(ad.placement) || 'HOMEPAGE_SPONSORED_FEATURE',
+      linkedSponsoredArticleId: String(ad.linkedSponsoredArticleId ?? ''),
+      linkedSponsoredArticleTitle: String(ad.linkedSponsoredArticleTitle ?? ''),
+      linkedSponsoredArticleUrl: String(ad.linkedSponsoredArticleUrl ?? ''),
     });
     setAdImageFile(null);
     setAdImageUploading(false);
@@ -2249,47 +2479,15 @@ export default function AdsManager() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!form.slot) {
-      toast.error('Slot is required');
+    let payload: any;
+    try {
+      payload = buildAdPayloadFromForm(form);
+    } catch (err: any) {
+      toast.error(err?.message || 'Please complete the required fields');
       return;
     }
 
-    if (!form.title.trim()) {
-      toast.error('Title is required');
-      return;
-    }
-    if (!form.imageUrl.trim()) {
-      toast.error('Image URL is required');
-      return;
-    }
-    if (form.clickable && !form.targetUrl.trim()) {
-      toast.error('Target URL is required when Clickable Ad is enabled');
-      return;
-    }
-
-    const priorityNum = Number(form.priority);
-    if (!Number.isFinite(priorityNum)) {
-      toast.error('Priority must be a number');
-      return;
-    }
-
-    const startAtIso = fromDatetimeLocalValue(form.startAt);
-    const endAtIso = fromDatetimeLocalValue(form.endAt);
-
-    if (form.startAt.trim() && !startAtIso) {
-      toast.error('Start At must be a valid date/time');
-      return;
-    }
-    if (form.endAt.trim() && !endAtIso) {
-      toast.error('End At must be a valid date/time');
-      return;
-    }
-    if (startAtIso && endAtIso && new Date(startAtIso).getTime() > new Date(endAtIso).getTime()) {
-      toast.error('Start At must be before End At');
-      return;
-    }
-
-    if (startAtIso && endAtIso && startAtIso === endAtIso) {
+    if (payload.startAt && payload.endAt && payload.startAt === payload.endAt) {
       const ok = window.confirm(
         'Warning: Start time and end time are the same. This creates a zero-length schedule window.\n\nSave anyway?'
       );
@@ -2298,22 +2496,6 @@ export default function AdsManager() {
 
     setSaving(true);
     try {
-      const payload: any = {
-        slot: canonicalSlot(form.slot),
-        title: form.title.trim(),
-        imageUrl: form.imageUrl.trim(),
-        clickable: Boolean(form.clickable),
-        isClickable: Boolean(form.clickable),
-        targetUrl: form.clickable ? form.targetUrl.trim() : null,
-        priority: priorityNum,
-        startAt: startAtIso,
-        endAt: endAtIso,
-        isActive: Boolean(form.isActive),
-      };
-
-      // Back-compat: some backends use `active` instead of `isActive`.
-      payload.active = payload.isActive;
-
       const normalizeAndUpsert = (raw: any) => {
         const next = normalizeAd(raw);
         if (!next.id) return;
@@ -2421,6 +2603,12 @@ export default function AdsManager() {
                 className="px-3 py-1 bg-green-600 text-white rounded"
               >
                 Create Ad
+              </button>
+              <button
+                onClick={openCreateSponsoredFeature}
+                className="px-3 py-1 bg-amber-600 text-white rounded"
+              >
+                Create Sponsored Feature
               </button>
             </>
           ) : null}
@@ -3313,8 +3501,8 @@ export default function AdsManager() {
                 <div className="border rounded p-4 bg-white dark:bg-slate-900">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold mb-1">Branded Content Products</div>
-                      <div className="text-sm text-slate-600 dark:text-slate-300">Premium sponsored placements and hosted campaigns for advertiser storytelling.</div>
+                      <div className="text-sm font-semibold mb-1">Sponsored Content Products</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300">Sponsored Feature, Sponsored Article, and Combo Campaign pricing for advertiser bookings.</div>
                     </div>
                     <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
                       Booking: {mediaKit.contactEmail || 'newspulse.ads@gmail.com'}
@@ -3498,6 +3686,109 @@ export default function AdsManager() {
       {tab === 'ads' ? (
         <>
 
+      <div className="border rounded p-4 bg-white dark:bg-slate-900">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Sponsored Content</h2>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              Create Sponsored Feature in Ads Manager. Create Sponsored Article from Add Article.
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={openCreateSponsoredFeature}
+              className="px-3 py-2 rounded bg-amber-600 text-white text-sm"
+            >
+              Create Sponsored Feature
+            </button>
+            <a
+              href="/add?sponsored=1"
+              className="px-3 py-2 rounded border text-sm bg-white text-slate-900 hover:bg-slate-50"
+            >
+              Create Sponsored Article
+            </a>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded border border-slate-200 bg-slate-50 p-3">
+            <div className="text-sm font-medium">Sponsored Feature</div>
+            <div className="mt-1 text-xs text-slate-600">Premium homepage promo card with image, headline, short summary, CTA, and click destination.</div>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 p-3">
+            <div className="text-sm font-medium">Sponsored Article</div>
+            <div className="mt-1 text-xs text-slate-600">Use Add Article and switch on Sponsored Article to keep paid stories separate from normal editorial content.</div>
+          </div>
+          <div className="rounded border border-amber-200 bg-amber-50 p-3">
+            <div className="text-sm font-medium">Combo Campaign</div>
+            <div className="mt-1 text-xs text-amber-950">For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {(sponsoredFeatureAds.length > 0 ? sponsoredFeatureAds : [null]).map((ad, index) => (
+            ad ? (
+              <div key={ad.id} className="rounded border border-slate-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{ad.headline || ad.title || 'Sponsored Feature'}</div>
+                    <div className="mt-1 text-xs text-slate-600">{ad.sponsorBrandName || 'Sponsor / Brand Name not added yet'}</div>
+                  </div>
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${ad.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                    {ad.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                {ad.shortSummary ? (
+                  <div className="mt-2 text-sm text-slate-700 dark:text-slate-200">{ad.shortSummary}</div>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600">
+                  <div>Placement: {SPONSORED_FEATURE_PLACEMENT_LABEL}</div>
+                  <div>Schedule: {formatAdScheduleRange(ad.startAt, ad.endAt)}</div>
+                  <div>Priority: {Number(ad.priority ?? 0)}</div>
+                </div>
+                {ad.linkedSponsoredArticleTitle || ad.linkedSponsoredArticleId ? (
+                  <div className="mt-2 text-xs text-slate-600">
+                    Linked Sponsored Article: {ad.linkedSponsoredArticleTitle || ad.linkedSponsoredArticleId}
+                  </div>
+                ) : null}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(ad)}
+                    className="px-2 py-1 rounded border text-xs"
+                  >
+                    Edit Sponsored Feature
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div key={`empty-sponsored-${index}`} className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+                No Sponsored Features yet. Create one here when you are ready to book a homepage promo card.
+              </div>
+            )
+          ))}
+          <div className="rounded border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm font-medium">Recent Sponsored Articles</div>
+            <div className="mt-1 text-xs text-slate-600">These can be linked from Sponsored Feature for Combo campaigns.</div>
+            <div className="mt-3 space-y-2">
+              {sponsoredArticlesLoading ? (
+                <div className="text-xs text-slate-500">Loading Sponsored Articles…</div>
+              ) : sponsoredArticleOptions.length > 0 ? (
+                sponsoredArticleOptions.slice(0, 6).map((article) => (
+                  <div key={article.id} className="rounded border border-white bg-white px-3 py-2 text-sm">
+                    <div className="font-medium text-slate-900">{article.title}</div>
+                    <div className="mt-1 text-xs text-slate-500">{article.slug ? `/story/${article.slug}` : article.id}{article.status ? ` • ${article.status}` : ''}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-slate-500">No Sponsored Articles found yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4 bg-slate-50 dark:bg-slate-800 border rounded p-3">
         <div className="flex items-center gap-2">
@@ -3599,8 +3890,14 @@ export default function AdsManager() {
 
                 return (
                   <tr key={ad.id} className="border-t">
-                    <td className="p-2 font-mono text-xs">{ad.slot}</td>
-                    <td className="p-2">{ad.title || '-'}</td>
+                    <td className="p-2">
+                      <div className="text-sm font-medium">{displayPlacementLabel(ad)}</div>
+                      <div className="font-mono text-[11px] text-slate-500">{String(ad.slot || '-')}</div>
+                    </td>
+                    <td className="p-2">
+                      <div>{ad.headline || ad.title || '-'}</div>
+                      {ad.sponsorBrandName ? <div className="text-[11px] text-slate-500">{ad.sponsorBrandName}</div> : null}
+                    </td>
                     <td className="p-2">
                       <button
                         type="button"
@@ -3634,7 +3931,7 @@ export default function AdsManager() {
                         {isBrokenImage ? (
                           <span className="text-[11px] text-red-700">Image URL invalid</span>
                         ) : (
-                          <span className="text-[11px] text-slate-500">Click target</span>
+                          <span className="text-[11px] text-slate-500">{isSponsoredFeatureAd(ad) ? 'Sponsored Feature' : 'Click target'}</span>
                         )}
                       </div>
                     </td>
@@ -3681,7 +3978,11 @@ export default function AdsManager() {
             }}
           >
             <div className="flex items-center justify-between p-4 border-b flex-none">
-              <h2 className="text-lg font-semibold">{editingId ? 'Edit Ad' : 'Create Ad'}</h2>
+              <h2 className="text-lg font-semibold">
+                {form.mode === 'sponsored-feature'
+                  ? (editingId ? 'Edit Sponsored Feature' : 'Create Sponsored Feature')
+                  : (editingId ? 'Edit Ad' : 'Create Ad')}
+              </h2>
               <button
                 type="button"
                 onClick={closeModal}
@@ -3695,41 +3996,129 @@ export default function AdsManager() {
             <form onSubmit={submit} className="flex flex-col flex-1 min-h-0">
               <div className="flex-1 min-h-0 overflow-y-auto py-5 px-6 overscroll-contain">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Slot *</label>
-                  {editingId && isLegacySlot(form.slot) ? (
-                    <div className="w-full border rounded px-2 py-2 bg-slate-50 dark:bg-slate-950">
-                      <div className="text-sm">{slotLabel(String(form.slot))}</div>
-                      <div className="text-xs text-slate-500 font-mono">{canonicalSlot(form.slot)}</div>
+                  {form.mode === 'sponsored-feature' ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                      <div className="font-semibold">Sponsored Feature</div>
+                      <div className="mt-1">Premium homepage promo card with image, headline, short summary, CTA, and click destination.</div>
+                      <div className="mt-2 text-xs">For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.</div>
                     </div>
-                  ) : (
-                    <select
-                      className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
-                      value={form.slot}
-                      onChange={(e) => setForm(prev => ({ ...prev, slot: e.target.value as any }))}
-                      required
-                    >
-                      <option value="">Select slot…</option>
-                      {SLOT_OPTIONS.map(s => (
-                        <option key={s} value={s}>{slotDropdownLabel(String(s))}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                  ) : null}
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Title *</label>
-                  <input
-                    className="w-full border rounded px-2 py-2"
-                    value={form.title}
-                    onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
-                    placeholder="e.g. Sponsor: ACME"
-                  />
-                </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {form.mode === 'sponsored-feature' ? (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Placement *</label>
+                      <select
+                        className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
+                        value={form.placement}
+                        onChange={(e) => setForm(prev => ({ ...prev, placement: e.target.value as SponsoredFeaturePlacement }))}
+                      >
+                        {SPONSORED_FEATURE_PLACEMENTS.map((placement) => (
+                          <option key={placement.value} value={placement.value}>{placement.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Sponsor / Brand Name *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.sponsorBrandName}
+                        onChange={(e) => setForm(prev => ({ ...prev, sponsorBrandName: e.target.value }))}
+                        placeholder="Enter sponsor or brand name"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Internal Campaign Name *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.internalCampaignName}
+                        onChange={(e) => setForm(prev => ({ ...prev, internalCampaignName: e.target.value }))}
+                        placeholder="Example: Diwali launch homepage push"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Headline *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.headline}
+                        onChange={(e) => setForm(prev => ({ ...prev, headline: e.target.value }))}
+                        placeholder="Homepage headline"
+                      />
+                    </div>
+
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-sm font-medium">Short Summary *</label>
+                      <textarea
+                        className="w-full border rounded px-2 py-2"
+                        rows={3}
+                        value={form.shortSummary}
+                        onChange={(e) => setForm(prev => ({ ...prev, shortSummary: e.target.value }))}
+                        placeholder="Short homepage summary"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">CTA Text *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.ctaText}
+                        onChange={(e) => setForm(prev => ({ ...prev, ctaText: e.target.value }))}
+                        placeholder="Example: Read More"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Destination URL *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.destinationUrl}
+                        onChange={(e) => setForm(prev => ({ ...prev, destinationUrl: e.target.value }))}
+                        placeholder="https://..."
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Slot *</label>
+                      {editingId && isLegacySlot(form.slot) ? (
+                        <div className="w-full border rounded px-2 py-2 bg-slate-50 dark:bg-slate-950">
+                          <div className="text-sm">{slotLabel(String(form.slot))}</div>
+                          <div className="text-xs text-slate-500 font-mono">{canonicalSlot(form.slot)}</div>
+                        </div>
+                      ) : (
+                        <select
+                          className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
+                          value={form.slot}
+                          onChange={(e) => setForm(prev => ({ ...prev, slot: e.target.value as any }))}
+                          required
+                        >
+                          <option value="">Select slot…</option>
+                          {SLOT_OPTIONS.map(s => (
+                            <option key={s} value={s}>{slotDropdownLabel(String(s))}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Title *</label>
+                      <input
+                        className="w-full border rounded px-2 py-2"
+                        value={form.title}
+                        onChange={(e) => setForm(prev => ({ ...prev, title: e.target.value }))}
+                        placeholder="e.g. Sponsor: ACME"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-sm font-medium">Image URL *</label>
+                  <label className="text-sm font-medium">{form.mode === 'sponsored-feature' ? 'Cover Image *' : 'Image URL *'}</label>
                   <input
                     className="w-full border rounded px-2 py-2"
                     value={form.imageUrl}
@@ -3800,23 +4189,56 @@ export default function AdsManager() {
                   ) : null}
                 </div>
 
-                <div className="space-y-1 md:col-span-2">
-                  <label className="text-sm font-medium">Target URL{form.clickable ? ' *' : ''}</label>
-                  <input
-                    className="w-full border rounded px-2 py-2"
-                    value={form.targetUrl}
-                    onChange={(e) => setForm(prev => ({ ...prev, targetUrl: e.target.value }))}
-                    placeholder="https://..."
-                    required={form.clickable}
-                    disabled={!form.clickable}
-                  />
-                  {!form.clickable && (
-                    <div className="text-xs text-slate-500">View-only ad. Users won't be redirected.</div>
-                  )}
-                </div>
+                {form.mode === 'sponsored-feature' ? (
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-sm font-medium">Optional linked Sponsored Article</label>
+                    <select
+                      className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
+                      value={form.linkedSponsoredArticleId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        const match = sponsoredArticleOptions.find((article) => article.id === nextId);
+                        setForm((prev) => ({
+                          ...prev,
+                          linkedSponsoredArticleId: nextId,
+                          linkedSponsoredArticleTitle: match?.title || '',
+                          linkedSponsoredArticleUrl: match?.slug ? `/story/${match.slug}` : '',
+                          destinationUrl: prev.destinationUrl || (match?.slug ? `/story/${match.slug}` : prev.destinationUrl),
+                        }));
+                      }}
+                    >
+                      <option value="">No linked Sponsored Article</option>
+                      {sponsoredArticleOptions.map((article) => (
+                        <option key={article.id} value={article.id}>
+                          {article.title}{article.status ? ` (${article.status})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-[11px] text-slate-500">
+                      {sponsoredArticlesLoading
+                        ? 'Loading Sponsored Articles…'
+                        : 'For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.'}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-sm font-medium">Target URL{form.clickable ? ' *' : ''}</label>
+                    <input
+                      className="w-full border rounded px-2 py-2"
+                      value={form.targetUrl}
+                      onChange={(e) => setForm(prev => ({ ...prev, targetUrl: e.target.value }))}
+                      placeholder="https://..."
+                      required={form.clickable}
+                      disabled={!form.clickable}
+                    />
+                    {!form.clickable && (
+                      <div className="text-xs text-slate-500">View-only ad. Users won't be redirected.</div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">Priority</label>
+                  <label className="text-sm font-medium">{form.mode === 'sponsored-feature' ? 'Optional priority' : 'Priority'}</label>
                   <input
                     type="number"
                     className="w-full border rounded px-2 py-2"
@@ -3826,7 +4248,7 @@ export default function AdsManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">Active</label>
+                  <label className="text-sm font-medium">Active On/Off</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -3837,27 +4259,36 @@ export default function AdsManager() {
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">Clickable Ad</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={form.clickable}
-                      onChange={(e) => {
-                        const next = e.target.checked;
-                        setForm(prev => ({
-                          ...prev,
-                          clickable: next,
-                          targetUrl: next ? prev.targetUrl : '',
-                        }));
-                      }}
-                    />
-                    <span className="text-sm">Clickable</span>
+                {form.mode === 'standard-ad' ? (
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">Clickable Ad</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={form.clickable}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          setForm(prev => ({
+                            ...prev,
+                            clickable: next,
+                            targetUrl: next ? prev.targetUrl : '',
+                          }));
+                        }}
+                      />
+                      <span className="text-sm">Clickable</span>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">Saved as</label>
+                    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      Sponsored Feature
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">Start At</label>
+                  <label className="text-sm font-medium">Start Date & Time</label>
                   <input
                     type="datetime-local"
                     className="w-full border rounded px-2 py-2"
@@ -3870,7 +4301,7 @@ export default function AdsManager() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">End At</label>
+                  <label className="text-sm font-medium">End Date & Time</label>
                   <input
                     type="datetime-local"
                     className="w-full border rounded px-2 py-2"
@@ -3896,8 +4327,20 @@ export default function AdsManager() {
                     )}
                   </div>
                   <div className="text-xs text-slate-600 dark:text-slate-300">
-                    <div className="font-medium">Click target</div>
-                    <div className="break-all">{(!form.clickable || !form.targetUrl.trim()) ? '(none)' : form.targetUrl.trim()}</div>
+                    {form.mode === 'sponsored-feature' ? (
+                      <>
+                        <div className="font-medium">{form.headline || 'Sponsored Feature headline'}</div>
+                        <div className="mt-1">{form.shortSummary || 'Short Summary will appear here.'}</div>
+                        <div className="mt-2 font-medium">CTA</div>
+                        <div>{form.ctaText || '(CTA Text)'}</div>
+                        <div className="mt-1 break-all">{form.destinationUrl.trim() || '(Destination URL)'}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-medium">Click target</div>
+                        <div className="break-all">{(!form.clickable || !form.targetUrl.trim()) ? '(none)' : form.targetUrl.trim()}</div>
+                      </>
+                    )}
                     <div className="mt-3 font-medium">Schedule</div>
                     <div>{formatAdScheduleRange(form.startAt, form.endAt)}</div>
                   </div>
@@ -3921,7 +4364,7 @@ export default function AdsManager() {
                   className="px-3 py-2 rounded bg-blue-600 text-white"
                   disabled={saving}
                 >
-                  {saving ? 'Saving…' : (editingId ? 'Save Changes' : 'Create Ad')}
+                  {saving ? 'Saving…' : (form.mode === 'sponsored-feature' ? (editingId ? 'Save Sponsored Feature' : 'Create Sponsored Feature') : (editingId ? 'Save Changes' : 'Create Ad'))}
                 </button>
               </div>
             </form>

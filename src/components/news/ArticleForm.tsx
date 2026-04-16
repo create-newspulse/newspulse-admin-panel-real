@@ -389,6 +389,7 @@ interface ArticleFormProps {
   onDone?: () => void;
   userRole?: 'writer'|'editor'|'admin'|'founder';
   onDirtyChange?: (dirty: boolean) => void;
+  defaultSponsored?: boolean;
 }
 
 export const ArticleForm: React.FC<ArticleFormProps> = ({
@@ -400,6 +401,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   onDone = ()=>{},
   userRole='writer',
   onDirtyChange,
+  defaultSponsored = false,
 }) => {
   const navigate = useNavigate();
   // resolve edit id
@@ -578,6 +580,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [state, setState] = useState('');
   const [district, setDistrict] = useState('');
   const [city, setCity] = useState('');
+  const [isSponsoredArticle, setIsSponsoredArticle] = useState(Boolean(defaultSponsored));
+  const [sponsorBrandName, setSponsorBrandName] = useState('');
+  const [sponsorDisclosure, setSponsorDisclosure] = useState('');
+  const [sponsorCtaText, setSponsorCtaText] = useState('');
+  const [sponsorCtaUrl, setSponsorCtaUrl] = useState('');
 
   type Snapshot = {
     title: string;
@@ -601,6 +608,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     state: string;
     district: string;
     city: string;
+    isSponsoredArticle: boolean;
+    sponsorBrandName: string;
+    sponsorDisclosure: string;
+    sponsorCtaText: string;
+    sponsorCtaUrl: string;
   };
 
   // Used for dirty-state + publish reset.
@@ -626,6 +638,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     state: '',
     district: '',
     city: '',
+    isSponsoredArticle: Boolean(defaultSponsored),
+    sponsorBrandName: '',
+    sponsorDisclosure: '',
+    sponsorCtaText: '',
+    sponsorCtaUrl: '',
   };
 
   function resetToNewArticle() {
@@ -654,6 +671,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setState('');
     setDistrict('');
     setCity('');
+    setIsSponsoredArticle(Boolean(defaultSponsored));
+    setSponsorBrandName('');
+    setSponsorDisclosure('');
+    setSponsorCtaText('');
+    setSponsorCtaUrl('');
     setPtiStatus('pending');
     setPtiReasons([]);
     setLangIssues({});
@@ -701,6 +723,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       state: (next?.state ?? state ?? '').toString(),
       district: (next?.district ?? district ?? '').toString(),
       city: (next?.city ?? city ?? '').toString(),
+      isSponsoredArticle: (typeof next?.isSponsoredArticle === 'boolean') ? next.isSponsoredArticle : isSponsoredArticle,
+      sponsorBrandName: (next?.sponsorBrandName ?? sponsorBrandName ?? '').toString(),
+      sponsorDisclosure: (next?.sponsorDisclosure ?? sponsorDisclosure ?? '').toString(),
+      sponsorCtaText: (next?.sponsorCtaText ?? sponsorCtaText ?? '').toString(),
+      sponsorCtaUrl: (next?.sponsorCtaUrl ?? sponsorCtaUrl ?? '').toString(),
     };
   }
 
@@ -727,6 +754,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       state: (s.state || ''),
       district: (s.district || ''),
       city: (s.city || ''),
+      isSponsoredArticle: !!s.isSponsoredArticle,
+      sponsorBrandName: (s.sponsorBrandName || ''),
+      sponsorDisclosure: (s.sponsorDisclosure || ''),
+      sponsorCtaText: (s.sponsorCtaText || ''),
+      sponsorCtaUrl: (s.sponsorCtaUrl || ''),
     };
     return JSON.stringify(normalized);
   }
@@ -1008,6 +1040,37 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setState(String((src as any).state || ''));
       setDistrict(String((src as any).district || ''));
       setCity(String((src as any).city || ''));
+      const incomingSponsored = Boolean(
+        (src as any).isSponsored
+        ?? (src as any).sponsored
+        ?? (src as any).sponsoredArticle?.enabled
+        ?? normalizedTags.some((tag) => ['sponsored', 'sponsored-article'].includes(normalizeTagKey(tag)))
+      );
+      setIsSponsoredArticle(incomingSponsored);
+      setSponsorBrandName(String(
+        (src as any).sponsorBrandName
+        ?? (src as any).sponsorName
+        ?? (src as any).brandName
+        ?? (src as any).sponsoredArticle?.sponsorBrandName
+        ?? ''
+      ));
+      setSponsorDisclosure(String(
+        (src as any).sponsorDisclosure
+        ?? (src as any).sponsoredArticle?.sponsorDisclosure
+        ?? ''
+      ));
+      setSponsorCtaText(String(
+        (src as any).sponsorCtaText
+        ?? (src as any).ctaText
+        ?? (src as any).sponsoredArticle?.ctaText
+        ?? ''
+      ));
+      setSponsorCtaUrl(String(
+        (src as any).sponsorCtaUrl
+        ?? (src as any).ctaUrl
+        ?? (src as any).sponsoredArticle?.ctaUrl
+        ?? ''
+      ));
 
       // Cover image (support both coverImageUrl and imageUrl across environments)
       const incomingCoverField: any = (src as any).coverImage;
@@ -1074,6 +1137,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state: String((src as any).state || ''),
           district: String((src as any).district || ''),
           city: String((src as any).city || ''),
+          isSponsoredArticle: incomingSponsored,
+          sponsorBrandName: String(
+            (src as any).sponsorBrandName
+            ?? (src as any).sponsorName
+            ?? (src as any).brandName
+            ?? ''
+          ),
+          sponsorDisclosure: String((src as any).sponsorDisclosure || ''),
+          sponsorCtaText: String((src as any).sponsorCtaText ?? (src as any).ctaText ?? ''),
+          sponsorCtaUrl: String((src as any).sponsorCtaUrl ?? (src as any).ctaUrl ?? ''),
         });
         setLastSavedSnapshot(s);
         setLastSavedAt(Date.now());
@@ -1516,6 +1589,22 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
         tags: string[];
+        isSponsored?: boolean;
+        sponsored?: boolean;
+        sponsorBrandName?: string;
+        sponsorName?: string;
+        sponsorDisclosure?: string;
+        sponsorCtaText?: string;
+        sponsorCtaUrl?: string;
+        ctaText?: string;
+        ctaUrl?: string;
+        sponsoredArticle?: {
+          enabled: boolean;
+          sponsorBrandName?: string;
+          sponsorDisclosure?: string;
+          ctaText?: string;
+          ctaUrl?: string;
+        };
       } => {
         const categoryKeyRaw = (category || '').trim();
         const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
@@ -1552,6 +1641,20 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const geo = (geoState || geoDistrict || geoCity)
           ? { state: geoState, district: geoDistrict, city: geoCity }
           : undefined;
+        const normalizedTags = (() => {
+          const baseTags = Array.isArray(tags) ? tags : [];
+          if (!isSponsoredArticle) {
+            return baseTags.filter((tag) => {
+              const key = normalizeTagKey(tag);
+              return key !== 'sponsored' && key !== 'sponsored-article';
+            });
+          }
+          return dedupeTags([...baseTags, 'sponsored', 'sponsored-article']);
+        })();
+        const sponsorBrand = trimOrUndef(sponsorBrandName);
+        const sponsorDisclosureText = trimOrUndef(sponsorDisclosure);
+        const sponsorCtaLabel = trimOrUndef(sponsorCtaText);
+        const sponsorCtaLink = trimOrUndef(sponsorCtaUrl);
         return {
           title,
           slug: safeSlug,
@@ -1585,7 +1688,25 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
-          tags: Array.isArray(tags) ? tags : [],
+          tags: normalizedTags,
+          isSponsored: isSponsoredArticle ? true : undefined,
+          sponsored: isSponsoredArticle ? true : undefined,
+          sponsorBrandName: sponsorBrand,
+          sponsorName: sponsorBrand,
+          sponsorDisclosure: sponsorDisclosureText,
+          sponsorCtaText: sponsorCtaLabel,
+          sponsorCtaUrl: sponsorCtaLink,
+          ctaText: sponsorCtaLabel,
+          ctaUrl: sponsorCtaLink,
+          sponsoredArticle: isSponsoredArticle
+            ? {
+                enabled: true,
+                sponsorBrandName: sponsorBrand,
+                sponsorDisclosure: sponsorDisclosureText,
+                ctaText: sponsorCtaLabel,
+                ctaUrl: sponsorCtaLink,
+              }
+            : undefined,
         };
       };
 
@@ -1690,6 +1811,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         payloadKeys: Object.keys(body).sort(),
       });
       if (!title.trim()) throw new Error('Title required');
+      if (isSponsoredArticle && !String(sponsorBrandName || '').trim()) {
+        throw new Error('Sponsor / Brand Name required for Sponsored Article');
+      }
+      if (isSponsoredArticle && !String(sponsorDisclosure || '').trim()) {
+        throw new Error('Sponsor Disclosure required for Sponsored Article');
+      }
+      if ((String(sponsorCtaText || '').trim() && !String(sponsorCtaUrl || '').trim()) || (!String(sponsorCtaText || '').trim() && String(sponsorCtaUrl || '').trim())) {
+        throw new Error('CTA Text and CTA URL should be filled together');
+      }
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryKey) {
         throw new Error('Category required to publish');
       }
@@ -1803,6 +1933,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         state,
         district,
         city,
+        isSponsoredArticle,
+        sponsorBrandName,
+        sponsorDisclosure,
+        sponsorCtaText,
+        sponsorCtaUrl,
       }));
       setLastSavedAt(Date.now());
 
@@ -1999,7 +2134,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -2022,8 +2157,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (!String(category || '').trim()) missing.push('Category');
     if (category && !categoryValidForPublish) missing.push('Valid Category');
     if ((content || '').trim().length < 50) missing.push('Content (min 50 chars)');
+    if (isSponsoredArticle && !String(sponsorBrandName || '').trim()) missing.push('Sponsor / Brand Name');
+    if (isSponsoredArticle && !String(sponsorDisclosure || '').trim()) missing.push('Sponsor Disclosure');
+    if ((String(sponsorCtaText || '').trim() && !String(sponsorCtaUrl || '').trim()) || (!String(sponsorCtaText || '').trim() && String(sponsorCtaUrl || '').trim())) {
+      missing.push('CTA Text + CTA URL');
+    }
     return missing;
-  }, [title, content, category, categoryValidForPublish]);
+  }, [title, content, category, categoryValidForPublish, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const previewEnabled = (title || '').trim().length > 0 && (content || '').trim().length > 0;
   const publishTooltip = !publishEnabled
@@ -2032,7 +2172,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city]);
+  }, [title, slug, summary, content, category, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2347,6 +2487,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <label className="block text-sm font-medium">Content</label>
                 <div className="text-xs text-slate-600">Words: {wordCount}</div>
               </div>
+              {isSponsoredArticle ? (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  Sponsored Article is on. This story will keep sponsor details separate from normal editorial content.
+                </div>
+              ) : null}
               <RichTextEditor
                 value={content}
                 onChange={setContent}
@@ -2682,6 +2827,68 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <option value='scheduled'>Scheduled</option>
                   {(userRole==='admin'||userRole==='founder') && <option value='published'>Published</option>}
                 </select>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-900">Sponsored Article</div>
+                    <div className="mt-1 text-[11px] text-slate-600">Use this only for paid article pages so normal editorial stories stay separate and clean.</div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={isSponsoredArticle}
+                      onChange={(e) => setIsSponsoredArticle(e.target.checked)}
+                    />
+                    Sponsored
+                  </label>
+                </div>
+
+                {isSponsoredArticle ? (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium">Sponsor / Brand Name</label>
+                      <input
+                        value={sponsorBrandName}
+                        onChange={(e) => setSponsorBrandName(e.target.value)}
+                        className="w-full border px-2 py-2 rounded text-sm"
+                        placeholder="Enter sponsor or brand name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium">Sponsor Disclosure</label>
+                      <input
+                        value={sponsorDisclosure}
+                        onChange={(e) => setSponsorDisclosure(e.target.value)}
+                        className="w-full border px-2 py-2 rounded text-sm"
+                        placeholder="Example: Sponsored by Brand Name"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium">CTA Text</label>
+                        <input
+                          value={sponsorCtaText}
+                          onChange={(e) => setSponsorCtaText(e.target.value)}
+                          className="w-full border px-2 py-2 rounded text-sm"
+                          placeholder="Example: Learn More"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium">CTA URL</label>
+                        <input
+                          value={sponsorCtaUrl}
+                          onChange={(e) => setSponsorCtaUrl(e.target.value)}
+                          className="w-full border px-2 py-2 rounded text-sm"
+                          placeholder="https://..."
+                        />
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      When Sponsored is on, this article saves and publishes as a Sponsored Article without changing the normal Add Article flow.
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {status === 'scheduled' && (
                 <div>

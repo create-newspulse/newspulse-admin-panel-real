@@ -12,6 +12,15 @@ export interface Article {
   summary?: string;
   description?: string;
   content?: string;
+  isSponsored?: boolean;
+  sponsored?: boolean;
+  sponsorBrandName?: string;
+  sponsorName?: string;
+  sponsorDisclosure?: string;
+  sponsorCtaText?: string;
+  sponsorCtaUrl?: string;
+  ctaText?: string;
+  ctaUrl?: string;
   imageUrl?: string;
   translationGroupId?: string;
   // Some environments/public site use coverImageUrl instead of imageUrl.
