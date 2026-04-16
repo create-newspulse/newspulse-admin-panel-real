@@ -75,6 +75,25 @@ type MediaKitTickerPricingTable = {
   notes?: string[];
 };
 
+type MediaKitBrandedPricingPeriod = '1d' | '3d' | '7d' | '15d' | '1m' | 'perArticle';
+
+type MediaKitBrandedPricingMap = Partial<Record<MediaKitBrandedPricingPeriod, number>>;
+
+type MediaKitBrandedPricingTable = {
+  title: string;
+  subtitle?: string;
+  prices: MediaKitBrandedPricingMap;
+  notes?: string[];
+};
+
+type MediaKitBrandedProduct = {
+  productKey: string;
+  name: string;
+  description: string;
+  pricingPeriods: MediaKitBrandedPricingPeriod[];
+  pricingTables: MediaKitBrandedPricingTable[];
+};
+
 type MediaKitTickerScrollAds = {
   title: string;
   description: string;
@@ -97,6 +116,7 @@ type MediaKitDoc = {
   updatedAt?: string;
   sections: MediaKitSection[];
   tickerScrollAds: MediaKitTickerScrollAds;
+  brandedProducts: MediaKitBrandedProduct[];
   rateCards: MediaKitRateCard[];
   bundles: MediaKitBundle[];
   policies?: string[];
@@ -109,6 +129,15 @@ const TICKER_SCROLL_PRICING_PERIODS: Array<{ key: MediaKitTickerPricingPeriod; l
   { key: '15d', label: '15 Days' },
   { key: '1m', label: '1 Month' },
   { key: '1y', label: '1 Year' },
+];
+
+const BRANDED_PRODUCT_PRICING_PERIODS: Array<{ key: MediaKitBrandedPricingPeriod; label: string }> = [
+  { key: '1d', label: '1 Day' },
+  { key: '3d', label: '3 Days' },
+  { key: '7d', label: '7 Days' },
+  { key: '15d', label: '15 Days' },
+  { key: '1m', label: '1 Month' },
+  { key: 'perArticle', label: 'Per Article Publish' },
 ];
 
 const TICKER_SCROLL_LANGUAGE_MULTIPLIERS = {
@@ -245,6 +274,88 @@ function defaultMediaKit(): MediaKitDoc {
         {
           title: 'Intro Price (Current)',
           subtitle: 'Best for early partners',
+      brandedProducts: [
+        {
+          productKey: 'SPONSORED_FEATURE',
+          name: 'Sponsored Feature',
+          description: 'Premium branded content block inside the homepage content flow with image, headline, short summary, CTA, and clear Sponsored Feature label.',
+          pricingPeriods: ['1d', '3d', '7d', '15d', '1m'],
+          pricingTables: [
+            {
+              title: 'Intro Price (Current)',
+              subtitle: 'Best for early partners',
+              prices: {
+                '1d': 1500,
+                '3d': 4200,
+                '7d': 8500,
+                '15d': 16000,
+                '1m': 28000,
+              },
+            },
+            {
+              title: 'Standard Price (Official)',
+              subtitle: 'Regular rate card',
+              prices: {
+                '1d': 2000,
+                '3d': 5500,
+                '7d': 12000,
+                '15d': 22000,
+                '1m': 40000,
+              },
+            },
+          ],
+        },
+        {
+          productKey: 'SPONSORED_ARTICLE',
+          name: 'Sponsored Article',
+          description: 'Hosted branded article page on NewsPulse with clear sponsored label, feature image, article body, CTA, and linked destination.',
+          pricingPeriods: ['perArticle'],
+          pricingTables: [
+            {
+              title: 'Intro Price (Current)',
+              subtitle: 'Best for early partners',
+              prices: {
+                perArticle: 6000,
+              },
+            },
+            {
+              title: 'Standard Price (Official)',
+              subtitle: 'Regular rate card',
+              prices: {
+                perArticle: 9000,
+              },
+            },
+          ],
+        },
+        {
+          productKey: 'SPONSORED_FEATURE_ARTICLE_COMBO',
+          name: 'Combo - Sponsored Feature + Sponsored Article',
+          description: 'Homepage Sponsored Feature placement plus full hosted Sponsored Article as one bundled campaign.',
+          pricingPeriods: ['3d', '7d', '15d', '1m'],
+          pricingTables: [
+            {
+              title: 'Intro Price (Current)',
+              subtitle: 'Best for early partners',
+              prices: {
+                '3d': 9500,
+                '7d': 18000,
+                '15d': 26000,
+                '1m': 35000,
+              },
+            },
+            {
+              title: 'Standard Price (Official)',
+              subtitle: 'Regular rate card',
+              prices: {
+                '3d': 12000,
+                '7d': 24000,
+                '15d': 34000,
+                '1m': 45000,
+              },
+            },
+          ],
+        },
+      ],
           prices: {
             '1d': 1500,
             '3d': 4000,
@@ -378,6 +489,10 @@ function formatTickerScrollPeriodLabel(period: MediaKitTickerPricingPeriod): str
   return TICKER_SCROLL_PRICING_PERIODS.find((entry) => entry.key === period)?.label || period;
 }
 
+function formatBrandedProductPeriodLabel(period: MediaKitBrandedPricingPeriod): string {
+  return BRANDED_PRODUCT_PRICING_PERIODS.find((entry) => entry.key === period)?.label || period;
+}
+
 function formatMediaKitAsText(doc: MediaKitDoc): string {
   const lines: string[] = [];
   lines.push(doc.title);
@@ -418,6 +533,24 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
     const bookingEmail = doc.tickerScrollAds.bookingEmail || doc.contactEmail;
     if (bookingEmail) lines.push(`Booking: ${bookingEmail}`);
     lines.push('');
+  }
+
+  if (doc.brandedProducts?.length) {
+    lines.push('Branded Content Products');
+    for (const product of doc.brandedProducts) {
+      lines.push(product.name);
+      if (product.description) lines.push(product.description);
+      for (const table of (product.pricingTables || [])) {
+        lines.push(table.subtitle ? `${table.title} - ${table.subtitle}` : table.title);
+        for (const period of (product.pricingPeriods || [])) {
+          const value = table.prices?.[period];
+          if (value == null) continue;
+          lines.push(`  • ${formatBrandedProductPeriodLabel(period)}: ${formatMoney(value, doc.currencyCode)}`);
+        }
+        for (const note of (table.notes || [])) lines.push(`  • ${note}`);
+      }
+      lines.push('');
+    }
   }
 
   lines.push('Rates');
@@ -950,6 +1083,7 @@ export default function AdsManager() {
     );
     const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : (typeof raw.updated_at === 'string' ? raw.updated_at : base.updatedAt);
     const rawTickerScrollAds = raw.tickerScrollAds ?? raw.tickerScrollAdvertisements ?? raw.ticker_scroll_ads;
+    const rawBrandedProducts = raw.brandedProducts ?? raw.branded_products ?? raw.sponsoredProducts ?? raw.sponsored_products;
 
     const sections = Array.isArray(raw.sections)
       ? raw.sections
@@ -1025,6 +1159,88 @@ export default function AdsManager() {
         pricingTables,
         bookingEmail: String(rawTickerScrollAds.bookingEmail ?? rawTickerScrollAds.contactEmail ?? baseTicker.bookingEmail ?? '').trim() || baseTicker.bookingEmail,
       } as MediaKitTickerScrollAds;
+    })();
+
+    const brandedProductsFromRaw = Array.isArray(rawBrandedProducts)
+      ? rawBrandedProducts
+        .filter(Boolean)
+        .map((product: any) => {
+          const productKey = String(product?.productKey ?? product?.key ?? '').trim();
+          const name = String(product?.name ?? product?.title ?? '').trim() || productKey || 'Product';
+          const baseProduct = base.brandedProducts.find((entry) => entry.productKey === productKey || entry.name === name);
+
+          const pricingPeriods = Array.isArray(product?.pricingPeriods)
+            ? product.pricingPeriods
+              .map((period: any) => String(period).trim())
+              .filter((period: any): period is MediaKitBrandedPricingPeriod => BRANDED_PRODUCT_PRICING_PERIODS.some((entry) => entry.key === period))
+            : (baseProduct?.pricingPeriods || []);
+
+          const rawPricingTables = Array.isArray(product?.pricingTables)
+            ? product.pricingTables
+            : [
+                product?.introPricing ? {
+                  title: 'Intro Price (Current)',
+                  subtitle: 'Best for early partners',
+                  prices: product.introPricing,
+                } : null,
+                product?.standardPricing ? {
+                  title: 'Standard Price (Official)',
+                  subtitle: 'Regular rate card',
+                  prices: product.standardPricing,
+                } : null,
+              ].filter(Boolean);
+
+          const pricingTables = (Array.isArray(rawPricingTables) && rawPricingTables.length > 0)
+            ? rawPricingTables.map((table: any, index: number) => {
+                const baseTable = baseProduct?.pricingTables?.[index];
+                const pricesSource = table?.prices ?? table?.pricing ?? table?.priceByPeriod ?? table?.price_by_period ?? {};
+                const prices: MediaKitBrandedPricingMap = {};
+                for (const period of (pricingPeriods.length ? pricingPeriods : (baseProduct?.pricingPeriods || []))) {
+                  const rawValue = pricesSource?.[period];
+                  if (Number.isFinite(Number(rawValue))) {
+                    prices[period] = Number(rawValue);
+                    continue;
+                  }
+                  const fallbackValue = baseTable?.prices?.[period];
+                  if (Number.isFinite(Number(fallbackValue))) prices[period] = Number(fallbackValue);
+                }
+
+                return {
+                  title: String(table?.title ?? baseTable?.title ?? '').trim() || baseTable?.title || 'Pricing',
+                  subtitle: String(table?.subtitle ?? baseTable?.subtitle ?? '').trim() || baseTable?.subtitle,
+                  prices,
+                  notes: Array.isArray(table?.notes)
+                    ? table.notes.map((note: any) => String(note).trim()).filter(Boolean)
+                    : (baseTable?.notes || []),
+                } as MediaKitBrandedPricingTable;
+              })
+            : (baseProduct?.pricingTables || []);
+
+          return {
+            productKey: productKey || baseProduct?.productKey || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
+            name,
+            description: String(product?.description ?? baseProduct?.description ?? '').trim() || baseProduct?.description || '',
+            pricingPeriods: pricingPeriods.length ? pricingPeriods : (baseProduct?.pricingPeriods || []),
+            pricingTables,
+          } as MediaKitBrandedProduct;
+        })
+        .filter((product: MediaKitBrandedProduct) => product.productKey)
+      : null;
+
+    const brandedProducts = (() => {
+      if (!brandedProductsFromRaw) return base.brandedProducts;
+
+      const rawByKey = new Map<string, MediaKitBrandedProduct>();
+      for (const product of brandedProductsFromRaw) rawByKey.set(product.productKey, product);
+
+      const merged: MediaKitBrandedProduct[] = [];
+      for (const baseProduct of base.brandedProducts) {
+        merged.push(rawByKey.get(baseProduct.productKey) || baseProduct);
+        rawByKey.delete(baseProduct.productKey);
+      }
+
+      for (const leftover of rawByKey.values()) merged.push(leftover);
+      return merged;
     })();
 
     const rateCardsFromRaw = Array.isArray(raw.rateCards)
@@ -1156,6 +1372,7 @@ export default function AdsManager() {
       updatedAt,
       sections,
       tickerScrollAds,
+      brandedProducts,
       rateCards,
       bundles,
       policies,
@@ -3086,6 +3303,71 @@ export default function AdsManager() {
                             ))}
                           </ul>
                         ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {(mediaKit.brandedProducts?.length || 0) > 0 ? (
+                <div className="border rounded p-4 bg-white dark:bg-slate-900">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold mb-1">Branded Content Products</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300">Premium sponsored placements and hosted campaigns for advertiser storytelling.</div>
+                    </div>
+                    <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
+                      Booking: {mediaKit.contactEmail || 'newspulse.ads@gmail.com'}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3">
+                    {(mediaKit.brandedProducts || []).map((product, idx) => (
+                      <div key={`${product.productKey}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium">{product.name}</div>
+                            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{product.description}</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
+                          {(product.pricingTables || []).map((table, tableIndex) => (
+                            <div key={`${product.productKey}-${table.title}-${tableIndex}`} className="rounded border px-3 py-3 bg-white dark:bg-slate-900">
+                              <div>
+                                <div className="text-sm font-medium">{table.title}</div>
+                                {table.subtitle ? (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400">{table.subtitle}</div>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                                {(product.pricingPeriods || []).map((period) => {
+                                  const value = table.prices?.[period];
+                                  if (value == null) return null;
+                                  const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(value, mediaKit.fxRateUsdInr) : null;
+                                  return (
+                                    <div key={`${product.productKey}-${table.title}-${period}`} className="rounded border px-2 py-2 bg-white dark:bg-slate-900">
+                                      <div className="text-[11px] text-slate-500">{formatBrandedProductPeriodLabel(period)}</div>
+                                      <div className="text-sm font-semibold">{formatMoney(value, mediaKit.currencyCode)}</div>
+                                      {usd ? (
+                                        <div className="text-[11px] text-slate-500">≈ {usd}</div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {(table.notes?.length || 0) > 0 ? (
+                                <ul className="mt-3 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                                  {table.notes!.map((note, noteIndex) => (
+                                    <li key={`${product.productKey}-${table.title}-note-${noteIndex}`}>{note}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
