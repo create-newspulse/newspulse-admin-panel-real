@@ -84,6 +84,7 @@ import MyCommunityStories from '@pages/community/MyCommunityStories';
 import ReporterPortal from '@pages/community/ReporterPortal';
 import CommunityHome from '@pages/community/CommunityHome';
 import ReporterContactDirectory from '@pages/community/ReporterContactDirectory';
+import YouthPulseContributorDirectory from '@pages/community/YouthPulseContributorDirectory';
 import ReporterStoriesAdmin from '@pages/community/ReporterStoriesAdmin';
 import JournalistApplications from '@pages/community/JournalistApplications';
 import ReporterPortalPreview from '@pages/community/ReporterPortalPreview';
@@ -268,6 +269,9 @@ function App() {
               <Route path="/community/reporter-queue/:id" element={<ProtectedRoute><LegacyCommunityReporterQueueDetailRedirect /></ProtectedRoute>} />
               {/* Community Hub root */}
               <Route path="/community" element={<ProtectedRoute><LockCheckWrapper><CommunityHome /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/community/youth-pulse-queue" element={<Navigate to="/community/reporter" replace />} />
+              <Route path="/community/youth-pulse" element={<Navigate to="/community/reporter" replace />} />
+              <Route path="/community/youth-pulse-contributors" element={<ProtectedRoute><LockCheckWrapper><YouthPulseContributorDirectory /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
               {/* Community Reporter – Submit Story (admin + public alias) */}
               <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><CommunitySubmitRedirect /></LockCheckWrapper></ProtectedRoute>} />

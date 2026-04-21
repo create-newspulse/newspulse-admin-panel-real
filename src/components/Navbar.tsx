@@ -13,7 +13,7 @@ export default function Navbar() {
 
   // remove unused handleLogout closure (we use inline handler)
 
-  const left = leftNav(role);
+  const left = leftNav(role).filter((item) => item.key !== 'community-hub');
   const right = rightNav(role);
 
   return (

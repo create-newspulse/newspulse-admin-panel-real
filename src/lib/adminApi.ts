@@ -197,6 +197,7 @@ export async function listReporterContacts(q: ReporterContactQuery = {}): Promis
 export type FounderFeatureToggles = {
   communityReporterClosed: boolean;
   reporterPortalClosed: boolean;
+  youthPulseSubmissionsClosed: boolean;
   updatedAt?: string;
 };
 
@@ -229,6 +230,7 @@ function normalizeFounderFeatureToggles(raw: unknown): FounderFeatureToggles {
 
   const explicitCommunityClosed = pickOptionalBoolean(payload, ['communityReporterClosed']);
   const explicitReporterPortalClosed = pickOptionalBoolean(payload, ['reporterPortalClosed']);
+  const explicitYouthPulseClosed = pickOptionalBoolean(payload, ['youthPulseSubmissionsClosed']);
 
   const communityReporterEnabled = pickOptionalBoolean(payload, [
     'communityReporterEnabled',
@@ -243,9 +245,16 @@ function normalizeFounderFeatureToggles(raw: unknown): FounderFeatureToggles {
     'communityMyStoriesEnabled',
   ]);
 
+  const youthPulseSubmissionsEnabled = pickOptionalBoolean(payload, [
+    'youthPulseSubmissionsEnabled',
+    'allowYouthPulseSubmissions',
+    'youthPulseEnabled',
+  ]);
+
   return {
     communityReporterClosed: explicitCommunityClosed ?? (typeof communityReporterEnabled === 'boolean' ? !communityReporterEnabled : false),
     reporterPortalClosed: explicitReporterPortalClosed ?? (typeof reporterPortalEnabled === 'boolean' ? !reporterPortalEnabled : false),
+    youthPulseSubmissionsClosed: explicitYouthPulseClosed ?? (typeof youthPulseSubmissionsEnabled === 'boolean' ? !youthPulseSubmissionsEnabled : false),
     updatedAt: typeof payload.updatedAt === 'string' ? payload.updatedAt : undefined,
   };
 }
@@ -270,6 +279,14 @@ function serializeFounderFeatureTogglePatch(patch: Partial<FounderFeatureToggles
     payload.communityMyStoriesEnabled = reporterPortalEnabled;
   }
 
+  if (typeof patch.youthPulseSubmissionsClosed === 'boolean') {
+    const youthPulseSubmissionsEnabled = !patch.youthPulseSubmissionsClosed;
+    payload.youthPulseSubmissionsClosed = patch.youthPulseSubmissionsClosed;
+    payload.youthPulseSubmissionsEnabled = youthPulseSubmissionsEnabled;
+    payload.allowYouthPulseSubmissions = youthPulseSubmissionsEnabled;
+    payload.youthPulseEnabled = youthPulseSubmissionsEnabled;
+  }
+
   return payload;
 }
 
@@ -289,6 +306,13 @@ function assertFounderFeatureTogglePersistence(
     && persisted.reporterPortalClosed !== requestedPatch.reporterPortalClosed
   ) {
     throw new Error('Feature toggle save could not be verified for Reporter Portal.');
+  }
+
+  if (
+    typeof requestedPatch.youthPulseSubmissionsClosed === 'boolean'
+    && persisted.youthPulseSubmissionsClosed !== requestedPatch.youthPulseSubmissionsClosed
+  ) {
+    throw new Error('Feature toggle save could not be verified for Youth Pulse Submissions.');
   }
 }
 

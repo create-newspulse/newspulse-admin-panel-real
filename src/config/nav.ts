@@ -20,7 +20,8 @@ export const NAV_ITEMS: NavItem[] = [
   // Keep main nav pointing to /admin/articles (alias routes handle others)
   { key:'manage', label:'Manage News', path:'/admin/articles', roles:['editor','admin','founder','moderator'], icon:'📁' },
   { key:'drafts', label:'Draft Desk', path:'/draft-desk', roles:['editor','admin','founder'], icon:'📰' },
-  { key:'community-reporter', label:'Community Reporter Queue', path:'/community/reporter', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
+  { key:'community-hub', label:'Community Hub', path:'/community', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
+  { key:'community-reporter-queue', label:'Community Reporter Queue', path:'/community/reporter', roles:['editor','admin','founder','moderator'], icon:'🗂️' },
   // Founder/Admin oversight for the live reporter workspace
   { key:'reporter-portal', label:'Reporter Portal Admin', path:'/community/portal', roles:['admin','founder'], icon:'👥' },
   { key:'livetv', label:'Live TV', path:'/admin/live', roles:['editor','admin','founder'], icon:'🎥' },
@@ -38,7 +39,6 @@ export const NAV_ITEMS: NavItem[] = [
   // Owner Control Center (single link; module navigation handled inside the pages)
   { key:'soz', label:'Safe Owner Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
-  { key:'youth', label:'Youth Pulse', path:'/admin/youth-pulse', roles:['editor','admin','founder'], icon:'🌐' },
   // Right side utility items
   // Admin global security dashboard (Zero-Trust controls)
   { key:'security', label:'Zero-Trust Security', path:'/admin/security', roles:['admin','founder'], icon:'🧱', rightSide:true, hidden: true },

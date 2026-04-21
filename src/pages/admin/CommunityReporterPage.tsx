@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApi, cleanupOldLowPriorityCommunityStories } from '@/lib/adminApi';
 import { normalizeError, appendError } from '@/lib/error';
-import { fetchCommunityReporterSubmissions, listCommunityReporterQueue, restoreCommunitySubmission, hardDeleteCommunitySubmission } from '@/api/adminCommunityReporterApi';
+import { fetchCommunitySubmissions, listCommunityReporterQueue, restoreCommunitySubmission, hardDeleteCommunitySubmission } from '@/api/adminCommunityReporterApi';
 import { debug } from '@/lib/debug';
 import { useAuth } from '@/context/AuthContext';
 import { useNotify } from '@/components/ui/toast-bridge';
+import { updateArticlePartial } from '@/lib/api/articles';
 import {
   CommunitySubmissionPriority,
   CommunitySubmissionApi,
@@ -16,6 +17,13 @@ import { formatLocation, getAgeGroup, toneToBadgeClasses } from '@/lib/community
 import ReporterProfileDrawer from '@/components/community/ReporterProfileDrawer';
 import { Star } from 'lucide-react';
 import { listReporterContacts as listReporterContactsDirectory, type ReporterContact } from '@/lib/api/reporterDirectory';
+import {
+  buildReviewDraftFromSubmission,
+  buildYouthDecisionPayload,
+  buildYouthDraftPayload,
+  extractArticleId,
+  normalizeYouthPulseSubmission,
+} from '@/lib/youthPulseCommunity';
 
 /*
  * Community Reporter Queue (admin)
@@ -31,6 +39,63 @@ function formatPriorityLabel(priority?: CommunitySubmissionPriority){
   if (priority === 'EDITOR_REVIEW') return '🟡 Editor Review';
   if (priority === 'LOW_PRIORITY') return '🟢 Low Priority';
   return '—';
+}
+
+function isYouthPulseQueueItem(submission: CommunitySubmission): boolean {
+  return (submission as any).sourceType === 'youth-pulse'
+    || (submission as any)?.metadata?.youthPulseCommunity === true
+    || Boolean((submission as any).youthPulseSubmission);
+}
+
+function mapYouthSubmissionToQueueItem(raw: Record<string, any>): CommunitySubmission | null {
+  const youthSubmission = normalizeYouthPulseSubmission(raw);
+  if (!youthSubmission) return null;
+
+  return {
+    id: youthSubmission.id,
+    headline: youthSubmission.title,
+    body: youthSubmission.originalBody,
+    category: youthSubmission.trackLabel || 'Youth Pulse',
+    location: youthSubmission.locationLabel === '—' ? '' : youthSubmission.locationLabel,
+    city: youthSubmission.city || undefined,
+    state: youthSubmission.state || undefined,
+    status: youthSubmission.status === 'rejected'
+      ? 'rejected'
+      : youthSubmission.status === 'approved' || youthSubmission.status === 'published'
+        ? 'approved'
+        : 'pending',
+    linkedArticleId: youthSubmission.linkedArticleId || null,
+    createdAt: youthSubmission.createdAt,
+    userName: youthSubmission.submittedBy,
+    name: youthSubmission.submittedBy,
+    email: youthSubmission.email,
+    contactName: youthSubmission.submittedBy,
+    contactEmail: youthSubmission.email,
+    contactPhone: youthSubmission.phone,
+    contactMethod: youthSubmission.phone ? 'phone' : youthSubmission.email ? 'email' : undefined,
+    reporterName: youthSubmission.submittedBy,
+    reporterLocation: youthSubmission.locationLabel === '—' ? undefined : youthSubmission.locationLabel,
+    reporterVerificationLevel: 'community_default',
+    reporterStatus: 'active',
+    sourceType: 'youth-pulse',
+    sourceLabel: 'Youth Pulse',
+    youthPulseTrack: youthSubmission.track,
+    youthPulseTrackLabel: youthSubmission.trackLabel,
+    youthPulseSubmission: youthSubmission,
+    metadata: {
+      ...(raw.metadata || {}),
+      youthPulseCommunity: true,
+      youthPulseTrack: youthSubmission.track,
+      youthPulseTrackLabel: youthSubmission.trackLabel,
+    },
+    flags: youthSubmission.moderationFlags,
+  };
+}
+
+function getYouthSubmissionModel(submission: CommunitySubmission) {
+  const direct = (submission as any).youthPulseSubmission;
+  if (direct && typeof direct === 'object' && direct.id) return direct;
+  return normalizeYouthPulseSubmission(submission as any);
 }
 
 // Priority rank helper no longer used in sorting; keep for future enhancements
@@ -50,7 +115,7 @@ export default function CommunityReporterPage(){
   // New UI state additions
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'FLAGGED'>('ALL');
   const [aiPickOnly, setAiPickOnly] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<'ALL'|'COMMUNITY'|'VERIFIED_JOURNALISTS'>('ALL');
+  const [sourceFilter, setSourceFilter] = useState<'ALL'|'COMMUNITY_REPORTER'|'YOUTH_PULSE'>('ALL');
   const [reviewMode, setReviewMode] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -331,27 +396,49 @@ export default function CommunityReporterPage(){
   }
 
   // React Query based loading for submissions with server-side filters.
-  const sourceBackend = sourceFilter === 'COMMUNITY' ? 'community' : sourceFilter === 'VERIFIED_JOURNALISTS' ? 'journalists' : undefined;
   const { isLoading, isError } = (window as any).useQueueQueryHook || {};
 
   // Inline lightweight custom hook behavior without external abstraction.
   const [internalLoading, setInternalLoading] = useState(false);
+  async function loadSharedQueueData() {
+    const rawQueue = await listCommunityReporterQueue({
+      status: viewMode === 'pending' ? 'pending' : 'rejected',
+      priority: priorityFilter === 'ALL' ? undefined : priorityFilter,
+      risk: riskFilter === 'ALL' ? undefined : riskFilter,
+      aiPickOnly,
+    });
+
+    const queueItems: CommunitySubmissionApi[] = Array.isArray(rawQueue?.submissions) ? rawQueue.submissions : [];
+    const seenIds = new Set<string>();
+
+    const mappedQueue = queueItems
+      .map((item) => {
+        const youthMapped = mapYouthSubmissionToQueueItem(item as Record<string, any>);
+        return youthMapped || mapRaw(item);
+      })
+      .filter((item) => {
+        if (!item?.id) return false;
+        seenIds.add(item.id);
+        return true;
+      });
+
+    const allSubmissions = await fetchCommunitySubmissions({ status: 'all', page: 1, limit: 300 });
+    const youthFallback = allSubmissions
+      .map((item) => mapYouthSubmissionToQueueItem(item as Record<string, any>))
+      .filter((item): item is CommunitySubmission => Boolean(item))
+      .filter((item) => !seenIds.has(item.id));
+
+    return enrichReporterIdentityIfPossible([...mappedQueue, ...youthFallback]);
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function run() {
       setInternalLoading(true);
       setError(null);
       try {
-        const raw = await listCommunityReporterQueue({
-          status: viewMode === 'pending' ? 'pending' : 'rejected',
-          priority: priorityFilter === 'ALL' ? undefined : priorityFilter,
-          risk: riskFilter === 'ALL' ? undefined : riskFilter,
-          source: sourceBackend,
-          aiPickOnly,
-        });
-        const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-        const mapped = list.map(mapRaw);
-        const enriched = await enrichReporterIdentityIfPossible(mapped);
+        const enriched = await loadSharedQueueData();
+        if (cancelled) return;
         setSubmissions(enriched);
       } catch (e:any) {
         const n = normalizeError(e, 'Failed to load submissions.');
@@ -363,22 +450,12 @@ export default function CommunityReporterPage(){
     }
     run();
     return () => { cancelled = true; };
-  }, [viewMode, priorityFilter, riskFilter, sourceFilter, aiPickOnly]);
+  }, [viewMode, priorityFilter, riskFilter, aiPickOnly]);
 
   async function fetchSubmissions(){
     // Manual refresh (e.g. cleanup or explicit reload) using same param mapping.
     try {
-      const raw = await listCommunityReporterQueue({
-        status: viewMode === 'pending' ? 'pending' : 'rejected',
-        priority: priorityFilter === 'ALL' ? undefined : priorityFilter,
-        risk: riskFilter === 'ALL' ? undefined : riskFilter,
-        source: sourceBackend,
-        aiPickOnly,
-      });
-      debug('[CommunityReporterPage] refresh raw', raw);
-      const list: CommunitySubmissionApi[] = Array.isArray(raw?.submissions) ? raw.submissions : [];
-      const mapped = list.map(mapRaw);
-      const enriched = await enrichReporterNamesIfPossible(mapped);
+      const enriched = await loadSharedQueueData();
       setSubmissions(enriched);
     } catch(e:any) {
       const n = normalizeError(e, 'Failed to load submissions.');
@@ -400,12 +477,18 @@ export default function CommunityReporterPage(){
 
   // Removed unused DecisionResponse type; approve flow now uses CommunityApproveResponse
 
-  const handleDecision = async (submissionId: string, decision: 'approve' | 'reject') => {
+  const handleDecision = async (submission: CommunitySubmission, decision: 'approve' | 'reject') => {
+    const submissionId = submission.id;
     setActionId(submissionId); setError(null);
     try {
+      const youthSubmission = isYouthPulseQueueItem(submission) ? getYouthSubmissionModel(submission) : null;
+      const payload = youthSubmission
+        ? buildYouthDecisionPayload(youthSubmission, buildReviewDraftFromSubmission(youthSubmission), decision)
+        : { decision };
+
       const res = await adminApi.post<CommunityDecisionResponse>(
         `/community-reporter/submissions/${submissionId}/decision`,
-        { decision }
+        payload
       );
       const data = res.data as CommunityDecisionResponse;
 
@@ -416,6 +499,16 @@ export default function CommunityReporterPage(){
       // Normalize submission (handles id/status)
       const normalizedSubmission = mapRaw(data.submission as CommunitySubmissionApi);
       const linkedArticleId = normalizedSubmission.linkedArticleId ?? null;
+
+      if (youthSubmission && decision === 'approve') {
+        const articleId = linkedArticleId || extractArticleId(data as any);
+        if (articleId) {
+          await updateArticlePartial(articleId, {
+            ...buildYouthDraftPayload(youthSubmission, buildReviewDraftFromSubmission(youthSubmission)),
+            status: 'draft',
+          } as any);
+        }
+      }
 
       // Update local cache with full submission payload
       setSubmissions(prev => prev.map(s =>
@@ -523,8 +616,8 @@ export default function CommunityReporterPage(){
   const filteredSubmissions = useMemo(() => {
     // Adjust default sort for pending: verified journalist first
     const sorted = submissions.slice().sort((a, b) => {
-      const aVerifiedJournalist = ((a as any).sourceType === 'journalist') && ((a as any).reporterVerificationLevel === 'verified');
-      const bVerifiedJournalist = ((b as any).sourceType === 'journalist') && ((b as any).reporterVerificationLevel === 'verified');
+      const aVerifiedJournalist = !isYouthPulseQueueItem(a) && ((a as any).sourceType === 'journalist') && ((a as any).reporterVerificationLevel === 'verified');
+      const bVerifiedJournalist = !isYouthPulseQueueItem(b) && ((b as any).sourceType === 'journalist') && ((b as any).reporterVerificationLevel === 'verified');
       if (aVerifiedJournalist && !bVerifiedJournalist) return -1;
       if (!aVerifiedJournalist && bVerifiedJournalist) return 1;
       const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -547,11 +640,8 @@ export default function CommunityReporterPage(){
       })
       .filter(s => {
         if (sourceFilter === 'ALL') return true;
-        const src = (s as any).sourceType as 'community'|'journalist'|undefined;
-        const v = (s as any).reporterVerificationLevel as 'unverified'|'pending'|'verified'|undefined;
-        if (sourceFilter === 'COMMUNITY') return (src !== 'journalist') || (v !== 'verified');
-        // VERIFIED_JOURNALISTS
-        return src === 'journalist' && v === 'verified';
+        if (sourceFilter === 'YOUTH_PULSE') return isYouthPulseQueueItem(s);
+        return !isYouthPulseQueueItem(s);
       })
       .filter(s => aiPickOnly ? (s.aiHighlighted || (typeof s.aiTrendingScore === 'number' && s.aiTrendingScore > 0)) : true)
       .slice();
@@ -567,7 +657,7 @@ export default function CommunityReporterPage(){
       setReviewIndex(i => i + 1);
       return;
     }
-    await handleDecision(currentReviewItem.id, action === 'approve' ? 'approve' : 'reject');
+    await handleDecision(currentReviewItem, action === 'approve' ? 'approve' : 'reject');
     setReviewIndex(i => i + 1);
   }
 
@@ -632,14 +722,14 @@ export default function CommunityReporterPage(){
         {/* Source filter bar */}
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-xs text-slate-600 mr-1">Source:</span>
-          {(['ALL','COMMUNITY','VERIFIED_JOURNALISTS'] as const).map(sv => (
+          {(['ALL','COMMUNITY_REPORTER','YOUTH_PULSE'] as const).map(sv => (
             <button
               key={sv}
               type="button"
               onClick={() => setSourceFilter(sv)}
               className={`px-2 py-1 text-xs rounded border ${sourceFilter===sv ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-700 border-slate-300'}`}
-              title={sv==='VERIFIED_JOURNALISTS' ? 'Only verified journalist submissions' : sv==='COMMUNITY' ? 'Community reporters' : 'Show all sources'}
-            >{sv==='ALL' ? 'All' : sv==='COMMUNITY' ? 'Community' : 'Verified journalists'}</button>
+              title={sv==='YOUTH_PULSE' ? 'Only Youth Pulse submissions' : sv==='COMMUNITY_REPORTER' ? 'Only Community Reporter submissions' : 'Show all sources'}
+            >{sv==='ALL' ? 'All' : sv==='COMMUNITY_REPORTER' ? 'Community Reporter' : 'Youth Pulse'}</button>
           ))}
         </div>
         {/* AI Pick toggle */}
@@ -815,16 +905,19 @@ export default function CommunityReporterPage(){
                     )}
                     {/* Source chips */}
                     {(() => {
-                      const sourceType = (s as any).sourceType as 'community'|'journalist'|undefined;
-                      const v = (s as any).reporterVerificationLevel as 'community_default'|'pending'|'verified'|'limited'|'revoked'|'unverified'|undefined;
-                      if (sourceType === 'journalist' && v === 'verified') {
-                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200" title="Verified Journalist">Verified Journalist ✅</span>;
+                      if (isYouthPulseQueueItem(s)) {
+                        return (
+                          <>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-cyan-100 text-cyan-800 border border-cyan-200" title="Youth Pulse submission">Youth Pulse</span>
+                            {(s as any).youthPulseTrackLabel && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white text-cyan-700 border border-cyan-200" title="Youth Pulse track">
+                                {(s as any).youthPulseTrackLabel}
+                              </span>
+                            )}
+                          </>
+                        );
                       }
-                      if (sourceType === 'journalist' && (v === 'pending' || v === 'limited' || v === 'revoked' || v === 'unverified')) {
-                        const label = v==='pending' ? 'pending' : v==='limited' ? 'limited' : v==='revoked' ? 'revoked' : 'unverified';
-                        return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title={`Journalist (${label})`}>Journalist ({label})</span>;
-                      }
-                      return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-700 border border-purple-200" title="Community Reporter">Community Reporter</span>;
+                      return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-700 border border-purple-200" title="Community Reporter submission">Community Reporter</span>;
                     })()}
                     {typeof (s as any).ethicsStrikes === 'number' && (s as any).ethicsStrikes > 0 && (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 border border-amber-200" title={`Ethics strikes: ${(s as any).ethicsStrikes}`}>⚠ {(s as any).ethicsStrikes}</span>
@@ -929,14 +1022,14 @@ export default function CommunityReporterPage(){
                   {viewMode === 'pending' && String(s.status || '').toUpperCase() !== 'APPROVED' && (
                     <button
                       disabled={actionId === s.id || !s.id || s.id==='missing-id'}
-                      onClick={()=> handleDecision(s.id, 'approve')}
+                      onClick={()=> handleDecision(s, 'approve')}
                       className="px-3 py-1 text-xs rounded bg-green-600 text-white disabled:opacity-60"
                     >Approve</button>
                   )}
                   {viewMode === 'pending' && String(s.status || '').toUpperCase() !== 'REJECTED' && (
                     <button
                       disabled={actionId === s.id || !s.id || s.id==='missing-id'}
-                      onClick={()=> handleDecision(s.id, 'reject')}
+                      onClick={()=> handleDecision(s, 'reject')}
                       className="px-3 py-1 text-xs rounded bg-red-600 text-white disabled:opacity-60"
                     >Reject</button>
                   )}

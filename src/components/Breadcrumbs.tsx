@@ -27,8 +27,10 @@ const Breadcrumbs = () => {
     news: 'Manage News',
     'manage-news': 'Manage News',
     ads: 'Ads Manager',
-    community: 'Community',
+    community: 'Community Hub',
     reporter: 'Community Reporter Queue',
+    'youth-pulse-queue': 'Community Reporter Queue',
+    'youth-pulse-contributors': 'Youth Pulse Contact Directory',
   };
 
   // Full-path overrides for clarity between similarly named areas
@@ -37,7 +39,11 @@ const Breadcrumbs = () => {
     "/admin/security": "Zero-Trust Security",
     "/safeownerzone/security": "Security Center",
     "/admin/safe-owner-zone/security-lockdown": "Security Center",
+    "/community": "Community Hub",
     "/community/reporter": "Community Reporter Queue",
+    "/community/youth-pulse": "Community Reporter Queue",
+    "/community/youth-pulse-queue": "Community Reporter Queue",
+    "/community/youth-pulse-contributors": "Youth Pulse Contact Directory",
     "/community/portal": "Reporter Portal Admin",
     "/admin/community/portal": "Reporter Portal Admin",
     "/broadcast-center": "Broadcast Center",

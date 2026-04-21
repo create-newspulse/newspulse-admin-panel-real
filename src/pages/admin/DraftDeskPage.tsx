@@ -9,6 +9,7 @@ import {
   hardDeleteArticle,
   Article as NPArticle,
 } from '@/lib/api/articles';
+import { normalizeYouthPulseTrack } from '@/lib/youthPulseTracks';
 
 // Extend with optional “community / pro / founder” hints
 type Article = NPArticle & {
@@ -23,8 +24,68 @@ type Article = NPArticle & {
   content?: string;
 };
 
+function normalizeSourceToken(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-');
+}
+
+function getYouthPulseTrackCandidates(a: Article): string[] {
+  const raw = a as any;
+  return [
+    raw?.track,
+    raw?.trackName,
+    raw?.subCategory,
+    raw?.subcategory,
+    raw?.metadata?.track,
+    raw?.metadata?.trackName,
+    raw?.metadata?.youthPulseTrack,
+    raw?.metadata?.youthPulseTrackLabel,
+  ]
+    .filter((value) => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => String(value));
+}
+
+export function isYouthPulseDraft(a: Article): boolean {
+  const raw = a as any;
+  const sourceType = normalizeSourceToken(raw?.sourceType);
+  const sourceLabel = String(raw?.sourceLabel || raw?.metadata?.sourceLabel || '').trim().toLowerCase();
+  const submissionSource = normalizeSourceToken(raw?.submissionSource || raw?.metadata?.submissionSource);
+  const category = normalizeSourceToken(a.category || raw?.subCategory || raw?.subcategory);
+  const hasYouthTrack = getYouthPulseTrackCandidates(a).some((value) => !!normalizeYouthPulseTrack(value));
+
+  if (sourceType === 'youth-pulse') return true;
+  if (sourceLabel === 'youth pulse' || sourceLabel === 'youth pulse community') return true;
+  if (submissionSource === 'youth-pulse') return true;
+  if (category === 'youth-pulse') return true;
+  if (hasYouthTrack) return true;
+  if (raw?.metadata?.youthPulseCommunity === true) return true;
+
+  const text = [
+    a.source,
+    a.origin,
+    a.submittedBy,
+    a.category,
+    raw?.publicLabel,
+    raw?.label,
+    raw?.metadata?.sourceLabel,
+    ...getYouthPulseTrackCandidates(a),
+    Array.isArray(raw?.tags) ? raw.tags.join(' ') : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (text.includes('youth pulse community')) return true;
+  if (text.includes('youth-pulse-community')) return true;
+  if (text.includes('youth pulse')) return true;
+  return false;
+}
+
 function isCommunityDraft(a: Article): boolean {
   const src = (a.source || a.origin || a.submittedBy || '').toLowerCase();
+  if (isYouthPulseDraft(a)) return false;
   if (a.isCommunity) return true;
   if (src.includes('community')) return true;
   if (src.includes('reporter')) return true;
@@ -35,13 +96,14 @@ function isCommunityDraft(a: Article): boolean {
 // Rough classification just for filtering / badges
 function getSourceKind(
   a: Article,
-): 'community' | 'editor' | 'pro' | 'founder' {
+): 'community' | 'youth' | 'editor' | 'pro' | 'founder' {
   const raw = (a.source || a.origin || a.submittedBy || '').toLowerCase();
 
   if (raw.includes('founder') || raw.includes('owner')) return 'founder';
   if (raw.includes('pro') || raw.includes('professional') || raw.includes('journalist')) {
     return 'pro';
   }
+  if (isYouthPulseDraft(a)) return 'youth';
   if (isCommunityDraft(a)) return 'community';
   return 'editor';
 }
@@ -52,7 +114,7 @@ function snippet(txt?: string, n = 150) {
   return clean.length > n ? clean.slice(0, n - 1) + '…' : clean;
 }
 
-function formatLocation(value: unknown): string | null {
+export function formatLocation(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value === 'string') {
     const s = value.trim();
@@ -62,8 +124,10 @@ function formatLocation(value: unknown): string | null {
 
   if (typeof value === 'object') {
     const obj = value as any;
-    // Common backend shape: { city, district, state, isUT, country }
     const parts = [
+      obj?.name,
+      obj?.label,
+      obj?.value,
       obj?.city,
       obj?.district,
       obj?.state,
@@ -72,15 +136,7 @@ function formatLocation(value: unknown): string | null {
       .map((p) => (typeof p === 'string' ? p.trim() : ''))
       .filter(Boolean);
 
-    if (parts.length) return parts.join(', ');
-
-    // Last resort: avoid throwing; provide something readable.
-    try {
-      const json = JSON.stringify(obj);
-      return json && json !== '{}' ? json : null;
-    } catch {
-      return null;
-    }
+    return parts.length ? parts.join(', ') : null;
   }
 
   return null;
@@ -94,7 +150,7 @@ export default function DraftDeskPage() {
   // NEW: status + source filters
   const [statusFilter, setStatusFilter] = useState<'drafts' | 'deleted'>('drafts');
   const [sourceFilter, setSourceFilter] =
-    useState<'all' | 'community' | 'editor' | 'pro' | 'founder'>('all');
+    useState<'all' | 'community' | 'youth' | 'editor' | 'pro' | 'founder'>('all');
 
   const [preview, setPreview] = useState<Article | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -234,7 +290,7 @@ export default function DraftDeskPage() {
           📰 Draft Desk – All Draft Articles
         </h1>
         <div className="text-sm text-slate-600">
-          All drafts from Community Reporter &amp; Editors in one place.
+          Shared draft destination for Community Reporter, Youth Pulse Community, editors, founder, and professional journalist workflows.
         </div>
       </div>
 
@@ -289,6 +345,17 @@ export default function DraftDeskPage() {
             </button>
 
             <button
+              onClick={() => setSourceFilter('youth')}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'youth'
+                  ? 'bg-cyan-700 text-white border-cyan-700'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Youth Pulse drafts
+            </button>
+
+            <button
               onClick={() => setSourceFilter('editor')}
               className={`px-3 py-1 rounded border text-sm ${
                 sourceFilter === 'editor'
@@ -335,6 +402,7 @@ export default function DraftDeskPage() {
         {filtered.map((a) => {
           const sourceKind = getSourceKind(a);
           const isCommunity = sourceKind === 'community';
+          const isYouth = sourceKind === 'youth';
           const isPro = sourceKind === 'pro';
           const isFounder = sourceKind === 'founder';
           const locationText =
@@ -347,31 +415,47 @@ export default function DraftDeskPage() {
             <div
               key={a._id}
               className={`flex items-start justify-between gap-4 p-3 rounded border ${
-                isCommunity ? 'bg-purple-50 border-purple-200' : 'bg-white'
+                isYouth
+                  ? 'bg-white border-slate-200'
+                  : isCommunity
+                    ? 'bg-purple-50 border-purple-200'
+                    : 'bg-white'
               } hover:bg-slate-50`}
             >
               <div className="flex-1">
                 <div className="text-xs mb-1 text-slate-600 flex flex-wrap gap-2 items-center">
+                  {isYouth && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white text-slate-700 border border-slate-200">
+                      <span aria-hidden="true" className="text-slate-400">•</span>
+                      <span>Youth Pulse Community</span>
+                    </span>
+                  )}
                   {isCommunity && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
                       🧑‍🤝‍🧑 Community Reporter
                     </span>
                   )}
-                  {!isCommunity && isPro && (
+                  {!isCommunity && !isYouth && isPro && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
                       🎙️ Professional Journalist
                     </span>
                   )}
-                  {!isCommunity && !isPro && isFounder && (
+                  {!isCommunity && !isYouth && !isPro && isFounder && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
                       ⭐ Founder Draft
                     </span>
                   )}
-                  {!isCommunity && !isPro && !isFounder && (
+                  {!isCommunity && !isYouth && !isPro && !isFounder && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
                       ✍️ Editor Draft
                     </span>
                   )}
+
+                  {isYouth && (a as any)?.metadata?.youthPulseTrackLabel ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white text-cyan-700 border border-cyan-200">
+                      {(a as any).metadata.youthPulseTrackLabel}
+                    </span>
+                  ) : null}
 
                   {locationText ? <span>· {locationText}</span> : null}
                   {a.language ? <span>· {a.language?.toUpperCase()}</span> : null}
@@ -472,6 +556,14 @@ export default function DraftDeskPage() {
             <div className="text-xs mb-3 text-slate-600 flex flex-wrap gap-2 items-center">
               {(() => {
                 const sourceKind = getSourceKind(preview as Article);
+                if (sourceKind === 'youth') {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white text-slate-700 border border-slate-200">
+                      <span aria-hidden="true" className="text-slate-400">•</span>
+                      <span>Youth Pulse Community</span>
+                    </span>
+                  );
+                }
                 if (sourceKind === 'community') {
                   return (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">

@@ -10,6 +10,7 @@ type CommunityFeatureToggles = FounderFeatureToggles;
 const DEFAULT_TOGGLES: CommunityFeatureToggles = {
   communityReporterClosed: false,
   reporterPortalClosed: false,
+  youthPulseSubmissionsClosed: false,
 };
 
 type SaveState = {
@@ -45,10 +46,14 @@ export default function FeatureTogglesCommunityReporter() {
 
       const changedFeature = typeof variables.communityReporterClosed === 'boolean'
         ? 'Community Reporter'
-        : 'Reporter Portal';
+        : typeof variables.reporterPortalClosed === 'boolean'
+          ? 'Reporter Portal'
+          : 'Youth Pulse Submissions';
       const changedValue = typeof variables.communityReporterClosed === 'boolean'
         ? saved.communityReporterClosed
-        : saved.reporterPortalClosed;
+        : typeof variables.reporterPortalClosed === 'boolean'
+          ? saved.reporterPortalClosed
+          : saved.youthPulseSubmissionsClosed;
       const message = `${changedFeature} saved as ${formatVisibilityLabel(changedValue)}.`;
 
       setSaveState({ kind: 'success', message });
@@ -131,6 +136,21 @@ export default function FeatureTogglesCommunityReporter() {
               checked={currentToggles.reporterPortalClosed}
               disabled={!isFounder || saving}
               onChange={(checked) => handleToggleChange({ reporterPortalClosed: checked })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between border rounded-xl p-4">
+            <div>
+              <h2 className="font-semibold">Youth Pulse Submissions</h2>
+              <p className="text-sm text-slate-400">
+                When <strong>ON</strong>, the public Youth Pulse submission entry is hidden and new Youth Pulse submissions are closed.
+                When <strong>OFF</strong>, visitors can open the Youth Pulse submission form and send stories for review.
+              </p>
+            </div>
+            <InlineToggleSwitch
+              checked={currentToggles.youthPulseSubmissionsClosed}
+              disabled={!isFounder || saving}
+              onChange={(checked) => handleToggleChange({ youthPulseSubmissionsClosed: checked })}
             />
           </div>
 

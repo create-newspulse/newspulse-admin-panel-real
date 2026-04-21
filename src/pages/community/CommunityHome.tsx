@@ -63,7 +63,7 @@ export default function CommunityHome() {
         </div>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Community Hub</h1>
-          <p className="text-sm text-slate-600 mt-1">Central place for all Community Reporter tools.</p>
+          <p className="text-sm text-slate-600 mt-1">Central place for Community Reporter and Youth Pulse community tools.</p>
           {/* Top stats pills with higher contrast for accessibility */}
           <div className="mt-3 grid grid-cols-3 gap-3">
             <button
@@ -92,7 +92,6 @@ export default function CommunityHome() {
       </header>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {/* Reporter Portal */}
         <HubCard
           to="/community/portal"
           title="Reporter Portal"
@@ -100,7 +99,6 @@ export default function CommunityHome() {
           icon={<Users className="w-6 h-6" />}
           variant="primary"
         />
-        {/* Community Reporter Queue */}
         <HubCard
           to="/community/reporter"
           title="Community Reporter Queue"
@@ -108,7 +106,6 @@ export default function CommunityHome() {
           icon={<FileText className="w-6 h-6" />}
           variant="secondary"
         />
-        {/* My Community Stories (route exists) */}
         <HubCard
           to="/community/my-stories"
           title="My Community Stories"
@@ -116,7 +113,6 @@ export default function CommunityHome() {
           icon={<PenSquare className="w-6 h-6" />}
           variant="neutral"
         />
-        {/* Reporter Contact Directory */}
         <HubCard
           to="/community/reporter-contacts"
           title="Reporter Contact Directory"
@@ -124,7 +120,13 @@ export default function CommunityHome() {
           icon={<ContactRound className="w-6 h-6" />}
           variant="secondary"
         />
-        {/* Journalist Applications */}
+        <HubCard
+          to="/community/youth-pulse-contributors"
+          title="Youth Pulse Contact Directory"
+          description="Separate directory for Youth Pulse contributor details, contacts, and follow-up."
+          icon={<ContactRound className="w-6 h-6" />}
+          variant="secondary"
+        />
         <HubCard
           to="/community/journalist-applications"
           title="Journalist Applications"
@@ -132,7 +134,6 @@ export default function CommunityHome() {
           icon={<ContactRound className="w-6 h-6" />}
           variant="secondary"
         />
-        {/* Founder-only: Community Reporter Feature Toggles */}
         <HubCard
           to="/founder/feature-toggles"
           title="Community Reporter Feature Toggles – Founder only"
@@ -143,7 +144,7 @@ export default function CommunityHome() {
       </section>
 
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-indigo-700 text-sm">
-        Use these cards to monitor the live Reporter Portal, review reporter-owned submissions, and control public access when needed.
+        Use these cards to monitor the live Reporter Portal, review community submissions, and manage Community Reporter and Youth Pulse contact directories.
       </div>
     </div>
   );
