@@ -28,7 +28,7 @@ const AddNews: React.FC = () => {
       {sponsoredMode ? (
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <div className="font-semibold">Sponsored Article</div>
-          <div className="mt-1">Use the Sponsored Article section in Publishing Settings to add sponsor details without affecting the normal editorial workflow.</div>
+          <div className="mt-1">Use the Mark as Sponsored Article control in Publishing Settings to add sponsor details without affecting the normal editorial workflow.</div>
         </div>
       ) : null}
       <ArticleForm

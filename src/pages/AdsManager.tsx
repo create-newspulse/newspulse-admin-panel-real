@@ -2,7 +2,19 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi, api } from '@/lib/api';
-import { listArticles, type Article } from '@/lib/api/articles';
+import {
+  normalizeSponsoredContentPlacement,
+  type SponsoredContentPlacement,
+  type SponsoredFeatureInventoryRecord,
+} from '@/lib/sponsoredContentInventory';
+import {
+  deleteSponsoredFeature,
+  listEligibleSponsoredArticles,
+  listSponsoredFeatures,
+  saveSponsoredFeature,
+  setSponsoredFeatureActive,
+  type SponsoredArticleOption,
+} from '@/lib/sponsoredFeaturesApi';
 import { useAuth } from '@context/AuthContext';
 import {
   type AdInquiry,
@@ -622,22 +634,13 @@ type SponsorAd = {
   linkedSponsoredArticleUrl?: string | null;
 };
 
-type SponsoredFeaturePlacement = 'HOMEPAGE_SPONSORED_FEATURE';
 type AdProductMode = 'standard-ad' | 'sponsored-feature';
 
-const SPONSORED_FEATURE_STORAGE_SLOT: AdSlot = 'HOME_BILLBOARD_970x250';
 const SPONSORED_FEATURE_PRODUCT_TYPE = 'SPONSORED_FEATURE';
 const SPONSORED_FEATURE_PLACEMENT_LABEL = 'Homepage Sponsored Feature';
-const SPONSORED_FEATURE_PLACEMENTS: Array<{ value: SponsoredFeaturePlacement; label: string }> = [
-  { value: 'HOMEPAGE_SPONSORED_FEATURE', label: SPONSORED_FEATURE_PLACEMENT_LABEL },
+const SPONSORED_FEATURE_PLACEMENTS: Array<{ value: SponsoredContentPlacement; label: string }> = [
+  { value: 'homepage_sponsored_feature', label: SPONSORED_FEATURE_PLACEMENT_LABEL },
 ];
-
-type SponsoredArticleOption = {
-  id: string;
-  title: string;
-  slug?: string;
-  status?: string;
-};
 
 // Slots that have placement toggles in the UI.
 const PLACEMENT_SLOT_OPTIONS = [
@@ -775,12 +778,39 @@ function formatAdScheduleRange(startAt?: string | null, endAt?: string | null): 
   return `Ends: ${formatAdScheduleDateTime(endAt)}`;
 }
 
-function normalizeSponsoredFeaturePlacement(value: unknown): SponsoredFeaturePlacement | '' {
-  const raw = String(value ?? '').trim().toUpperCase();
-  if (!raw) return '';
-  if (raw === 'HOMEPAGE_SPONSORED_FEATURE') return 'HOMEPAGE_SPONSORED_FEATURE';
-  if (raw === 'HOME_PAGE_SPONSORED_FEATURE') return 'HOMEPAGE_SPONSORED_FEATURE';
-  return '';
+function getSponsoredFeatureVisibility(feature: SponsoredFeatureInventoryRecord): {
+  label: string;
+  className: string;
+} {
+  if (!feature.isActive) {
+    return {
+      label: 'Inactive',
+      className: 'border-slate-200 bg-slate-50 text-slate-700',
+    };
+  }
+
+  const now = Date.now();
+  const startTime = feature.startAt ? new Date(feature.startAt).getTime() : null;
+  const endTime = feature.endAt ? new Date(feature.endAt).getTime() : null;
+
+  if (startTime && !Number.isNaN(startTime) && startTime > now) {
+    return {
+      label: 'Scheduled',
+      className: 'border-amber-200 bg-amber-50 text-amber-800',
+    };
+  }
+
+  if (endTime && !Number.isNaN(endTime) && endTime < now) {
+    return {
+      label: 'Ended',
+      className: 'border-slate-300 bg-slate-100 text-slate-700',
+    };
+  }
+
+  return {
+    label: 'Visible now',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  };
 }
 
 function isSponsoredArticleRecord(article: any): boolean {
@@ -796,7 +826,7 @@ function isSponsoredArticleRecord(article: any): boolean {
 
 function isSponsoredFeatureAd(ad: SponsorAd | null | undefined): boolean {
   if (!ad) return false;
-  return ad.productType === SPONSORED_FEATURE_PRODUCT_TYPE || normalizeSponsoredFeaturePlacement(ad.placement) === 'HOMEPAGE_SPONSORED_FEATURE';
+  return ad.productType === SPONSORED_FEATURE_PRODUCT_TYPE || normalizeSponsoredContentPlacement(ad.placement) === 'homepage_sponsored_feature';
 }
 
 function displayPlacementLabel(ad: SponsorAd): string {
@@ -968,7 +998,7 @@ type AdFormState = {
   shortSummary: string;
   ctaText: string;
   destinationUrl: string;
-  placement: SponsoredFeaturePlacement | '';
+  placement: SponsoredContentPlacement | '';
   linkedSponsoredArticleId: string;
   linkedSponsoredArticleTitle: string;
   linkedSponsoredArticleUrl: string;
@@ -991,7 +1021,7 @@ const emptyForm = (): AdFormState => ({
   shortSummary: '',
   ctaText: '',
   destinationUrl: '',
-  placement: 'HOMEPAGE_SPONSORED_FEATURE',
+  placement: 'homepage_sponsored_feature',
   linkedSponsoredArticleId: '',
   linkedSponsoredArticleTitle: '',
   linkedSponsoredArticleUrl: '',
@@ -1002,7 +1032,7 @@ function normalizeAd(raw: any): SponsorAd {
     ? raw.sponsoredFeature
     : {};
   const productType = String(raw?.productType ?? raw?.product_type ?? sponsoredFeature?.productType ?? '').trim().toUpperCase();
-  const placement = normalizeSponsoredFeaturePlacement(raw?.placement ?? raw?.sponsoredPlacement ?? sponsoredFeature?.placement);
+  const placement = normalizeSponsoredContentPlacement(raw?.placement ?? raw?.sponsoredPlacement ?? sponsoredFeature?.placement);
   return {
     id: String(raw?.id ?? raw?._id ?? ''),
     slot: canonicalSlot(raw?.slot ?? ''),
@@ -1065,6 +1095,8 @@ export default function AdsManager() {
   const [inquirySearch, setInquirySearch] = React.useState('');
 
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
+  const [sponsoredFeatures, setSponsoredFeatures] = React.useState<SponsoredFeatureInventoryRecord[]>([]);
+  const [sponsoredFeaturesLoading, setSponsoredFeaturesLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [sponsoredArticleOptions, setSponsoredArticleOptions] = React.useState<SponsoredArticleOption[]>([]);
   const [sponsoredArticlesLoading, setSponsoredArticlesLoading] = React.useState(false);
@@ -1797,11 +1829,24 @@ export default function AdsManager() {
 
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
+  const [sponsoredFeatureBusyById, setSponsoredFeatureBusyById] = React.useState<Record<string, boolean>>({});
 
-  const sponsoredFeatureAds = React.useMemo(
-    () => ads.filter((ad) => isSponsoredFeatureAd(ad)),
-    [ads]
+  const sponsoredFeatureActiveCount = React.useMemo(
+    () => sponsoredFeatures.filter((feature) => feature.isActive).length,
+    [sponsoredFeatures],
   );
+
+  const liveSponsoredFeature = React.useMemo(
+    () => sponsoredFeatures.find((feature) => getSponsoredFeatureVisibility(feature).label === 'Visible now') || null,
+    [sponsoredFeatures],
+  );
+
+  const sponsoredFeaturePreviewTarget = React.useMemo(() => {
+    const linkedId = String(form.linkedSponsoredArticleId || '').trim();
+    const linkedUrl = String(form.linkedSponsoredArticleUrl || '').trim();
+    const destinationUrl = String(form.destinationUrl || '').trim();
+    return linkedId ? (linkedUrl || destinationUrl || null) : (destinationUrl || null);
+  }, [form.destinationUrl, form.linkedSponsoredArticleId, form.linkedSponsoredArticleUrl]);
 
   React.useEffect(() => {
     setAdImagePreviewBroken(false);
@@ -1888,21 +1933,21 @@ export default function AdsManager() {
     return true;
   }, []);
 
+  const loadSponsoredFeatures = React.useCallback(async () => {
+    setSponsoredFeaturesLoading(true);
+    try {
+      setSponsoredFeatures(await listSponsoredFeatures());
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load Sponsored Features');
+    } finally {
+      setSponsoredFeaturesLoading(false);
+    }
+  }, []);
+
   const loadSponsoredArticles = React.useCallback(async () => {
     setSponsoredArticlesLoading(true);
     try {
-      const result = await listArticles({ page: 1, limit: 100, sort: '-updatedAt' });
-      const rows = Array.isArray(result?.rows) ? result.rows : [];
-      const next = rows
-        .filter((article) => isSponsoredArticleRecord(article))
-        .map((article: Article) => ({
-          id: String(article._id || '').trim(),
-          title: String(article.title || 'Untitled').trim() || 'Untitled',
-          slug: String(article.slug || '').trim() || undefined,
-          status: String(article.status || article.state || '').trim() || undefined,
-        }))
-        .filter((article) => article.id);
-      setSponsoredArticleOptions(next);
+      setSponsoredArticleOptions(await listEligibleSponsoredArticles());
     } catch {
       setSponsoredArticleOptions([]);
     } finally {
@@ -1911,8 +1956,13 @@ export default function AdsManager() {
   }, []);
 
   React.useEffect(() => {
+    void loadSponsoredFeatures();
     void loadSponsoredArticles();
-  }, [loadSponsoredArticles]);
+  }, [loadSponsoredArticles, loadSponsoredFeatures]);
+
+  const refreshSponsoredContent = React.useCallback(async () => {
+    await Promise.all([loadSponsoredFeatures(), loadSponsoredArticles()]);
+  }, [loadSponsoredArticles, loadSponsoredFeatures]);
 
   const buildAdPayloadFromForm = React.useCallback((draft: AdFormState) => {
     const priorityNum = Number(draft.priority);
@@ -1936,68 +1986,6 @@ export default function AdsManager() {
     const imageUrl = String(draft.imageUrl || '').trim();
     if (!imageUrl) {
       throw new Error(draft.mode === 'sponsored-feature' ? 'Cover Image is required' : 'Image URL is required');
-    }
-
-    if (draft.mode === 'sponsored-feature') {
-      const sponsorBrandName = String(draft.sponsorBrandName || '').trim();
-      const internalCampaignName = String(draft.internalCampaignName || '').trim();
-      const headline = String(draft.headline || '').trim();
-      const shortSummary = String(draft.shortSummary || '').trim();
-      const ctaText = String(draft.ctaText || '').trim();
-      const destinationUrl = String(draft.destinationUrl || '').trim();
-      const placement = normalizeSponsoredFeaturePlacement(draft.placement) || 'HOMEPAGE_SPONSORED_FEATURE';
-
-      if (!sponsorBrandName) throw new Error('Sponsor / Brand Name is required');
-      if (!internalCampaignName) throw new Error('Internal Campaign Name is required');
-      if (!headline) throw new Error('Headline is required');
-      if (!shortSummary) throw new Error('Short Summary is required');
-      if (!ctaText) throw new Error('CTA Text is required');
-      if (!destinationUrl) throw new Error('Destination URL is required');
-
-      const linkedSponsoredArticleId = String(draft.linkedSponsoredArticleId || '').trim() || null;
-      const linkedSponsoredArticleTitle = String(draft.linkedSponsoredArticleTitle || '').trim() || null;
-      const linkedSponsoredArticleUrl = String(draft.linkedSponsoredArticleUrl || '').trim() || null;
-
-      const payload: any = {
-        slot: SPONSORED_FEATURE_STORAGE_SLOT,
-        title: headline,
-        imageUrl,
-        clickable: true,
-        isClickable: true,
-        targetUrl: destinationUrl,
-        destinationUrl,
-        priority: priorityNum,
-        startAt: startAtIso,
-        endAt: endAtIso,
-        isActive: Boolean(draft.isActive),
-        active: Boolean(draft.isActive),
-        productType: SPONSORED_FEATURE_PRODUCT_TYPE,
-        sponsorBrandName,
-        sponsorName: sponsorBrandName,
-        internalCampaignName,
-        headline,
-        shortSummary,
-        ctaText,
-        placement,
-        linkedSponsoredArticleId,
-        linkedSponsoredArticleTitle,
-        linkedSponsoredArticleUrl,
-      };
-
-      payload.sponsoredFeature = {
-        sponsorBrandName,
-        internalCampaignName,
-        headline,
-        shortSummary,
-        ctaText,
-        destinationUrl,
-        placement,
-        linkedSponsoredArticleId,
-        linkedSponsoredArticleTitle,
-        linkedSponsoredArticleUrl,
-      };
-
-      return payload;
     }
 
     if (!draft.slot) {
@@ -2028,6 +2016,7 @@ export default function AdsManager() {
 
   const hostExternalImageNow = React.useCallback(async () => {
     if (!editingId) return;
+    if (form.mode === 'sponsored-feature') return;
     const imageUrl = String(form.imageUrl || '').trim();
     if (!isExternalImageUrl(imageUrl)) return;
     try {
@@ -2070,9 +2059,8 @@ export default function AdsManager() {
     setForm({
       ...emptyForm(),
       mode: 'sponsored-feature',
-      slot: SPONSORED_FEATURE_STORAGE_SLOT,
       clickable: true,
-      placement: 'HOMEPAGE_SPONSORED_FEATURE',
+      placement: 'homepage_sponsored_feature',
     });
     setAdImageFile(null);
     setAdImageUploading(false);
@@ -2104,10 +2092,38 @@ export default function AdsManager() {
       shortSummary: String(ad.shortSummary ?? ''),
       ctaText: String(ad.ctaText ?? ''),
       destinationUrl: String(ad.destinationUrl ?? ad.targetUrl ?? ''),
-      placement: normalizeSponsoredFeaturePlacement(ad.placement) || 'HOMEPAGE_SPONSORED_FEATURE',
+      placement: normalizeSponsoredContentPlacement(ad.placement) || 'homepage_sponsored_feature',
       linkedSponsoredArticleId: String(ad.linkedSponsoredArticleId ?? ''),
       linkedSponsoredArticleTitle: String(ad.linkedSponsoredArticleTitle ?? ''),
       linkedSponsoredArticleUrl: String(ad.linkedSponsoredArticleUrl ?? ''),
+    });
+    setAdImageFile(null);
+    setAdImageUploading(false);
+    setAdImageUploadProgress(null);
+    setHostingExternalImage(false);
+    setAdImagePreviewBroken(false);
+    setModalOpen(true);
+  };
+
+  const openEditSponsoredFeature = (feature: SponsoredFeatureInventoryRecord) => {
+    setEditingId(feature.id);
+    setForm({
+      ...emptyForm(),
+      mode: 'sponsored-feature',
+      imageUrl: feature.coverImage,
+      isActive: feature.isActive,
+      sponsorBrandName: feature.sponsorName,
+      internalCampaignName: feature.internalCampaignName,
+      headline: feature.headline,
+      shortSummary: feature.shortSummary,
+      ctaText: feature.ctaText,
+      destinationUrl: feature.destinationUrl,
+      placement: feature.placement,
+      linkedSponsoredArticleId: String(feature.optionalLinkedSponsoredArticleId ?? ''),
+      linkedSponsoredArticleTitle: String(feature.linkedSponsoredArticleTitle ?? ''),
+      linkedSponsoredArticleUrl: String(feature.linkedArticle?.publicUrl ?? feature.linkedSponsoredArticleUrl ?? ''),
+      startAt: toDatetimeLocalValue(feature.startAt),
+      endAt: toDatetimeLocalValue(feature.endAt),
     });
     setAdImageFile(null);
     setAdImageUploading(false);
@@ -2462,7 +2478,7 @@ export default function AdsManager() {
   };
 
   const filteredAds = React.useMemo(() => {
-    let list = ads;
+    let list = ads.filter((ad) => !isSponsoredFeatureAd(ad));
     if (slotFilter !== 'ALL') list = list.filter(a => a.slot === slotFilter);
     if (activeOnly) list = list.filter(a => a.isActive);
     // Higher priority first; fallback stable by updatedAt
@@ -2478,6 +2494,64 @@ export default function AdsManager() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (form.mode === 'sponsored-feature') {
+      const sponsorName = String(form.sponsorBrandName || '').trim();
+      const internalCampaignName = String(form.internalCampaignName || '').trim();
+      const headline = String(form.headline || '').trim();
+      const shortSummary = String(form.shortSummary || '').trim();
+      const ctaText = String(form.ctaText || '').trim();
+      const destinationUrl = String(form.destinationUrl || '').trim();
+      const coverImage = String(form.imageUrl || '').trim();
+      const linkedSponsoredArticleId = String(form.linkedSponsoredArticleId || '').trim();
+      const linkedSponsoredArticleUrl = String(form.linkedSponsoredArticleUrl || '').trim();
+      const startAt = fromDatetimeLocalValue(form.startAt);
+      const endAt = fromDatetimeLocalValue(form.endAt);
+
+      try {
+        if (!sponsorName) throw new Error('Sponsor / Brand Name is required');
+        if (!headline) throw new Error('Headline is required');
+        if (!shortSummary) throw new Error('Short Summary is required');
+        if (!ctaText) throw new Error('CTA Text is required');
+        if (!coverImage) throw new Error('Cover Image is required');
+        if (!linkedSponsoredArticleId && !destinationUrl) throw new Error('Destination URL is required when no Sponsored Article is linked');
+        if (form.startAt.trim() && !startAt) throw new Error('Start Date & Time must be a valid date/time');
+        if (form.endAt.trim() && !endAt) throw new Error('End Date & Time must be a valid date/time');
+        if (startAt && endAt && new Date(startAt).getTime() > new Date(endAt).getTime()) {
+          throw new Error('Start Date & Time must be before End Date & Time');
+        }
+      } catch (err: any) {
+        toast.error(err?.message || 'Please complete the required fields');
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const next = await saveSponsoredFeature({
+          sponsorName,
+          headline,
+          shortSummary,
+          ctaText,
+          coverImage,
+          destinationUrl: destinationUrl || linkedSponsoredArticleUrl,
+          linkedSponsoredArticleId: linkedSponsoredArticleId || null,
+          linkedSponsoredArticleTitle: String(form.linkedSponsoredArticleTitle || '').trim() || null,
+          linkedSponsoredArticleUrl: linkedSponsoredArticleUrl || null,
+          isActive: Boolean(form.isActive),
+          startAt,
+          endAt,
+          internalCampaignName: internalCampaignName || null,
+        }, editingId);
+        setSponsoredFeatures(next);
+        setModalOpen(false);
+        toast.success(editingId ? 'Sponsored Feature updated' : 'Sponsored Feature created');
+      } catch (err: any) {
+        toast.error(err?.message || 'Save failed');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     let payload: any;
     try {
@@ -2584,6 +2658,34 @@ export default function AdsManager() {
     }
   };
 
+  const removeSponsoredFeature = async (feature: SponsoredFeatureInventoryRecord) => {
+    if (!confirm(`Delete sponsored feature "${feature.headline || 'Sponsored Feature'}"?`)) return;
+
+    setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: true }));
+    try {
+      setSponsoredFeatures(await deleteSponsoredFeature(feature.id));
+      toast.success('Sponsored Feature deleted');
+    } catch (err: any) {
+      toast.error(err?.message || 'Delete failed');
+    } finally {
+      setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: false }));
+    }
+  };
+
+  const toggleSponsoredFeatureActive = async (feature: SponsoredFeatureInventoryRecord) => {
+    const nextActive = !feature.isActive;
+
+    setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: true }));
+    try {
+      setSponsoredFeatures(await setSponsoredFeatureActive(feature.id, nextActive));
+      toast.success(nextActive ? 'Sponsored Feature activated' : 'Sponsored Feature deactivated');
+    } catch (err: any) {
+      toast.error(err?.message || 'Toggle failed');
+    } finally {
+      setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: false }));
+    }
+  };
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2592,9 +2694,9 @@ export default function AdsManager() {
           {tab === 'ads' ? (
             <>
               <button
-                onClick={() => void fetchAds()}
+                onClick={() => void Promise.all([fetchAds(), refreshSponsoredContent()])}
                 className="px-3 py-1 bg-slate-700 text-white rounded"
-                disabled={loading}
+                disabled={loading || sponsoredFeaturesLoading || sponsoredArticlesLoading}
               >
                 Refresh
               </button>
@@ -2603,12 +2705,6 @@ export default function AdsManager() {
                 className="px-3 py-1 bg-green-600 text-white rounded"
               >
                 Create Ad
-              </button>
-              <button
-                onClick={openCreateSponsoredFeature}
-                className="px-3 py-1 bg-amber-600 text-white rounded"
-              >
-                Create Sponsored Feature
               </button>
             </>
           ) : null}
@@ -3687,103 +3783,185 @@ export default function AdsManager() {
         <>
 
       <div className="border rounded p-4 bg-white dark:bg-slate-900">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <h2 className="text-lg font-semibold">Sponsored Content</h2>
-            <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Create Sponsored Feature in Ads Manager. Create Sponsored Article from Add Article.
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <button
+                type="button"
+                onClick={openCreateSponsoredFeature}
+                className="px-3 py-2 rounded bg-amber-600 text-white text-sm"
+              >
+                Create Sponsored Feature
+              </button>
+              <a
+                href="/add?sponsored=1"
+                className="px-3 py-2 rounded border text-sm bg-white text-slate-900 hover:bg-slate-50"
+              >
+                Create Sponsored Article
+              </a>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={openCreateSponsoredFeature}
-              className="px-3 py-2 rounded bg-amber-600 text-white text-sm"
-            >
-              Create Sponsored Feature
-            </button>
-            <a
-              href="/add?sponsored=1"
-              className="px-3 py-2 rounded border text-sm bg-white text-slate-900 hover:bg-slate-50"
-            >
-              Create Sponsored Article
-            </a>
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            Manage Sponsored Feature campaigns inside Ads Manager without mixing them into display ad slots. Sponsored Articles stay in Add Article.
           </div>
         </div>
 
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="rounded border border-slate-200 bg-slate-50 p-3">
-            <div className="text-sm font-medium">Sponsored Feature</div>
-            <div className="mt-1 text-xs text-slate-600">Premium homepage promo card with image, headline, short summary, CTA, and click destination.</div>
+            <div className="text-sm font-medium">Current active count</div>
+            <div className="mt-2 text-3xl font-bold">{sponsoredFeatureActiveCount}</div>
+            <div className="mt-1 text-xs text-slate-600">Expected value is usually 0 or 1.</div>
           </div>
           <div className="rounded border border-slate-200 bg-slate-50 p-3">
-            <div className="text-sm font-medium">Sponsored Article</div>
-            <div className="mt-1 text-xs text-slate-600">Use Add Article and switch on Sponsored Article to keep paid stories separate from normal editorial content.</div>
+            <div className="text-sm font-medium">Eligible Sponsored Articles</div>
+            <div className="mt-2 text-3xl font-bold">{sponsoredArticleOptions.length}</div>
+            <div className="mt-1 text-xs text-slate-600">Only published Sponsored Articles are eligible for combo linking.</div>
           </div>
           <div className="rounded border border-amber-200 bg-amber-50 p-3">
-            <div className="text-sm font-medium">Combo Campaign</div>
-            <div className="mt-1 text-xs text-amber-950">For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.</div>
+            <div className="text-sm font-medium text-amber-950">Homepage rule</div>
+            <div className="mt-1 text-xs text-amber-950">Only one Sponsored Feature can be active at a time. Turning one on will turn the others off.</div>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {(sponsoredFeatureAds.length > 0 ? sponsoredFeatureAds : [null]).map((ad, index) => (
-            ad ? (
-              <div key={ad.id} className="rounded border border-slate-200 bg-white p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">{ad.headline || ad.title || 'Sponsored Feature'}</div>
-                    <div className="mt-1 text-xs text-slate-600">{ad.sponsorBrandName || 'Sponsor / Brand Name not added yet'}</div>
-                  </div>
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${ad.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                    {ad.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-                {ad.shortSummary ? (
-                  <div className="mt-2 text-sm text-slate-700 dark:text-slate-200">{ad.shortSummary}</div>
-                ) : null}
-                <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600">
-                  <div>Placement: {SPONSORED_FEATURE_PLACEMENT_LABEL}</div>
-                  <div>Schedule: {formatAdScheduleRange(ad.startAt, ad.endAt)}</div>
-                  <div>Priority: {Number(ad.priority ?? 0)}</div>
-                </div>
-                {ad.linkedSponsoredArticleTitle || ad.linkedSponsoredArticleId ? (
-                  <div className="mt-2 text-xs text-slate-600">
-                    Linked Sponsored Article: {ad.linkedSponsoredArticleTitle || ad.linkedSponsoredArticleId}
-                  </div>
-                ) : null}
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openEdit(ad)}
-                    className="px-2 py-1 rounded border text-xs"
-                  >
-                    Edit Sponsored Feature
-                  </button>
-                </div>
+        <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Homepage live target</div>
+              <div className="mt-1 text-xs text-slate-600">Use this to confirm which active Sponsored Feature the public homepage can actually click through to.</div>
+            </div>
+            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${liveSponsoredFeature ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+              {liveSponsoredFeature ? 'Live record ready' : 'No live record'}
+            </span>
+          </div>
+          {liveSponsoredFeature ? (
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Headline</div>
+                <div className="mt-1 text-slate-900">{liveSponsoredFeature.headline}</div>
               </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Public click target</div>
+                <div className="mt-1 break-all text-slate-900">{liveSponsoredFeature.publicClickTarget || '-'}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo mode</div>
+                <div className="mt-1 text-slate-900">{liveSponsoredFeature.optionalLinkedSponsoredArticleId ? 'Linked Sponsored Article first' : 'Fallback URL only'}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 text-sm text-slate-500">No active homepage Sponsored Feature yet. Create one here and mark it active.</div>
+          )}
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr),minmax(320px,1fr)]">
+          <div className="space-y-4">
+            {sponsoredFeaturesLoading ? (
+              <div className="rounded border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading Sponsored Features…</div>
+            ) : sponsoredFeatures.length > 0 ? (
+              sponsoredFeatures.map((feature) => {
+                const busy = Boolean(sponsoredFeatureBusyById[feature.id]);
+                const visibility = getSponsoredFeatureVisibility(feature);
+                const scheduleLabel = feature.startAt || feature.endAt ? formatAdScheduleRange(feature.startAt, feature.endAt) : 'Always available';
+                return (
+                  <div key={feature.id} className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Sponsored Feature</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-900">{feature.headline || 'Untitled Sponsored Feature'}</div>
+                        <div className="mt-1 text-sm text-slate-600">{feature.sponsorName || 'Sponsor name missing'}</div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${feature.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                          {feature.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${visibility.className}`}>
+                          {visibility.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    {feature.shortSummary ? (
+                      <p className="mt-3 text-sm leading-6 text-slate-700">{feature.shortSummary}</p>
+                    ) : null}
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-slate-600 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">CTA</div>
+                        <div className="mt-1">{feature.ctaText || '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Schedule</div>
+                        <div className="mt-1">{scheduleLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo link</div>
+                        <div className="mt-1">{feature.linkedSponsoredArticleTitle || feature.optionalLinkedSponsoredArticleId || 'No linked Sponsored Article'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Destination fallback</div>
+                        <div className="mt-1 break-all">{feature.destinationUrl || '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Public click target</div>
+                        <div className="mt-1 break-all">{feature.publicClickTarget || '-'}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void toggleSponsoredFeatureActive(feature)}
+                        disabled={busy}
+                        className={`rounded border px-3 py-1.5 text-xs font-medium ${feature.isActive ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'}`}
+                      >
+                        {busy ? 'Saving…' : (feature.isActive ? 'Turn Off' : 'Turn On')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditSponsoredFeature(feature)}
+                        disabled={busy}
+                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
+                      >
+                        Edit Sponsored Feature
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeSponsoredFeature(feature)}
+                        disabled={busy}
+                        className="rounded border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             ) : (
-              <div key={`empty-sponsored-${index}`} className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-                No Sponsored Features yet. Create one here when you are ready to book a homepage promo card.
+              <div className="rounded border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+                No Sponsored Features yet. Create one here when you need a homepage sponsored campaign.
               </div>
-            )
-          ))}
-          <div className="rounded border border-slate-200 bg-slate-50 p-4">
-            <div className="text-sm font-medium">Recent Sponsored Articles</div>
-            <div className="mt-1 text-xs text-slate-600">These can be linked from Sponsored Feature for Combo campaigns.</div>
-            <div className="mt-3 space-y-2">
-              {sponsoredArticlesLoading ? (
-                <div className="text-xs text-slate-500">Loading Sponsored Articles…</div>
-              ) : sponsoredArticleOptions.length > 0 ? (
-                sponsoredArticleOptions.slice(0, 6).map((article) => (
-                  <div key={article.id} className="rounded border border-white bg-white px-3 py-2 text-sm">
-                    <div className="font-medium text-slate-900">{article.title}</div>
-                    <div className="mt-1 text-xs text-slate-500">{article.slug ? `/story/${article.slug}` : article.id}{article.status ? ` • ${article.status}` : ''}</div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-xs text-slate-500">No Sponsored Articles found yet.</div>
-              )}
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-sm font-medium">Recent Sponsored Articles</div>
+              <div className="mt-1 text-xs text-slate-600">These published Sponsored Articles are eligible for combo linking.</div>
+              <div className="mt-3 space-y-2">
+                {sponsoredArticlesLoading ? (
+                  <div className="text-xs text-slate-500">Loading Sponsored Articles…</div>
+                ) : sponsoredArticleOptions.length > 0 ? (
+                  sponsoredArticleOptions.slice(0, 8).map((article) => (
+                    <div key={article.id} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                      <div className="font-medium text-slate-900">{article.title}</div>
+                      <div className="mt-1 text-xs text-slate-500">{article.publicUrl || article.id}{article.status ? ` • ${article.status}` : ''}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs text-slate-500">No eligible Sponsored Articles found yet.</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -4012,7 +4190,7 @@ export default function AdsManager() {
                       <select
                         className="w-full border rounded px-2 py-2 bg-white dark:bg-slate-950"
                         value={form.placement}
-                        onChange={(e) => setForm(prev => ({ ...prev, placement: e.target.value as SponsoredFeaturePlacement }))}
+                        onChange={(e) => setForm(prev => ({ ...prev, placement: e.target.value as SponsoredContentPlacement }))}
                       >
                         {SPONSORED_FEATURE_PLACEMENTS.map((placement) => (
                           <option key={placement.value} value={placement.value}>{placement.label}</option>
@@ -4031,12 +4209,12 @@ export default function AdsManager() {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-sm font-medium">Internal Campaign Name *</label>
+                      <label className="text-sm font-medium">Internal Campaign Name</label>
                       <input
                         className="w-full border rounded px-2 py-2"
                         value={form.internalCampaignName}
                         onChange={(e) => setForm(prev => ({ ...prev, internalCampaignName: e.target.value }))}
-                        placeholder="Example: Diwali launch homepage push"
+                        placeholder="Optional internal label"
                       />
                     </div>
 
@@ -4072,13 +4250,14 @@ export default function AdsManager() {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-sm font-medium">Destination URL *</label>
+                      <label className="text-sm font-medium">Destination URL {form.linkedSponsoredArticleId ? '(fallback)' : '*'}</label>
                       <input
                         className="w-full border rounded px-2 py-2"
                         value={form.destinationUrl}
                         onChange={(e) => setForm(prev => ({ ...prev, destinationUrl: e.target.value }))}
-                        placeholder="https://..."
+                        placeholder="https://... or /news/..."
                       />
+                      <div className="text-[11px] text-slate-500">Used when no Sponsored Article is linked, or as the fallback destination.</div>
                     </div>
                   </>
                 ) : (
@@ -4127,7 +4306,7 @@ export default function AdsManager() {
                     required
                   />
 
-                  {isExternalImageUrl(form.imageUrl) ? (
+                  {form.mode === 'standard-ad' && isExternalImageUrl(form.imageUrl) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -4202,8 +4381,8 @@ export default function AdsManager() {
                           ...prev,
                           linkedSponsoredArticleId: nextId,
                           linkedSponsoredArticleTitle: match?.title || '',
-                          linkedSponsoredArticleUrl: match?.slug ? `/story/${match.slug}` : '',
-                          destinationUrl: prev.destinationUrl || (match?.slug ? `/story/${match.slug}` : prev.destinationUrl),
+                          linkedSponsoredArticleUrl: match?.publicUrl || '',
+                          destinationUrl: prev.destinationUrl || match?.publicUrl || prev.destinationUrl,
                         }));
                       }}
                     >
@@ -4217,7 +4396,11 @@ export default function AdsManager() {
                     <div className="text-[11px] text-slate-500">
                       {sponsoredArticlesLoading
                         ? 'Loading Sponsored Articles…'
-                        : 'For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature.'}
+                        : 'For Combo campaigns, publish the Sponsored Article first, then link it from the Sponsored Feature. Only published Sponsored Articles are eligible.'}
+                    </div>
+                    <div className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                      <span className="font-semibold">Public click target preview:</span>{' '}
+                      <span className="break-all">{sponsoredFeaturePreviewTarget || 'Add a linked Sponsored Article or a fallback URL'}</span>
                     </div>
                   </div>
                 ) : (
@@ -4333,7 +4516,8 @@ export default function AdsManager() {
                         <div className="mt-1">{form.shortSummary || 'Short Summary will appear here.'}</div>
                         <div className="mt-2 font-medium">CTA</div>
                         <div>{form.ctaText || '(CTA Text)'}</div>
-                        <div className="mt-1 break-all">{form.destinationUrl.trim() || '(Destination URL)'}</div>
+                        <div className="mt-2 font-medium">Public click target</div>
+                        <div className="break-all">{sponsoredFeaturePreviewTarget || '(Destination URL or linked Sponsored Article)'}</div>
                       </>
                     ) : (
                       <>

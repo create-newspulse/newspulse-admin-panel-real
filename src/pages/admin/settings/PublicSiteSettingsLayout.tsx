@@ -29,7 +29,7 @@ function PublicSiteSettingsLayoutInner() {
   const handleReset = async () => {
     try {
       await resetDraftRemoteToPublished('reset-public-site-settings-to-published');
-      toast.success('Saved. Live will update within 10 seconds.');
+      toast.success('Saved to live. Public site will update automatically.');
     } catch (e: unknown) {
       toast.error(normalizeError(e as any, 'Reset failed').message);
     }
@@ -38,7 +38,7 @@ function PublicSiteSettingsLayoutInner() {
   const handleSaveDraft = async () => {
     try {
       await saveDraftRemote('save-public-site-settings');
-      toast.success('Saved. Live will update within 10 seconds.');
+      toast.success('Saved to live. Public site will update automatically.');
     } catch (e: unknown) {
       toast.error(normalizeError(e as any, 'Save failed').message);
     }

@@ -249,6 +249,7 @@ function App() {
 
               {/* Ads Manager */}
               <Route path="/admin/ads" element={<ProtectedRoute><LockCheckWrapper><AdsManager /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/sponsored-content" element={<Navigate to="/admin/ads" replace />} />
               {/* Draft Desk */}
               <Route path="/draft-desk" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/draft-desk/:id" element={<ProtectedRoute><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></ProtectedRoute>} />

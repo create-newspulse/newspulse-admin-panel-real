@@ -2840,7 +2840,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       checked={isSponsoredArticle}
                       onChange={(e) => setIsSponsoredArticle(e.target.checked)}
                     />
-                    Sponsored
+                    Mark as Sponsored Article
                   </label>
                 </div>
 
@@ -2885,7 +2885,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       </div>
                     </div>
                     <div className="text-[11px] text-slate-600">
-                      When Sponsored is on, this article saves and publishes as a Sponsored Article without changing the normal Add Article flow.
+                      When Mark as Sponsored Article is on, this article saves and publishes as a Sponsored Article without changing the normal Add Article flow.
                     </div>
                   </div>
                 ) : null}

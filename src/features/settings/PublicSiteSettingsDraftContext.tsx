@@ -119,11 +119,16 @@ export function PublicSiteSettingsDraftProvider({ children }: PropsWithChildren)
     setError(null);
     try {
       const normalized = normalizePublicSiteSettings(basePublished);
-      const nextDraft = await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(
+      await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(
         normalized,
         auditAction ? { action: auditAction } : undefined
       );
-      setDraft(nextDraft);
+      const published = await publicSiteSettingsApi.publishAdminPublicSiteSettings(
+        normalized,
+        auditAction ? { action: `${auditAction}:publish-live` } : undefined
+      );
+      setBasePublished(published);
+      setDraft(published);
       try {
         localStorage.removeItem(LOCAL_KEY);
       } catch {}
@@ -150,11 +155,16 @@ export function PublicSiteSettingsDraftProvider({ children }: PropsWithChildren)
     setError(null);
     try {
       const normalizedDraft = normalizePublicSiteSettings(draft);
-      const nextDraft = await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(
+      await publicSiteSettingsApi.putAdminPublicSiteSettingsDraft(
         normalizedDraft,
         auditAction ? { action: auditAction } : undefined
       );
-      setDraft(nextDraft);
+      const published = await publicSiteSettingsApi.publishAdminPublicSiteSettings(
+        normalizedDraft,
+        auditAction ? { action: `${auditAction}:publish-live` } : undefined
+      );
+      setBasePublished(published);
+      setDraft(published);
       try {
         localStorage.removeItem(LOCAL_KEY);
       } catch {}
