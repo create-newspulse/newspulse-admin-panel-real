@@ -127,7 +127,10 @@ export function SettingsDraftProvider({ children, scope = 'admin-panel' }: Props
     setError(null);
     try {
       const next = scope === 'public-site'
-        ? await settingsApi.putAdminPublicSiteSettings(draft, auditAction ? { action: auditAction } : undefined)
+        ? await (async () => {
+          await settingsApi.putAdminPublicSiteSettings(draft, auditAction ? { action: auditAction } : undefined);
+          return settingsApi.publishAdminPublicSiteSettings(draft, auditAction ? { action: auditAction } : undefined);
+        })()
         : await settingsApi.putAdminSettings(draft, auditAction ? { action: auditAction } : undefined);
       setBase(next);
       setDraft(next);
