@@ -1,4 +1,4 @@
-import { listArticles, type Article } from '@/lib/api/articles';
+import { listArticles, updateArticlePartial, type Article } from '@/lib/api/articles';
 import { adminApiClient } from '@/lib/adminApiClient';
 import {
   normalizeSponsoredFeatureRecord,
@@ -13,6 +13,10 @@ export type SponsoredArticleOption = {
   status?: string;
   language?: string;
   publicUrl?: string;
+  sponsorDisclosure?: string;
+  sponsorCtaText?: string;
+  sponsorCtaUrl?: string;
+  sponsorFeatureLinkedId?: string | null;
 };
 
 export type SponsoredFeatureInput = {
@@ -26,6 +30,7 @@ export type SponsoredFeatureInput = {
   linkedSponsoredArticleTitle?: string | null;
   linkedSponsoredArticleUrl?: string | null;
   isActive: boolean;
+  comboCampaignIsActive?: boolean;
   startAt?: string | null;
   endAt?: string | null;
   internalCampaignName?: string | null;
@@ -120,6 +125,9 @@ function buildSponsoredFeaturePayload(input: SponsoredFeatureInput) {
       alt: headline || sponsorName || null,
     },
     isActive: Boolean(input.isActive),
+    comboCampaign: {
+      isActive: input.comboCampaignIsActive !== false,
+    },
     linkedArticleId: linkedArticleId || null,
     linkedArticleUrl: linkedArticleUrl || null,
     startAt: String(input.startAt || '').trim() || null,
@@ -181,11 +189,43 @@ export async function setSponsoredFeatureActive(
   }
 }
 
-export async function listEligibleSponsoredArticles(): Promise<SponsoredArticleOption[]> {
-  const result = await listArticles({ page: 1, limit: 250, sort: '-updatedAt', status: 'published' });
+export async function setSponsoredFeatureComboActive(
+  id: string,
+  isActive: boolean,
+): Promise<SponsoredFeatureInventoryRecord[]> {
+  try {
+    await adminApiClient.patch(`${SPONSORED_FEATURES_PATH}/${encodeURIComponent(id)}/combo-toggle`, { isActive });
+    return await listSponsoredFeatures();
+  } catch (error: any) {
+    throw new Error(getErrorMessage(error, 'Failed to update Combo Campaign status'));
+  }
+}
+
+export async function setSponsoredArticleVisibility(
+  articleId: string,
+  isVisible: boolean,
+): Promise<SponsoredArticleOption[]> {
+  const id = String(articleId || '').trim();
+  if (!id) throw new Error('Sponsored Article id is required');
+
+  try {
+    await updateArticlePartial(id, {
+      status: isVisible ? 'published' : 'draft',
+      ...(isVisible ? { publishedAt: new Date().toISOString() } : { publishedAt: null, publishAt: null, scheduledAt: null }),
+      isSponsored: true,
+      isSponsoredArticle: true,
+    } as any);
+    return await listSponsoredArticleInventory();
+  } catch (error: any) {
+    throw new Error(getErrorMessage(error, isVisible ? 'Failed to turn Sponsored Article on' : 'Failed to turn Sponsored Article off'));
+  }
+}
+
+export async function listSponsoredArticleInventory(): Promise<SponsoredArticleOption[]> {
+  const result = await listArticles({ page: 1, limit: 250, sort: '-updatedAt', status: 'all' });
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   return rows
-    .filter((article) => isSponsoredArticleRecord(article) && isPublishedArticleRecord(article))
+    .filter((article) => isSponsoredArticleRecord(article))
     .map((article) => ({
       id: String(article._id || '').trim(),
       title: String(article.title || 'Untitled').trim() || 'Untitled',
@@ -193,6 +233,15 @@ export async function listEligibleSponsoredArticles(): Promise<SponsoredArticleO
       status: normalizeStatus(article),
       language: normalizeArticleLanguage(article),
       publicUrl: buildPublicArticleUrl(article),
+      sponsorDisclosure: String(article.sponsorDisclosure || '').trim() || undefined,
+      sponsorCtaText: String(article.sponsorCtaText || '').trim() || undefined,
+      sponsorCtaUrl: String(article.sponsorCtaUrl || '').trim() || undefined,
+      sponsorFeatureLinkedId: String(article.sponsorFeatureLinkedId || '').trim() || null,
     }))
     .filter((article) => article.id);
+}
+
+export async function listEligibleSponsoredArticles(): Promise<SponsoredArticleOption[]> {
+  const inventory = await listSponsoredArticleInventory();
+  return inventory.filter((article) => isPublishedArticleRecord(article as Article));
 }

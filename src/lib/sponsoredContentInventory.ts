@@ -35,6 +35,7 @@ export type SponsoredFeatureInventoryRecord = {
   linkedArticle?: SponsoredLinkedArticleRecord | null;
   publicClickTarget?: string | null;
   isActive: boolean;
+  comboCampaignIsActive?: boolean;
   startAt?: string | null;
   endAt?: string | null;
   createdAt?: string | null;
@@ -126,6 +127,16 @@ export function normalizeSponsoredFeatureRecord(raw: unknown): SponsoredFeatureI
     ?? ''
   ).trim() || null;
   const destinationUrl = String(payload.destinationUrl ?? '').trim();
+  const comboCampaignIsActive = payload.comboCampaignIsActive === undefined
+    ? !((payload.comboCampaign && typeof payload.comboCampaign === 'object' && (payload.comboCampaign as Record<string, unknown>).isActive === false)
+      || (payload.commercialState && typeof payload.commercialState === 'object'
+        && (payload.commercialState as Record<string, unknown>).comboCampaign
+        && typeof ((payload.commercialState as Record<string, unknown>).comboCampaign) === 'object'
+        && ((((payload.commercialState as Record<string, unknown>).comboCampaign) as Record<string, unknown>).isEnabled === false)))
+    : Boolean(payload.comboCampaignIsActive);
+  const publicClickTarget = comboCampaignIsActive && linkedArticlePublicUrl
+    ? linkedArticlePublicUrl
+    : (destinationUrl || linkedArticleUrl || null);
 
   return {
     id,
@@ -154,8 +165,9 @@ export function normalizeSponsoredFeatureRecord(raw: unknown): SponsoredFeatureI
           publicUrl: linkedArticlePublicUrl,
         }
       : null,
-    publicClickTarget: linkedArticlePublicUrl || destinationUrl || linkedArticleUrl,
+    publicClickTarget,
     isActive: Boolean(payload.isActive),
+    comboCampaignIsActive,
     startAt: String(payload.startAt ?? '').trim() || null,
     endAt: String(payload.endAt ?? '').trim() || null,
     createdAt: String(payload.createdAt ?? '').trim() || null,

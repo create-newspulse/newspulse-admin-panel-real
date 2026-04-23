@@ -19,6 +19,7 @@ export interface Article {
   sponsorDisclosure?: string;
   sponsorCtaText?: string;
   sponsorCtaUrl?: string;
+  sponsorFeatureLinkedId?: string | null;
   ctaText?: string;
   ctaUrl?: string;
   imageUrl?: string;

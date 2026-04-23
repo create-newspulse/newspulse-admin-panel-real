@@ -2885,6 +2885,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       </div>
                     </div>
                     <div className="text-[11px] text-slate-600">
+                      These fields control the Sponsored Article page CTA directly. If you leave them blank, the public page only falls back to a linked Sponsored Feature CTA when a real combo link exists.
+                    </div>
+                    <div className="text-[11px] text-slate-600">
                       When Mark as Sponsored Article is on, this article saves and publishes as a Sponsored Article without changing the normal Add Article flow.
                     </div>
                   </div>

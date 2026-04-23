@@ -9,10 +9,12 @@ import {
 } from '@/lib/sponsoredContentInventory';
 import {
   deleteSponsoredFeature,
-  listEligibleSponsoredArticles,
+  listSponsoredArticleInventory,
   listSponsoredFeatures,
   saveSponsoredFeature,
+  setSponsoredArticleVisibility,
   setSponsoredFeatureActive,
+  setSponsoredFeatureComboActive,
   type SponsoredArticleOption,
 } from '@/lib/sponsoredFeaturesApi';
 import { useAuth } from '@context/AuthContext';
@@ -813,6 +815,86 @@ function getSponsoredFeatureVisibility(feature: SponsoredFeatureInventoryRecord)
   };
 }
 
+function isSponsoredArticleLiveStatus(status?: string | null): boolean {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'published' || normalized === 'live' || normalized === 'public';
+}
+
+function getSponsoredArticleStatusLabel(article?: SponsoredArticleOption | null): string {
+  if (!article) return 'No linked Sponsored Article';
+  if (isSponsoredArticleLiveStatus(article.status)) return 'Standalone article live';
+
+  const normalized = String(article.status || '').trim().toLowerCase();
+  if (!normalized) return 'Standalone article unavailable';
+  if (normalized === 'draft') return 'Standalone article draft';
+  if (normalized === 'scheduled') return 'Standalone article scheduled';
+  if (normalized === 'archived') return 'Standalone article archived';
+  if (normalized === 'deleted') return 'Standalone article hidden';
+  return `Standalone article ${normalized}`;
+}
+
+function getSponsoredFeatureCommercialState(
+  feature: SponsoredFeatureInventoryRecord,
+  linkedArticle?: SponsoredArticleOption | null,
+): {
+  productLabel: string;
+  productHelp: string;
+  comboLabel: string;
+  comboHelp: string;
+  publicClickTarget: string | null;
+  linkedArticleLabel: string;
+} {
+  const linkedArticleUrl = String(feature.linkedArticle?.publicUrl || feature.linkedSponsoredArticleUrl || '').trim();
+  const destinationUrl = String(feature.destinationUrl || '').trim();
+  const comboEnabled = feature.comboCampaignIsActive !== false;
+  const linkedArticleLive = Boolean(feature.optionalLinkedSponsoredArticleId) && isSponsoredArticleLiveStatus(linkedArticle?.status);
+  const featureVisibleNow = getSponsoredFeatureVisibility(feature).label === 'Visible now';
+
+  if (!feature.optionalLinkedSponsoredArticleId) {
+    return {
+      productLabel: 'Sponsored Feature only',
+      productHelp: 'Reach product only. Homepage card runs independently from any Sponsored Article.',
+      comboLabel: 'No combo bundle',
+      comboHelp: 'No linked Sponsored Article. This remains a homepage-only commercial product.',
+      publicClickTarget: destinationUrl || null,
+      linkedArticleLabel: 'No linked Sponsored Article',
+    };
+  }
+
+  if (!comboEnabled) {
+    return {
+      productLabel: 'Sponsored Feature with combo disabled',
+      productHelp: 'Reach product stays independent. The linked article remains optional while the bundle switch is off.',
+      comboLabel: 'Combo Campaign off',
+      comboHelp: 'Bundle behavior is disabled. Homepage clicks use the Sponsored Feature fallback destination instead of the linked article.',
+      publicClickTarget: destinationUrl || null,
+      linkedArticleLabel: getSponsoredArticleStatusLabel(linkedArticle),
+    };
+  }
+
+  if (linkedArticleLive) {
+    return {
+      productLabel: 'Combo-capable Sponsored Feature',
+      productHelp: 'Reach product stays independent, but a live linked article upgrades the campaign into the Combo bundle.',
+      comboLabel: featureVisibleNow ? 'Combo Campaign active' : 'Combo bundle ready',
+      comboHelp: featureVisibleNow
+        ? 'Homepage reach and article depth are both live. This is the bundled commercial offer.'
+        : 'Linked article is live. Combo becomes active when the homepage Sponsored Feature is also visible.',
+      publicClickTarget: linkedArticleUrl || destinationUrl || null,
+      linkedArticleLabel: getSponsoredArticleStatusLabel(linkedArticle),
+    };
+  }
+
+  return {
+    productLabel: 'Sponsored Feature with optional article link',
+    productHelp: 'Reach product remains live on its own. The linked article is not live, so the bundle is inactive.',
+    comboLabel: 'Combo bundle inactive',
+    comboHelp: 'The homepage card stays independent. Publish the linked Sponsored Article to activate the bundle.',
+    publicClickTarget: destinationUrl || null,
+    linkedArticleLabel: getSponsoredArticleStatusLabel(linkedArticle),
+  };
+}
+
 function isSponsoredArticleRecord(article: any): boolean {
   if (!article || typeof article !== 'object') return false;
   if (article.isSponsored === true || article.sponsored === true) return true;
@@ -999,6 +1081,7 @@ type AdFormState = {
   ctaText: string;
   destinationUrl: string;
   placement: SponsoredContentPlacement | '';
+  comboCampaignIsActive: boolean;
   linkedSponsoredArticleId: string;
   linkedSponsoredArticleTitle: string;
   linkedSponsoredArticleUrl: string;
@@ -1022,6 +1105,7 @@ const emptyForm = (): AdFormState => ({
   ctaText: '',
   destinationUrl: '',
   placement: 'homepage_sponsored_feature',
+  comboCampaignIsActive: true,
   linkedSponsoredArticleId: '',
   linkedSponsoredArticleTitle: '',
   linkedSponsoredArticleUrl: '',
@@ -1098,6 +1182,7 @@ export default function AdsManager() {
   const [sponsoredFeatures, setSponsoredFeatures] = React.useState<SponsoredFeatureInventoryRecord[]>([]);
   const [sponsoredFeaturesLoading, setSponsoredFeaturesLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [sponsoredArticleInventory, setSponsoredArticleInventory] = React.useState<SponsoredArticleOption[]>([]);
   const [sponsoredArticleOptions, setSponsoredArticleOptions] = React.useState<SponsoredArticleOption[]>([]);
   const [sponsoredArticlesLoading, setSponsoredArticlesLoading] = React.useState(false);
 
@@ -1830,10 +1915,21 @@ export default function AdsManager() {
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
   const [sponsoredFeatureBusyById, setSponsoredFeatureBusyById] = React.useState<Record<string, boolean>>({});
+  const [sponsoredArticleBusyById, setSponsoredArticleBusyById] = React.useState<Record<string, boolean>>({});
 
   const sponsoredFeatureActiveCount = React.useMemo(
     () => sponsoredFeatures.filter((feature) => feature.isActive).length,
     [sponsoredFeatures],
+  );
+
+  const sponsoredArticleById = React.useMemo(
+    () => new Map(sponsoredArticleInventory.map((article) => [article.id, article])),
+    [sponsoredArticleInventory],
+  );
+
+  const eligibleSponsoredArticleCount = React.useMemo(
+    () => sponsoredArticleInventory.filter((article) => isSponsoredArticleLiveStatus(article.status)).length,
+    [sponsoredArticleInventory],
   );
 
   const liveSponsoredFeature = React.useMemo(
@@ -1843,10 +1939,14 @@ export default function AdsManager() {
 
   const sponsoredFeaturePreviewTarget = React.useMemo(() => {
     const linkedId = String(form.linkedSponsoredArticleId || '').trim();
-    const linkedUrl = String(form.linkedSponsoredArticleUrl || '').trim();
+    const linkedArticle = linkedId ? sponsoredArticleById.get(linkedId) : null;
+    const linkedUrl = String(form.linkedSponsoredArticleUrl || linkedArticle?.publicUrl || '').trim();
     const destinationUrl = String(form.destinationUrl || '').trim();
-    return linkedId ? (linkedUrl || destinationUrl || null) : (destinationUrl || null);
-  }, [form.destinationUrl, form.linkedSponsoredArticleId, form.linkedSponsoredArticleUrl]);
+    if (linkedId && linkedArticle && isSponsoredArticleLiveStatus(linkedArticle.status)) {
+      return linkedUrl || destinationUrl || null;
+    }
+    return destinationUrl || null;
+  }, [form.destinationUrl, form.linkedSponsoredArticleId, form.linkedSponsoredArticleUrl, sponsoredArticleById]);
 
   React.useEffect(() => {
     setAdImagePreviewBroken(false);
@@ -1947,8 +2047,11 @@ export default function AdsManager() {
   const loadSponsoredArticles = React.useCallback(async () => {
     setSponsoredArticlesLoading(true);
     try {
-      setSponsoredArticleOptions(await listEligibleSponsoredArticles());
+      const inventory = await listSponsoredArticleInventory();
+      setSponsoredArticleInventory(inventory);
+      setSponsoredArticleOptions(inventory.filter((article) => isSponsoredArticleLiveStatus(article.status)));
     } catch {
+      setSponsoredArticleInventory([]);
       setSponsoredArticleOptions([]);
     } finally {
       setSponsoredArticlesLoading(false);
@@ -2061,6 +2164,7 @@ export default function AdsManager() {
       mode: 'sponsored-feature',
       clickable: true,
       placement: 'homepage_sponsored_feature',
+      comboCampaignIsActive: true,
     });
     setAdImageFile(null);
     setAdImageUploading(false);
@@ -2119,6 +2223,7 @@ export default function AdsManager() {
       ctaText: feature.ctaText,
       destinationUrl: feature.destinationUrl,
       placement: feature.placement,
+      comboCampaignIsActive: feature.comboCampaignIsActive !== false,
       linkedSponsoredArticleId: String(feature.optionalLinkedSponsoredArticleId ?? ''),
       linkedSponsoredArticleTitle: String(feature.linkedSponsoredArticleTitle ?? ''),
       linkedSponsoredArticleUrl: String(feature.linkedArticle?.publicUrl ?? feature.linkedSponsoredArticleUrl ?? ''),
@@ -2533,11 +2638,12 @@ export default function AdsManager() {
           shortSummary,
           ctaText,
           coverImage,
-          destinationUrl: destinationUrl || linkedSponsoredArticleUrl,
+          destinationUrl,
           linkedSponsoredArticleId: linkedSponsoredArticleId || null,
           linkedSponsoredArticleTitle: String(form.linkedSponsoredArticleTitle || '').trim() || null,
           linkedSponsoredArticleUrl: linkedSponsoredArticleUrl || null,
           isActive: Boolean(form.isActive),
+          comboCampaignIsActive: Boolean(form.comboCampaignIsActive),
           startAt,
           endAt,
           internalCampaignName: internalCampaignName || null,
@@ -2683,6 +2789,35 @@ export default function AdsManager() {
       toast.error(err?.message || 'Toggle failed');
     } finally {
       setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: false }));
+    }
+  };
+
+  const toggleSponsoredFeatureCombo = async (feature: SponsoredFeatureInventoryRecord) => {
+    const nextActive = feature.comboCampaignIsActive === false;
+
+    setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: true }));
+    try {
+      setSponsoredFeatures(await setSponsoredFeatureComboActive(feature.id, nextActive));
+      toast.success(nextActive ? 'Combo Campaign enabled' : 'Combo Campaign disabled');
+    } catch (err: any) {
+      toast.error(err?.message || 'Combo toggle failed');
+    } finally {
+      setSponsoredFeatureBusyById((prev) => ({ ...prev, [feature.id]: false }));
+    }
+  };
+
+  const toggleSponsoredArticleActive = async (article: SponsoredArticleOption) => {
+    const nextVisible = !isSponsoredArticleLiveStatus(article.status);
+
+    setSponsoredArticleBusyById((prev) => ({ ...prev, [article.id]: true }));
+    try {
+      await setSponsoredArticleVisibility(article.id, nextVisible);
+      await refreshSponsoredContent();
+      toast.success(nextVisible ? 'Sponsored Article turned on' : 'Sponsored Article turned off');
+    } catch (err: any) {
+      toast.error(err?.message || 'Sponsored Article toggle failed');
+    } finally {
+      setSponsoredArticleBusyById((prev) => ({ ...prev, [article.id]: false }));
     }
   };
 
@@ -3807,6 +3942,21 @@ export default function AdsManager() {
           </div>
         </div>
 
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div className="rounded border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm font-semibold text-slate-900">Sponsored Feature</div>
+            <div className="mt-1 text-xs text-slate-600">Homepage reach product only. Turning it off hides only the homepage sponsored card.</div>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm font-semibold text-slate-900">Sponsored Article</div>
+            <div className="mt-1 text-xs text-slate-600">Standalone sponsored page product. Publish state stays independent from the homepage Sponsored Feature.</div>
+          </div>
+          <div className="rounded border border-amber-200 bg-amber-50 p-4">
+            <div className="text-sm font-semibold text-amber-950">Combo Campaign</div>
+            <div className="mt-1 text-xs text-amber-950">Commercial bundle only. It becomes active when a live homepage Sponsored Feature is linked to a live Sponsored Article.</div>
+          </div>
+        </div>
+
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="rounded border border-slate-200 bg-slate-50 p-3">
             <div className="text-sm font-medium">Current active count</div>
@@ -3815,7 +3965,7 @@ export default function AdsManager() {
           </div>
           <div className="rounded border border-slate-200 bg-slate-50 p-3">
             <div className="text-sm font-medium">Eligible Sponsored Articles</div>
-            <div className="mt-2 text-3xl font-bold">{sponsoredArticleOptions.length}</div>
+            <div className="mt-2 text-3xl font-bold">{eligibleSponsoredArticleCount}</div>
             <div className="mt-1 text-xs text-slate-600">Only published Sponsored Articles are eligible for combo linking.</div>
           </div>
           <div className="rounded border border-amber-200 bg-amber-50 p-3">
@@ -3835,19 +3985,35 @@ export default function AdsManager() {
             </span>
           </div>
           {liveSponsoredFeature ? (
-            <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+              {(() => {
+                const commercialState = getSponsoredFeatureCommercialState(
+                  liveSponsoredFeature,
+                  liveSponsoredFeature.optionalLinkedSponsoredArticleId
+                    ? sponsoredArticleById.get(liveSponsoredFeature.optionalLinkedSponsoredArticleId) || null
+                    : null,
+                );
+                return (
+                  <>
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Headline</div>
                 <div className="mt-1 text-slate-900">{liveSponsoredFeature.headline}</div>
               </div>
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Public click target</div>
-                <div className="mt-1 break-all text-slate-900">{liveSponsoredFeature.publicClickTarget || '-'}</div>
+                <div className="mt-1 break-all text-slate-900">{commercialState.publicClickTarget || '-'}</div>
               </div>
               <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo mode</div>
-                <div className="mt-1 text-slate-900">{liveSponsoredFeature.optionalLinkedSponsoredArticleId ? 'Linked Sponsored Article first' : 'Fallback URL only'}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Commercial product</div>
+                <div className="mt-1 text-slate-900">{commercialState.productLabel}</div>
               </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo Campaign</div>
+                <div className="mt-1 text-slate-900">{commercialState.comboLabel}</div>
+              </div>
+                  </>
+                );
+              })()}
             </div>
           ) : (
             <div className="mt-3 text-sm text-slate-500">No active homepage Sponsored Feature yet. Create one here and mark it active.</div>
@@ -3861,8 +4027,13 @@ export default function AdsManager() {
             ) : sponsoredFeatures.length > 0 ? (
               sponsoredFeatures.map((feature) => {
                 const busy = Boolean(sponsoredFeatureBusyById[feature.id]);
+                const comboIsActive = feature.comboCampaignIsActive !== false;
                 const visibility = getSponsoredFeatureVisibility(feature);
                 const scheduleLabel = feature.startAt || feature.endAt ? formatAdScheduleRange(feature.startAt, feature.endAt) : 'Always available';
+                const linkedArticle = feature.optionalLinkedSponsoredArticleId
+                  ? sponsoredArticleById.get(feature.optionalLinkedSponsoredArticleId) || null
+                  : null;
+                const commercialState = getSponsoredFeatureCommercialState(feature, linkedArticle);
                 return (
                   <div key={feature.id} className="rounded border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3895,8 +4066,9 @@ export default function AdsManager() {
                         <div className="mt-1">{scheduleLabel}</div>
                       </div>
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo link</div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Linked Sponsored Article</div>
                         <div className="mt-1">{feature.linkedSponsoredArticleTitle || feature.optionalLinkedSponsoredArticleId || 'No linked Sponsored Article'}</div>
+                        <div className="mt-1 text-xs text-slate-500">{commercialState.linkedArticleLabel}</div>
                       </div>
                       <div>
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Destination fallback</div>
@@ -3904,7 +4076,17 @@ export default function AdsManager() {
                       </div>
                       <div>
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Public click target</div>
-                        <div className="mt-1 break-all">{feature.publicClickTarget || '-'}</div>
+                        <div className="mt-1 break-all">{commercialState.publicClickTarget || '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Commercial product</div>
+                        <div className="mt-1">{commercialState.productLabel}</div>
+                        <div className="mt-1 text-xs text-slate-500">{commercialState.productHelp}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo Campaign</div>
+                        <div className="mt-1">{commercialState.comboLabel}</div>
+                        <div className="mt-1 text-xs text-slate-500">{commercialState.comboHelp}</div>
                       </div>
                     </div>
 
@@ -3916,6 +4098,14 @@ export default function AdsManager() {
                         className={`rounded border px-3 py-1.5 text-xs font-medium ${feature.isActive ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'}`}
                       >
                         {busy ? 'Saving…' : (feature.isActive ? 'Turn Off' : 'Turn On')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void toggleSponsoredFeatureCombo(feature)}
+                        disabled={busy || !feature.optionalLinkedSponsoredArticleId}
+                        className={`rounded border px-3 py-1.5 text-xs font-medium ${comboIsActive ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'} disabled:cursor-not-allowed disabled:opacity-60`}
+                      >
+                        {busy ? 'Saving…' : (comboIsActive ? 'Combo Off' : 'Combo On')}
                       </button>
                       <button
                         type="button"
@@ -3947,17 +4137,34 @@ export default function AdsManager() {
           <div className="space-y-4">
             <div className="rounded border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-medium">Recent Sponsored Articles</div>
-              <div className="mt-1 text-xs text-slate-600">These published Sponsored Articles are eligible for combo linking.</div>
+              <div className="mt-1 text-xs text-slate-600">Standalone Sponsored Articles keep their own publish state. Published ones are eligible for Combo linking.</div>
               <div className="mt-3 space-y-2">
                 {sponsoredArticlesLoading ? (
                   <div className="text-xs text-slate-500">Loading Sponsored Articles…</div>
-                ) : sponsoredArticleOptions.length > 0 ? (
-                  sponsoredArticleOptions.slice(0, 8).map((article) => (
-                    <div key={article.id} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                      <div className="font-medium text-slate-900">{article.title}</div>
-                      <div className="mt-1 text-xs text-slate-500">{article.publicUrl || article.id}{article.status ? ` • ${article.status}` : ''}</div>
-                    </div>
-                  ))
+                ) : sponsoredArticleInventory.length > 0 ? (
+                  sponsoredArticleInventory.slice(0, 8).map((article) => {
+                    const articleLive = isSponsoredArticleLiveStatus(article.status);
+                    const busy = Boolean(sponsoredArticleBusyById[article.id]);
+                    return (
+                      <div key={article.id} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-medium text-slate-900">{article.title}</div>
+                            <div className="mt-1 text-xs text-slate-500">{article.publicUrl || article.id}{article.status ? ` • ${article.status}` : ''}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">{getSponsoredArticleStatusLabel(article)}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void toggleSponsoredArticleActive(article)}
+                            disabled={busy}
+                            className={`shrink-0 rounded border px-2.5 py-1 text-[11px] font-medium ${articleLive ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700'} disabled:cursor-not-allowed disabled:opacity-60`}
+                          >
+                            {busy ? 'Saving…' : (articleLive ? 'Article Off' : 'Article On')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="text-xs text-slate-500">No eligible Sponsored Articles found yet.</div>
                 )}
@@ -4382,7 +4589,6 @@ export default function AdsManager() {
                           linkedSponsoredArticleId: nextId,
                           linkedSponsoredArticleTitle: match?.title || '',
                           linkedSponsoredArticleUrl: match?.publicUrl || '',
-                          destinationUrl: prev.destinationUrl || match?.publicUrl || prev.destinationUrl,
                         }));
                       }}
                     >

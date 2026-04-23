@@ -5,10 +5,12 @@ import { api } from '@/lib/api';
 import type { SponsoredFeatureInventoryRecord } from '@/lib/sponsoredContentInventory';
 import {
   deleteSponsoredFeature,
-  listEligibleSponsoredArticles,
+  listSponsoredArticleInventory,
   listSponsoredFeatures,
   saveSponsoredFeature,
+  setSponsoredArticleVisibility,
   setSponsoredFeatureActive,
+  setSponsoredFeatureComboActive,
   type SponsoredArticleOption,
 } from '@/lib/sponsoredFeaturesApi';
 
@@ -24,6 +26,7 @@ type SponsoredFeatureFormState = {
   linkedSponsoredArticleTitle: string;
   linkedSponsoredArticleUrl: string;
   isActive: boolean;
+  comboCampaignIsActive: boolean;
   startAt: string;
   endAt: string;
 };
@@ -41,6 +44,7 @@ function emptyForm(): SponsoredFeatureFormState {
     linkedSponsoredArticleTitle: '',
     linkedSponsoredArticleUrl: '',
     isActive: false,
+    comboCampaignIsActive: true,
     startAt: '',
     endAt: '',
   };
@@ -96,6 +100,11 @@ function getVisibility(record: SponsoredFeatureInventoryRecord) {
   return { label: 'Live on homepage', className: 'border-emerald-200 bg-emerald-50 text-emerald-800' };
 }
 
+function isSponsoredArticleLiveStatus(status?: string | null) {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'published' || normalized === 'live' || normalized === 'public';
+}
+
 export default function SponsoredContentManager() {
   const [features, setFeatures] = React.useState<SponsoredFeatureInventoryRecord[]>([]);
   const [articles, setArticles] = React.useState<SponsoredArticleOption[]>([]);
@@ -113,6 +122,14 @@ export default function SponsoredContentManager() {
 
   const activeCount = React.useMemo(
     () => features.filter((feature) => feature.isActive).length,
+    [features],
+  );
+  const publishedArticleCount = React.useMemo(
+    () => articles.filter((article) => isSponsoredArticleLiveStatus(article.status)).length,
+    [articles],
+  );
+  const featureById = React.useMemo(
+    () => new Map(features.map((feature) => [feature.id, feature])),
     [features],
   );
 
@@ -143,7 +160,7 @@ export default function SponsoredContentManager() {
   const loadArticles = React.useCallback(async () => {
     setArticlesLoading(true);
     try {
-      const next = await listEligibleSponsoredArticles();
+      const next = await listSponsoredArticleInventory();
       setArticles(next);
     } catch {
       setArticles([]);
@@ -239,6 +256,7 @@ export default function SponsoredContentManager() {
       linkedSponsoredArticleTitle: String(feature.linkedSponsoredArticleTitle || ''),
       linkedSponsoredArticleUrl: String(feature.linkedSponsoredArticleUrl || ''),
       isActive: Boolean(feature.isActive),
+      comboCampaignIsActive: feature.comboCampaignIsActive !== false,
       startAt: toDatetimeLocalValue(feature.startAt),
       endAt: toDatetimeLocalValue(feature.endAt),
     });
@@ -291,6 +309,7 @@ export default function SponsoredContentManager() {
         linkedSponsoredArticleTitle: String(form.linkedSponsoredArticleTitle || '').trim() || null,
         linkedSponsoredArticleUrl: linkedArticleUrl || null,
         isActive: Boolean(form.isActive),
+        comboCampaignIsActive: Boolean(form.comboCampaignIsActive),
         startAt,
         endAt,
         internalCampaignName: String(form.campaignLabel || '').trim() || null,
@@ -328,6 +347,34 @@ export default function SponsoredContentManager() {
     }
   }, []);
 
+  const handleToggleCombo = React.useCallback(async (feature: SponsoredFeatureInventoryRecord) => {
+    setBusyById((prev) => ({ ...prev, [feature.id]: true }));
+    try {
+      const next = await setSponsoredFeatureComboActive(feature.id, feature.comboCampaignIsActive === false);
+      setFeatures(next);
+      toast.success(feature.comboCampaignIsActive === false ? 'Combo Campaign enabled' : 'Combo Campaign disabled');
+    } catch (err: any) {
+      toast.error(err?.message || 'Combo toggle failed');
+    } finally {
+      setBusyById((prev) => ({ ...prev, [feature.id]: false }));
+    }
+  }, []);
+
+  const handleToggleArticle = React.useCallback(async (article: SponsoredArticleOption) => {
+    setBusyById((prev) => ({ ...prev, [article.id]: true }));
+    try {
+      const nextArticles = await setSponsoredArticleVisibility(article.id, !isSponsoredArticleLiveStatus(article.status));
+      setArticles(nextArticles);
+      const nextFeatures = await listSponsoredFeatures();
+      setFeatures(nextFeatures);
+      toast.success(isSponsoredArticleLiveStatus(article.status) ? 'Sponsored Article turned off' : 'Sponsored Article turned on');
+    } catch (err: any) {
+      toast.error(err?.message || 'Sponsored Article toggle failed');
+    } finally {
+      setBusyById((prev) => ({ ...prev, [article.id]: false }));
+    }
+  }, []);
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -355,6 +402,21 @@ export default function SponsoredContentManager() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:bg-slate-900">
+          <div className="text-sm font-semibold">Sponsored Feature</div>
+          <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">Homepage reach product only. Turning it off hides only the homepage sponsored card.</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:bg-slate-900">
+          <div className="text-sm font-semibold">Sponsored Article</div>
+          <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">Standalone sponsored story product. Its publish state stays independent from the homepage feature.</div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-semibold text-amber-950">Combo Campaign</div>
+          <div className="mt-2 text-sm text-amber-950">Bundle logic only. Turning it off keeps the feature and article records intact but sends homepage clicks to the fallback URL.</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <div className="text-sm font-semibold text-amber-950">Homepage rule</div>
           <div className="mt-2 text-sm text-amber-950">Only one Sponsored Feature is shown on the homepage at a time.</div>
@@ -366,9 +428,9 @@ export default function SponsoredContentManager() {
           <div className="mt-2 text-xs text-slate-500">Expected value is usually 0 or 1.</div>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 dark:bg-slate-900">
-          <div className="text-sm font-semibold">Eligible Sponsored Articles</div>
-          <div className="mt-2 text-3xl font-bold">{articles.length}</div>
-          <div className="mt-2 text-xs text-slate-500">Only published Sponsored Articles appear here because the homepage can only link to public stories.</div>
+          <div className="text-sm font-semibold">Sponsored Articles live</div>
+          <div className="mt-2 text-3xl font-bold">{publishedArticleCount}</div>
+          <div className="mt-2 text-xs text-slate-500">These article ON/OFF controls are separate from homepage feature delivery.</div>
         </div>
       </div>
 
@@ -394,7 +456,7 @@ export default function SponsoredContentManager() {
             </div>
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo mode</div>
-              <div className="mt-1 text-slate-900 dark:text-slate-100">{liveFeature.optionalLinkedSponsoredArticleId ? 'Linked Sponsored Article first' : 'Fallback URL only'}</div>
+              <div className="mt-1 text-slate-900 dark:text-slate-100">{liveFeature.comboCampaignIsActive === false ? 'Combo OFF, fallback URL first' : (liveFeature.optionalLinkedSponsoredArticleId ? 'Linked Sponsored Article first' : 'Fallback URL only')}</div>
             </div>
           </div>
         ) : (
@@ -410,6 +472,7 @@ export default function SponsoredContentManager() {
             features.map((feature) => {
               const busy = Boolean(busyById[feature.id]);
               const visibility = getVisibility(feature);
+              const comboIsActive = feature.comboCampaignIsActive !== false;
               return (
                 <div key={feature.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:bg-slate-900">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -444,6 +507,7 @@ export default function SponsoredContentManager() {
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Combo Link</div>
                       <div className="mt-1">{feature.linkedSponsoredArticleTitle || feature.optionalLinkedSponsoredArticleId || 'No linked Sponsored Article'}</div>
+                      <div className="mt-1 text-xs text-slate-500">{comboIsActive ? 'Combo ON: homepage click prefers the linked Sponsored Article when it is public.' : 'Combo OFF: homepage click uses the fallback destination URL.'}</div>
                     </div>
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Destination fallback</div>
@@ -463,6 +527,14 @@ export default function SponsoredContentManager() {
                       className={`rounded border px-3 py-1.5 text-xs font-medium ${feature.isActive ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'}`}
                     >
                       {busy ? 'Saving…' : (feature.isActive ? 'Turn Off' : 'Turn On')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleCombo(feature)}
+                      disabled={busy || !feature.optionalLinkedSponsoredArticleId}
+                      className={`rounded border px-3 py-1.5 text-xs font-medium ${comboIsActive ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'} disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      {busy ? 'Saving…' : (comboIsActive ? 'Combo Off' : 'Combo On')}
                     </button>
                     <button
                       type="button"
@@ -495,7 +567,7 @@ export default function SponsoredContentManager() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold">Sponsored Articles</h2>
-              <p className="mt-1 text-xs text-slate-500">Article-based inventory for combo campaign linking.</p>
+              <p className="mt-1 text-xs text-slate-500">Standalone article product with its own ON/OFF state. Published articles remain eligible for combo linking.</p>
             </div>
             <a href="/add?sponsored=1" className="text-xs font-medium text-amber-700 hover:text-amber-800">Create</a>
           </div>
@@ -504,14 +576,54 @@ export default function SponsoredContentManager() {
             {articlesLoading ? (
               <div className="text-sm text-slate-500">Loading Sponsored Articles…</div>
             ) : articles.length > 0 ? (
-              articles.slice(0, 8).map((article) => (
-                <div key={article.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <div className="text-sm font-medium text-slate-900">{article.title}</div>
-                  <div className="mt-1 text-xs text-slate-500">{article.slug ? `/story/${article.slug}` : article.id}{article.status ? ` • ${article.status}` : ''}</div>
-                </div>
-              ))
+              articles.slice(0, 8).map((article) => {
+                const articleLive = isSponsoredArticleLiveStatus(article.status);
+                const busy = Boolean(busyById[article.id]);
+                const linkedFeature = article.sponsorFeatureLinkedId ? featureById.get(article.sponsorFeatureLinkedId) || null : null;
+                const articleHasOwnCta = Boolean(String(article.sponsorCtaUrl || '').trim());
+                const linkedFeatureFallbackAvailable = Boolean(
+                  linkedFeature
+                  && linkedFeature.comboCampaignIsActive !== false
+                  && String(linkedFeature.optionalLinkedSponsoredArticleId || '').trim() === article.id
+                  && String(linkedFeature.destinationUrl || '').trim()
+                );
+                return (
+                  <div key={article.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-medium text-slate-900">{article.title}</div>
+                        <div className="mt-1 text-xs text-slate-500">{article.publicUrl || article.id}{article.status ? ` • ${article.status}` : ''}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{articleLive ? 'Article ON: public sponsored story is live.' : 'Article OFF: story stays out of the public sponsored flow.'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {articleHasOwnCta
+                            ? `Article CTA: ${article.sponsorCtaText || 'CTA configured'} -> ${article.sponsorCtaUrl}`
+                            : (linkedFeatureFallbackAvailable
+                              ? 'Article CTA: no article-level CTA set. Linked feature fallback is available because this article is really linked.'
+                              : 'Article CTA: disclosure only unless you add an article-level CTA in the article editor.')}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleArticle(article)}
+                          disabled={busy}
+                          className={`rounded border px-2.5 py-1 text-[11px] font-medium ${articleLive ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700'} disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          {busy ? 'Saving…' : (articleLive ? 'Article Off' : 'Article On')}
+                        </button>
+                        <a
+                          href={`/admin/articles/${article.id}/edit`}
+                          className="text-[11px] font-medium text-amber-700 hover:text-amber-800"
+                        >
+                          Edit Article CTA
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
             ) : (
-              <div className="text-sm text-slate-500">No eligible Sponsored Articles found yet.</div>
+              <div className="text-sm text-slate-500">No Sponsored Articles found yet.</div>
             )}
           </div>
         </aside>
@@ -602,7 +714,7 @@ export default function SponsoredContentManager() {
                       }}
                     >
                       <option value="">No linked Sponsored Article</option>
-                      {articles.map((article) => (
+                      {articles.filter((article) => isSponsoredArticleLiveStatus(article.status)).map((article) => (
                         <option key={article.id} value={article.id}>
                           {article.title}{article.status ? ` (${article.status})` : ''}
                         </option>
@@ -699,6 +811,21 @@ export default function SponsoredContentManager() {
                       <span>
                         <span className="block">Make this the active homepage Sponsored Feature</span>
                         <span className="mt-1 block text-xs font-normal text-slate-500">If enabled, this campaign becomes the one active Sponsored Feature shown on the homepage.</span>
+                      </span>
+                    </label>
+                  </div>
+                  <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                    <label className="flex items-start gap-3 text-sm font-medium text-amber-950">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={form.comboCampaignIsActive}
+                        disabled={!form.linkedSponsoredArticleId}
+                        onChange={(e) => setForm((prev) => ({ ...prev, comboCampaignIsActive: e.target.checked }))}
+                      />
+                      <span>
+                        <span className="block">Enable Combo Campaign link behavior</span>
+                        <span className="mt-1 block text-xs font-normal text-amber-900">When off, the homepage feature can stay on and the Sponsored Article can stay published, but homepage clicks use the fallback destination URL instead of the linked article.</span>
                       </span>
                     </label>
                   </div>
