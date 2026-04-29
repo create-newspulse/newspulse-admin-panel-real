@@ -10,6 +10,13 @@ export type AdInquiry = {
   message: string;
   createdAt: string;
   status: string;
+  phone?: string;
+  company?: string;
+  slot?: string;
+  budget?: string;
+  target?: string;
+  startDate?: string;
+  pageUrl?: string;
   hasReply?: boolean;
   lastRepliedAt?: string;
   lastRepliedBy?: string;
@@ -35,20 +42,51 @@ function asOptionalNumber(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asString(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function cleanText(value: unknown): string {
+  return asString(value)
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\r\n?/g, '\n')
+    .trim();
+}
+
+function normalizeStatus(value: unknown): AdInquiryStatus {
+  const status = asString(value).trim().toLowerCase();
+  if (status === 'read') return 'read';
+  if (status === 'deleted' || status === 'trash' || status === 'trashed' || status === 'archived') return 'deleted';
+  return 'new';
+}
+
 function normalizeInquiry(raw: any): AdInquiry {
   const id = asString(raw?._id ?? raw?.id);
-  const name = asString(raw?.name ?? raw?.fullName ?? raw?.full_name);
-  const email = asString(raw?.email);
-  const message = asString(raw?.message ?? raw?.body ?? raw?.text);
+  const name = firstString(raw?.name, raw?.advertiserName, raw?.contactName, raw?.fullName, raw?.full_name, raw?.contact?.name, raw?.advertiser?.name);
+  const email = firstString(raw?.email, raw?.contactEmail, raw?.contact_email, raw?.contact?.email, raw?.advertiser?.email);
+  const message = cleanText(raw?.message ?? raw?.body ?? raw?.text ?? raw?.notes ?? raw?.description);
   const createdAt = asString(raw?.createdAt ?? raw?.created_at ?? raw?.submittedAt ?? raw?.submitted_at);
-  const status = asString(raw?.status ?? raw?.state ?? 'new');
+  const status = normalizeStatus(raw?.status ?? raw?.state ?? raw?.readStatus ?? raw?.read_status);
+  const phone = firstString(raw?.phone, raw?.phoneNumber, raw?.phone_number, raw?.contactPhone, raw?.contact_phone, raw?.contact?.phone, raw?.advertiser?.phone);
+  const company = firstString(raw?.company, raw?.companyName, raw?.company_name, raw?.brandName, raw?.brand_name, raw?.organization, raw?.advertiser?.company);
+  const slot = firstString(raw?.slot, raw?.adSlot, raw?.ad_slot, raw?.placement, raw?.placementKey, raw?.placement_key, raw?.requestedSlot, raw?.requested_slot);
+  const budget = firstString(raw?.budget, raw?.budgetRange, raw?.budget_range, raw?.estimatedBudget, raw?.estimated_budget);
+  const target = firstString(raw?.target, raw?.targeting, raw?.targetAudience, raw?.target_audience, raw?.audience);
+  const startDate = asString(raw?.startDate ?? raw?.start_date ?? raw?.campaignStartDate ?? raw?.campaign_start_date ?? raw?.preferredStartDate ?? raw?.preferred_start_date);
+  const pageUrl = firstString(raw?.pageUrl, raw?.page_url, raw?.url, raw?.sourceUrl, raw?.source_url, raw?.referrer, raw?.referrerUrl, raw?.referrer_url);
   const lastRepliedAt = asString(raw?.lastRepliedAt ?? raw?.last_replied_at);
   const lastRepliedBy = asString(raw?.lastRepliedBy ?? raw?.last_replied_by ?? raw?.repliedBy ?? raw?.replyBy);
   const replyCount = asOptionalNumber(raw?.replyCount ?? raw?.reply_count ?? raw?.repliesCount ?? raw?.replies_count);
   const lastReplySubject = asString(raw?.lastReplySubject ?? raw?.last_reply_subject ?? raw?.replySubject ?? raw?.last_subject);
   const hasReplyFallback = Boolean(lastRepliedAt || lastReplySubject || ((replyCount ?? 0) > 0));
   const hasReply = Boolean(raw?.hasReply ?? raw?.has_reply ?? hasReplyFallback);
-  return { id, name, email, message, createdAt, status, hasReply, lastRepliedAt, lastRepliedBy, replyCount, lastReplySubject };
+  return { id, name, email, message, createdAt, status, phone, company, slot, budget, target, startDate, pageUrl, hasReply, lastRepliedAt, lastRepliedBy, replyCount, lastReplySubject };
 }
 
 function inquiryUrl(path = ''): string {
@@ -378,7 +416,7 @@ export async function replyToAdInquiry(id: string, payload: AdInquiryReplyPayloa
 }
 
 export function messagePreview(message: string, maxLen = 80): string {
-  const s = asString(message).replace(/\s+/g, ' ').trim();
+  const s = cleanText(message).replace(/\s+/g, ' ').trim();
   if (s.length <= maxLen) return s;
   return `${s.slice(0, maxLen - 1)}…`;
 }

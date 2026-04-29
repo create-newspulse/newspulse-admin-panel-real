@@ -3409,6 +3409,52 @@ export default function AdsManager() {
                   <div className="text-xs text-slate-500">Email</div>
                   <div className="font-medium">{inquiryView.email || '-'}</div>
                 </div>
+                {inquiryView.phone ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Phone</div>
+                    <div className="font-medium">{inquiryView.phone}</div>
+                  </div>
+                ) : null}
+                {inquiryView.company ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Company</div>
+                    <div className="font-medium">{inquiryView.company}</div>
+                  </div>
+                ) : null}
+                {inquiryView.slot ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Slot</div>
+                    <div className="font-medium">{inquiryView.slot}</div>
+                  </div>
+                ) : null}
+                {inquiryView.budget ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Budget</div>
+                    <div className="font-medium">{inquiryView.budget}</div>
+                  </div>
+                ) : null}
+                {inquiryView.target ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Target</div>
+                    <div className="font-medium">{inquiryView.target}</div>
+                  </div>
+                ) : null}
+                {inquiryView.startDate ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Start Date</div>
+                    <div className="font-medium">{safeDateLabel(inquiryView.startDate)}</div>
+                  </div>
+                ) : null}
+                {inquiryView.pageUrl ? (
+                  <div>
+                    <div className="text-xs text-slate-500">Page URL</div>
+                    <div className="font-medium break-all">
+                      <a href={inquiryView.pageUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                        {inquiryView.pageUrl}
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
                 <div>
                   <div className="text-xs text-slate-500">Created</div>
                   <div className="font-medium">{safeDateLabel(inquiryView.createdAt)}</div>
@@ -3420,7 +3466,7 @@ export default function AdsManager() {
               </div>
 
               <div>
-                <div className="text-xs text-slate-500">Message</div>
+                <div className="text-xs text-slate-500">Full Message</div>
                 <div className="mt-1 whitespace-pre-wrap text-sm border rounded p-3 bg-slate-50 dark:bg-slate-950">
                   {inquiryView.message || '-'}
                 </div>
