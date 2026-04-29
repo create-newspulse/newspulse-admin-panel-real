@@ -43,7 +43,9 @@ type AdSlot =
   | 'HOME_728x90'
   | 'FOOTER_BANNER_728x90'
   | 'HOME_RIGHT_300x250'
+  | 'HOME_LEFT_300x250'
   | 'HOME_RIGHT_300x600'
+  | 'HOME_LEFT_300x600'
   | 'HOME_BILLBOARD_970x250'
   | 'LIVE_UPDATE_SPONSOR'
   | 'BREAKING_SPONSOR'
@@ -69,6 +71,12 @@ type MediaKitRateCard = {
   rate15Days: number;
   includes?: string[];
   specs?: string[];
+};
+
+type MediaKitRateCardGroup = {
+  heading: string;
+  description: string;
+  keys: readonly string[];
 };
 
 type MediaKitBundle = {
@@ -170,6 +178,71 @@ const TICKER_SCROLL_LANGUAGE_PACKAGE_BULLETS: string[] = [
 ];
 
 const RATE_CARD_ROUNDING_STEP = 50;
+const COMBO_CAMPAIGN_PRODUCT_KEY = 'COMBO_CAMPAIGN';
+const LEGACY_COMBO_CAMPAIGN_PRODUCT_KEY = 'SPONSORED_FEATURE_ARTICLE_COMBO';
+
+const MEDIA_KIT_RATE_CARD_GROUPS: readonly MediaKitRateCardGroup[] = [
+  {
+    heading: 'Display Slots',
+    description: 'Homepage and layout ad inventory with image creatives.',
+    keys: [
+      'HOME_728x90',
+      'FOOTER_BANNER_728x90',
+      'HOME_LEFT_300x250',
+      'HOME_RIGHT_300x250',
+      'HOME_LEFT_300x600',
+      'HOME_RIGHT_300x600',
+      'HOME_BILLBOARD_970x250',
+    ],
+  },
+  {
+    heading: 'Article Slots',
+    description: 'Ad inventory inside or after article pages.',
+    keys: ['ARTICLE_INLINE', 'ARTICLE_END'],
+  },
+  {
+    heading: 'Sponsor Lines',
+    description: 'Text sponsor lines tied to breaking and live update surfaces.',
+    keys: ['LIVE_UPDATE_SPONSOR', 'BREAKING_SPONSOR'],
+  },
+];
+
+function normalizeProductKey(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/__+/g, '_').replace(/^_|_$/g, '');
+  if (normalized === LEGACY_COMBO_CAMPAIGN_PRODUCT_KEY || normalized === COMBO_CAMPAIGN_PRODUCT_KEY) return COMBO_CAMPAIGN_PRODUCT_KEY;
+  return normalized || raw;
+}
+
+function productDisplayName(product: MediaKitBrandedProduct): string {
+  if (normalizeProductKey(product.productKey) === COMBO_CAMPAIGN_PRODUCT_KEY) return 'Combo Campaign';
+  return product.name;
+}
+
+function groupRateCardsByOpportunity(rateCards: MediaKitRateCard[]): Array<{ heading: string; description: string; cards: MediaKitRateCard[] }> {
+  const usedKeys = new Set<string>();
+  const groups = MEDIA_KIT_RATE_CARD_GROUPS.map((group) => {
+    const cards = rateCards.filter((card) => {
+      const key = canonicalSlot(card.placementKey);
+      const matched = group.keys.includes(key);
+      if (matched) usedKeys.add(card.placementKey);
+      return matched;
+    });
+    return { heading: group.heading, description: group.description, cards };
+  }).filter((group) => group.cards.length > 0);
+
+  const customCards = rateCards.filter((card) => !usedKeys.has(card.placementKey));
+  if (customCards.length > 0) {
+    groups.push({
+      heading: 'Other Rate Cards',
+      description: 'Custom inventory returned by the backend.',
+      cards: customCards,
+    });
+  }
+
+  return groups;
+}
 
 function roundRateCardPrice(value: number, step = RATE_CARD_ROUNDING_STEP): number {
   const numericValue = Number(value);
@@ -369,8 +442,8 @@ function defaultMediaKit(): MediaKitDoc {
         ],
       },
       {
-        productKey: 'SPONSORED_FEATURE_ARTICLE_COMBO',
-        name: 'Combo — Sponsored Feature + Sponsored Article',
+        productKey: COMBO_CAMPAIGN_PRODUCT_KEY,
+        name: 'Combo Campaign',
         description: 'Sponsored Feature on the homepage plus one full Sponsored Article as one combo campaign.',
         pricingPeriods: ['3d', '7d', '15d', '1m'],
         pricingTables: [
@@ -421,10 +494,24 @@ function defaultMediaKit(): MediaKitDoc {
         specs: ['300×250 image'],
       }, { preserveExplicitDerived: false }),
       normalizeRateCard({
+        placementKey: 'HOME_LEFT_300x250',
+        placementLabel: 'Home Left Rail 300×250',
+        prices: { day: 400 },
+        includes: ['Homepage left-rail placement', 'One linked destination'],
+        specs: ['300×250 image'],
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'HOME_RIGHT_300x600',
         placementLabel: 'Home Right Rail 300×600 (Half Page)',
         prices: { day: 650 },
         includes: ['Premium sidebar placement', 'One linked destination'],
+        specs: ['300×600 image'],
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
+        placementKey: 'HOME_LEFT_300x600',
+        placementLabel: 'Home Left Rail 300×600 (Half Page)',
+        prices: { day: 650 },
+        includes: ['Premium left-rail placement', 'One linked destination'],
         specs: ['300×600 image'],
       }, { preserveExplicitDerived: false }),
       normalizeRateCard({
@@ -524,6 +611,7 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
   }
 
   if (doc.tickerScrollAds) {
+    lines.push('Ticker Packages');
     lines.push(doc.tickerScrollAds.title);
     if (doc.tickerScrollAds.description) lines.push(doc.tickerScrollAds.description);
     lines.push('Placements');
@@ -552,9 +640,9 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
   }
 
   if (doc.brandedProducts?.length) {
-    lines.push('Branded Content Products');
+    lines.push('Sponsored Packages');
     for (const product of doc.brandedProducts) {
-      lines.push(product.name);
+      lines.push(`${productDisplayName(product)} (${normalizeProductKey(product.productKey)})`);
       if (product.description) lines.push(product.description);
       for (const table of (product.pricingTables || [])) {
         lines.push(table.subtitle ? `${table.title} - ${table.subtitle}` : table.title);
@@ -569,17 +657,19 @@ function formatMediaKitAsText(doc: MediaKitDoc): string {
     }
   }
 
-  lines.push('Rates');
-  for (const r of (doc.rateCards || [])) {
-    const day = `${formatMoney(r.prices.day, doc.currencyCode)}/day`;
-    const week = `${formatMoney(r.prices.week, doc.currencyCode)}/week`;
-    const fifteenDays = `${formatMoney(r.rate15Days, doc.currencyCode)}/15 days`;
-    const month = `${formatMoney(r.prices.month, doc.currencyCode)}/month`;
-    lines.push(`${r.placementLabel} (${r.placementKey}): ${day}, ${week}, ${fifteenDays}, ${month}`);
-    for (const i of (r.includes || [])) lines.push(`  • ${i}`);
-    for (const sp of (r.specs || [])) lines.push(`  • Spec: ${sp}`);
+  for (const group of groupRateCardsByOpportunity(doc.rateCards || [])) {
+    lines.push(group.heading);
+    for (const r of group.cards) {
+      const day = `${formatMoney(r.prices.day, doc.currencyCode)}/day`;
+      const week = `${formatMoney(r.prices.week, doc.currencyCode)}/week`;
+      const fifteenDays = `${formatMoney(r.rate15Days, doc.currencyCode)}/15 days`;
+      const month = `${formatMoney(r.prices.month, doc.currencyCode)}/month`;
+      lines.push(`${r.placementLabel} (${r.placementKey}): ${day}, ${week}, ${fifteenDays}, ${month}`);
+      for (const i of (r.includes || [])) lines.push(`  • ${i}`);
+      for (const sp of (r.specs || [])) lines.push(`  • Spec: ${sp}`);
+    }
+    lines.push('');
   }
-  lines.push('');
 
   if (doc.bundles?.length) {
     lines.push('Bundles');
@@ -649,7 +739,9 @@ const PLACEMENT_SLOT_OPTIONS = [
   'HOME_728x90',
   'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
+  'HOME_LEFT_300x250',
   'HOME_RIGHT_300x600',
+  'HOME_LEFT_300x600',
   'HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
   'BREAKING_SPONSOR',
@@ -662,7 +754,9 @@ const SLOT_OPTIONS = [
   'HOME_728x90',
   'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
+  'HOME_LEFT_300x250',
   'HOME_RIGHT_300x600',
+  'HOME_LEFT_300x600',
   'HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
   'BREAKING_SPONSOR',
@@ -677,7 +771,9 @@ const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
   FOOTER_BANNER_728x90: 'Footer Banner 728×90',
   HOME_RIGHT_300x250: 'Home Right Rail 300×250',
+  HOME_LEFT_300x250: 'Home Left Rail 300×250',
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page)',
+  HOME_LEFT_300x600: 'Home Left Rail 300×600 (Half Page)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Sponsored by <Brand>)',
   BREAKING_SPONSOR: 'Breaking Sponsor (Sponsored by <Brand>)',
@@ -688,6 +784,7 @@ const SLOT_LABELS: Record<string, string> = {
 
 const SLOT_DROPDOWN_HINT_LABELS: Record<string, string> = {
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page / Premium Sidebar)',
+  HOME_LEFT_300x600: 'Home Left Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Billboard / Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Ticker / “Sponsored by Brand”)',
   BREAKING_SPONSOR: 'Breaking Sponsor (Breaking ticker / “Sponsored by Brand”)',
@@ -711,7 +808,9 @@ function canonicalSlot(value: unknown): string {
   if (normalized === 'HOME_728X90') return 'HOME_728x90';
   if (normalized === 'FOOTER_BANNER_728X90') return 'FOOTER_BANNER_728x90';
   if (normalized === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
+  if (normalized === 'HOME_LEFT_300X250') return 'HOME_LEFT_300x250';
   if (normalized === 'HOME_RIGHT_300X600') return 'HOME_RIGHT_300x600';
+  if (normalized === 'HOME_LEFT_300X600') return 'HOME_LEFT_300x600';
   if (normalized === 'HOME_BILLBOARD_970X250') return 'HOME_BILLBOARD_970x250';
   if (normalized === 'LIVE_UPDATE_SPONSOR') return 'LIVE_UPDATE_SPONSOR';
   if (normalized === 'BREAKING_SPONSOR') return 'BREAKING_SPONSOR';
@@ -893,17 +992,6 @@ function getSponsoredFeatureCommercialState(
     publicClickTarget: destinationUrl || null,
     linkedArticleLabel: getSponsoredArticleStatusLabel(linkedArticle),
   };
-}
-
-function isSponsoredArticleRecord(article: any): boolean {
-  if (!article || typeof article !== 'object') return false;
-  if (article.isSponsored === true || article.sponsored === true) return true;
-
-  const tags = Array.isArray(article.tags) ? article.tags : [];
-  return tags.some((tag) => {
-    const normalized = String(tag || '').trim().toLowerCase();
-    return normalized === 'sponsored' || normalized === 'sponsored-article';
-  });
 }
 
 function isSponsoredFeatureAd(ad: SponsorAd | null | undefined): boolean {
@@ -1381,11 +1469,11 @@ export default function AdsManager() {
       ? rawBrandedProducts
         .filter(Boolean)
         .map((product: any) => {
-          const productKey = String(product?.productKey ?? product?.key ?? '').trim();
+          const productKey = normalizeProductKey(product?.productKey ?? product?.key);
           const name = String(product?.name ?? product?.title ?? '').trim() || productKey || 'Product';
-          const baseProduct = base.brandedProducts.find((entry) => entry.productKey === productKey || entry.name === name);
+          const baseProduct = base.brandedProducts.find((entry) => normalizeProductKey(entry.productKey) === productKey || entry.name === name || productDisplayName(entry) === name);
 
-          const pricingPeriods = Array.isArray(product?.pricingPeriods)
+          const pricingPeriods: MediaKitBrandedPricingPeriod[] = Array.isArray(product?.pricingPeriods)
             ? product.pricingPeriods
               .map((period: any) => String(period).trim())
               .filter((period: any): period is MediaKitBrandedPricingPeriod => BRANDED_PRODUCT_PRICING_PERIODS.some((entry) => entry.key === period))
@@ -1411,7 +1499,8 @@ export default function AdsManager() {
                 const baseTable = baseProduct?.pricingTables?.[index];
                 const pricesSource = table?.prices ?? table?.pricing ?? table?.priceByPeriod ?? table?.price_by_period ?? {};
                 const prices: MediaKitBrandedPricingMap = {};
-                for (const period of (pricingPeriods.length ? pricingPeriods : (baseProduct?.pricingPeriods || []))) {
+                const periodsToPrice: MediaKitBrandedPricingPeriod[] = pricingPeriods.length ? pricingPeriods : (baseProduct?.pricingPeriods || []);
+                for (const period of periodsToPrice) {
                   const rawValue = pricesSource?.[period];
                   if (Number.isFinite(Number(rawValue))) {
                     prices[period] = Number(rawValue);
@@ -1433,8 +1522,8 @@ export default function AdsManager() {
             : (baseProduct?.pricingTables || []);
 
           return {
-            productKey: productKey || baseProduct?.productKey || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
-            name,
+            productKey: productKey || normalizeProductKey(baseProduct?.productKey) || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
+            name: productKey === COMBO_CAMPAIGN_PRODUCT_KEY ? 'Combo Campaign' : name,
             description: String(product?.description ?? baseProduct?.description ?? '').trim() || baseProduct?.description || '',
             pricingPeriods: pricingPeriods.length ? pricingPeriods : (baseProduct?.pricingPeriods || []),
             pricingTables,
@@ -1447,12 +1536,13 @@ export default function AdsManager() {
       if (!brandedProductsFromRaw) return base.brandedProducts;
 
       const rawByKey = new Map<string, MediaKitBrandedProduct>();
-      for (const product of brandedProductsFromRaw) rawByKey.set(product.productKey, product);
+      for (const product of brandedProductsFromRaw) rawByKey.set(normalizeProductKey(product.productKey), product);
 
       const merged: MediaKitBrandedProduct[] = [];
       for (const baseProduct of base.brandedProducts) {
-        merged.push(rawByKey.get(baseProduct.productKey) || baseProduct);
-        rawByKey.delete(baseProduct.productKey);
+        const key = normalizeProductKey(baseProduct.productKey);
+        merged.push(rawByKey.get(key) || baseProduct);
+        rawByKey.delete(key);
       }
 
       for (const leftover of rawByKey.values()) merged.push(leftover);
@@ -3691,7 +3781,8 @@ export default function AdsManager() {
                 <div className="border rounded p-4 bg-white dark:bg-slate-900">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold mb-1">{mediaKit.tickerScrollAds.title}</div>
+                      <div className="text-sm font-semibold mb-1">Ticker Packages</div>
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{mediaKit.tickerScrollAds.title}</div>
                       <div className="text-sm text-slate-600 dark:text-slate-300">{mediaKit.tickerScrollAds.description}</div>
                     </div>
                     <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
@@ -3778,7 +3869,7 @@ export default function AdsManager() {
                 <div className="border rounded p-4 bg-white dark:bg-slate-900">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-semibold mb-1">Sponsored Content Products</div>
+                      <div className="text-sm font-semibold mb-1">Sponsored Packages</div>
                       <div className="text-sm text-slate-600 dark:text-slate-300">Sponsored Feature, Sponsored Article, and Combo Campaign pricing for advertiser bookings.</div>
                     </div>
                     <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
@@ -3791,7 +3882,14 @@ export default function AdsManager() {
                       <div key={`${product.productKey}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-medium">{product.name}</div>
+                            <div className="text-sm font-medium">
+                              {normalizeProductKey(product.productKey) === COMBO_CAMPAIGN_PRODUCT_KEY
+                                ? 'Combo Campaign / COMBO_CAMPAIGN'
+                                : productDisplayName(product)}
+                            </div>
+                            {normalizeProductKey(product.productKey) !== COMBO_CAMPAIGN_PRODUCT_KEY ? (
+                              <div className="text-xs text-slate-500 font-mono">{normalizeProductKey(product.productKey)}</div>
+                            ) : null}
                             <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{product.description}</div>
                           </div>
                         </div>
@@ -3841,53 +3939,63 @@ export default function AdsManager() {
 
               <div className="border rounded p-4 bg-white dark:bg-slate-900">
                 <div className="text-sm font-semibold mb-2">Rate Cards</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {(mediaKit.rateCards || []).map((r, idx) => (
-                    <div key={`${r.placementKey}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium">{r.placementLabel}</div>
-                          {!mediaKitPreview ? (
-                            <div className="text-xs text-slate-500 font-mono">{r.placementKey}</div>
-                          ) : null}
-                        </div>
+                <div className="space-y-4">
+                  {groupRateCardsByOpportunity(mediaKit.rateCards || []).map((group) => (
+                    <div key={group.heading}>
+                      <div className="mb-2">
+                        <div className="text-sm font-medium">{group.heading}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{group.description}</div>
                       </div>
-
-                      <div className="mt-2 grid grid-cols-2 lg:grid-cols-4 gap-2">
-                        {(
-                          [
-                                { label: '1 Day', period: 'day' as const, value: r.prices.day },
-                                { label: '7 Days', period: 'week' as const, value: r.prices.week },
-                                { label: '15 Days', period: 'rate15Days' as const, value: r.rate15Days },
-                                { label: '1 Month', period: 'month' as const, value: r.prices.month },
-                          ]
-                        ).map((p) => {
-                          const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(p.value, mediaKit.fxRateUsdInr) : null;
-                          return (
-                            <div key={p.period} className="rounded border px-2 py-1 bg-white dark:bg-slate-900">
-                              <div className="text-[11px] text-slate-500">{p.label}</div>
-                              <div className="text-sm font-semibold">{formatMoney(p.value, mediaKit.currencyCode)}</div>
-                              {usd ? (
-                                <div className="text-[11px] text-slate-500">≈ {usd}</div>
-                              ) : null}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {group.cards.map((r, idx) => (
+                          <div key={`${r.placementKey}-${idx}`} className={mediaKitPreview ? 'rounded border p-3 bg-white dark:bg-slate-900' : 'rounded border p-3 bg-slate-50 dark:bg-slate-950'}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium">{r.placementLabel}</div>
+                                {!mediaKitPreview ? (
+                                  <div className="text-xs text-slate-500 font-mono">{r.placementKey}</div>
+                                ) : null}
+                              </div>
                             </div>
-                          );
-                        })}
+
+                            <div className="mt-2 grid grid-cols-2 lg:grid-cols-4 gap-2">
+                              {(
+                                [
+                                      { label: '1 Day', period: 'day' as const, value: r.prices.day },
+                                      { label: '7 Days', period: 'week' as const, value: r.prices.week },
+                                      { label: '15 Days', period: 'rate15Days' as const, value: r.rate15Days },
+                                      { label: '1 Month', period: 'month' as const, value: r.prices.month },
+                                ]
+                              ).map((p) => {
+                                const usd = mediaKit.showUsdApprox ? formatUsdApproxFromInr(p.value, mediaKit.fxRateUsdInr) : null;
+                                return (
+                                  <div key={p.period} className="rounded border px-2 py-1 bg-white dark:bg-slate-900">
+                                    <div className="text-[11px] text-slate-500">{p.label}</div>
+                                    <div className="text-sm font-semibold">{formatMoney(p.value, mediaKit.currencyCode)}</div>
+                                    {usd ? (
+                                      <div className="text-[11px] text-slate-500">≈ {usd}</div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {(r.includes?.length || 0) > 0 ? (
+                              <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
+                                {r.includes!.map((i, j) => (
+                                  <li key={`${group.heading}-${idx}-inc-${j}`}>{i}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+
+                            {(r.specs?.length || 0) > 0 ? (
+                              <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                                Specs: {r.specs!.join(', ')}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
                       </div>
-
-                      {(r.includes?.length || 0) > 0 ? (
-                        <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 dark:text-slate-200 space-y-1">
-                          {r.includes!.map((i, j) => (
-                            <li key={`${idx}-inc-${j}`}>{i}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-
-                      {(r.specs?.length || 0) > 0 ? (
-                        <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-                          Specs: {r.specs!.join(', ')}
-                        </div>
-                      ) : null}
                     </div>
                   ))}
                 </div>

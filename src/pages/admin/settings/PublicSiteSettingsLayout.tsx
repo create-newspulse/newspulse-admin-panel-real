@@ -60,6 +60,7 @@ function PublicSiteSettingsLayoutInner() {
         <NavLink to="tickers" className={linkCls}>Tickers</NavLink>
         <NavLink to="live-tv" className={linkCls}>Live TV</NavLink>
         <NavLink to="inspiration-hub" className={linkCls}>Inspiration Hub</NavLink>
+        <NavLink to="daily-wonders" className={linkCls}>Daily Wonders</NavLink>
         <NavLink to="footer" className={linkCls}>Footer</NavLink>
         <NavLink to="language-theme" className={linkCls}>Language & Theme</NavLink>
       </aside>

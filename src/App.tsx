@@ -107,6 +107,7 @@ import HomepageModulesSettings from '@pages/admin/settings/public-site/HomepageM
 import TickersSettings from '@pages/admin/settings/public-site/TickersSettings';
 import LiveTvSettings from '@pages/admin/settings/public-site/LiveTvSettings';
 import InspirationHubSettings from '@pages/admin/settings/public-site/InspirationHubSettings';
+import DailyWondersSettings from '@pages/admin/settings/public-site/DailyWondersSettings';
 import FooterSettings from '@pages/admin/settings/public-site/FooterSettings';
 import LanguageThemeSettings from '@pages/admin/settings/public-site/LanguageThemeSettings';
 import PublicPreview from '@pages/admin/settings/public-site/PublicPreview';
@@ -357,6 +358,7 @@ function App() {
                   <Route path="tickers" element={<TickersSettings />} />
                   <Route path="live-tv" element={<LiveTvSettings />} />
                   <Route path="inspiration-hub" element={<InspirationHubSettings />} />
+                  <Route path="daily-wonders" element={<DailyWondersSettings />} />
                   <Route path="footer" element={<FooterSettings />} />
                   <Route path="language-theme" element={<LanguageThemeSettings />} />
                   <Route path="preview" element={<PublicPreview />} />

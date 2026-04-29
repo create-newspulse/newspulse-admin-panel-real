@@ -65,6 +65,22 @@ const InspirationHubSchema = z
   })
   .passthrough();
 
+const DailyWondersSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    showOnHomepage: z.boolean().default(true),
+    smallLabel: z.string().default('DAILY WONDERS'),
+    title: z.string().default('Thought of the Day'),
+    subtitle: z.string().default('One meaningful thought to pause, reflect, and move through the day with clarity.'),
+    thoughtLabel: z.string().default("TODAY'S THOUGHT"),
+    thoughtText: z.string().default('A peaceful mind does not come from a perfect day, but from choosing calm in the middle of it.'),
+    reminderLabel: z.string().default('GENTLE REMINDER'),
+    reminderText: z.string().default('You do not need to solve the whole day at once. One honest step is enough.'),
+    footerText: z.string().default('A small daily pause for calm, clarity, and inspiration.'),
+    publishDate: z.string().default(''),
+  })
+  .passthrough();
+
 function normalizeLocalizedText(input: unknown, fallback = ''): Record<(typeof SUPPORTED_INSPIRATION_LANGUAGES)[number], string> {
   const value = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
   return {
@@ -182,6 +198,37 @@ function normalizeInspirationHubSettings(input: unknown): Record<string, unknown
   };
 }
 
+function normalizeDailyWondersSettings(input: unknown): Record<string, unknown> {
+  const value = input && typeof input === 'object' ? { ...(input as Record<string, unknown>) } : {};
+
+  return {
+    ...value,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+    showOnHomepage: typeof value.showOnHomepage === 'boolean' ? value.showOnHomepage : true,
+    smallLabel: typeof value.smallLabel === 'string' && value.smallLabel.trim() ? value.smallLabel : 'DAILY WONDERS',
+    title: typeof value.title === 'string' && value.title.trim() ? value.title : 'Thought of the Day',
+    subtitle: typeof value.subtitle === 'string' && value.subtitle.trim()
+      ? value.subtitle
+      : 'One meaningful thought to pause, reflect, and move through the day with clarity.',
+    thoughtLabel: typeof value.thoughtLabel === 'string' && value.thoughtLabel.trim()
+      ? value.thoughtLabel
+      : "TODAY'S THOUGHT",
+    thoughtText: typeof value.thoughtText === 'string' && value.thoughtText.trim()
+      ? value.thoughtText
+      : 'A peaceful mind does not come from a perfect day, but from choosing calm in the middle of it.',
+    reminderLabel: typeof value.reminderLabel === 'string' && value.reminderLabel.trim()
+      ? value.reminderLabel
+      : 'GENTLE REMINDER',
+    reminderText: typeof value.reminderText === 'string' && value.reminderText.trim()
+      ? value.reminderText
+      : 'You do not need to solve the whole day at once. One honest step is enough.',
+    footerText: typeof value.footerText === 'string' && value.footerText.trim()
+      ? value.footerText
+      : 'A small daily pause for calm, clarity, and inspiration.',
+    publishDate: typeof value.publishDate === 'string' ? value.publishDate : '',
+  };
+}
+
 export const PublicSiteSettingsSchema = z
   .object({
     homepage: z
@@ -208,6 +255,8 @@ export const PublicSiteSettingsSchema = z
       .default({}),
 
     inspirationHub: InspirationHubSchema.default({}),
+
+    dailyWonders: DailyWondersSchema.default({}),
 
     languageTheme: z
       .object({
@@ -262,6 +311,19 @@ export const DEFAULT_PUBLIC_SITE_SETTINGS: PublicSiteSettings = {
       narrationText: { en: '', hi: '', gu: '' },
     },
   },
+  dailyWonders: {
+    enabled: true,
+    showOnHomepage: true,
+    smallLabel: 'DAILY WONDERS',
+    title: 'Thought of the Day',
+    subtitle: 'One meaningful thought to pause, reflect, and move through the day with clarity.',
+    thoughtLabel: "TODAY'S THOUGHT",
+    thoughtText: 'A peaceful mind does not come from a perfect day, but from choosing calm in the middle of it.',
+    reminderLabel: 'GENTLE REMINDER',
+    reminderText: 'You do not need to solve the whole day at once. One honest step is enough.',
+    footerText: 'A small daily pause for calm, clarity, and inspiration.',
+    publishDate: '',
+  },
   languageTheme: { languages: ['en'], themePreset: 'system' },
 };
 
@@ -298,12 +360,14 @@ export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSi
       modules: normalizeHomepageModulesRecord((input as any)?.homepage?.modules) as any,
     },
     inspirationHub: normalizeInspirationHubSettings((input as any)?.inspirationHub) as any,
+    dailyWonders: normalizeDailyWondersSettings((input as any)?.dailyWonders) as any,
   };
 }
 
 export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSettings>>(patch: T): T {
   const rawModules = (patch as any)?.homepage?.modules;
   const rawInspirationHub = (patch as any)?.inspirationHub;
+  const rawDailyWonders = (patch as any)?.dailyWonders;
   const next: any = {
     ...(patch as any),
   };
@@ -317,6 +381,10 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
 
   if (rawInspirationHub && typeof rawInspirationHub === 'object') {
     next.inspirationHub = normalizeInspirationHubSettings(rawInspirationHub);
+  }
+
+  if (rawDailyWonders && typeof rawDailyWonders === 'object') {
+    next.dailyWonders = normalizeDailyWondersSettings(rawDailyWonders);
   }
 
   return next;

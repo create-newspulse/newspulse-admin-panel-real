@@ -105,6 +105,10 @@ function mergeDefaults(value: PublicSiteSettings): PublicSiteSettings {
         },
       },
     },
+    dailyWonders: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.dailyWonders,
+      ...(value.dailyWonders || {}),
+    },
     languageTheme: {
       ...DEFAULT_PUBLIC_SITE_SETTINGS.languageTheme,
       ...(value.languageTheme || {}),
