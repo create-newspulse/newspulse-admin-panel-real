@@ -23,6 +23,71 @@ const upload = multer({
   },
 });
 
+let VIRAL_VIDEO_FRONTEND_ENABLED = true;
+let DEMO_VIRAL_VIDEO_COUNTER = 1;
+let DEMO_VIRAL_VIDEOS = [];
+
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+}
+
+function viralVideoSettingsResponse() {
+  return { ok: true, settings: { frontendEnabled: VIRAL_VIDEO_FRONTEND_ENABLED === true } };
+}
+
+function slugifyViralVideo(input) {
+  return String(input || 'viral-video')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100) || 'viral-video';
+}
+
+function normalizeViralVideoPayload(body = {}, existing = {}) {
+  const status = String(body.status || existing.status || 'draft').trim().toLowerCase() === 'published' ? 'published' : 'draft';
+  const homepageFeatured = status === 'published' && normalizeBoolean(body.homepageFeatured ?? body.featured, existing.homepageFeatured === true || existing.featured === true);
+  const thumbnailUrl = String(body.thumbnailUrl || body.posterImage?.url || existing.thumbnailUrl || '').trim();
+  const videoUrl = String(body.videoUrl || existing.videoUrl || '').trim();
+  const embedUrl = String(body.embedUrl || existing.embedUrl || '').trim();
+  const now = new Date().toISOString();
+  return {
+    ...existing,
+    _id: existing._id || `demo-viral-video-${DEMO_VIRAL_VIDEO_COUNTER++}`,
+    title: String(body.title || existing.title || '').trim(),
+    slug: slugifyViralVideo(body.slug || existing.slug || body.title || existing.title),
+    summary: String(body.summary || existing.summary || '').trim(),
+    category: String(body.category || existing.category || '').trim(),
+    thumbnailUrl,
+    posterImage: { url: thumbnailUrl },
+    videoUrl,
+    embedUrl,
+    sourceType: String(body.sourceType || existing.sourceType || (embedUrl ? 'embed_url' : 'video_url')).trim().toLowerCase() === 'embed_url' ? 'embed_url' : 'video_url',
+    language: ['hi', 'gu'].includes(String(body.language || existing.language || '').trim().toLowerCase()) ? String(body.language || existing.language).trim().toLowerCase() : 'en',
+    tags: Array.isArray(body.tags) ? body.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : (existing.tags || []),
+    status,
+    homepageVisible: status === 'published',
+    homepageFeatured,
+    featured: homepageFeatured,
+    publishedAt: status === 'published' ? (body.publishedAt || existing.publishedAt || now) : null,
+    sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : (existing.sortOrder ?? null),
+    createdAt: existing.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function isHomepageEligibleViralVideo(item) {
+  return VIRAL_VIDEO_FRONTEND_ENABLED === true
+    && item?.status === 'published'
+    && item?.homepageVisible === true
+    && (item?.homepageFeatured === true || item?.featured === true)
+    && Boolean(String(item?.thumbnailUrl || '').trim())
+    && Boolean(String(item?.videoUrl || item?.embedUrl || '').trim());
+}
+
 // Middleware
 const DEV_ALLOWED_ORIGINS = [
   'http://localhost:5173',
@@ -88,6 +153,129 @@ app.post('/api/language/translate', (req, res) => {
   // Demo behavior: return the input unchanged.
   // The frontend applies glossary substitutions after translation.
   res.json({ translated: input, from: String(from || ''), to: String(to || '') });
+});
+
+// --- Viral Videos global frontend visibility (demo/local contract) ---
+app.get('/api/admin/viral-videos/settings', (_req, res) => {
+  res.json(viralVideoSettingsResponse());
+});
+
+app.put('/api/admin/viral-videos/settings', (req, res) => {
+  VIRAL_VIDEO_FRONTEND_ENABLED = normalizeBoolean(req.body?.frontendEnabled, VIRAL_VIDEO_FRONTEND_ENABLED === true);
+  res.json(viralVideoSettingsResponse());
+});
+
+app.get('/api/public/viral-videos/settings', (_req, res) => {
+  res.json(viralVideoSettingsResponse());
+});
+
+app.get('/api/public/viral-videos/featured', (_req, res) => {
+  const settings = { frontendEnabled: VIRAL_VIDEO_FRONTEND_ENABLED === true };
+  const item = DEMO_VIRAL_VIDEOS
+    .filter(isHomepageEligibleViralVideo)
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(Number(left.sortOrder)) ? Number(left.sortOrder) : Number.MAX_SAFE_INTEGER;
+      const rightOrder = Number.isFinite(Number(right.sortOrder)) ? Number(right.sortOrder) : Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return new Date(right.publishedAt || right.updatedAt || 0).getTime() - new Date(left.publishedAt || left.updatedAt || 0).getTime();
+    })[0] || null;
+  res.json({ ok: true, item, video: item, selectionMode: 'manual', settings });
+});
+
+app.get('/api/public/viral-videos', (req, res) => {
+  if (!VIRAL_VIDEO_FRONTEND_ENABLED) {
+    return res.json({ ok: true, items: [], selectionMode: 'list', settings: { frontendEnabled: false } });
+  }
+  const featuredOnly = String(req.query?.featured || '').trim().toLowerCase() === 'true';
+  const items = DEMO_VIRAL_VIDEOS.filter((item) => {
+    if (item.status !== 'published') return false;
+    if (!String(item.thumbnailUrl || '').trim()) return false;
+    if (!String(item.videoUrl || item.embedUrl || '').trim()) return false;
+    if (featuredOnly) return item.homepageVisible === true && (item.homepageFeatured === true || item.featured === true);
+    return true;
+  });
+  return res.json({ ok: true, items, selectionMode: featuredOnly ? 'manual' : 'list', settings: { frontendEnabled: true } });
+});
+
+app.get('/api/admin/viral-videos', (req, res) => {
+  const status = String(req.query?.status || '').trim().toLowerCase();
+  const featuredOnly = String(req.query?.featured || req.query?.homepageFeatured || '').trim().toLowerCase() === 'true';
+  const q = String(req.query?.q || '').trim().toLowerCase();
+  const items = DEMO_VIRAL_VIDEOS.filter((item) => {
+    if (status && status !== 'all' && item.status !== status) return false;
+    if (featuredOnly && !(item.homepageFeatured === true || item.featured === true)) return false;
+    if (q && ![item.title, item.summary, item.category, item.slug, ...(item.tags || [])].join(' ').toLowerCase().includes(q)) return false;
+    return true;
+  });
+  res.json({ ok: true, items, total: items.length, page: 1, pages: 1, limit: items.length || 20 });
+});
+
+app.post('/api/admin/viral-videos/upload', upload.single('video'), (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, message: 'Video file is required' });
+  const filename = `${Date.now()}-${String(req.file.originalname || 'viral-video.mp4').replace(/[^a-z0-9._-]+/gi, '-')}`;
+  const url = `/demo-uploads/viral-videos/${encodeURIComponent(filename)}`;
+  res.json({ ok: true, success: true, url, filename, data: { url, filename, bytes: req.file.size, mimetype: req.file.mimetype } });
+});
+
+app.post('/api/admin/viral-videos/thumbnail-upload', upload.single('thumbnail'), (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, message: 'Thumbnail image is required' });
+  const filename = `${Date.now()}-${String(req.file.originalname || 'viral-video-thumbnail.jpg').replace(/[^a-z0-9._-]+/gi, '-')}`;
+  const url = `/demo-uploads/viral-videos/thumbnails/${encodeURIComponent(filename)}`;
+  res.json({ ok: true, success: true, url, filename, data: { url, filename, bytes: req.file.size, mimetype: req.file.mimetype } });
+});
+
+app.get('/api/admin/viral-videos/:id', (req, res) => {
+  const item = DEMO_VIRAL_VIDEOS.find((video) => video._id === req.params.id || video.id === req.params.id);
+  if (!item) return res.status(404).json({ ok: false, message: 'Viral video not found' });
+  res.json({ ok: true, item });
+});
+
+app.post('/api/admin/viral-videos', (req, res) => {
+  const item = normalizeViralVideoPayload(req.body || {});
+  if (!item.title || !item.slug) return res.status(400).json({ ok: false, message: 'Title and slug are required' });
+  DEMO_VIRAL_VIDEOS = [item, ...DEMO_VIRAL_VIDEOS.filter((video) => video.slug !== item.slug)];
+  if (item.status === 'published' && item.homepageFeatured) {
+    DEMO_VIRAL_VIDEOS = DEMO_VIRAL_VIDEOS.map((video) => video._id === item._id ? video : { ...video, homepageFeatured: false, featured: false });
+  }
+  res.status(201).json({ ok: true, item });
+});
+
+function updateDemoViralVideo(req, res) {
+  const index = DEMO_VIRAL_VIDEOS.findIndex((video) => video._id === req.params.id || video.id === req.params.id);
+  if (index < 0) return res.status(404).json({ ok: false, message: 'Viral video not found' });
+  const item = normalizeViralVideoPayload(req.body || {}, DEMO_VIRAL_VIDEOS[index]);
+  DEMO_VIRAL_VIDEOS[index] = item;
+  if (item.status === 'published' && item.homepageFeatured) {
+    DEMO_VIRAL_VIDEOS = DEMO_VIRAL_VIDEOS.map((video) => video._id === item._id ? video : { ...video, homepageFeatured: false, featured: false });
+  }
+  res.json({ ok: true, item });
+}
+
+app.put('/api/admin/viral-videos/:id', updateDemoViralVideo);
+app.patch('/api/admin/viral-videos/:id', updateDemoViralVideo);
+
+app.patch('/api/admin/viral-videos/:id/status', (req, res) => {
+  const index = DEMO_VIRAL_VIDEOS.findIndex((video) => video._id === req.params.id || video.id === req.params.id);
+  if (index < 0) return res.status(404).json({ ok: false, message: 'Viral video not found' });
+  const item = normalizeViralVideoPayload({
+    ...DEMO_VIRAL_VIDEOS[index],
+    status: req.body?.status,
+    publishedAt: req.body?.publishedAt,
+    homepageFeatured: req.body?.homepageFeatured,
+    featured: req.body?.featured,
+  }, DEMO_VIRAL_VIDEOS[index]);
+  DEMO_VIRAL_VIDEOS[index] = item;
+  if (item.status === 'published' && item.homepageFeatured) {
+    DEMO_VIRAL_VIDEOS = DEMO_VIRAL_VIDEOS.map((video) => video._id === item._id ? video : { ...video, homepageFeatured: false, featured: false });
+  }
+  res.json({ ok: true, item });
+});
+
+app.delete('/api/admin/viral-videos/:id', (req, res) => {
+  const before = DEMO_VIRAL_VIDEOS.length;
+  DEMO_VIRAL_VIDEOS = DEMO_VIRAL_VIDEOS.filter((video) => video._id !== req.params.id && video.id !== req.params.id);
+  if (DEMO_VIRAL_VIDEOS.length === before) return res.status(404).json({ ok: false, message: 'Viral video not found' });
+  res.json({ ok: true });
 });
 
 // ===== Demo Auth (minimal) =====

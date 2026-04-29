@@ -122,6 +122,7 @@ import SafeOwnerZoneAiModelLog from '@/pages/admin/safe-owner-zone/SafeOwnerZone
 import BroadcastCenter from '@pages/admin/BroadcastCenter';
 import AdminUsersPage from '@pages/AdminUsersPage';
 import AiLogsPage from '@pages/AiLogsPage';
+import ViralVideosPage from '@pages/admin/ViralVideosPage';
 import { translationUiEnabled } from '@/config/featureFlags';
 
 function LegacySafeOwnerZoneRedirect() {
@@ -241,7 +242,9 @@ function App() {
               <Route path="/admin/add" element={<Navigate to="/add" replace />} />
               {/* Manage News canonical route + redirects */}
               <Route path="/admin/articles" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/viral-videos" element={<Navigate to="/admin/dashboard" replace />} />
+              <Route path="/admin/viral-videos" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/viral-videos/new" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/viral-videos/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/manage-news" element={<Navigate to="/admin/articles" replace />} />
               <Route path="/admin/manage-news" element={<Navigate to="/admin/articles" replace />} />
               <Route path="/admin/news" element={<Navigate to="/admin/articles" replace />} />

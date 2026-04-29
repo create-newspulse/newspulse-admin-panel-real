@@ -37,6 +37,13 @@ export type UploadCoverImageResult = {
   format?: string;
 };
 
+export type UploadVideoFileResult = {
+  url: string;
+  filename?: string;
+  bytes?: number;
+  mimetype?: string;
+};
+
 function extractUploadedNumber(raw: any, key: string): number | undefined {
   const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
   const value = payload?.[key];
@@ -278,4 +285,51 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
   };
   devDebug('[media] upload cover success', result);
   return result;
+}
+
+export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult> {
+  const fd = new FormData();
+  fd.append('video', file);
+
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem('np_token');
+  } catch {}
+
+  const resp = await fetch('/admin-api/admin/viral-videos/upload', {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  let payload: any = null;
+  try {
+    payload = await resp.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!resp.ok || payload?.ok === false) {
+    const msg =
+      payload?.error ||
+      payload?.message ||
+      payload?.data?.error ||
+      payload?.data?.message ||
+      `Video upload failed (${resp.status})`;
+    throw new Error(String(msg));
+  }
+
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+  const url = String(data?.url || payload?.url || '').trim();
+  if (!url) throw new Error('Video upload succeeded but no URL was returned');
+
+  return {
+    url,
+    filename: String(data?.filename || payload?.filename || '').trim() || undefined,
+    bytes: extractUploadedNumber(data, 'bytes'),
+    mimetype: extractUploadedString(data, 'mimetype'),
+  };
 }

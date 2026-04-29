@@ -42,6 +42,11 @@ app.use('/api/news', require('./routes/news/trendingController'));   // Trending
 // ✅ Admin API (frontend contract) – mount lightweight endpoints expected by the React UI
 // Articles: POST/GET/PUT on /admin-api/articles
 app.use('/admin-api', require('./routes/adminApiArticles'));
+// Viral Videos admin/public contract:
+// - /api/admin/viral-videos/settings
+// - /api/public/viral-videos/settings
+app.use('/api/admin', require('./routes/adminApiViralVideos'));
+app.use('/api/public', require('./routes/publicViralVideos'));
 // Assist suggestions: /admin-api/assist/suggest and /admin-api/assist/suggest/v2
 app.use('/admin-api/assist', require('./routes/assist'));
 

@@ -25,6 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Founder/Admin oversight for the live reporter workspace
   { key:'reporter-portal', label:'Reporter Portal Admin', path:'/community/portal', roles:['admin','founder'], icon:'👥' },
   { key:'livetv', label:'Live TV', path:'/admin/live', roles:['editor','admin','founder'], icon:'🎥' },
+  { key:'viral-videos', label:'Viral Videos', path:'/admin/viral-videos/new', roles:['editor','admin','founder'], icon:'🎬' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠' },
   { key:'aira', label:'AIRA', path:'/admin/aira', roles:['admin','founder'], icon:'🧍‍♀️' },
   { key:'editorial', label:'Editorial', path:'/admin/editorial', roles:['editor','admin','founder'], icon:'✍️' },
