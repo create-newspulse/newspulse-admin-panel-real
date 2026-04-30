@@ -21,6 +21,7 @@ export interface ViralVideoRecord {
   tags: string[];
   status: ViralVideoStatus;
   homepageVisible: boolean;
+  showOnHomepage: boolean;
   homepageFeatured: boolean;
   featured: boolean;
   publishedAt?: string | null;
@@ -42,6 +43,7 @@ export interface ViralVideoInput {
   tags: string[];
   status: ViralVideoStatus;
   homepageVisible: boolean;
+  showOnHomepage?: boolean;
   homepageFeatured: boolean;
   featured: boolean;
   publishedAt?: string | null;
@@ -73,8 +75,16 @@ export interface HomepageViralVideoSelection {
   frontendEnabled: boolean;
 }
 
+export interface ViralVideosCloudUploadCapability {
+  enabled: boolean;
+  available: boolean;
+  provider: string | null;
+  message: string;
+}
+
 export interface ViralVideosFrontendSettings {
   frontendEnabled: boolean;
+  viralVideosCloudUpload?: ViralVideosCloudUploadCapability;
 }
 
 const VIRAL_VIDEOS_PATH = 'admin/viral-videos';
@@ -104,6 +114,7 @@ function normalizeRecord(input: any): ViralVideoRecord {
   const status = String(input?.status || '').trim().toLowerCase() === 'published' ? 'published' : 'draft';
   const sortOrderRaw = input?.sortOrder;
   const sortOrder = Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : null;
+  const showOnHomepage = input?.showOnHomepage === true || input?.isHomepageVisible === true || input?.homepageVisible === true;
 
   return {
     _id: String(input?._id || input?.id || '').trim(),
@@ -119,7 +130,8 @@ function normalizeRecord(input: any): ViralVideoRecord {
     language: String(input?.language || input?.lang || 'en').trim() || 'en',
     tags,
     status,
-    homepageVisible: input?.homepageVisible === true,
+    homepageVisible: showOnHomepage,
+    showOnHomepage,
     homepageFeatured: input?.homepageFeatured === true || input?.featured === true,
     featured: input?.homepageFeatured === true || input?.featured === true,
     publishedAt: input?.publishedAt ? String(input.publishedAt) : null,
@@ -169,6 +181,8 @@ function buildPayload(input: Partial<ViralVideoInput>) {
     tags: Array.isArray(input.tags) ? input.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : [],
     status: input.status === 'published' ? 'published' : 'draft',
     homepageVisible: input.homepageVisible === true,
+    showOnHomepage: input.showOnHomepage === true || input.homepageVisible === true,
+    isHomepageVisible: input.showOnHomepage === true || input.homepageVisible === true,
     homepageFeatured: input.homepageFeatured === true || input.featured === true,
     featured: input.homepageFeatured === true || input.featured === true,
     publishedAt: input.publishedAt || null,
@@ -190,6 +204,20 @@ function readFrontendEnabled(payload: any, fallback: boolean) {
   if (typeof payload?.data?.settings?.frontendEnabled === 'boolean') return payload.data.settings.frontendEnabled;
   if (typeof payload?.frontendEnabled === 'boolean') return payload.frontendEnabled;
   return fallback;
+}
+
+function readCloudUploadCapability(payload: any): ViralVideosCloudUploadCapability | undefined {
+  const raw = payload?.settings?.viralVideosCloudUpload
+    || payload?.data?.settings?.viralVideosCloudUpload
+    || payload?.viralVideosCloudUpload
+    || payload?.data?.viralVideosCloudUpload;
+  if (!raw || typeof raw !== 'object') return undefined;
+  return {
+    enabled: raw.enabled === true,
+    available: raw.available === true,
+    provider: typeof raw.provider === 'string' && raw.provider.trim() ? raw.provider.trim() : null,
+    message: String(raw.message || '').trim(),
+  };
 }
 
 export async function listViralVideos(params: ViralVideoListParams = {}): Promise<ViralVideoListResponse> {
@@ -280,6 +308,7 @@ export async function getPublicViralVideosFrontendSettings(): Promise<ViralVideo
   const payload = await readPublicJson<any>(`${PUBLIC_VIRAL_VIDEOS_PATH}/settings`);
   return {
     frontendEnabled: readFrontendEnabled(payload, true),
+    viralVideosCloudUpload: readCloudUploadCapability(payload),
   };
 }
 
@@ -287,6 +316,7 @@ export async function getAdminViralVideosFrontendSettings(): Promise<ViralVideos
   const res = await adminApiClient.get(`${VIRAL_VIDEOS_PATH}/settings`);
   return {
     frontendEnabled: readFrontendEnabled(res.data, true),
+    viralVideosCloudUpload: readCloudUploadCapability(res.data),
   };
 }
 
@@ -294,5 +324,6 @@ export async function updateAdminViralVideosFrontendSettings(frontendEnabled: bo
   const res = await adminApiClient.put(`${VIRAL_VIDEOS_PATH}/settings`, { frontendEnabled });
   return {
     frontendEnabled: readFrontendEnabled(res.data, frontendEnabled),
+    viralVideosCloudUpload: readCloudUploadCapability(res.data),
   };
 }

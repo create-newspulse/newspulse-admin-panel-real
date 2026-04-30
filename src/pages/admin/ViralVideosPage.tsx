@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { Play } from 'lucide-react';
 import { useAuth } from '@context/AuthContext';
 import Switch from '@/components/settings/Switch';
+import { uploadCoverImage, uploadVideoFile } from '@/lib/api/media';
 import {
   getAdminViralVideosFrontendSettings,
+  getPublicViralVideosFrontendSettings,
   createViralVideo,
   deleteViralVideo,
   getViralVideo,
@@ -21,6 +24,19 @@ import {
 } from '@/lib/api/viralVideos';
 
 const FRONTEND_VISIBILITY_TOAST_ID = 'viral-videos-frontend-visibility';
+const IMAGE_UPLOAD_UNCONFIGURED_MESSAGE = 'Image upload is not configured in this environment. Paste an image URL to continue.';
+const THUMBNAIL_VIDEO_LINK_MESSAGE = 'This is a video/social link. Paste it in Video URL. Thumbnail needs an image URL.';
+const THUMBNAIL_IMAGE_URL_MESSAGE = 'Thumbnail needs a direct image URL ending in .jpg, .jpeg, .png, .webp, a Cloudinary image URL, S3/R2 image URL, or an uploaded article-cover image URL.';
+const CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE = 'Cloud video upload is not connected yet. Use Video URL for now.';
+const THUMBNAIL_ACCEPT_ATTR = 'image/png,image/jpeg,image/webp';
+const MAX_THUMBNAIL_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_THUMBNAIL_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const DEFAULT_CLOUD_VIDEO_UPLOAD_CAPABILITY = {
+  enabled: false,
+  available: false,
+  provider: null as string | null,
+  message: CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE,
+};
 
 type EditorState = {
   title: string;
@@ -79,6 +95,65 @@ function formatDate(value?: string | null) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : '-';
 }
 
+function parseUrl(value: string): URL | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  try {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://newspulse.local';
+    return new URL(raw, baseUrl);
+  } catch {
+    return null;
+  }
+}
+
+function isSocialVideoUrl(value: string): boolean {
+  const url = parseUrl(value);
+  if (!url) return false;
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  return host === 'instagram.com'
+    || host.endsWith('.instagram.com')
+    || host === 'facebook.com'
+    || host.endsWith('.facebook.com')
+    || host === 'fb.watch'
+    || host === 'x.com'
+    || host.endsWith('.x.com')
+    || host === 'twitter.com'
+    || host.endsWith('.twitter.com')
+    || host === 'youtube.com'
+    || host.endsWith('.youtube.com')
+    || host === 'youtu.be';
+}
+
+function isDirectVideoUrl(value: string): boolean {
+  const url = parseUrl(value);
+  if (!url) return false;
+  return /\.(mp4|webm)$/i.test(url.pathname);
+}
+
+function isValidThumbnailImageUrl(value: string): boolean {
+  const url = parseUrl(value);
+  if (!url) return false;
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+  const storageHost = host.includes('amazonaws.com')
+    || host.includes('cloudflarestorage.com')
+    || host.endsWith('.r2.dev')
+    || host.endsWith('.r2.cloudflarestorage.com');
+  if (/\.(jpe?g|png|webp)$/i.test(path)) return true;
+  if (host.includes('cloudinary.com') && path.includes('/image/upload')) return true;
+  if (storageHost && !isSocialVideoUrl(value) && !isDirectVideoUrl(value)) return true;
+  if (/\/(uploads?|media|images?)\//i.test(path) && !isSocialVideoUrl(value) && !isDirectVideoUrl(value)) return true;
+  return false;
+}
+
+function thumbnailUrlValidationMessage(value: string): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (isSocialVideoUrl(raw) || isDirectVideoUrl(raw)) return THUMBNAIL_VIDEO_LINK_MESSAGE;
+  if (!isValidThumbnailImageUrl(raw)) return THUMBNAIL_IMAGE_URL_MESSAGE;
+  return null;
+}
+
 function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): ViralVideoInput {
   const tags = state.tags.split(',').map((tag) => tag.trim()).filter(Boolean);
   const publishedAt = nextStatus === 'published'
@@ -92,8 +167,8 @@ function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): Viral
     category: state.category.trim(),
     thumbnailUrl: state.thumbnailUrl.trim(),
     videoUrl: state.videoUrl.trim(),
-    embedUrl: state.embedUrl.trim(),
-    sourceType: state.sourceType,
+    embedUrl: '',
+    sourceType: 'video_url',
     language: state.language,
     tags,
     status: nextStatus,
@@ -112,9 +187,9 @@ function fromRecord(record: ViralVideoRecord): EditorState {
     summary: record.summary || '',
     category: record.category || '',
     thumbnailUrl: record.thumbnailUrl || '',
-    sourceType: record.sourceType || 'video_url',
-    videoUrl: record.videoUrl || '',
-    embedUrl: record.embedUrl || '',
+    sourceType: 'video_url',
+    videoUrl: record.videoUrl || record.embedUrl || '',
+    embedUrl: '',
     language: record.language || 'en',
     tags: Array.isArray(record.tags) ? record.tags.join(', ') : '',
     publish: record.status === 'published',
@@ -122,78 +197,6 @@ function fromRecord(record: ViralVideoRecord): EditorState {
     publishedAt: toDateTimeLocal(record.publishedAt),
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? String(record.sortOrder) : '',
   };
-}
-
-function getAdminToken(): string {
-  try {
-    return localStorage.getItem('admin_token') || localStorage.getItem('np_token') || '';
-  } catch {
-    return '';
-  }
-}
-
-async function uploadViralVideoThumbnail(file: File): Promise<{ url: string }> {
-  const fd = new FormData();
-  fd.append('thumbnail', file);
-
-  const token = getAdminToken();
-  const resp = await fetch('/admin-api/admin/viral-videos/thumbnail-upload', {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  let payload: any = null;
-  try {
-    payload = await resp.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!resp.ok || payload?.ok === false) {
-    const msg = payload?.message || payload?.error || `Thumbnail upload failed (${resp.status})`;
-    throw new Error(String(msg));
-  }
-
-  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-  const url = String(data?.url || payload?.url || '').trim();
-  if (!url) throw new Error('Thumbnail upload succeeded but no URL was returned');
-  return { url };
-}
-
-async function uploadViralVideoFile(file: File): Promise<{ url: string }> {
-  const fd = new FormData();
-  fd.append('video', file);
-
-  const token = getAdminToken();
-  const resp = await fetch('/admin-api/admin/viral-videos/upload', {
-    method: 'POST',
-    body: fd,
-    credentials: 'include',
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  let payload: any = null;
-  try {
-    payload = await resp.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!resp.ok || payload?.ok === false) {
-    const msg = payload?.message || payload?.error || payload?.data?.message || `Video upload failed (${resp.status})`;
-    throw new Error(String(msg));
-  }
-
-  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-  const url = String(data?.url || payload?.url || '').trim();
-  if (!url) throw new Error('Video upload succeeded but no URL was returned');
-  return { url };
 }
 
 export default function ViralVideosPage() {
@@ -213,7 +216,11 @@ export default function ViralVideosPage() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [uploadingThumbnail, setUploadingThumbnail] = useState(false);
+  const [thumbnailUploadError, setThumbnailUploadError] = useState<string | null>(null);
+  const [thumbnailPreviewFailed, setThumbnailPreviewFailed] = useState(false);
+  const [cloudVideoUploadRequested, setCloudVideoUploadRequested] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const userRole = String(user?.role || '').trim().toLowerCase();
   const canManageFrontendVisibility = userRole === 'founder' || userRole === 'admin';
 
@@ -244,7 +251,13 @@ export default function ViralVideosPage() {
 
   const frontendSettingsQuery = useQuery({
     queryKey: ['viral-videos', 'frontend-settings', 'admin'],
-    queryFn: () => getAdminViralVideosFrontendSettings(),
+    queryFn: async () => {
+      try {
+        return await getAdminViralVideosFrontendSettings();
+      } catch {
+        return getPublicViralVideosFrontendSettings();
+      }
+    },
     staleTime: 30_000,
   });
 
@@ -253,18 +266,30 @@ export default function ViralVideosPage() {
       setEditor(EMPTY_EDITOR);
       setSlugTouched(false);
       setShowPreview(false);
+      setThumbnailUploadError(null);
+      setThumbnailPreviewFailed(false);
+      setCloudVideoUploadRequested(false);
+      setVideoUploadError(null);
       return;
     }
 
     if (editingId && itemQuery.data) {
       setEditor(fromRecord(itemQuery.data));
       setSlugTouched(true);
+      setThumbnailUploadError(null);
+      setThumbnailPreviewFailed(false);
+      setCloudVideoUploadRequested(false);
+      setVideoUploadError(null);
       return;
     }
 
     if (isCreateRoute) {
       setEditor(EMPTY_EDITOR);
       setSlugTouched(false);
+      setThumbnailUploadError(null);
+      setThumbnailPreviewFailed(false);
+      setCloudVideoUploadRequested(false);
+      setVideoUploadError(null);
     }
   }, [editingId, isCreateRoute, isEditorOpen, itemQuery.data]);
 
@@ -274,8 +299,9 @@ export default function ViralVideosPage() {
       if (!payload.title) throw new Error('Title is required');
       if (!payload.slug) throw new Error('Slug is required');
       if (!payload.thumbnailUrl) throw new Error('Thumbnail image is required');
-      if (payload.sourceType === 'video_url' && !payload.videoUrl) throw new Error('Video URL is required');
-      if (payload.sourceType === 'embed_url' && !payload.embedUrl) throw new Error('Embed URL is required');
+      const thumbnailError = thumbnailUrlValidationMessage(payload.thumbnailUrl);
+      if (thumbnailError) throw new Error(thumbnailError);
+      if (!payload.videoUrl) throw new Error('Video URL is required');
 
       if (editingId) {
         return updateViralVideo(editingId, payload);
@@ -324,41 +350,101 @@ export default function ViralVideosPage() {
     return ['all', ...Array.from(set).sort()];
   }, [items]);
 
-  const previewSource = editor.sourceType === 'embed_url' ? editor.embedUrl : editor.videoUrl;
+  const previewSource = editor.videoUrl.trim();
+  const hasPreviewSource = previewSource.length > 0;
   const isBusy = saveMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
   const homepageFeaturedItem = homepageFeatureQuery.data?.item || null;
   const homepageSelectionMode = homepageFeatureQuery.data?.selectionMode || 'manual';
+  const thumbnailUploadDisabled = uploadingThumbnail;
+  const thumbnailUploadHelpText = 'Upload or paste a direct image URL. For YouTube/Instagram/Facebook/X videos, paste the social link in Video URL and add a separate thumbnail image.';
+  const thumbnailValidationMessage = thumbnailUrlValidationMessage(editor.thumbnailUrl);
+  const thumbnailPreviewUrl = !thumbnailValidationMessage && isValidThumbnailImageUrl(editor.thumbnailUrl) ? editor.thumbnailUrl.trim() : '';
+  const cloudVideoUpload = frontendSettingsQuery.data?.viralVideosCloudUpload || DEFAULT_CLOUD_VIDEO_UPLOAD_CAPABILITY;
+  const cloudVideoUploadProviderLabel = cloudVideoUpload.provider ? String(cloudVideoUpload.provider).toUpperCase() : 'Not connected';
+  const cloudVideoUploadAvailable = cloudVideoUpload.available === true;
+  const cloudVideoUploadSwitchOn = cloudVideoUploadAvailable && cloudVideoUploadRequested;
+  const videoUploadDisabled = uploadingVideo || !cloudVideoUploadSwitchOn;
+  const cloudVideoUploadStatusText = !cloudVideoUploadAvailable
+    ? CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE
+    : (cloudVideoUploadSwitchOn
+      ? 'Cloud video upload is ON.'
+      : 'Video file upload is currently OFF. Use Video URL for now.');
+  const cloudVideoUploadStatusLabel = cloudVideoUploadSwitchOn ? 'ON' : 'OFF';
 
   async function handleThumbnailUpload(file: File | null) {
     if (!file) return;
+    if (file.size > MAX_THUMBNAIL_UPLOAD_BYTES) {
+      toast.error('Image must be 5MB or smaller');
+      return;
+    }
+    if (file.type && !ACCEPTED_THUMBNAIL_TYPES.has(file.type)) {
+      toast.error('Only PNG, JPEG, or WEBP images are allowed');
+      return;
+    }
     setUploadingThumbnail(true);
+    setThumbnailUploadError(null);
     try {
-      const result = await uploadViralVideoThumbnail(file);
+      const result = await uploadCoverImage(file);
       setEditor((current) => ({ ...current, thumbnailUrl: result.url }));
+      setThumbnailUploadError(null);
+      setThumbnailPreviewFailed(false);
+      setShowPreview(true);
       toast.success('Thumbnail uploaded');
     } catch (error: any) {
-      toast.error(String(error?.message || 'Thumbnail upload failed'));
+      const rawMessage = String(error?.message || '').trim();
+      const message = /cloudinary|configured|configuration|env|upload unavailable|status check|media status/i.test(rawMessage)
+        ? IMAGE_UPLOAD_UNCONFIGURED_MESSAGE
+        : (rawMessage || IMAGE_UPLOAD_UNCONFIGURED_MESSAGE);
+      setThumbnailUploadError(message);
+      toast.error(message);
     } finally {
       setUploadingThumbnail(false);
     }
   }
 
+  function handleCloudVideoUploadToggle(nextChecked: boolean) {
+    setVideoUploadError(null);
+    if (nextChecked && !cloudVideoUploadAvailable) {
+      toast.error(CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE);
+      setCloudVideoUploadRequested(false);
+      return;
+    }
+    setCloudVideoUploadRequested(nextChecked);
+  }
+
   async function handleVideoUpload(file: File | null) {
     if (!file) return;
+    if (!cloudVideoUploadRequested) {
+      setVideoUploadError('Video file upload is currently OFF. Use Video URL for now.');
+      return;
+    }
+    if (!cloudVideoUploadAvailable) {
+      setVideoUploadError(CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE);
+      toast.error(CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE);
+      return;
+    }
+
     setUploadingVideo(true);
+    setVideoUploadError(null);
     try {
-      const result = await uploadViralVideoFile(file);
-      setEditor((current) => ({
-        ...current,
-        sourceType: 'video_url',
-        videoUrl: result.url,
-        embedUrl: '',
-      }));
+      const result = await uploadVideoFile(file);
+      setEditor((current) => ({ ...current, sourceType: 'video_url', videoUrl: result.url, embedUrl: '' }));
       toast.success('Video uploaded');
     } catch (error: any) {
-      toast.error(String(error?.message || 'Video upload failed'));
+      const message = String(error?.message || 'Video upload failed');
+      setVideoUploadError(message);
+      toast.error(message);
     } finally {
       setUploadingVideo(false);
+    }
+  }
+
+  function handleThumbnailUrlChange(value: string) {
+    setThumbnailUploadError(null);
+    setEditor((current) => ({ ...current, thumbnailUrl: value }));
+    setThumbnailPreviewFailed(false);
+    if (isValidThumbnailImageUrl(value) && !thumbnailUrlValidationMessage(value)) {
+      setShowPreview(true);
     }
   }
 
@@ -421,15 +507,13 @@ export default function ViralVideosPage() {
     return 'Published in archive';
   };
 
-  const hasFrontendSettings = typeof frontendSettingsQuery.data?.frontendEnabled === 'boolean';
-  const frontendEnabled = frontendSettingsQuery.data?.frontendEnabled === true;
+  const frontendEnabled = frontendSettingsQuery.data?.frontendEnabled ?? homepageFeatureQuery.data?.frontendEnabled ?? true;
   const frontendVisibilityLabel = frontendSettingsQuery.isLoading
     ? 'Loading...'
-    : frontendSettingsQuery.isError
-      ? 'Unavailable'
-      : frontendEnabled
-        ? 'ON'
-        : 'OFF';
+    : frontendEnabled
+      ? 'ON'
+      : 'OFF';
+  const frontendVisibilityDisabled = frontendSettingsQuery.isError || globalVisibilityMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -458,20 +542,36 @@ export default function ViralVideosPage() {
             <div>
               <div className="text-sm font-semibold text-slate-900">Frontend visibility</div>
               <div className="mt-1 text-sm text-slate-600">
-                OFF hides Viral Videos from the homepage and public Viral Videos page. Saved records remain available in admin.
+                ON allows Viral Videos to appear on homepage and public Viral Videos page. OFF hides them publicly but keeps saved records in admin.
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                Frontend visibility ON does not publish drafts. Public display still requires Published status, and homepage display also needs Show on homepage = Yes.
               </div>
             </div>
-            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-              <span className={`text-sm font-semibold ${frontendEnabled ? 'text-emerald-700' : 'text-slate-600'}`}>
+            <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${frontendEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+              <span className={`min-w-10 text-sm font-bold ${frontendEnabled ? 'text-emerald-700' : 'text-slate-700'}`}>
                 {frontendVisibilityLabel}
               </span>
               {canManageFrontendVisibility ? (
-                <Switch
-                  checked={frontendEnabled}
-                  onCheckedChange={(next) => globalVisibilityMutation.mutate(next)}
-                  disabled={!hasFrontendSettings || frontendSettingsQuery.isError || globalVisibilityMutation.isPending}
-                  label="Frontend visibility"
-                />
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={frontendEnabled}
+                  aria-label="Frontend visibility"
+                  disabled={frontendVisibilityDisabled}
+                  onClick={() => globalVisibilityMutation.mutate(!frontendEnabled)}
+                  className={
+                    `relative inline-flex h-8 w-16 items-center rounded-full border-2 transition disabled:cursor-not-allowed disabled:opacity-60 ` +
+                    (frontendEnabled ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300 bg-slate-200')
+                  }
+                >
+                  <span
+                    className={
+                      `inline-block h-6 w-6 transform rounded-full bg-white shadow transition ` +
+                      (frontendEnabled ? 'translate-x-8' : 'translate-x-1')
+                    }
+                  />
+                </button>
               ) : null}
             </div>
           </div>
@@ -653,7 +753,7 @@ export default function ViralVideosPage() {
                     <div className="mt-2 text-xs text-slate-500">Published records can render on the frontend only when the global frontend switch is ON.</div>
                   </label>
                   <label className="rounded-xl border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Homepage featured</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Show on homepage</div>
                     <div className="mt-2 flex items-center justify-between gap-3">
                       <span className="text-sm text-slate-700">{editor.publish && editor.featured ? 'Yes' : 'No'}</span>
                       <input
@@ -664,7 +764,7 @@ export default function ViralVideosPage() {
                         className="h-4 w-4"
                       />
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">Homepage featured is per-video only. It does not turn the full Viral Videos frontend ON or OFF.</div>
+                    <div className="mt-2 text-xs text-slate-500">Shows this published video in the homepage Viral Videos slot. It does not turn the full Viral Videos frontend ON or OFF.</div>
                   </label>
                 </div>
               </div>
@@ -684,19 +784,6 @@ export default function ViralVideosPage() {
                     }}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
                     placeholder="Viral video title"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Slug</label>
-                  <input
-                    value={editor.slug}
-                    onChange={(event) => {
-                      setSlugTouched(true);
-                      setEditor((current) => ({ ...current, slug: slugify(event.target.value) }));
-                    }}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                    placeholder="viral-video-slug"
                   />
                 </div>
 
@@ -728,12 +815,12 @@ export default function ViralVideosPage() {
                 <div className="md:col-span-2">
                   <label className="mb-1 block text-sm font-medium text-slate-700">Thumbnail / poster image</label>
                   <div className="mb-2 flex flex-wrap items-center gap-3">
-                    <label className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    <label className={`inline-flex items-center rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 ${thumbnailUploadDisabled ? 'cursor-not-allowed bg-slate-100 opacity-60' : 'cursor-pointer hover:bg-slate-50'}`}>
                       <span>{uploadingThumbnail ? 'Uploading...' : 'Upload image'}</span>
                       <input
                         type="file"
-                        accept="image/*"
-                        disabled={uploadingThumbnail}
+                        accept={THUMBNAIL_ACCEPT_ATTR}
+                        disabled={thumbnailUploadDisabled}
                         onChange={(event) => {
                           const file = event.target.files?.[0] || null;
                           void handleThumbnailUpload(file);
@@ -742,17 +829,22 @@ export default function ViralVideosPage() {
                         className="hidden"
                       />
                     </label>
-                    <span className="text-xs text-slate-500">You can upload a thumbnail or paste an existing image URL below.</span>
+                    <span className="text-xs text-slate-500">{thumbnailUploadHelpText}</span>
                   </div>
-                  <input value={editor.thumbnailUrl} onChange={(event) => setEditor((current) => ({ ...current, thumbnailUrl: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://.../thumbnail.jpg" />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Source type</label>
-                  <select value={editor.sourceType} onChange={(event) => setEditor((current) => ({ ...current, sourceType: event.target.value as 'video_url' | 'embed_url' }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-                    <option value="video_url">Video URL</option>
-                    <option value="embed_url">Embed URL</option>
-                  </select>
+                  {thumbnailUploadError ? (
+                    <div className="mb-2 text-xs font-medium text-amber-700">{thumbnailUploadError}</div>
+                  ) : null}
+                  <input
+                    value={editor.thumbnailUrl}
+                    onChange={(event) => {
+                      handleThumbnailUrlChange(event.target.value);
+                    }}
+                    className={`w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-slate-500 ${thumbnailValidationMessage ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
+                    placeholder="https://.../thumbnail.jpg"
+                  />
+                  {thumbnailValidationMessage ? (
+                    <div className="mt-2 text-xs font-medium text-red-700">{thumbnailValidationMessage}</div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -760,16 +852,34 @@ export default function ViralVideosPage() {
                   <input type="datetime-local" value={editor.publishedAt} onChange={(event) => setEditor((current) => ({ ...current, publishedAt: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" />
                 </div>
 
-                {editor.sourceType === 'video_url' ? (
-                  <div className="md:col-span-2">
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Upload video file</label>
-                    <div className="mb-2 flex flex-wrap items-center gap-3">
-                      <label className="inline-flex cursor-pointer items-center rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Video URL</label>
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">Enable Cloud Video Upload</div>
+                        <div className={`mt-1 text-xs font-medium ${!cloudVideoUploadAvailable ? 'text-amber-700' : 'text-slate-500'}`}>{cloudVideoUploadStatusText}</div>
+                        {cloudVideoUploadSwitchOn ? (
+                          <div className="mt-1 text-xs text-slate-500">Storage provider: {cloudVideoUploadProviderLabel}</div>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <span className={`min-w-8 text-sm font-bold ${cloudVideoUploadSwitchOn ? 'text-emerald-700' : 'text-slate-700'}`}>{cloudVideoUploadStatusLabel}</span>
+                        <Switch
+                          checked={cloudVideoUploadSwitchOn}
+                          onCheckedChange={handleCloudVideoUploadToggle}
+                          disabled={!cloudVideoUploadAvailable}
+                          label="Enable Cloud Video Upload"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <label className={`inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium ${videoUploadDisabled ? 'cursor-not-allowed text-slate-500 opacity-70' : 'cursor-pointer text-slate-700 hover:bg-slate-50'}`}>
                         <span>{uploadingVideo ? 'Uploading...' : 'Upload video file'}</span>
                         <input
                           type="file"
                           accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
-                          disabled={uploadingVideo}
+                          disabled={videoUploadDisabled}
                           onChange={(event) => {
                             const file = event.target.files?.[0] || null;
                             void handleVideoUpload(file);
@@ -778,21 +888,14 @@ export default function ViralVideosPage() {
                           className="hidden"
                         />
                       </label>
-                      <span className="text-xs text-slate-500">Accepted formats: mp4, mov, webm.</span>
+                      <span className="text-xs text-slate-500">Upload video file button is enabled only when cloud storage is connected. Video URL remains active.</span>
                     </div>
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Or paste video URL</label>
-                    <input value={editor.videoUrl} onChange={(event) => setEditor((current) => ({ ...current, videoUrl: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://.../video.mp4" />
+                    {videoUploadError ? (
+                      <div className="mt-2 text-xs font-medium text-amber-700">{videoUploadError}</div>
+                    ) : null}
                   </div>
-                ) : (
-                  <div className="md:col-span-2">
-                    <label className="mb-1 block text-sm font-medium text-slate-700">Embed URL</label>
-                    <input value={editor.embedUrl} onChange={(event) => setEditor((current) => ({ ...current, embedUrl: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://www.youtube.com/embed/..." />
-                  </div>
-                )}
-
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Tags</label>
-                  <input value={editor.tags} onChange={(event) => setEditor((current) => ({ ...current, tags: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="viral, social, sports" />
+                  <input value={editor.videoUrl} onChange={(event) => setEditor((current) => ({ ...current, sourceType: 'video_url', videoUrl: event.target.value, embedUrl: '' }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://www.youtube.com/watch?v=..." />
+                  <div className="mt-2 text-xs text-slate-500">Paste YouTube, Instagram, Facebook, X, direct MP4/WebM, or cloud video URL.</div>
                 </div>
 
                 <div>
@@ -832,10 +935,27 @@ export default function ViralVideosPage() {
                 </div>
               </div>
 
-              {showPreview ? (
+              {showPreview || isEditorOpen ? (
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                   <div className="aspect-[16/10] bg-slate-100">
-                    {editor.thumbnailUrl ? <img src={editor.thumbnailUrl} alt={editor.title || 'Preview thumbnail'} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-sm text-slate-500">Add a thumbnail to preview</div>}
+                    {thumbnailPreviewUrl && !thumbnailPreviewFailed ? (
+                      <img
+                        src={thumbnailPreviewUrl}
+                        alt={editor.title || 'Preview thumbnail'}
+                        className="h-full w-full object-cover"
+                        onLoad={() => setThumbnailPreviewFailed(false)}
+                        onError={() => setThumbnailPreviewFailed(true)}
+                      />
+                    ) : hasPreviewSource ? (
+                      <div className="flex h-full flex-col items-center justify-center bg-slate-950 px-5 text-center text-slate-100">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/10 shadow-sm">
+                          <Play className="ml-0.5 h-7 w-7 fill-current" aria-hidden="true" />
+                        </div>
+                        <div className="mt-3 text-sm font-semibold">Source link added. Add a thumbnail for better preview.</div>
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-500">Add a thumbnail to preview</div>
+                    )}
                   </div>
                   <div className="space-y-3 p-4">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
@@ -851,7 +971,7 @@ export default function ViralVideosPage() {
                         Open source preview
                       </a>
                     ) : (
-                      <div className="text-sm text-slate-500">Add a video or embed URL for preview.</div>
+                      <div className="text-sm text-slate-500">Add a video URL for preview.</div>
                     )}
                   </div>
                 </div>
