@@ -374,9 +374,13 @@ function App() {
               <Route
                 path="/admin/safe-owner-zone"
                 element={
-                  <RequireRole allow={['founder', 'admin']}>
-                    <SafeOwnerZoneShell />
-                  </RequireRole>
+                  <ProtectedRoute>
+                    <LockCheckWrapper>
+                      <RequireRole allow={['founder', 'admin']}>
+                        <SafeOwnerZoneShell />
+                      </RequireRole>
+                    </LockCheckWrapper>
+                  </ProtectedRoute>
                 }
               >
                 <Route index element={<SafeOwnerZoneHub />} />
