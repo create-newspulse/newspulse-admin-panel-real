@@ -134,6 +134,48 @@ function pickHealthValue(health: any, keys: string[]): unknown {
   return undefined;
 }
 
+function pickFromPath(source: any, path: string): unknown {
+  if (!path) return source;
+  const parts = path.split('.');
+  let cursor = source;
+  for (const part of parts) cursor = cursor?.[part];
+  return cursor != null && cursor !== '' ? cursor : undefined;
+}
+
+function findHealthArrayItem(source: any, key: string): unknown {
+  if (!Array.isArray(source)) return undefined;
+  const normalizedKey = key.toLowerCase();
+  return source.find((item) => {
+    const itemKey = String(item?.key ?? item?.id ?? item?.name ?? item?.service ?? item?.component ?? '').trim().toLowerCase();
+    return itemKey === normalizedKey;
+  });
+}
+
+function pickHealthStatus(health: any, key: string, aliases: string[] = []): unknown {
+  const names = [key, ...aliases];
+  const containers = ['', 'health', 'systemHealth', 'checks', 'statuses', 'statusChecks', 'services', 'serviceStatuses', 'dependencies', 'components', 'results', 'backend', 'workers'];
+  const fields = ['', 'status', 'state', 'health', 'message'];
+
+  for (const container of containers) {
+    const containerValue = container ? pickFromPath(health, container) : health;
+    if (containerValue == null || containerValue === '') continue;
+
+    for (const name of names) {
+      const arrayItem = findHealthArrayItem(containerValue, name);
+      if (arrayItem != null) return arrayItem;
+
+      const base = pickFromPath(containerValue, name);
+      if (base == null || base === '') continue;
+      for (const field of fields) {
+        const value = field ? pickFromPath(base, field) : base;
+        if (value != null && value !== '') return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function healthPayload(health: any) {
   const data = health?.data;
   return data && typeof data === 'object' && !Array.isArray(data) ? data : health;
@@ -146,7 +188,7 @@ function healthStatusText(value: unknown, fallback = 'Check needed') {
   if (typeof value === 'object') {
     const raw: any = value;
     return healthStatusText(
-      raw.status ?? raw.state ?? raw.health ?? raw.ok ?? raw.connected ?? raw.available ?? raw.configured,
+      raw.status ?? raw.state ?? raw.health ?? raw.message ?? raw.ok ?? raw.connected ?? raw.available ?? raw.configured,
       fallback
     );
   }
@@ -356,12 +398,12 @@ function SystemHealthTab({ ctx }: { ctx: OwnerZoneShellContext }) {
   const didHealthFail = !!ctx.healthError;
   const statusFallback = didHealthFail ? 'Check needed' : 'Status not reported';
   const checkedAtFallback = didHealthFail ? 'Not connected yet' : 'Timestamp not reported';
-  const backendStatus = healthStatusText(pickHealthValue(health, ['backendApi', 'backendApi.status', 'services.backendApi', 'services.backendApi.status', 'backend', 'backend.status', 'api', 'api.status', 'services.api', 'services.api.status', 'status', 'ok', 'success']), statusFallback);
-  const mongoStatus = healthStatusText(pickHealthValue(health, ['mongodb', 'mongodb.status', 'services.mongodb', 'services.mongodb.status', 'mongo', 'mongo.status', 'services.mongo', 'services.mongo.status', 'database', 'database.status', 'services.database', 'services.database.status', 'db', 'db.status', 'backend.db', 'backend.db.status', 'backend.mongo', 'backend.mongo.status']), statusFallback);
-  const cacheStatus = healthStatusText(pickHealthValue(health, ['redis', 'redis.status', 'services.redis', 'services.redis.status', 'cache', 'cache.status', 'services.cache', 'services.cache.status', 'backend.redis', 'backend.redis.status', 'backend.cache', 'backend.cache.status']), statusFallback);
-  const translationStatus = healthStatusText(pickHealthValue(health, ['translationWorker', 'translationWorker.status', 'services.translationWorker', 'services.translationWorker.status', 'translation', 'translation.status', 'services.translation', 'services.translation.status', 'workers.translation', 'workers.translation.status', 'backend.translation', 'backend.translation.status']), statusFallback);
-  const emailStatus = healthStatusText(pickHealthValue(health, ['smtpEmail', 'smtpEmail.status', 'services.smtpEmail', 'services.smtpEmail.status', 'smtp', 'smtp.status', 'services.smtp', 'services.smtp.status', 'email', 'email.status', 'services.email', 'services.email.status', 'mail', 'mail.status', 'services.mail', 'services.mail.status', 'backend.smtp', 'backend.smtp.status', 'backend.email', 'backend.email.status']), statusFallback);
-  const environmentStatus = healthStatusText(pickHealthValue(health, ['environment', 'environment.status', 'services.environment', 'services.environment.status', 'deploy', 'deploy.status', 'services.deploy', 'services.deploy.status', 'vercel', 'vercel.status', 'services.vercel', 'services.vercel.status', 'render', 'render.status', 'services.render', 'services.render.status', 'backend.environment', 'backend.environment.status']), statusFallback);
+  const backendStatus = healthStatusText(pickHealthStatus(health, 'backendApi', ['backend', 'api']), statusFallback);
+  const mongoStatus = healthStatusText(pickHealthStatus(health, 'mongodb', ['mongo', 'database', 'db']), statusFallback);
+  const cacheStatus = healthStatusText(pickHealthStatus(health, 'redis', ['cache']), statusFallback);
+  const translationStatus = healthStatusText(pickHealthStatus(health, 'translationWorker', ['translation']), statusFallback);
+  const emailStatus = healthStatusText(pickHealthStatus(health, 'smtpEmail', ['smtp', 'email', 'mail']), statusFallback);
+  const environmentStatus = healthStatusText(pickHealthStatus(health, 'environment', ['deploy', 'vercel', 'render']), statusFallback);
   const checkedAtValue = pickHealthValue(health, ['checkedAt', 'checked_at', 'timestamp', 'time', 'updatedAt', 'updated_at', 'meta.checkedAt', 'meta.timestamp']);
   const checkedAt = checkedAtValue == null || checkedAtValue === '' ? checkedAtFallback : normalizeCheckedAt(checkedAtValue);
 
