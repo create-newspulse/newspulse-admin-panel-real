@@ -380,6 +380,12 @@ function App() {
                 }
               >
                 <Route index element={<SafeOwnerZoneHub />} />
+                <Route path="security" element={<SafeOwnerZoneModule slug="security" />} />
+                <Route path="emergency" element={<SafeOwnerZoneModule slug="emergency" />} />
+                <Route path="ai-safety" element={<SafeOwnerZoneModule slug="ai-safety" />} />
+                <Route path="backup" element={<SafeOwnerZoneModule slug="backup" />} />
+                <Route path="system-health" element={<SafeOwnerZoneModule slug="system-health" />} />
+                <Route path="audit-logs" element={<SafeOwnerZoneModule slug="audit-logs" />} />
                 <Route path="founder" element={<SafeOwnerZoneModule slug="founder" />} />
                 <Route path="security-lockdown" element={<SafeOwnerZoneModule slug="security-lockdown" />} />
                 <Route path="compliance" element={<SafeOwnerZoneModule slug="compliance" />} />

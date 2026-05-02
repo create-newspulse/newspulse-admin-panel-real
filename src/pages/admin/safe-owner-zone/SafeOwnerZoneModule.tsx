@@ -1,5 +1,5 @@
 import OwnerZoneRoute from '@/sections/SafeOwnerZone/OwnerZoneRoute';
-import { OwnerModulePage } from '@/sections/SafeOwnerZone/ownerzone.registry';
+import SafeOwnerZonePhaseOne, { resolvePhaseOneTab } from './SafeOwnerZonePhaseOne';
 
 const SLUG_TO_MODULE: Record<string, string> = {
   founder: 'founder',
@@ -19,8 +19,7 @@ export function resolveOwnerZoneModuleSlug(slug: string | undefined | null): str
 }
 
 export default function SafeOwnerZoneModule({ slug }: { slug: string }) {
-  const moduleId = resolveOwnerZoneModuleSlug(slug);
-  return <OwnerModulePage moduleId={moduleId} />;
+  return <SafeOwnerZonePhaseOne tab={resolvePhaseOneTab(slug)} />;
 }
 
 // Legacy compatibility for old /safeownerzone/:module routes.

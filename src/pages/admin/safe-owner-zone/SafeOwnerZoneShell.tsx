@@ -7,6 +7,7 @@ import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
 import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
 import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
 import { createSnapshot, getRecentAudit, health as ownerZoneHealth, listSnapshots } from '@/api/ownerZone';
+import { PHASE_ONE_SAFE_OWNER_TABS } from './SafeOwnerZonePhaseOne';
 
 export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
 
@@ -35,18 +36,7 @@ export type OwnerZoneShellContext = {
 
 type ModuleTab = { key: string; label: string; to: string; end?: boolean };
 
-const TABS: ModuleTab[] = [
-  { key: 'hub', label: 'Hub', to: '/admin/safe-owner-zone', end: true },
-  { key: 'founder', label: 'Founder', to: '/admin/safe-owner-zone/founder' },
-  { key: 'security', label: 'Security Center', to: '/admin/safe-owner-zone/security-lockdown' },
-  { key: 'compliance', label: 'Compliance', to: '/admin/safe-owner-zone/compliance' },
-  { key: 'ai', label: 'AI', to: '/admin/safe-owner-zone/ai-control' },
-  { key: 'ai-model-log', label: 'AI Model Log', to: '/admin/safe-owner-zone/ai-model-log' },
-  { key: 'vaults', label: 'Vaults', to: '/admin/safe-owner-zone/vaults' },
-  { key: 'ops', label: 'Ops', to: '/admin/safe-owner-zone/operations' },
-  { key: 'revenue', label: 'Revenue', to: '/admin/safe-owner-zone/revenue' },
-  { key: 'oversight', label: 'Oversight', to: '/admin/safe-owner-zone/admin-oversight' },
-];
+const TABS: ModuleTab[] = PHASE_ONE_SAFE_OWNER_TABS;
 
 function formatWhen(ts: string | null | undefined) {
   if (!ts) return 'Awaiting backend';
@@ -223,7 +213,7 @@ export default function SafeOwnerZoneShell() {
                   {status}
                 </span>
               </div>
-              <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Enterprise-grade controls, visibility, and governance.</div>
+              <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Clean founder view for health, safety, backup, compliance, and audit readiness.</div>
             </div>
 
             <div className="grid grid-cols-1 gap-2 text-right sm:grid-cols-2">
@@ -238,33 +228,8 @@ export default function SafeOwnerZoneShell() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                disabled={!canUseDangerActions}
-                onClick={doSnapshot}
-              >
-                Snapshot
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 disabled:opacity-50"
-                disabled={!canUseDangerActions}
-                onClick={() => setRollbackOpen(true)}
-              >
-                Rollback
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                disabled={!canUseDangerActions}
-                onClick={() => setLockConfirmOpen(true)}
-              >
-                Emergency Lockdown
-              </button>
-            </div>
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-100">
+            Phase 1 is UI cleanup only. Dangerous controls are shown as placeholders inside their tabs and require Owner Key rules in later phases.
           </div>
         </div>
 
