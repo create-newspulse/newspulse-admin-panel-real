@@ -134,34 +134,21 @@ function pickHealthValue(health: any, keys: string[]): unknown {
   return undefined;
 }
 
-function isHealthRecord(value: any) {
-  return value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function firstHealthRecord(...values: any[]) {
-  return values.find(isHealthRecord);
+function healthPayload(health: any) {
+  const data = health?.data;
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : health;
 }
 
 function normalizeHealthResponse(response: any) {
-  const responseData = isHealthRecord(response?.data) ? response.data : undefined;
-  const responseDataData = isHealthRecord(responseData?.data) ? responseData.data : undefined;
-  const payload = firstHealthRecord(responseDataData, responseData, response) || null;
-  const payloadData = isHealthRecord(payload?.data) ? payload.data : undefined;
-  const checks = firstHealthRecord(payload?.checks, payloadData?.checks, payloadData, payload) || null;
-
-  if (import.meta.env.DEV) {
-    console.debug('[SafeOwnerZone][system-health] normalized payload', {
-      keys: Object.keys(payload || {}),
-      checksKeys: Object.keys(checks || {}),
-    });
-  }
-
+  const payload = healthPayload(response);
+  const checks = payload?.checks && typeof payload.checks === 'object' && !Array.isArray(payload.checks)
+    ? payload.checks
+    : payload;
   return { payload, checks };
 }
 
-function pickCheckStatus(checks: any, keys: string[]): unknown {
-  const checkKey = keys.find((key) => checks?.[key] != null && checks?.[key] !== '');
-  const check = checkKey ? checks?.[checkKey] : undefined;
+function pickCheckStatus(checks: any, key: string): unknown {
+  const check = checks?.[key];
   if (check == null || check === '') return undefined;
   if (typeof check === 'object' && !Array.isArray(check)) {
     return check.status ?? check.message;
@@ -386,14 +373,13 @@ function SystemHealthTab({ ctx }: { ctx: OwnerZoneShellContext }) {
   const didHealthFail = !!ctx.healthError;
   const statusFallback = didHealthFail ? 'Check needed' : 'Status not reported';
   const checkedAtFallback = didHealthFail ? 'Not connected yet' : 'Timestamp not reported';
-  const backendStatus = healthStatusText(pickCheckStatus(checks, ['backendApi', 'backend']), statusFallback);
-  const mongoStatus = healthStatusText(pickCheckStatus(checks, ['mongodb', 'mongo', 'database']), statusFallback);
-  const cacheStatus = healthStatusText(pickCheckStatus(checks, ['redis', 'cache']), statusFallback);
-  const translationStatus = healthStatusText(pickCheckStatus(checks, ['translationWorker', 'worker']), statusFallback);
-  const emailStatus = healthStatusText(pickCheckStatus(checks, ['smtpEmail', 'smtp', 'email']), statusFallback);
-  const environmentStatus = healthStatusText(pickCheckStatus(checks, ['environment', 'env']), statusFallback);
-  const checkedAtValue = pickHealthValue(payload, ['checkedAt', 'checked_at', 'timestamp', 'time', 'updatedAt', 'updated_at', 'meta.checkedAt', 'meta.timestamp'])
-    ?? pickHealthValue(ctx.health, ['checkedAt', 'data.checkedAt', 'data.data.checkedAt']);
+  const backendStatus = healthStatusText(pickCheckStatus(checks, 'backendApi'), statusFallback);
+  const mongoStatus = healthStatusText(pickCheckStatus(checks, 'mongodb'), statusFallback);
+  const cacheStatus = healthStatusText(pickCheckStatus(checks, 'redis'), statusFallback);
+  const translationStatus = healthStatusText(pickCheckStatus(checks, 'translationWorker'), statusFallback);
+  const emailStatus = healthStatusText(pickCheckStatus(checks, 'smtpEmail'), statusFallback);
+  const environmentStatus = healthStatusText(pickCheckStatus(checks, 'environment'), statusFallback);
+  const checkedAtValue = pickHealthValue(payload, ['checkedAt', 'checked_at', 'timestamp', 'time', 'updatedAt', 'updated_at', 'meta.checkedAt', 'meta.timestamp']);
   const checkedAt = checkedAtValue == null || checkedAtValue === '' ? checkedAtFallback : normalizeCheckedAt(checkedAtValue);
 
   return (
