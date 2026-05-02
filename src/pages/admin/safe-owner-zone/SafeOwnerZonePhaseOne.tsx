@@ -124,80 +124,14 @@ function SimpleList({ items }: { items: Array<{ label: string; value: string; to
   );
 }
 
-function pickHealthValue(health: any, keys: string[]): unknown {
+function readHealthValue(health: any, keys: string[], fallback = 'Check needed') {
   for (const key of keys) {
     const parts = key.split('.');
     let cursor = health;
     for (const part of parts) cursor = cursor?.[part];
-    if (cursor != null && cursor !== '') return cursor;
+    if (cursor != null && cursor !== '') return String(cursor);
   }
-  return undefined;
-}
-
-function healthPayload(health: any) {
-  const data = health?.data;
-  return data && typeof data === 'object' && !Array.isArray(data) ? data : health;
-}
-
-function healthStatusText(value: unknown, fallback = 'Check needed') {
-  if (value == null || value === '') return fallback;
-  if (typeof value === 'boolean') return value ? 'OK' : 'Error';
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback;
-  if (typeof value === 'object') {
-    const raw: any = value;
-    return healthStatusText(
-      raw.status ?? raw.state ?? raw.health ?? raw.ok ?? raw.connected ?? raw.available ?? raw.configured,
-      fallback
-    );
-  }
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function displayHealthStatus(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return 'Check needed';
-
-  const normalized = text.toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const friendly: Record<string, string> = {
-    ok: 'OK',
-    healthy: 'Healthy',
-    online: 'Online',
-    up: 'Up',
-    connected: 'Connected',
-    available: 'Available',
-    ready: 'Ready',
-    success: 'Success',
-    running: 'Running',
-    configured: 'Configured',
-    'not configured': 'Not configured',
-    'check needed': 'Check needed',
-    missing: 'Missing',
-    unknown: 'Unknown',
-    error: 'Error',
-    failed: 'Failed',
-    down: 'Down',
-    offline: 'Offline',
-    disabled: 'Disabled',
-  };
-
-  if (friendly[normalized]) return friendly[normalized];
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
-function healthTone(value: string): Tone {
-  const text = value.toLowerCase().replace(/[-_]+/g, ' ');
-  if (/^(ok|healthy|online|up|connected|available|ready|success|pass|passed|true)$/i.test(value.trim())) return 'ok';
-  if (text.includes('error') || text.includes('fail') || text.includes('down') || text.includes('offline') || text.includes('unhealthy')) return 'danger';
-  if (text.includes('not configured') || text.includes('not connected') || text.includes('disabled') || text.includes('missing')) return 'warn';
-  if (text.includes('unknown') || text.includes('check needed') || text.includes('unavailable')) return 'warn';
-  return 'neutral';
-}
-
-function normalizeCheckedAt(value: unknown) {
-  if (value == null || value === '') return 'Not connected yet';
-  if (typeof value === 'number') return formatWhen(new Date(value).toISOString());
-  return formatWhen(String(value));
+  return fallback;
 }
 
 function auditKind(value: string | undefined) {
@@ -352,35 +286,18 @@ function ComplianceTab() {
 }
 
 function SystemHealthTab({ ctx }: { ctx: OwnerZoneShellContext }) {
-  const health = healthPayload(ctx.health);
-  const didHealthFail = !!ctx.healthError;
-  const statusFallback = didHealthFail ? 'Check needed' : 'Status not reported';
-  const checkedAtFallback = didHealthFail ? 'Not connected yet' : 'Timestamp not reported';
-  const backendStatus = healthStatusText(pickHealthValue(health, ['backendApi', 'backendApi.status', 'services.backendApi', 'services.backendApi.status', 'backend', 'backend.status', 'api', 'api.status', 'services.api', 'services.api.status', 'status', 'ok', 'success']), statusFallback);
-  const mongoStatus = healthStatusText(pickHealthValue(health, ['mongodb', 'mongodb.status', 'services.mongodb', 'services.mongodb.status', 'mongo', 'mongo.status', 'services.mongo', 'services.mongo.status', 'database', 'database.status', 'services.database', 'services.database.status', 'db', 'db.status', 'backend.db', 'backend.db.status', 'backend.mongo', 'backend.mongo.status']), statusFallback);
-  const cacheStatus = healthStatusText(pickHealthValue(health, ['redis', 'redis.status', 'services.redis', 'services.redis.status', 'cache', 'cache.status', 'services.cache', 'services.cache.status', 'backend.redis', 'backend.redis.status', 'backend.cache', 'backend.cache.status']), statusFallback);
-  const translationStatus = healthStatusText(pickHealthValue(health, ['translationWorker', 'translationWorker.status', 'services.translationWorker', 'services.translationWorker.status', 'translation', 'translation.status', 'services.translation', 'services.translation.status', 'workers.translation', 'workers.translation.status', 'backend.translation', 'backend.translation.status']), statusFallback);
-  const emailStatus = healthStatusText(pickHealthValue(health, ['smtpEmail', 'smtpEmail.status', 'services.smtpEmail', 'services.smtpEmail.status', 'smtp', 'smtp.status', 'services.smtp', 'services.smtp.status', 'email', 'email.status', 'services.email', 'services.email.status', 'mail', 'mail.status', 'services.mail', 'services.mail.status', 'backend.smtp', 'backend.smtp.status', 'backend.email', 'backend.email.status']), statusFallback);
-  const environmentStatus = healthStatusText(pickHealthValue(health, ['environment', 'environment.status', 'services.environment', 'services.environment.status', 'deploy', 'deploy.status', 'services.deploy', 'services.deploy.status', 'vercel', 'vercel.status', 'services.vercel', 'services.vercel.status', 'render', 'render.status', 'services.render', 'services.render.status', 'backend.environment', 'backend.environment.status']), statusFallback);
-  const checkedAtValue = pickHealthValue(health, ['checkedAt', 'checked_at', 'timestamp', 'time', 'updatedAt', 'updated_at', 'meta.checkedAt', 'meta.timestamp']);
-  const checkedAt = checkedAtValue == null || checkedAtValue === '' ? checkedAtFallback : normalizeCheckedAt(checkedAtValue);
-
+  const health = ctx.health;
+  const apiOk = health?.success === true || health?.ok === true;
   return (
     <SectionCard title="System Health" helper="Uses existing safe health information when available. Missing checks show a clear placeholder state.">
-      {ctx.healthError ? (
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-          {ctx.healthError}
-        </div>
-      ) : null}
       <SimpleList
         items={[
-          { label: 'Backend API', value: displayHealthStatus(backendStatus), tone: healthTone(backendStatus) },
-          { label: 'MongoDB', value: displayHealthStatus(mongoStatus), tone: healthTone(mongoStatus) },
-          { label: 'Redis / Cache', value: displayHealthStatus(cacheStatus), tone: healthTone(cacheStatus) },
-          { label: 'Translation Worker', value: displayHealthStatus(translationStatus), tone: healthTone(translationStatus) },
-          { label: 'SMTP / Email', value: displayHealthStatus(emailStatus), tone: healthTone(emailStatus) },
-          { label: 'Render / Vercel Environment', value: displayHealthStatus(environmentStatus), tone: healthTone(environmentStatus) },
-          { label: 'Checked at time', value: checkedAt, tone: checkedAt === 'Not connected yet' ? 'warn' : 'neutral' },
+          { label: 'Backend API status', value: ctx.backendConnected ? (apiOk ? 'OK' : 'Check needed') : 'Not connected yet', tone: ctx.backendConnected && apiOk ? 'ok' : 'warn' },
+          { label: 'MongoDB status', value: readHealthValue(health, ['backend.db.status', 'backend.mongo.status', 'db.status', 'mongo.status']) },
+          { label: 'Redis / cache status', value: readHealthValue(health, ['backend.redis.status', 'backend.cache.status', 'redis.status', 'cache.status'], 'Not connected yet') },
+          { label: 'Translation worker status', value: readHealthValue(health, ['backend.translation.status', 'translation.status', 'workers.translation.status']) },
+          { label: 'SMTP / email status', value: readHealthValue(health, ['backend.smtp.status', 'backend.email.status', 'smtp.status', 'email.status']) },
+          { label: 'Render / Vercel environment status', value: readHealthValue(health, ['backend.environment.status', 'environment.status', 'vercel.status', 'render.status']) },
         ]}
       />
     </SectionCard>

@@ -1,5 +1,4 @@
 import { api, getOwnerUnlockToken } from '@/lib/http';
-import { adminJson } from '@/lib/http/adminFetch';
 
 export type OwnerStatus = {
   mode?: 'NORMAL' | 'READ_ONLY' | 'LOCKDOWN' | string;
@@ -89,10 +88,6 @@ export async function reactivate(): Promise<any> {
 
 export async function health(): Promise<any> {
   return api('/system/health');
-}
-
-export async function getSafeOwnerZoneSystemHealth(): Promise<any> {
-  return adminJson('/admin/safe-owner-zone/system-health', { cache: 'no-store' });
 }
 
 export async function getRecentAudit(limit = 30): Promise<any> {
