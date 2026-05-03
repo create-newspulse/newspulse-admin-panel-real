@@ -215,9 +215,13 @@ function isAcceptedVideoFile(file: File): boolean {
   return ACCEPTED_VIDEO_EXTENSIONS.test(file.name || '');
 }
 
-function resolveVideoUploadErrorMessage(error: any): string {
+function resolveVideoUploadErrorMessage(error: any, cloudUploadEnabled = false): string {
   const rawMessage = String(error?.message || '').trim();
   if (!rawMessage) return 'Video upload failed';
+
+  if (cloudUploadEnabled && /cloud video upload is available but disabled|use video url unless enabled/i.test(rawMessage)) {
+    return 'Video upload failed on the Cloudinary video endpoint. Please try again.';
+  }
 
   const imageOnlyValidationError = /\b(jpg|jpeg|png|webp|thumbnail|image)\b/i.test(rawMessage);
   if (imageOnlyValidationError) return VIDEO_FILE_TYPE_MESSAGE;
@@ -554,6 +558,11 @@ export default function ViralVideosPage() {
 
   async function handleVideoUpload(file: File | null) {
     if (!file) return;
+    if (!cloudVideoUploadEnabled) {
+      setVideoUploadError(cloudVideoUploadStatusText);
+      toast.error(cloudVideoUploadStatusText);
+      return;
+    }
     if (file.size > MAX_VIDEO_UPLOAD_BYTES) {
       setVideoUploadError(VIDEO_FILE_SIZE_MESSAGE);
       toast.error(VIDEO_FILE_SIZE_MESSAGE);
@@ -577,7 +586,7 @@ export default function ViralVideosPage() {
       }));
       toast.success('Video uploaded');
     } catch (error: any) {
-      const message = resolveVideoUploadErrorMessage(error);
+      const message = resolveVideoUploadErrorMessage(error, cloudVideoUploadEnabled);
       setVideoUploadError(message);
       toast.error(message);
     } finally {

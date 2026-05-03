@@ -307,7 +307,7 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult
     token = localStorage.getItem('np_token');
   } catch {}
 
-  const resp = await fetch('/admin-api/admin/viral-videos/upload', {
+  const resp = await fetch('/admin-api/admin/viral-videos/upload-video', {
     method: 'POST',
     body: fd,
     credentials: 'include',
