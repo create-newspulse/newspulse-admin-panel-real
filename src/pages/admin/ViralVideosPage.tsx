@@ -225,6 +225,29 @@ function resolveVideoUploadErrorMessage(error: any): string {
   return rawMessage;
 }
 
+function readViralVideoErrorMessage(error: any, fallback: string): string {
+  const status = Number(error?.response?.status);
+  const url = String(error?.config?.url || error?.response?.config?.url || '').trim();
+  const data = error?.response?.data;
+  const payload = data?.data && typeof data.data === 'object' ? data.data : data;
+  const detail = String(
+    payload?.message
+    || payload?.error
+    || payload?.detail
+    || error?.message
+    || fallback
+  ).trim();
+
+  if (status === 404 && url) {
+    return `${detail || fallback} (route: ${url})`;
+  }
+  return detail || fallback;
+}
+
+function readSavedViralVideoId(record: any): string {
+  return String(record?._id || record?.id || '').trim();
+}
+
 function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): ViralVideoInput {
   const tags = state.tags.split(',').map((tag) => tag.trim()).filter(Boolean);
   const publishedAt = nextStatus === 'published'
@@ -408,9 +431,11 @@ export default function ViralVideosPage() {
     onSuccess: (saved, vars) => {
       queryClient.invalidateQueries({ queryKey: ['viral-videos'] });
       queryClient.invalidateQueries({ queryKey: ['viral-videos', 'homepage-featured'] });
+      const savedId = readSavedViralVideoId(saved);
       const savedHasFrontendCardFields = saved.status === 'published' && saved.isActive === true && Boolean(saved.thumbnailUrl);
       if (import.meta.env.DEV) {
         console.log('[viral-videos:save]', {
+          savedId,
           thumbnailUrl: saved.thumbnailUrl,
           posterImageUrl: saved.posterImageUrl || saved.posterImage?.url,
           videoFileUrl: saved.videoFileUrl,
@@ -422,10 +447,17 @@ export default function ViralVideosPage() {
       toast.success(savedHasFrontendCardFields
         ? 'Viral video saved: Published, Active ON, thumbnail saved'
         : (vars.status === 'published' ? 'Viral video published' : 'Draft saved'));
-      navigate(`/admin/viral-videos/${saved._id}/edit`, { replace: true });
+      if (savedId) {
+        queryClient.setQueryData(['viral-videos', 'admin-item', savedId], saved);
+        navigate(`/admin/viral-videos/${savedId}/edit`, { replace: true });
+        return;
+      }
+
+      // Fallback: save succeeded but backend response did not include an ID.
+      navigate('/admin/viral-videos');
     },
     onError: (error: any) => {
-      toast.error(String(error?.message || 'Failed to save viral video'));
+      toast.error(readViralVideoErrorMessage(error, 'Failed to save viral video'));
     },
   });
 
@@ -437,7 +469,7 @@ export default function ViralVideosPage() {
       toast.success(vars.status === 'published' ? 'Video published' : 'Video unpublished');
     },
     onError: (error: any) => {
-      toast.error(String(error?.message || 'Failed to update status'));
+      toast.error(readViralVideoErrorMessage(error, 'Failed to update status'));
     },
   });
 
@@ -450,7 +482,7 @@ export default function ViralVideosPage() {
       navigate('/admin/viral-videos');
     },
     onError: (error: any) => {
-      toast.error(String(error?.message || 'Failed to delete viral video'));
+      toast.error(readViralVideoErrorMessage(error, 'Failed to delete viral video'));
     },
   });
 
@@ -474,15 +506,17 @@ export default function ViralVideosPage() {
   const thumbnailPreviewUrl = !thumbnailValidationMessage && isValidThumbnailImageUrl(editor.thumbnailUrl) ? editor.thumbnailUrl.trim() : '';
   const cloudVideoUpload = frontendSettingsQuery.data?.viralVideosCloudUpload || DEFAULT_CLOUD_VIDEO_UPLOAD_CAPABILITY;
   const cloudVideoUploadProviderLabel = cloudVideoUpload.provider ? String(cloudVideoUpload.provider).toUpperCase() : 'Not connected';
+  const cloudVideoUploadProviderConnected = Boolean(String(cloudVideoUpload.provider || '').trim());
   const cloudVideoUploadAvailable = cloudVideoUpload.available === true;
-  const cloudVideoUploadSwitchOn = cloudVideoUploadAvailable && cloudVideoUploadRequested;
-  const videoUploadDisabled = uploadingVideo;
-  const cloudVideoUploadStatusText = !cloudVideoUploadAvailable
-    ? CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE
-    : (cloudVideoUploadSwitchOn
-      ? 'Cloud video upload is ON.'
-      : 'Video file upload is currently OFF. Use Video URL for now.');
-  const cloudVideoUploadStatusLabel = cloudVideoUploadSwitchOn ? 'ON' : 'OFF';
+  const cloudVideoUploadCanBeEnabled = cloudVideoUploadAvailable && cloudVideoUploadProviderConnected;
+  const cloudVideoUploadEnabled = cloudVideoUploadCanBeEnabled && cloudVideoUploadRequested;
+  const videoUploadDisabled = uploadingVideo || !cloudVideoUploadEnabled;
+  const cloudVideoUploadStatusText = cloudVideoUploadEnabled
+    ? 'Cloud video upload is enabled. Upload MP4/WebM/MOV or paste a Video URL.'
+    : (cloudVideoUploadCanBeEnabled
+      ? 'Cloud video upload is available but disabled. Use Video URL unless enabled.'
+      : CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE);
+  const cloudVideoUploadStatusLabel = cloudVideoUploadEnabled ? 'ON' : 'OFF';
 
   async function handleThumbnailUpload(file: File | null) {
     if (!file) return;
@@ -551,7 +585,7 @@ export default function ViralVideosPage() {
 
   function handleCloudVideoUploadToggle(nextChecked: boolean) {
     setVideoUploadError(null);
-    if (nextChecked && !cloudVideoUploadAvailable) {
+    if (nextChecked && !cloudVideoUploadCanBeEnabled) {
       toast.error(CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE);
       setCloudVideoUploadRequested(false);
       return;
@@ -1020,16 +1054,16 @@ export default function ViralVideosPage() {
                       <div>
                         <div className="text-sm font-semibold text-slate-900">Uploaded News Pulse Video/Reel</div>
                         <div className={`mt-1 text-xs font-medium ${!cloudVideoUploadAvailable ? 'text-amber-700' : 'text-slate-500'}`}>{cloudVideoUploadStatusText}</div>
-                        {cloudVideoUploadSwitchOn ? (
+                        {cloudVideoUploadEnabled ? (
                           <div className="mt-1 text-xs text-slate-500">Storage provider: {cloudVideoUploadProviderLabel}</div>
                         ) : null}
                       </div>
                       <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                        <span className={`min-w-8 text-sm font-bold ${cloudVideoUploadSwitchOn ? 'text-emerald-700' : 'text-slate-700'}`}>{cloudVideoUploadStatusLabel}</span>
+                        <span className={`min-w-8 text-sm font-bold ${cloudVideoUploadEnabled ? 'text-emerald-700' : 'text-slate-700'}`}>{cloudVideoUploadStatusLabel}</span>
                         <Switch
-                          checked={cloudVideoUploadSwitchOn}
+                          checked={cloudVideoUploadEnabled}
                           onCheckedChange={handleCloudVideoUploadToggle}
-                          disabled={!cloudVideoUploadAvailable}
+                          disabled={!cloudVideoUploadCanBeEnabled}
                           label="Enable Cloud Video Upload"
                         />
                       </div>
