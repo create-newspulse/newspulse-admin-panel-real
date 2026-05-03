@@ -332,7 +332,7 @@ export default function ViralVideosPage() {
   const [thumbnailUploadError, setThumbnailUploadError] = useState<string | null>(null);
   const [thumbnailPreviewFailed, setThumbnailPreviewFailed] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
-  const [cloudVideoUploadRequested, setCloudVideoUploadRequested] = useState(false);
+  const [cloudVideoUploadRequested, setCloudVideoUploadRequested] = useState<boolean | null>(null);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
   const userRole = String(user?.role || '').trim().toLowerCase();
   const canManageFrontendVisibility = userRole === 'founder' || userRole === 'admin';
@@ -386,7 +386,7 @@ export default function ViralVideosPage() {
       setThumbnailUploadError(null);
       setThumbnailPreviewFailed(false);
       setUploadingVideo(false);
-      setCloudVideoUploadRequested(false);
+      setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
       return;
     }
@@ -397,7 +397,7 @@ export default function ViralVideosPage() {
       setThumbnailUploadError(null);
       setThumbnailPreviewFailed(false);
       setUploadingVideo(false);
-      setCloudVideoUploadRequested(false);
+      setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
       return;
     }
@@ -408,7 +408,7 @@ export default function ViralVideosPage() {
       setThumbnailUploadError(null);
       setThumbnailPreviewFailed(false);
       setUploadingVideo(false);
-      setCloudVideoUploadRequested(false);
+      setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
     }
   }, [editingId, isCreateRoute, isEditorOpen, itemQuery.data]);
@@ -509,7 +509,9 @@ export default function ViralVideosPage() {
   const cloudVideoUploadProviderConnected = Boolean(String(cloudVideoUpload.provider || '').trim());
   const cloudVideoUploadAvailable = cloudVideoUpload.available === true;
   const cloudVideoUploadCanBeEnabled = cloudVideoUploadAvailable && cloudVideoUploadProviderConnected;
-  const cloudVideoUploadEnabled = cloudVideoUploadCanBeEnabled && cloudVideoUploadRequested;
+  const cloudVideoUploadDefaultEnabled = cloudVideoUpload.enabled === true;
+  const cloudVideoUploadToggleState = cloudVideoUploadRequested ?? cloudVideoUploadDefaultEnabled;
+  const cloudVideoUploadEnabled = cloudVideoUploadCanBeEnabled && cloudVideoUploadToggleState;
   const videoUploadDisabled = uploadingVideo || !cloudVideoUploadEnabled;
   const cloudVideoUploadStatusText = cloudVideoUploadEnabled
     ? 'Cloud video upload is enabled. Upload MP4/WebM/MOV or paste a Video URL.'
