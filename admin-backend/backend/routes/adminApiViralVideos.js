@@ -97,6 +97,7 @@ function toDocumentPayload(body, existing) {
     slug: String(body?.slug || existing?.slug || '').trim(),
     summary: String(body?.summary || existing?.summary || '').trim(),
     category: normalizeCategory(body?.category || existing?.category),
+    sourceName: String(body?.sourceName || existing?.sourceName || '').trim(),
     thumbnailUrl,
     posterImage: {
       url: thumbnailUrl,
@@ -108,6 +109,7 @@ function toDocumentPayload(body, existing) {
     language: normalizeLanguage(body?.language || existing?.language),
     tags: Array.isArray(body?.tags) ? body.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : (existing?.tags || []),
     status,
+    isActive: normalizeBoolean(body?.isActive ?? body?.active, existing ? existing.isActive !== false : true),
     homepageVisible,
     homepageFeatured: featured,
     featured,
@@ -123,6 +125,7 @@ function buildFilter(query) {
   const language = String(query?.language || '').trim().toLowerCase();
   const category = String(query?.category || '').trim();
   const homepageVisible = String(query?.homepageVisible || '').trim().toLowerCase();
+  const active = String(query?.active ?? query?.isActive ?? '').trim().toLowerCase();
   const q = String(query?.q || '').trim();
 
   if (status && status !== 'all') filter.status = normalizeStatus(status);
@@ -130,6 +133,8 @@ function buildFilter(query) {
   if (category) filter.category = normalizeCategory(category);
   if (homepageVisible === 'true') filter.homepageVisible = true;
   if (homepageVisible === 'false') filter.homepageVisible = false;
+  if (active === 'true') filter.isActive = true;
+  if (active === 'false') filter.isActive = false;
   if (String(query?.featured || query?.homepageFeatured || '').trim().toLowerCase() === 'true') {
     and.push({ $or: [{ featured: true }, { homepageFeatured: true }] });
   }

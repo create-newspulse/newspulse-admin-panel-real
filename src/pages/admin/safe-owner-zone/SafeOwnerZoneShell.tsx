@@ -1,289 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
-import settingsApi from '@/lib/settingsApi';
-import { useFounderActions } from '@/sections/SafeOwnerZone/hooks/useFounderActions';
-import { useNotify } from '@/components/ui/toast-bridge';
-import RollbackDialog from '@/sections/SafeOwnerZone/widgets/RollbackDialog';
-import ConfirmDangerModal from '@/components/modals/ConfirmDangerModal';
-import { isOwnerKeyUnlocked, useOwnerKeyStore } from '@/lib/ownerKeyStore';
-import { createSnapshot, getRecentAudit, health as ownerZoneHealth, listSnapshots } from '@/api/ownerZone';
-import { PHASE_ONE_SAFE_OWNER_TABS } from './SafeOwnerZonePhaseOne';
-
-export type OwnerZoneStatus = 'UNLOCKED' | 'READ-ONLY' | 'LOCKDOWN' | 'Awaiting backend';
+export type OwnerZoneStatus = 'UNLOCKED';
 
 export type OwnerZoneShellContext = {
-  backendConnected: boolean;
-  settings: any | null;
-  health: any | null;
-  audit: Array<{ ts?: string; type?: string; actorId?: string; role?: string; payload?: any }>;
-  lastSnapshotAt: string | null;
-  lastAuditAt: string | null;
-
   status: OwnerZoneStatus;
-  loadErrors: {
-    settings?: string | null;
-    health?: string | null;
-    audit?: string | null;
-    snapshots?: string | null;
-  };
-  canUseDangerActions: boolean;
-  busy: boolean;
-  updateAdminSettings: (patch: any, auditAction?: string) => Promise<void>;
-  doSnapshot: () => Promise<void>;
-  openRollback: () => void;
-  openEmergencyLockdown: () => void;
+  founderStatus: string;
+  websiteStatus: string;
+  ownerKeyStatus: string;
+  lastSnapshotLabel: string;
+  lastAuditLabel: string;
 };
 
-type ModuleTab = { key: string; label: string; to: string; end?: boolean };
-
-const TABS: ModuleTab[] = PHASE_ONE_SAFE_OWNER_TABS;
-
-function formatWhen(ts: string | null | undefined) {
-  if (!ts) return 'Awaiting backend';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
-}
-
-function statusPillClass(status: OwnerZoneStatus) {
-  if (status === 'LOCKDOWN') {
-    return 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700';
-  }
-  if (status === 'READ-ONLY') {
-    return 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700';
-  }
-  if (status === 'UNLOCKED') {
-    return 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-700';
-  }
-  return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700';
-}
-
-function formatLoadError(err: unknown, fallback: string) {
-  const anyErr = err as any;
-  const status = anyErr?.status ?? anyErr?.response?.status;
-  const message = anyErr?.body?.message || anyErr?.response?.data?.message || anyErr?.response?.data?.error || anyErr?.message;
-  if (message && status) return `${fallback}: ${message} (HTTP ${status})`;
-  if (message) return `${fallback}: ${message}`;
-  return fallback;
-}
-
 export default function SafeOwnerZoneShell() {
-  const notify = useNotify();
-  const { lockdown } = useFounderActions();
-  const setOwnerMode = useOwnerKeyStore((s) => s.setMode);
-  const ownerUnlockedUntilMs = useOwnerKeyStore((s) => s.unlockedUntilMs);
-
-  const [settings, setSettings] = useState<any | null>(null);
-  const [health, setHealth] = useState<any | null>(null);
-  const [audit, setAudit] = useState<Array<{ ts?: string; type?: string; actorId?: string; role?: string; payload?: any }>>([]);
-  const [lastSnapshotAt, setLastSnapshotAt] = useState<string | null>(null);
-
-  const [backendConnected, setBackendConnected] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [loadErrors, setLoadErrors] = useState<OwnerZoneShellContext['loadErrors']>({});
-
-  const [rollbackOpen, setRollbackOpen] = useState(false);
-  const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      const results = await Promise.allSettled([
-        settingsApi.getAdminSettings(),
-        ownerZoneHealth().catch(() => null as any),
-        getRecentAudit(30).catch(() => null as any),
-        listSnapshots(20).catch(() => null as any),
-      ]);
-
-      if (!mounted) return;
-
-      const okAny = results.some((r) => r.status === 'fulfilled' && r.value != null);
-      setBackendConnected(okAny);
-      setLoadErrors({
-        settings: results[0].status === 'rejected' ? formatLoadError(results[0].reason, 'Settings failed to load') : null,
-        health: results[1].status === 'rejected' ? formatLoadError(results[1].reason, 'System health failed to load') : null,
-        audit: results[2].status === 'rejected' ? formatLoadError(results[2].reason, 'Recent audit failed to load') : null,
-        snapshots: results[3].status === 'rejected' ? formatLoadError(results[3].reason, 'Snapshots failed to load') : null,
-      });
-
-      const s = results[0].status === 'fulfilled' ? results[0].value : null;
-      setSettings(s);
-
-      const h = results[1].status === 'fulfilled' ? results[1].value : null;
-      setHealth(h);
-
-      const a = results[2].status === 'fulfilled' ? results[2].value : null;
-      setAudit(Array.isArray((a as any)?.items) ? (a as any).items.slice(0, 30) : []);
-
-      const snaps = results[3].status === 'fulfilled' ? results[3].value : null;
-      const items = Array.isArray((snaps as any)?.items) ? (snaps as any).items : Array.isArray(snaps) ? (snaps as any) : [];
-      const latest = items[0] || null;
-      const ts = latest?.ts || latest?.createdAt || latest?.created_at || latest?.time || latest?.at || null;
-      setLastSnapshotAt(typeof ts === 'string' ? ts : null);
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [listSnapshots]);
-
-  const status: OwnerZoneStatus = useMemo(() => {
-    if (!backendConnected || !settings) return 'Awaiting backend';
-    const isLockdown = settings?.security?.lockdown === true;
-    const isReadOnly = settings?.publishing?.readOnly === true;
-    if (isLockdown) return 'LOCKDOWN';
-    if (isReadOnly) return 'READ-ONLY';
-    return 'UNLOCKED';
-  }, [backendConnected, settings]);
-
-  useEffect(() => {
-    if (status === 'LOCKDOWN') setOwnerMode('LOCKDOWN');
-    else if (status === 'READ-ONLY') setOwnerMode('READONLY');
-    else if (status === 'UNLOCKED') setOwnerMode('NORMAL');
-  }, [status, setOwnerMode]);
-
-  const lastAuditAt = useMemo(() => (audit?.[0]?.ts ? audit[0].ts : null), [audit]);
-
-  const canUseDangerActions = isOwnerKeyUnlocked(ownerUnlockedUntilMs) && backendConnected && status === 'UNLOCKED' && !busy;
-
-  async function doSnapshot() {
-    if (!canUseDangerActions) return;
-    setBusy(true);
-    try {
-      const r: any = await createSnapshot({ label: 'Owner Control Center snapshot', reason: 'Safe Owner Zone manual snapshot' });
-      const id = r?.id || r?._id || r?.snapshotId;
-      if (id) notify.ok('Snapshot created', String(id));
-      else notify.ok('Snapshot created');
-    } catch (e: any) {
-      notify.err('Snapshot failed', e?.message || 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function updateAdminSettings(patch: any, auditAction?: string) {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const next = await settingsApi.putAdminSettings(patch || {}, auditAction ? { action: auditAction } : undefined);
-      setSettings(next);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const outletCtx: OwnerZoneShellContext = {
-    backendConnected,
-    settings,
-    health,
-    audit,
-    lastSnapshotAt,
-    lastAuditAt,
-    status,
-    loadErrors,
-    canUseDangerActions,
-    busy,
-    updateAdminSettings,
-    doSnapshot,
-    openRollback: () => setRollbackOpen(true),
-    openEmergencyLockdown: () => setLockConfirmOpen(true),
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="sticky top-0 z-30 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 md:-mx-6 md:px-6">
-        {/* Owner Command Bar */}
-        <div className="flex flex-col gap-3">
-          {(loadErrors.settings || loadErrors.health || loadErrors.audit || loadErrors.snapshots) && (
-            <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
-              <div className="font-semibold">Founder Command backend request failed</div>
-              {loadErrors.settings ? <div className="mt-1">{loadErrors.settings}</div> : null}
-              {loadErrors.health ? <div className="mt-1">{loadErrors.health}</div> : null}
-              {loadErrors.audit ? <div className="mt-1">{loadErrors.audit}</div> : null}
-              {loadErrors.snapshots ? <div className="mt-1">{loadErrors.snapshots}</div> : null}
-            </div>
-          )}
-
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Owner Control Center</h1>
-                <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${statusPillClass(status)}`}>
-                  {status}
-                </span>
-              </div>
-              <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">Clean founder view for health, safety, backup, compliance, and audit readiness.</div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 text-right sm:grid-cols-2">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left dark:border-slate-700 dark:bg-slate-800">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Last snapshot</div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white">{formatWhen(lastSnapshotAt)}</div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left dark:border-slate-700 dark:bg-slate-800">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Last audit event</div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-900 dark:text-white">{formatWhen(lastAuditAt)}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-100">
-            Phase 1 is UI cleanup only. Dangerous controls are shown as placeholders inside their tabs and require Owner Key rules in later phases.
-          </div>
+    <section className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-10">
+      <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-8">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">Safe Owner Zone</h1>
+          <p className="text-sm leading-6 text-slate-600 dark:text-slate-300 sm:text-base">
+            Founder-only safety area. This section is reserved for future emergency, backup, audit, and protection controls.
+          </p>
         </div>
 
-        {/* Module Switcher Tabs */}
-        <div className="mt-4 overflow-x-auto">
-          <div className="flex min-w-max items-center gap-2">
-            {TABS.map((t) => (
-              <NavLink
-                key={t.key}
-                to={t.to}
-                end={t.end}
-                className={({ isActive }) =>
-                  `rounded-full border px-3 py-1.5 text-sm font-semibold transition whitespace-nowrap ${
-                    isActive
-                      ? 'border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
-                  }`
-                }
-              >
-                {t.label}
-              </NavLink>
-            ))}
-          </div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-100">
+          Safe Owner Zone is currently in preview mode. No action here changes the website.
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <span className="font-semibold text-slate-950 dark:text-white">Status:</span> Preview only
         </div>
       </div>
-
-      <Outlet context={outletCtx} />
-
-      <RollbackDialog open={rollbackOpen} onClose={() => setRollbackOpen(false)} />
-
-      <ConfirmDangerModal
-        open={lockConfirmOpen}
-        title="Emergency Lockdown"
-        description="This is a dangerous action. Type CONFIRM to trigger lockdown."
-        confirmLabel="CONFIRM"
-        requirePin={false}
-        confirmButtonText="Trigger Lockdown"
-        danger
-        onClose={() => setLockConfirmOpen(false)}
-        onConfirm={async () => {
-          if (!canUseDangerActions) return;
-          setBusy(true);
-          try {
-            const r: any = await lockdown({ reason: 'Owner Control Center emergency lockdown', scope: 'site' });
-            (window as any).__LOCK_STATE__ = r?.ok ? 'LOCKED' : (window as any).__LOCK_STATE__ || 'UNLOCKED';
-            if (r?.ok) notify.ok('Lockdown enabled');
-            else notify.err('Lockdown failed', r?.error || 'Unknown error');
-          } catch (e: any) {
-            notify.err('Lockdown failed', e?.message || 'Unknown error');
-          } finally {
-            setBusy(false);
-          }
-        }}
-      />
-    </div>
+    </section>
   );
 }

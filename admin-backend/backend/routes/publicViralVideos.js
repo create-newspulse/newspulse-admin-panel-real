@@ -59,6 +59,7 @@ router.get('/viral-videos/featured', async (req, res) => {
     const language = String(req.query.language || '').trim().toLowerCase();
     const filter = {
       status: 'published',
+      isActive: true,
       homepageVisible: true,
       thumbnailUrl: { $ne: '' },
       $or: [{ featured: true }, { homepageFeatured: true }],
@@ -85,6 +86,7 @@ router.get('/viral-videos', async (req, res) => {
     const limit = toInt(req.query.limit, 24);
     const filter = {
       status: 'published',
+      isActive: true,
       thumbnailUrl: { $ne: '' },
       $or: [{ videoUrl: { $ne: '' } }, { embedUrl: { $ne: '' } }],
     };
@@ -105,7 +107,7 @@ router.get('/viral-videos', async (req, res) => {
     let selectionMode = featuredOnly ? 'manual' : 'list';
 
     if (featuredOnly && items.length === 0 && fallbackLatest) {
-      const fallbackFilter = { status: 'published' };
+      const fallbackFilter = { status: 'published', isActive: true };
       if (language) fallbackFilter.language = language;
       items = await ViralVideo.find(fallbackFilter)
         .sort({ publishedAt: -1, updatedAt: -1 })

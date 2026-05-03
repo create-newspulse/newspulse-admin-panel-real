@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getHomepageFeaturedViralVideo, getPublicViralVideosFrontendSettings } from '@/lib/api/viralVideos';
 
-function openVideoHref(item: { embedUrl?: string; videoUrl?: string; slug?: string }) {
-  return item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
+function openVideoHref(item: { embedUrl?: string; videoUrl?: string; videoFileUrl?: string; slug?: string }) {
+  return item.videoFileUrl || item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
 }
 
 export default function ViralVideosTeaserBlock() {
@@ -26,6 +26,7 @@ export default function ViralVideosTeaserBlock() {
 
   const item = data?.item || null;
   const selectionMode = data?.selectionMode || 'manual';
+  const activeItem = item?.isActive === false ? null : item;
 
   return (
     <section className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm">
@@ -50,32 +51,33 @@ export default function ViralVideosTeaserBlock() {
         </div>
       ) : null}
 
-      {!isLoading && !error && !item ? (
+      {!isLoading && !error && !activeItem ? (
         <div className="mt-4 rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
           No published viral videos are available yet.
         </div>
       ) : null}
 
-      {item ? (
+      {activeItem ? (
         <article className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 md:grid md:grid-cols-[1.2fr_1fr]">
           <div className="aspect-[16/10] bg-slate-200 md:aspect-auto">
-            {item.thumbnailUrl ? (
-              <img src={item.thumbnailUrl} alt={item.title} className="h-full w-full object-cover" />
+            {activeItem.thumbnailUrl ? (
+              <img src={activeItem.thumbnailUrl} alt={activeItem.title} className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-slate-500">No thumbnail</div>
             )}
           </div>
           <div className="space-y-4 p-5">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-              <span>{String(item.language || 'en').toUpperCase()}</span>
+              <span>{String(activeItem.language || 'en').toUpperCase()}</span>
               <span className={`rounded-full px-2 py-0.5 ${selectionMode === 'manual' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-700'}`}>
                 {selectionMode === 'manual' ? 'Manual homepage feature' : 'Latest published fallback'}
               </span>
             </div>
-            <div className="text-2xl font-semibold text-slate-900">{item.title}</div>
-            {item.category ? <div className="text-sm font-medium text-slate-500">Category: {item.category}</div> : null}
-            {item.summary ? <p className="text-sm leading-6 text-slate-600">{item.summary}</p> : null}
-            <a href={openVideoHref(item)} target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+            <div className="text-2xl font-semibold text-slate-900">{activeItem.title}</div>
+            {activeItem.sourceName ? <div className="text-sm font-medium text-slate-500">Source: {activeItem.sourceName}</div> : null}
+            {activeItem.category ? <div className="text-sm font-medium text-slate-500">Category: {activeItem.category}</div> : null}
+            {activeItem.summary ? <p className="text-sm leading-6 text-slate-600">{activeItem.summary}</p> : null}
+            <a href={openVideoHref(activeItem)} target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
               Watch now
             </a>
           </div>

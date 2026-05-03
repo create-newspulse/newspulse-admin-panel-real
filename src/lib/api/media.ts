@@ -44,6 +44,17 @@ export type UploadVideoFileResult = {
   mimetype?: string;
 };
 
+function normalizeVideoUploadErrorMessage(raw: unknown): string {
+  const message = String(raw || '').trim();
+  if (!message) return 'Video upload failed';
+
+  if (/\b(jpg|jpeg|png|webp|thumbnail|image)\b/i.test(message)) {
+    return 'Only MP4, WebM, or MOV videos are allowed.';
+  }
+
+  return message;
+}
+
 function extractUploadedNumber(raw: any, key: string): number | undefined {
   const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
   const value = payload?.[key];
@@ -319,7 +330,7 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult
       payload?.data?.error ||
       payload?.data?.message ||
       `Video upload failed (${resp.status})`;
-    throw new Error(String(msg));
+    throw new Error(normalizeVideoUploadErrorMessage(msg));
   }
 
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;

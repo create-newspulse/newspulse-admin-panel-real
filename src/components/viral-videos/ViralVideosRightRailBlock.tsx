@@ -6,9 +6,10 @@ import { getHomepageFeaturedViralVideo, type ViralVideoRecord } from '@/lib/api/
 function isEligibleVideo(item: ViralVideoRecord | null | undefined) {
   if (!item) return false;
   const status = String(item.status || '').toLowerCase();
-  const hasVideoSource = Boolean(String(item.videoUrl || item.embedUrl || '').trim());
+  const hasVideoSource = Boolean(String(item.videoFileUrl || item.videoUrl || item.embedUrl || '').trim());
   const hasThumbnail = Boolean(String(item.thumbnailUrl || '').trim());
   return status === 'published'
+    && item.isActive !== false
     && item.homepageVisible === true
     && (item.homepageFeatured === true || item.featured === true)
     && hasThumbnail
@@ -16,7 +17,7 @@ function isEligibleVideo(item: ViralVideoRecord | null | undefined) {
 }
 
 function videoHref(item: ViralVideoRecord) {
-  return item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
+  return item.videoFileUrl || item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
 }
 
 export default function ViralVideosRightRailBlock() {

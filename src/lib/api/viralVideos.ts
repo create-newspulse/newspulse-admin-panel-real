@@ -2,6 +2,8 @@ import { adminApiClient } from '@/lib/adminApiClient';
 
 export type ViralVideoStatus = 'draft' | 'published';
 export type ViralVideoSourceType = 'video_url' | 'embed_url';
+export type ViralVideoType = 'uploaded' | 'youtube' | 'twitter' | 'external';
+export type ViralVideoPlaybackMode = 'internal' | 'youtube' | 'twitter' | 'external_link';
 
 export interface ViralVideoRecord {
   _id: string;
@@ -9,17 +11,23 @@ export interface ViralVideoRecord {
   slug: string;
   summary?: string;
   category?: string;
+  sourceName?: string;
   thumbnailUrl?: string;
+  posterImageUrl?: string;
   posterImage?: {
     url: string;
     publicId?: string;
   };
   videoUrl?: string;
+  videoFileUrl?: string;
   embedUrl?: string;
   sourceType: ViralVideoSourceType;
+  videoType: ViralVideoType;
+  playbackMode: ViralVideoPlaybackMode;
   language: 'en' | 'hi' | 'gu' | string;
   tags: string[];
   status: ViralVideoStatus;
+  isActive: boolean;
   homepageVisible: boolean;
   showOnHomepage: boolean;
   homepageFeatured: boolean;
@@ -35,13 +43,19 @@ export interface ViralVideoInput {
   slug: string;
   summary?: string;
   category?: string;
+  sourceName?: string;
   thumbnailUrl?: string;
+  posterImageUrl?: string;
   videoUrl?: string;
+  videoFileUrl?: string;
   embedUrl?: string;
   sourceType: ViralVideoSourceType;
+  videoType?: ViralVideoType;
+  playbackMode?: ViralVideoPlaybackMode;
   language: string;
   tags: string[];
   status: ViralVideoStatus;
+  isActive?: boolean;
   homepageVisible: boolean;
   showOnHomepage?: boolean;
   homepageFeatured: boolean;
@@ -90,11 +104,61 @@ export interface ViralVideosFrontendSettings {
 const VIRAL_VIDEOS_PATH = 'admin/viral-videos';
 const PUBLIC_VIRAL_VIDEOS_PATH = '/admin-api/public/viral-videos';
 
+function adminViralVideoProxyUrl(path = '') {
+  const suffix = path ? `/${path.replace(/^\/+/, '')}` : '';
+  return `/admin-api/${VIRAL_VIDEOS_PATH}${suffix}`;
+}
+
+function logEditRequest(id: string, url: string, status: number | string) {
+  if (import.meta.env.DEV) {
+    console.log('[viral-videos:edit]', { id, url, status });
+  }
+}
+
 function unwrapPayload(payload: any) {
   if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') {
     return payload.data;
   }
   return payload;
+}
+
+function isYouTubeViralVideoUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    return host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be';
+  } catch {
+    return false;
+  }
+}
+
+function isXTwitterViralVideoStatusUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    return (host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com'))
+      && /\/(status|statuses)\/\d+/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function inferVideoType(videoUrl: string, videoFileUrl: string): ViralVideoType {
+  if (videoFileUrl) return 'uploaded';
+  if (isYouTubeViralVideoUrl(videoUrl)) return 'youtube';
+  if (isXTwitterViralVideoStatusUrl(videoUrl)) return 'twitter';
+  return 'external';
+}
+
+function inferPlaybackMode(videoType: ViralVideoType): ViralVideoPlaybackMode {
+  if (videoType === 'uploaded') return 'internal';
+  if (videoType === 'youtube') return 'youtube';
+  if (videoType === 'twitter') return 'twitter';
+  return 'external_link';
 }
 
 function normalizeRecord(input: any): ViralVideoRecord {
@@ -103,15 +167,27 @@ function normalizeRecord(input: any): ViralVideoRecord {
     : undefined;
   const thumbnailUrl = String(
     input?.thumbnailUrl
+    || input?.posterImageUrl
     || poster?.url
     || input?.posterUrl
     || ''
   ).trim();
+  const videoFileUrl = String(input?.videoFileUrl || input?.videoFile?.url || input?.uploadedVideoUrl || '').trim();
+  const videoTypeRaw = String(input?.videoType || '').trim().toLowerCase();
+  const playbackModeRaw = String(input?.playbackMode || '').trim().toLowerCase();
+  const normalizedVideoUrl = String(input?.videoUrl || '').trim();
+  const videoType: ViralVideoType = videoTypeRaw === 'uploaded' || videoTypeRaw === 'youtube' || videoTypeRaw === 'twitter' || videoTypeRaw === 'external'
+    ? videoTypeRaw
+    : inferVideoType(normalizedVideoUrl, videoFileUrl);
+  const playbackMode: ViralVideoPlaybackMode = playbackModeRaw === 'internal' || playbackModeRaw === 'youtube' || playbackModeRaw === 'twitter' || playbackModeRaw === 'external_link'
+    ? playbackModeRaw
+    : inferPlaybackMode(videoType);
   const tags = Array.isArray(input?.tags)
     ? input.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
     : [];
   const sourceType = String(input?.sourceType || (input?.embedUrl ? 'embed_url' : 'video_url')).trim().toLowerCase();
   const status = String(input?.status || '').trim().toLowerCase() === 'published' ? 'published' : 'draft';
+  const isActive = input?.isActive === false || input?.active === false || input?.enabled === false ? false : true;
   const sortOrderRaw = input?.sortOrder;
   const sortOrder = Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : null;
   const showOnHomepage = input?.showOnHomepage === true || input?.isHomepageVisible === true || input?.homepageVisible === true;
@@ -122,14 +198,20 @@ function normalizeRecord(input: any): ViralVideoRecord {
     slug: String(input?.slug || '').trim(),
     summary: String(input?.summary || input?.caption || '').trim() || undefined,
     category: String(input?.category || '').trim() || undefined,
+    sourceName: String(input?.sourceName || input?.source || input?.sourceLabel || '').trim() || undefined,
     thumbnailUrl: thumbnailUrl || undefined,
+    posterImageUrl: thumbnailUrl || undefined,
     posterImage: thumbnailUrl ? { url: thumbnailUrl, ...(poster?.publicId ? { publicId: String(poster.publicId) } : {}) } : undefined,
-    videoUrl: String(input?.videoUrl || '').trim() || undefined,
+    videoUrl: normalizedVideoUrl || undefined,
+    videoFileUrl: videoFileUrl || undefined,
     embedUrl: String(input?.embedUrl || '').trim() || undefined,
     sourceType: sourceType === 'embed_url' ? 'embed_url' : 'video_url',
+    videoType,
+    playbackMode,
     language: String(input?.language || input?.lang || 'en').trim() || 'en',
     tags,
     status,
+    isActive,
     homepageVisible: showOnHomepage,
     showOnHomepage,
     homepageFeatured: input?.homepageFeatured === true || input?.featured === true,
@@ -168,18 +250,38 @@ function normalizeListResponse(payload: any, requestedPage: number, limit: numbe
 }
 
 function buildPayload(input: Partial<ViralVideoInput>) {
+  const thumbnailUrl = String(input.thumbnailUrl || '').trim();
+  const posterImageUrl = String(input.posterImageUrl || thumbnailUrl).trim();
+  const videoFileUrl = String(input.videoFileUrl || '').trim();
+  const videoType = input.videoType === 'uploaded' || input.videoType === 'youtube' || input.videoType === 'twitter' || input.videoType === 'external'
+    ? input.videoType
+    : inferVideoType(String(input.videoUrl || ''), videoFileUrl);
+  const playbackMode = input.playbackMode === 'internal' || input.playbackMode === 'youtube' || input.playbackMode === 'twitter' || input.playbackMode === 'external_link'
+    ? input.playbackMode
+    : inferPlaybackMode(videoType);
+  const isActive = input.isActive !== false;
+
   return {
     title: String(input.title || '').trim(),
     slug: String(input.slug || '').trim(),
     summary: String(input.summary || '').trim(),
     category: String(input.category || '').trim(),
-    thumbnailUrl: String(input.thumbnailUrl || '').trim(),
+    sourceName: String(input.sourceName || '').trim(),
+    thumbnailUrl,
+    posterImageUrl,
+    posterUrl: posterImageUrl,
+    posterImage: posterImageUrl ? { url: posterImageUrl } : undefined,
     videoUrl: String(input.videoUrl || '').trim(),
+    videoFileUrl,
     embedUrl: String(input.embedUrl || '').trim(),
     sourceType: input.sourceType === 'embed_url' ? 'embed_url' : 'video_url',
+    videoType,
+    playbackMode,
     language: String(input.language || 'en').trim() || 'en',
     tags: Array.isArray(input.tags) ? input.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : [],
     status: input.status === 'published' ? 'published' : 'draft',
+    isActive,
+    active: isActive,
     homepageVisible: input.homepageVisible === true,
     showOnHomepage: input.showOnHomepage === true || input.homepageVisible === true,
     isHomepageVisible: input.showOnHomepage === true || input.homepageVisible === true,
@@ -235,19 +337,35 @@ export async function listViralVideos(params: ViralVideoListParams = {}): Promis
 }
 
 export async function getViralVideo(id: string): Promise<ViralVideoRecord> {
-  const res = await adminApiClient.get(`${VIRAL_VIDEOS_PATH}/${encodeURIComponent(id)}`);
-  const payload = unwrapPayload(res.data);
-  return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
+  const encodedId = encodeURIComponent(id);
+  const url = adminViralVideoProxyUrl(encodedId);
+  try {
+    const res = await adminApiClient.get(`${VIRAL_VIDEOS_PATH}/${encodedId}`);
+    logEditRequest(id, url, res.status);
+    const payload = unwrapPayload(res.data);
+    return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
+  } catch (error: any) {
+    logEditRequest(id, url, error?.response?.status || 'error');
+    throw error;
+  }
+}
+
+export async function updateViralVideo(id: string, input: Partial<ViralVideoInput>): Promise<ViralVideoRecord> {
+  const encodedId = encodeURIComponent(id);
+  const url = adminViralVideoProxyUrl(encodedId);
+  try {
+    const res = await adminApiClient.patch(`${VIRAL_VIDEOS_PATH}/${encodedId}`, buildPayload(input));
+    logEditRequest(id, url, res.status);
+    const payload = unwrapPayload(res.data);
+    return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
+  } catch (error: any) {
+    logEditRequest(id, url, error?.response?.status || 'error');
+    throw error;
+  }
 }
 
 export async function createViralVideo(input: ViralVideoInput): Promise<ViralVideoRecord> {
   const res = await adminApiClient.post(VIRAL_VIDEOS_PATH, buildPayload(input));
-  const payload = unwrapPayload(res.data);
-  return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
-}
-
-export async function updateViralVideo(id: string, input: Partial<ViralVideoInput>): Promise<ViralVideoRecord> {
-  const res = await adminApiClient.patch(`${VIRAL_VIDEOS_PATH}/${encodeURIComponent(id)}`, buildPayload(input));
   const payload = unwrapPayload(res.data);
   return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
 }

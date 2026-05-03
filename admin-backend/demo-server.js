@@ -61,6 +61,7 @@ function normalizeViralVideoPayload(body = {}, existing = {}) {
     slug: slugifyViralVideo(body.slug || existing.slug || body.title || existing.title),
     summary: String(body.summary || existing.summary || '').trim(),
     category: String(body.category || existing.category || '').trim(),
+    sourceName: String(body.sourceName || existing.sourceName || '').trim(),
     thumbnailUrl,
     posterImage: { url: thumbnailUrl },
     videoUrl,
@@ -69,6 +70,7 @@ function normalizeViralVideoPayload(body = {}, existing = {}) {
     language: ['hi', 'gu'].includes(String(body.language || existing.language || '').trim().toLowerCase()) ? String(body.language || existing.language).trim().toLowerCase() : 'en',
     tags: Array.isArray(body.tags) ? body.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : (existing.tags || []),
     status,
+    isActive: normalizeBoolean(body.isActive ?? body.active, existing.isActive !== false),
     homepageVisible: status === 'published',
     homepageFeatured,
     featured: homepageFeatured,
@@ -82,6 +84,7 @@ function normalizeViralVideoPayload(body = {}, existing = {}) {
 function isHomepageEligibleViralVideo(item) {
   return VIRAL_VIDEO_FRONTEND_ENABLED === true
     && item?.status === 'published'
+    && item?.isActive !== false
     && item?.homepageVisible === true
     && (item?.homepageFeatured === true || item?.featured === true)
     && Boolean(String(item?.thumbnailUrl || '').trim())
@@ -189,6 +192,7 @@ app.get('/api/public/viral-videos', (req, res) => {
   const featuredOnly = String(req.query?.featured || '').trim().toLowerCase() === 'true';
   const items = DEMO_VIRAL_VIDEOS.filter((item) => {
     if (item.status !== 'published') return false;
+    if (item.isActive === false) return false;
     if (!String(item.thumbnailUrl || '').trim()) return false;
     if (!String(item.videoUrl || item.embedUrl || '').trim()) return false;
     if (featuredOnly) return item.homepageVisible === true && (item.homepageFeatured === true || item.featured === true);

@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Navigate } from 'react-router-dom';
 import { getPublicViralVideosFrontendSettings, listPublicViralVideos } from '@/lib/api/viralVideos';
 
-function getVideoHref(item: { embedUrl?: string; videoUrl?: string }) {
-  return item.embedUrl || item.videoUrl || '#';
+function getVideoHref(item: { embedUrl?: string; videoUrl?: string; videoFileUrl?: string }) {
+  return item.videoFileUrl || item.embedUrl || item.videoUrl || '#';
 }
 
 function formatDate(value?: string | null) {

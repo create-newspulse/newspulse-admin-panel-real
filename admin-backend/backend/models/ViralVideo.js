@@ -10,6 +10,7 @@ const ViralVideoSchema = new mongoose.Schema({
   slug: { type: String, required: true, trim: true, unique: true, index: true },
   summary: { type: String, default: '', trim: true },
   category: { type: String, default: '', trim: true, index: true },
+  sourceName: { type: String, default: '', trim: true },
   thumbnailUrl: { type: String, default: '', trim: true },
   posterImage: {
     url: { type: String, default: '' },
@@ -21,6 +22,7 @@ const ViralVideoSchema = new mongoose.Schema({
   language: { type: String, enum: LANGUAGE_ENUM, default: 'en', index: true },
   tags: { type: [String], default: [] },
   status: { type: String, enum: STATUS_ENUM, default: 'draft', index: true },
+  isActive: { type: Boolean, default: true, index: true },
   homepageVisible: { type: Boolean, default: false, index: true },
   homepageFeatured: { type: Boolean, default: false, index: true },
   featured: { type: Boolean, default: false, index: true },
@@ -28,7 +30,7 @@ const ViralVideoSchema = new mongoose.Schema({
   sortOrder: { type: Number, default: null, index: true },
 }, { timestamps: true, versionKey: false });
 
-ViralVideoSchema.index({ status: 1, homepageVisible: 1, homepageFeatured: 1, featured: 1, language: 1, category: 1, sortOrder: 1, publishedAt: -1 });
+ViralVideoSchema.index({ status: 1, isActive: 1, homepageVisible: 1, homepageFeatured: 1, featured: 1, language: 1, category: 1, sortOrder: 1, publishedAt: -1 });
 ViralVideoSchema.index({ title: 'text', summary: 'text', category: 'text', tags: 'text' }, { default_language: 'english' });
 
 ViralVideoSchema.pre('validate', async function(next) {
