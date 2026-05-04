@@ -106,7 +106,8 @@ const MEDIA_LIBRARY_STATUS_ROUTE = '/admin-api/media/status';
 const ALLOWED_MEDIA_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4'] as const;
 const ALLOWED_MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.mp4'] as const;
 const REJECTED_FORMATS_MESSAGE = 'Only JPG, JPEG, PNG images and MP4 videos are allowed.';
-const CLOUDINARY_SYNC_CONFIRMATION_MESSAGE = 'This will import missing Cloudinary assets into Media Library. It will not delete files or overwrite existing records.';
+const CLOUDINARY_SYNC_CONFIRMATION_MESSAGE = 'This will import missing Cloudinary assets into Media Library records. It will not delete Cloudinary files or overwrite existing media.';
+const PERMANENT_DELETE_CONFIRMATION_MESSAGE = 'This will permanently delete selected media records and may delete Cloudinary files if backend supports it. This action cannot be undone.';
 const DEV_MEDIA_ORIGIN = 'http://localhost:5000';
 const MIN_IMAGE_PREVIEW_BYTES = 32;
 const MIN_VIDEO_PREVIEW_BYTES = 1024;
@@ -910,6 +911,7 @@ export default function MediaLibrary(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [syncingCloudinary, setSyncingCloudinary] = useState(false);
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [overrides, setOverrides] = useState<Record<string, MediaOverride>>(() => readOverrides());
   const [tab, setTab] = useState<MediaTab>('all');
@@ -1050,6 +1052,11 @@ export default function MediaLibrary(): JSX.Element {
     if (selectedMediaIds.length === 0) return [];
     return mergedItems.filter((item) => !item.isDeleted && selectedMediaIds.includes(item.id));
   }, [mergedItems, selectedMediaIds]);
+
+  const activeUnusedItems = useMemo(() => mergedItems.filter((item) => !item.isDeleted && item.usageCount === 0), [mergedItems]);
+  const trashUnusedItems = useMemo(() => mergedItems.filter((item) => item.isDeleted && item.usageCount === 0), [mergedItems]);
+  const selectedUnusedMediaItems = useMemo(() => selectedMediaItems.filter((item) => item.usageCount === 0), [selectedMediaItems]);
+  const selectedUnusedTrashItems = useMemo(() => selectedTrashItems.filter((item) => item.usageCount === 0), [selectedTrashItems]);
 
   const visibleTrashIds = useMemo(() => visibleItems.filter((item) => item.isDeleted).map((item) => item.id), [visibleItems]);
   const allVisibleTrashSelected = visibleTrashIds.length > 0 && visibleTrashIds.every((id) => selectedTrashIds.includes(id));
@@ -1485,6 +1492,26 @@ export default function MediaLibrary(): JSX.Element {
     setToDate('');
   }
 
+  function handleFindUnusedMedia() {
+    setTab('all');
+    setStatusFilter('active');
+    setUsageFilter('unused');
+    setAdvancedFiltersOpen(true);
+    setSelectedTrashIds([]);
+  }
+
+  function handleCleanupOldUnusedMedia() {
+    if (selectedUnusedTrashItems.length > 0) {
+      requestPermanentDelete(selectedUnusedTrashItems);
+      return;
+    }
+    setTab('trash');
+    setStatusFilter('deleted');
+    setUsageFilter('unused');
+    setAdvancedFiltersOpen(true);
+    setSelectedMediaIds([]);
+  }
+
   const replacementChoices = mergedItems.filter((item) => !item.isDeleted && item.id !== selectedItem?.id);
 
   return (
@@ -1529,16 +1556,101 @@ export default function MediaLibrary(): JSX.Element {
             </button>
             <button
               type="button"
-              onClick={() => void handleSyncCloudinary()}
-              disabled={syncingCloudinary}
-              aria-busy={syncingCloudinary}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setAdvancedToolsOpen((open) => !open)}
+              aria-expanded={advancedToolsOpen}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <Cloud className="h-4 w-4" />
-              {syncingCloudinary ? 'Syncing...' : 'Sync Cloudinary'}
+              Advanced Tools
             </button>
           </div>
         </div>
+
+        {advancedToolsOpen ? (
+          <div className="mt-6 border-t border-slate-200 pt-5">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-2xl">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Maintenance</div>
+                <div className="mt-2 text-sm leading-6 text-slate-700">
+                  New uploads are already stored in Cloudinary. Sync Cloudinary is only for importing older Cloudinary files that are missing from Media Library.
+                </div>
+              </div>
+              <div className="grid w-full gap-3 xl:max-w-3xl">
+                <div className="flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Sync Cloudinary Assets</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-600">Manual one-time import for Cloudinary files that do not already have Media Library records.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleSyncCloudinary()}
+                    disabled={syncingCloudinary}
+                    aria-busy={syncingCloudinary}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-2.5 text-sm font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Cloud className="h-4 w-4" />
+                    {syncingCloudinary ? 'Syncing...' : 'Sync Cloudinary Assets'}
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3 border-b border-slate-200 pb-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Find unused media</div>
+                      <div className="mt-1 text-xs leading-5 text-slate-600">Lists active media with usage count 0. Nothing is deleted automatically.</div>
+                    </div>
+                    <button type="button" onClick={handleFindUnusedMedia} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Search className="h-4 w-4" />
+                      Show unused media
+                    </button>
+                  </div>
+                  <div className="max-h-40 overflow-auto rounded-2xl border border-slate-200 bg-white/80">
+                    {activeUnusedItems.length > 0 ? activeUnusedItems.slice(0, 12).map((item) => (
+                      <label key={item.id} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedMediaIds.includes(item.id)}
+                          onChange={(event) => toggleMediaSelection(item.id, event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{item.filename}</span>
+                        <span className="text-xs text-slate-500">{getMediaTypeLabel(item.mediaType)}</span>
+                      </label>
+                    )) : (
+                      <div className="px-3 py-3 text-sm text-slate-500">No active unused media found.</div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-xs text-slate-500">
+                      {activeUnusedItems.length} active unused found{activeUnusedItems.length > 12 ? ', showing first 12' : ''}.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => requestMoveItemsToTrash(selectedUnusedMediaItems)}
+                      disabled={selectedUnusedMediaItems.length === 0}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Move selected unused to Trash
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Cleanup old unused media</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-600">Permanent cleanup is limited to Trash or this Advanced Tools review path.</div>
+                    <div className="mt-1 text-xs text-slate-500">{trashUnusedItems.length} unused media records currently in Trash.</div>
+                  </div>
+                  <button type="button" onClick={handleCleanupOldUnusedMedia} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">
+                    <Trash2 className="h-4 w-4" />
+                    {selectedUnusedTrashItems.length > 0 ? 'Review selected Trash cleanup' : 'Review Trash cleanup'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span>{uploadStatusLabel}</span>
@@ -1727,7 +1839,7 @@ export default function MediaLibrary(): JSX.Element {
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Trash management</div>
-                  <div className="mt-1 text-sm text-rose-900">Trash shows deleted assets only. Permanent delete removes the media record from this admin library view; it does not request Cloudinary asset deletion.</div>
+                  <div className="mt-1 text-sm text-rose-900">Trash shows deleted assets only. Permanent delete is available here after a strong confirmation.</div>
                 </div>
                 <button type="button" onClick={toggleSelectAllTrash} className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100">
                   {allVisibleTrashSelected ? 'Deselect visible' : 'Select visible'}
@@ -2360,8 +2472,7 @@ export default function MediaLibrary(): JSX.Element {
               )}
 
               <div className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                <div className="font-semibold">This will permanently delete the media record. This action cannot be undone.</div>
-                <div className="mt-2 text-xs leading-5 text-rose-800">This does not request permanent deletion of the Cloudinary asset.</div>
+                <div className="font-semibold">{PERMANENT_DELETE_CONFIRMATION_MESSAGE}</div>
                 {pendingDeleteHasBlockedUsedItems ? (
                   <div className="mt-2 text-xs leading-5 text-rose-800">
                     One or more selected items are still tracked as used. Founder-level access is required to permanently delete referenced media.
