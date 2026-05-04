@@ -1527,6 +1527,16 @@ export default function MediaLibrary(): JSX.Element {
               <RefreshCcw className="h-4 w-4" />
               Refresh
             </button>
+            <button
+              type="button"
+              onClick={() => void handleSyncCloudinary()}
+              disabled={syncingCloudinary}
+              aria-busy={syncingCloudinary}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Cloud className="h-4 w-4" />
+              {syncingCloudinary ? 'Syncing...' : 'Sync Cloudinary'}
+            </button>
           </div>
         </div>
 
@@ -1708,27 +1718,6 @@ export default function MediaLibrary(): JSX.Element {
                 </div>
 
                 <button type="button" onClick={resetFilters} className="text-sm font-medium text-slate-600 hover:text-slate-900">Reset filters</button>
-              </div>
-
-              <div className="mt-4 rounded-3xl border border-sky-100 bg-white p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Cloudinary Tools</div>
-                    <div className="mt-1 text-sm leading-6 text-slate-600">
-                      New uploads already go to Cloudinary. Sync Cloudinary is only for importing missing old Cloudinary assets into Media Library records.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleSyncCloudinary()}
-                    disabled={syncingCloudinary}
-                    aria-busy={syncingCloudinary}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-2.5 text-sm font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Cloud className="h-4 w-4" />
-                    {syncingCloudinary ? 'Syncing...' : 'Sync Cloudinary'}
-                  </button>
-                </div>
               </div>
             </div>
           ) : null}
