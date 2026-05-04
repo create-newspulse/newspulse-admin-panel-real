@@ -55,6 +55,11 @@ function normalizeVideoUploadErrorMessage(raw: unknown): string {
   return message;
 }
 
+function isUploadVideoRouteFallbackMessage(message: string, status: number): boolean {
+  if (status === 404 || status === 405) return true;
+  return /cloud video upload is available but disabled|use video url unless enabled|route not found|not found/i.test(message);
+}
+
 function extractUploadedNumber(raw: any, key: string): number | undefined {
   const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
   const value = payload?.[key];
@@ -298,7 +303,7 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
   return result;
 }
 
-export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult> {
+async function postViralVideoFile(file: File, url: string): Promise<UploadVideoFileResult> {
   const fd = new FormData();
   fd.append('video', file);
 
@@ -307,7 +312,7 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult
     token = localStorage.getItem('np_token');
   } catch {}
 
-  const resp = await fetch('/admin-api/admin/viral-videos/upload-video', {
+  const resp = await fetch(url, {
     method: 'POST',
     body: fd,
     credentials: 'include',
@@ -330,17 +335,33 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult
       payload?.data?.error ||
       payload?.data?.message ||
       `Video upload failed (${resp.status})`;
-    throw new Error(normalizeVideoUploadErrorMessage(msg));
+    const error = new Error(normalizeVideoUploadErrorMessage(msg));
+    (error as any).status = resp.status;
+    (error as any).uploadUrl = url;
+    throw error;
   }
 
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-  const url = String(data?.url || payload?.url || '').trim();
-  if (!url) throw new Error('Video upload succeeded but no URL was returned');
+  const uploadedUrl = String(data?.url || payload?.url || '').trim();
+  if (!uploadedUrl) throw new Error('Video upload succeeded but no URL was returned');
 
   return {
-    url,
+    url: uploadedUrl,
     filename: String(data?.filename || payload?.filename || '').trim() || undefined,
     bytes: extractUploadedNumber(data, 'bytes'),
     mimetype: extractUploadedString(data, 'mimetype'),
   };
+}
+
+export async function uploadVideoFile(file: File): Promise<UploadVideoFileResult> {
+  try {
+    return await postViralVideoFile(file, '/admin-api/admin/viral-videos/upload-video');
+  } catch (error: any) {
+    const message = String(error?.message || '').trim();
+    const status = Number(error?.status || 0);
+    if (isUploadVideoRouteFallbackMessage(message, status)) {
+      return await postViralVideoFile(file, '/admin-api/admin/viral-videos/upload');
+    }
+    throw error;
+  }
 }

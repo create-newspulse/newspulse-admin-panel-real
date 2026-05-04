@@ -188,7 +188,7 @@ router.put('/viral-videos/settings', async (req, res) => {
   }
 });
 
-router.post('/viral-videos/upload', videoUpload.single('video'), async (req, res) => {
+async function handleViralVideoUpload(req, res) {
   try {
     if (!req.file) return res.status(400).json({ ok: false, message: 'Video file is required' });
     const filename = req.file.filename;
@@ -208,7 +208,10 @@ router.post('/viral-videos/upload', videoUpload.single('video'), async (req, res
   } catch (error) {
     res.status(500).json({ ok: false, message: error.message });
   }
-});
+}
+
+router.post('/viral-videos/upload-video', videoUpload.single('video'), handleViralVideoUpload);
+router.post('/viral-videos/upload', videoUpload.single('video'), handleViralVideoUpload);
 
 router.post('/viral-videos/thumbnail-upload', thumbnailUpload.single('thumbnail'), async (req, res) => {
   try {

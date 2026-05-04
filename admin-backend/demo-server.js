@@ -214,12 +214,15 @@ app.get('/api/admin/viral-videos', (req, res) => {
   res.json({ ok: true, items, total: items.length, page: 1, pages: 1, limit: items.length || 20 });
 });
 
-app.post('/api/admin/viral-videos/upload', upload.single('video'), (req, res) => {
+function handleDemoViralVideoUpload(req, res) {
   if (!req.file) return res.status(400).json({ ok: false, message: 'Video file is required' });
   const filename = `${Date.now()}-${String(req.file.originalname || 'viral-video.mp4').replace(/[^a-z0-9._-]+/gi, '-')}`;
   const url = `/demo-uploads/viral-videos/${encodeURIComponent(filename)}`;
   res.json({ ok: true, success: true, url, filename, data: { url, filename, bytes: req.file.size, mimetype: req.file.mimetype } });
-});
+}
+
+app.post('/api/admin/viral-videos/upload-video', upload.single('video'), handleDemoViralVideoUpload);
+app.post('/api/admin/viral-videos/upload', upload.single('video'), handleDemoViralVideoUpload);
 
 app.post('/api/admin/viral-videos/thumbnail-upload', upload.single('thumbnail'), (req, res) => {
   if (!req.file) return res.status(400).json({ ok: false, message: 'Thumbnail image is required' });
