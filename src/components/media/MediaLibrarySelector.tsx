@@ -4,6 +4,8 @@ import {
   fetchMediaLibraryAssets,
   formatMediaFileSize,
   formatMediaUploadedDate,
+  getMediaLibraryPreviewUrls,
+  isValidMediaLibraryImageAsset,
   type MediaLibraryAsset,
   type MediaLibraryAssetType,
 } from '@/lib/mediaLibrary';
@@ -33,14 +35,29 @@ function modeLabel(mode: MediaLibrarySelectorMode) {
 
 function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
   const [failed, setFailed] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const previewUrls = getMediaLibraryPreviewUrls(asset);
+  const previewKey = previewUrls.join('|');
 
-  useEffect(() => setFailed(false), [asset.id, asset.url, asset.thumbnailUrl, asset.posterUrl]);
+  useEffect(() => {
+    setFailed(false);
+    setPreviewIndex(0);
+  }, [asset.id, asset.url, asset.thumbnailUrl, asset.posterUrl, asset.assetUrl, asset.secureUrl, previewKey]);
+
+  const handlePreviewError = () => {
+    if (previewIndex < previewUrls.length - 1) {
+      setPreviewIndex((current) => current + 1);
+      return;
+    }
+    setFailed(true);
+  };
 
   if (asset.mediaType === 'video') {
+    const posterUrl = previewUrls[previewIndex] || '';
     return (
       <div className="relative flex h-full w-full items-center justify-center bg-slate-950 text-white">
-        {asset.posterUrl && !failed ? (
-          <img src={asset.posterUrl} alt={asset.filename} className="h-full w-full object-cover opacity-80" onError={() => setFailed(true)} />
+        {posterUrl && !failed ? (
+          <img src={posterUrl} alt={asset.filename} className="h-full w-full object-cover opacity-80" onError={handlePreviewError} />
         ) : null}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-slate-950/10 to-transparent" />
         <div className="absolute flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-white/15 shadow-lg">
@@ -50,16 +67,17 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
     );
   }
 
-  const src = asset.thumbnailUrl || asset.url;
+  const src = previewUrls[previewIndex] || '';
   if (!src || failed) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400">
-        <ImageIcon className="h-8 w-8" />
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-slate-100 px-3 text-center text-slate-500">
+        <div className="text-sm font-semibold text-slate-700">Preview unavailable</div>
+        <div className="line-clamp-2 text-xs leading-4">{asset.filename}</div>
       </div>
     );
   }
 
-  return <img src={src} alt={asset.filename} className="h-full w-full object-cover" onError={() => setFailed(true)} />;
+  return <img src={src} alt={asset.filename} className="h-full w-full object-cover" onError={handlePreviewError} />;
 }
 
 export default function MediaLibrarySelector({ open, mode, title, actionLabel, onClose, onSelect }: MediaLibrarySelectorProps) {
@@ -103,8 +121,9 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
     const needle = search.trim().toLowerCase();
     return items.filter((asset) => {
       if (!typeAllowed(asset.mediaType, mode)) return false;
+      if (mode === 'image' && !isValidMediaLibraryImageAsset(asset)) return false;
       if (!needle) return true;
-      return [asset.filename, asset.url, asset.source, ...asset.tags].join(' ').toLowerCase().includes(needle);
+      return [asset.filename, asset.url, asset.assetUrl, asset.secureUrl, asset.source, ...asset.tags].join(' ').toLowerCase().includes(needle);
     });
   }, [items, mode, search]);
 

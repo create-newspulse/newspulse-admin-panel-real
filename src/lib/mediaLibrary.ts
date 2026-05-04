@@ -7,6 +7,9 @@ export type MediaLibraryAsset = {
   url: string;
   thumbnailUrl: string;
   posterUrl?: string;
+  assetUrl?: string;
+  secureUrl?: string;
+  previewUrls: string[];
   filename: string;
   mediaType: MediaLibraryAssetType;
   mimeType?: string;
@@ -67,6 +70,17 @@ function resolveAssetUrl(primary: unknown, relative?: unknown): string {
   return primaryText || relativeText;
 }
 
+function uniqueUrls(values: unknown[], relativeUrl?: string): string[] {
+  const seen = new Set<string>();
+  return values
+    .map((value) => resolveAssetUrl(value, relativeUrl))
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
 function extractUploadsItems(raw: any): any[] {
   const candidates = [raw?.items, raw?.data?.items, raw?.data?.data?.items, raw?.data, raw];
   for (const candidate of candidates) {
@@ -119,11 +133,16 @@ export function formatMediaUploadedDate(value?: string): string {
 export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
   const mediaType = inferMediaType(raw);
   const relativeUrl = safeText(raw?.relativeUrl || raw?.relativePath || raw?.file?.relativeUrl);
-  const url = resolveAssetUrl(raw?.url || raw?.path || raw?.secure_url || raw?.secureUrl || raw?.location, relativeUrl);
+  const assetUrl = resolveAssetUrl(raw?.assetUrl || raw?.asset_url || raw?.file?.assetUrl || raw?.file?.url, relativeUrl);
+  const secureUrl = resolveAssetUrl(raw?.secureUrl || raw?.secure_url || raw?.file?.secureUrl || raw?.file?.secure_url, relativeUrl);
+  const url = resolveAssetUrl(raw?.url || raw?.path || secureUrl || raw?.location || assetUrl, relativeUrl);
   const thumbnailUrl = resolveAssetUrl(raw?.thumbnailUrl || raw?.previewUrl || raw?.poster || raw?.posterUrl, relativeUrl) || url;
   const posterUrl = mediaType === 'video'
     ? (resolveAssetUrl(raw?.poster || raw?.posterUrl || raw?.thumbnailUrl || raw?.previewUrl, relativeUrl) || thumbnailUrl || url)
     : undefined;
+  const previewUrls = mediaType === 'image'
+    ? uniqueUrls([raw?.thumbnailUrl, raw?.posterUrl, raw?.poster, raw?.assetUrl, raw?.asset_url, assetUrl, raw?.url, raw?.path, url, raw?.secureUrl, raw?.secure_url, secureUrl, raw?.location], relativeUrl)
+    : uniqueUrls([raw?.poster, raw?.posterUrl, raw?.thumbnailUrl, raw?.previewUrl, posterUrl, raw?.assetUrl, raw?.asset_url, assetUrl, raw?.url, raw?.path, url, raw?.secureUrl, raw?.secure_url, secureUrl], relativeUrl);
   const linked = Array.isArray(raw?.linkedContent) ? raw.linkedContent : [];
   const tags = Array.isArray(raw?.tags) ? raw.tags.map((tag: unknown) => safeText(tag)).filter(Boolean) : [];
 
@@ -132,6 +151,9 @@ export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
     url,
     thumbnailUrl,
     posterUrl,
+    assetUrl: assetUrl || undefined,
+    secureUrl: secureUrl || undefined,
+    previewUrls,
     filename: safeText(raw?.filename || raw?.name || raw?.originalName || raw?.title || raw?.url, 'Untitled media'),
     mediaType,
     mimeType: safeText(raw?.mimeType || raw?.mime || raw?.contentType) || undefined,
@@ -142,6 +164,26 @@ export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
     usageCount: safeNumber(raw?.usageCount ?? raw?.usedCount ?? raw?.referencesCount ?? raw?.usage?.count) ?? linked.length,
     tags,
   };
+}
+
+export function getMediaLibraryPreviewUrls(asset: MediaLibraryAsset): string[] {
+  const candidates = asset.mediaType === 'image'
+    ? [asset.thumbnailUrl, asset.posterUrl, asset.assetUrl, asset.url, asset.secureUrl, ...asset.previewUrls]
+    : [asset.posterUrl, asset.thumbnailUrl, asset.assetUrl, asset.url, asset.secureUrl, ...asset.previewUrls];
+  const seen = new Set<string>();
+  return candidates.filter((value) => {
+    const url = safeText(value);
+    if (!url || seen.has(url)) return false;
+    seen.add(url);
+    return true;
+  });
+}
+
+export function isValidMediaLibraryImageAsset(asset: MediaLibraryAsset): boolean {
+  if (asset.mediaType !== 'image') return false;
+  const size = safeNumber(asset.fileSize);
+  if (typeof size === 'number' && size < 100) return false;
+  return getMediaLibraryPreviewUrls(asset).length > 0;
 }
 
 export async function fetchMediaLibraryAssets(): Promise<MediaLibraryAsset[]> {
