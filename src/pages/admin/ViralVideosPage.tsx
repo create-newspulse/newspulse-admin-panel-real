@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Play } from 'lucide-react';
 import { useAuth } from '@context/AuthContext';
+import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import Switch from '@/components/settings/Switch';
 import { uploadCoverImage, uploadVideoFile } from '@/lib/api/media';
 import {
@@ -338,6 +339,7 @@ export default function ViralVideosPage() {
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [cloudVideoUploadRequested, setCloudVideoUploadRequested] = useState<boolean | null>(null);
   const [videoUploadError, setVideoUploadError] = useState<string | null>(null);
+  const [mediaLibraryMode, setMediaLibraryMode] = useState<null | 'thumbnail' | 'video'>(null);
   const userRole = String(user?.role || '').trim().toLowerCase();
   const canManageFrontendVisibility = userRole === 'founder' || userRole === 'admin';
 
@@ -392,6 +394,7 @@ export default function ViralVideosPage() {
       setUploadingVideo(false);
       setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
+      setMediaLibraryMode(null);
       return;
     }
 
@@ -403,6 +406,7 @@ export default function ViralVideosPage() {
       setUploadingVideo(false);
       setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
+      setMediaLibraryMode(null);
       return;
     }
 
@@ -414,6 +418,7 @@ export default function ViralVideosPage() {
       setUploadingVideo(false);
       setCloudVideoUploadRequested(null);
       setVideoUploadError(null);
+      setMediaLibraryMode(null);
     }
   }, [editingId, isCreateRoute, isEditorOpen, itemQuery.data]);
 
@@ -621,6 +626,33 @@ export default function ViralVideosPage() {
       embedUrl: '',
       ...derivePlaybackFields(value, current.videoFileUrl),
     }));
+  }
+
+  function handleMediaLibrarySelect(asset: MediaLibraryAsset) {
+    if (mediaLibraryMode === 'thumbnail') {
+      setEditor((current) => ({ ...current, thumbnailUrl: asset.url, posterImageUrl: asset.url }));
+      setThumbnailUploadError(null);
+      setThumbnailPreviewFailed(false);
+      setShowPreview(true);
+      setMediaLibraryMode(null);
+      toast.success('Thumbnail selected from Media Library');
+      return;
+    }
+
+    if (mediaLibraryMode === 'video') {
+      setEditor((current) => ({
+        ...current,
+        sourceType: 'video_url',
+        videoUrl: asset.url,
+        videoFileUrl: asset.url,
+        embedUrl: '',
+        videoType: 'uploaded',
+        playbackMode: 'internal',
+      }));
+      setVideoUploadError(null);
+      setMediaLibraryMode(null);
+      toast.success('Video selected from Media Library');
+    }
   }
 
   const globalVisibilityMutation = useMutation({
@@ -1035,6 +1067,13 @@ export default function ViralVideosPage() {
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => setMediaLibraryMode('thumbnail')}
+                      className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Choose from Media Library
+                    </button>
                     <span className="text-xs text-slate-500">{thumbnailUploadHelpText}</span>
                   </div>
                   {thumbnailUploadError ? (
@@ -1094,6 +1133,13 @@ export default function ViralVideosPage() {
                           className="hidden"
                         />
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => setMediaLibraryMode('video')}
+                        className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Choose from Media Library
+                      </button>
                       <span className="text-xs text-slate-500">Uploaded files save as videoFileUrl and play as News Pulse reels.</span>
                     </div>
                     {editor.videoFileUrl ? (
@@ -1213,6 +1259,15 @@ export default function ViralVideosPage() {
           </div>
         </section>
       ) : null}
+
+      <MediaLibrarySelector
+        open={mediaLibraryMode !== null}
+        mode={mediaLibraryMode === 'video' ? 'video' : 'image'}
+        title={mediaLibraryMode === 'video' ? 'Choose Viral Video File' : 'Choose Thumbnail Image'}
+        actionLabel={mediaLibraryMode === 'video' ? 'Use in Viral Video' : 'Use as Thumbnail'}
+        onClose={() => setMediaLibraryMode(null)}
+        onSelect={handleMediaLibrarySelect}
+      />
     </div>
   );
 }

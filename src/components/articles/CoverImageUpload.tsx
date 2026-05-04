@@ -13,6 +13,7 @@ export type CoverImageUploadProps = {
   disabled?: boolean;
   disabledText?: string | null;
   disabledDetail?: string | null;
+  onChooseFromLibrary?: () => void;
 };
 
 function formatBytes(bytes: number): string {
@@ -28,7 +29,7 @@ function formatBytes(bytes: number): string {
   return `${rounded} ${units[idx]}`;
 }
 
-export default function CoverImageUpload({ url, file, onChangeFile, onRemove, disabled = false, disabledText = null, disabledDetail = null }: CoverImageUploadProps) {
+export default function CoverImageUpload({ url, file, onChangeFile, onRemove, disabled = false, disabledText = null, disabledDetail = null, onChooseFromLibrary }: CoverImageUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -203,6 +204,12 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
             <button type="button" className="btn" onClick={pick} disabled={disabled} title={disabledText || undefined}>
               {hasRealPreview ? 'Replace' : 'Upload Image'}
             </button>
+
+            {onChooseFromLibrary ? (
+              <button type="button" className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50" onClick={onChooseFromLibrary}>
+                Choose from Media Library
+              </button>
+            ) : null}
 
             {hasRealPreview && (
               <button

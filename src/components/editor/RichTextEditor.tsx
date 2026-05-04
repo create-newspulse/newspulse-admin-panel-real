@@ -6,10 +6,11 @@ import Link from '@tiptap/extension-link';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import type { Editor as TiptapEditor } from '@tiptap/core';
+import { Node, mergeAttributes, type Editor as TiptapEditor } from '@tiptap/core';
 import { TextSelection } from 'prosemirror-state';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
+import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 
 export interface RichTextEditorProps {
   value: string;
@@ -55,6 +56,28 @@ function escapeHtmlAttr(input: string): string {
     .replace(/'/g, '&#39;');
 }
 
+const VideoBlock = Node.create({
+  name: 'videoBlock',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      src: { default: null },
+      poster: { default: null },
+      title: { default: null },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'video[src]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['video', mergeAttributes(HTMLAttributes, { controls: '', playsinline: '', class: 'np-rich-video' })];
+  },
+});
+
 function ToolbarButton({
   editor,
   label,
@@ -93,6 +116,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       Highlight.configure({ multicolor: false }),
       Link.configure({ openOnClick: false }),
       Image,
+      VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
     [placeholder]
@@ -117,6 +141,9 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     if (current !== next) editor.commands.setContent(next);
   }, [editor, value]);
 
+  const [symbol, setSymbol] = useState('');
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+
   if (!editor) return <div className="text-xs text-slate-500">Loading editor…</div>;
 
   const canUndo = editor.can().chain().undo().run();
@@ -124,7 +151,21 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
 
   const insertSymbol = (s: string) => editor.chain().focus().insertContent(s).run();
 
-  const [symbol, setSymbol] = useState('');
+  const insertMediaAsset = (asset: MediaLibraryAsset) => {
+    if (asset.mediaType === 'video') {
+      editor.chain().focus().insertContent({
+        type: 'videoBlock',
+        attrs: {
+          src: asset.url,
+          poster: asset.posterUrl || undefined,
+          title: asset.filename,
+        },
+      }).run();
+    } else {
+      editor.chain().focus().setImage({ src: asset.url, alt: asset.filename }).run();
+    }
+    setMediaLibraryOpen(false);
+  };
 
   const onLink = () => {
     if (editor.isActive('link')) {
@@ -169,6 +210,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="Quote" onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} />
         <ToolbarButton editor={editor} label="Highlight" onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} />
         <ToolbarButton editor={editor} label="Link" onClick={onLink} active={editor.isActive('link')} />
+        <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
 
         <span className="mx-1 h-4 w-px bg-slate-200" />
 
@@ -209,6 +251,15 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       <EditorContent
         editor={editor}
         className="bg-white shadow-[inset_0_1px_2px_rgba(15,23,42,0.03)]"
+      />
+
+      <MediaLibrarySelector
+        open={mediaLibraryOpen}
+        mode="all"
+        title="Insert Media in Article"
+        actionLabel="Insert in Article"
+        onClose={() => setMediaLibraryOpen(false)}
+        onSelect={insertMediaAsset}
       />
     </div>
   );

@@ -19,6 +19,7 @@ import { normalizeError } from '@/lib/error';
 import PreviewModal from '@/components/preview/PreviewModal';
 import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailability';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
+import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { getMediaStatus, uploadCoverImage } from '@/lib/api/media';
 import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticleCategoryKey } from '@/lib/articleCategories';
 import { generateArticleSlug } from '@/lib/articleSlug';
@@ -472,6 +473,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [isUploadingCover, setIsUploadingCover] = useState(false);
   const [coverUploadOk, setCoverUploadOk] = useState(false);
   const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
+  const [coverMediaLibraryOpen, setCoverMediaLibraryOpen] = useState(false);
 
   const mediaStatusQuery = useQuery({
     queryKey: ['media', 'status'],
@@ -2072,6 +2074,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
   }
 
+  function chooseCoverFromMediaLibrary(asset: MediaLibraryAsset) {
+    setCoverImage({ url: asset.url });
+    setCoverImageFile(null);
+    setCoverUploadError(null);
+    setCoverUploadOk(true);
+    setCoverMediaLibraryOpen(false);
+    toast.success('Cover image selected from Media Library');
+  }
+
   async function createLinkedTranslation(target: LangCode) {
     if (!effectiveId) {
       toast.error('Save this story first to create a translation');
@@ -2924,6 +2935,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     setCoverUploadOk(false);
                     setCoverUploadError(null);
                   }}
+                  onChooseFromLibrary={() => setCoverMediaLibraryOpen(true)}
                 />
                 {isUploadingCover && <div className="mt-1 text-[11px] text-slate-500">Uploading…</div>}
                 {!isUploadingCover && coverUploadOk && coverImageUrl ? (
@@ -2977,6 +2989,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           scheduledAt,
           tags,
         }}
+      />
+
+      <MediaLibrarySelector
+        open={coverMediaLibraryOpen}
+        mode="image"
+        title="Choose Cover Image"
+        actionLabel="Use as Cover"
+        onClose={() => setCoverMediaLibraryOpen(false)}
+        onSelect={chooseCoverFromMediaLibrary}
       />
 
       {publishSuccess && (
