@@ -21,6 +21,8 @@ export type MediaLibraryAsset = {
   tags: string[];
 };
 
+const MIN_SELECTOR_VIDEO_BYTES = 100 * 1024;
+
 function safeText(value: unknown, fallback = ''): string {
   const normalized = String(value ?? '').trim();
   return normalized || fallback;
@@ -39,8 +41,70 @@ function isLoopbackHostname(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1';
 }
 
+function isLiveBrowser(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.location?.hostname && !isLoopbackHostname(window.location.hostname);
+  } catch {
+    return !import.meta.env.DEV;
+  }
+}
+
+function isPreviewableAbsoluteUrl(value: string): boolean {
+  if (!isAbsoluteHttpUrl(value)) return true;
+  try {
+    const parsed = new URL(value);
+    return !(isLiveBrowser() && isLoopbackHostname(parsed.hostname));
+  } catch {
+    return false;
+  }
+}
+
+function splitUrlSuffix(value: string) {
+  const match = value.match(/^([^?#]*)([?#].*)?$/);
+  return {
+    base: match?.[1] || value,
+    suffix: match?.[2] || '',
+  };
+}
+
+function replaceAssetExtension(value: string, nextExtension: string): string {
+  const { base, suffix } = splitUrlSuffix(value);
+  const nextBase = /\.[a-z0-9]+$/i.test(base) ? base.replace(/\.[a-z0-9]+$/i, nextExtension) : `${base}${nextExtension}`;
+  return `${nextBase}${suffix}`;
+}
+
+function isImageDeliveryUrl(value: string): boolean {
+  return /\/(image)\/upload\//i.test(value) || /\.(jpe?g|png|webp|gif|avif)(?:[?#].*)?$/i.test(value);
+}
+
+function isVideoDeliveryUrl(value: string): boolean {
+  return /\/(video)\/upload\//i.test(value) || /\.(mp4|mov|m4v|webm|ogg|ogv|avi|mkv)(?:[?#].*)?$/i.test(value);
+}
+
+function isPlayableVideoUrl(value: string): boolean {
+  if (!isPreviewableAbsoluteUrl(value)) return false;
+  return isVideoDeliveryUrl(value) || /\/(uploads?|media|videos?)\//i.test(value);
+}
+
+function deriveCloudinaryVideoFrameUrls(value: string): string[] {
+  const raw = safeText(value);
+  if (!raw || !/\/video\/upload\//i.test(raw)) return [];
+
+  const imageUrl = replaceAssetExtension(raw, '.jpg');
+  return [
+    imageUrl.replace(/\/video\/upload\//i, '/video/upload/so_1,w_640,h_360,c_fill,q_auto,f_jpg/'),
+    imageUrl.replace(/\/video\/upload\//i, '/video/upload/so_0,w_640,h_360,c_fill,q_auto,f_jpg/'),
+    imageUrl.replace(/\/video\/upload\//i, '/video/upload/w_640,h_360,c_fill,q_auto,f_jpg/'),
+  ];
+}
+
 function buildDevAssetUrl(path: string): string {
   return `http://localhost:5000${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function buildProxyAssetUrl(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return normalized.startsWith('/admin-api/') ? normalized : `/admin-api${normalized}`;
 }
 
 function resolveAssetUrl(primary: unknown, relative?: unknown): string {
@@ -50,6 +114,9 @@ function resolveAssetUrl(primary: unknown, relative?: unknown): string {
   if (primaryText && isAbsoluteHttpUrl(primaryText)) {
     try {
       const parsed = new URL(primaryText);
+      if (relativeText.startsWith('/') && isLoopbackHostname(parsed.hostname) && isLiveBrowser()) {
+        return buildProxyAssetUrl(relativeText);
+      }
       if (
         import.meta.env.DEV
         && relativeText.startsWith('/')
@@ -65,8 +132,8 @@ function resolveAssetUrl(primary: unknown, relative?: unknown): string {
     }
   }
 
-  if (primaryText.startsWith('/')) return import.meta.env.DEV ? buildDevAssetUrl(primaryText) : primaryText;
-  if (relativeText.startsWith('/')) return import.meta.env.DEV ? buildDevAssetUrl(relativeText) : relativeText;
+  if (primaryText.startsWith('/')) return import.meta.env.DEV ? buildDevAssetUrl(primaryText) : buildProxyAssetUrl(primaryText);
+  if (relativeText.startsWith('/')) return import.meta.env.DEV ? buildDevAssetUrl(relativeText) : buildProxyAssetUrl(relativeText);
   return primaryText || relativeText;
 }
 
@@ -75,7 +142,7 @@ function uniqueUrls(values: unknown[], relativeUrl?: string): string[] {
   return values
     .map((value) => resolveAssetUrl(value, relativeUrl))
     .filter((value) => {
-      if (!value || seen.has(value)) return false;
+      if (!value || seen.has(value) || !isPreviewableAbsoluteUrl(value)) return false;
       seen.add(value);
       return true;
     });
@@ -135,14 +202,26 @@ export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
   const relativeUrl = safeText(raw?.relativeUrl || raw?.relativePath || raw?.file?.relativeUrl);
   const assetUrl = resolveAssetUrl(raw?.assetUrl || raw?.asset_url || raw?.file?.assetUrl || raw?.file?.url, relativeUrl);
   const secureUrl = resolveAssetUrl(raw?.secureUrl || raw?.secure_url || raw?.file?.secureUrl || raw?.file?.secure_url, relativeUrl);
-  const url = resolveAssetUrl(raw?.url || raw?.path || secureUrl || raw?.location || assetUrl, relativeUrl);
+  const playbackUrls = mediaType === 'video'
+    ? uniqueUrls([raw?.url, raw?.path, raw?.location, raw?.secureUrl, raw?.secure_url, secureUrl, raw?.assetUrl, raw?.asset_url, assetUrl], relativeUrl).filter(isPlayableVideoUrl)
+    : [];
+  const url = mediaType === 'video'
+    ? (playbackUrls[0] || resolveAssetUrl(raw?.url || raw?.path || secureUrl || raw?.location || assetUrl, relativeUrl))
+    : resolveAssetUrl(raw?.url || raw?.path || secureUrl || raw?.location || assetUrl, relativeUrl);
   const thumbnailUrl = resolveAssetUrl(raw?.thumbnailUrl || raw?.previewUrl || raw?.poster || raw?.posterUrl, relativeUrl) || url;
   const posterUrl = mediaType === 'video'
     ? (resolveAssetUrl(raw?.poster || raw?.posterUrl || raw?.thumbnailUrl || raw?.previewUrl, relativeUrl) || thumbnailUrl || url)
     : undefined;
   const previewUrls = mediaType === 'image'
     ? uniqueUrls([raw?.thumbnailUrl, raw?.posterUrl, raw?.poster, raw?.assetUrl, raw?.asset_url, assetUrl, raw?.url, raw?.path, url, raw?.secureUrl, raw?.secure_url, secureUrl, raw?.location], relativeUrl)
-    : uniqueUrls([raw?.poster, raw?.posterUrl, raw?.thumbnailUrl, raw?.previewUrl, posterUrl, raw?.assetUrl, raw?.asset_url, assetUrl, raw?.url, raw?.path, url, raw?.secureUrl, raw?.secure_url, secureUrl], relativeUrl);
+    : uniqueUrls([
+        raw?.thumbnailUrl,
+        raw?.previewUrl,
+        raw?.poster,
+        raw?.posterUrl,
+        posterUrl,
+        ...playbackUrls.flatMap((candidate) => deriveCloudinaryVideoFrameUrls(candidate)),
+      ], relativeUrl).filter(isImageDeliveryUrl);
   const linked = Array.isArray(raw?.linkedContent) ? raw.linkedContent : [];
   const tags = Array.isArray(raw?.tags) ? raw.tags.map((tag: unknown) => safeText(tag)).filter(Boolean) : [];
 
@@ -169,14 +248,20 @@ export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
 export function getMediaLibraryPreviewUrls(asset: MediaLibraryAsset): string[] {
   const candidates = asset.mediaType === 'image'
     ? [asset.thumbnailUrl, asset.posterUrl, asset.assetUrl, asset.url, asset.secureUrl, ...asset.previewUrls]
-    : [asset.posterUrl, asset.thumbnailUrl, asset.assetUrl, asset.url, asset.secureUrl, ...asset.previewUrls];
+    : [asset.thumbnailUrl, asset.posterUrl, ...asset.previewUrls];
   const seen = new Set<string>();
   return candidates.filter((value) => {
     const url = safeText(value);
-    if (!url || seen.has(url)) return false;
+    if (!url || seen.has(url) || !isPreviewableAbsoluteUrl(url)) return false;
     seen.add(url);
     return true;
   });
+}
+
+export function getMediaLibraryPlayableVideoUrl(asset: MediaLibraryAsset): string {
+  if (asset.mediaType !== 'video') return '';
+  const candidates = [asset.url, asset.assetUrl, asset.secureUrl];
+  return candidates.find((value) => isPlayableVideoUrl(safeText(value))) || '';
 }
 
 export function isValidMediaLibraryImageAsset(asset: MediaLibraryAsset): boolean {
@@ -184,6 +269,13 @@ export function isValidMediaLibraryImageAsset(asset: MediaLibraryAsset): boolean
   const size = safeNumber(asset.fileSize);
   if (typeof size === 'number' && size < 100) return false;
   return getMediaLibraryPreviewUrls(asset).length > 0;
+}
+
+export function isValidMediaLibraryVideoAsset(asset: MediaLibraryAsset): boolean {
+  if (asset.mediaType !== 'video') return false;
+  const size = safeNumber(asset.fileSize);
+  if (typeof size === 'number' && size < MIN_SELECTOR_VIDEO_BYTES) return false;
+  return !!getMediaLibraryPlayableVideoUrl(asset);
 }
 
 export async function fetchMediaLibraryAssets(): Promise<MediaLibraryAsset[]> {

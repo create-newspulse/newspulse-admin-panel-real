@@ -6,6 +6,7 @@ import {
   formatMediaUploadedDate,
   getMediaLibraryPreviewUrls,
   isValidMediaLibraryImageAsset,
+  isValidMediaLibraryVideoAsset,
   type MediaLibraryAsset,
   type MediaLibraryAssetType,
 } from '@/lib/mediaLibrary';
@@ -33,7 +34,7 @@ function modeLabel(mode: MediaLibrarySelectorMode) {
   return 'Images and videos';
 }
 
-function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
+function AssetPreview({ asset, onImagePreviewFailed }: { asset: MediaLibraryAsset; onImagePreviewFailed?: (assetId: string) => void }) {
   const [failed, setFailed] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const previewUrls = getMediaLibraryPreviewUrls(asset);
@@ -50,6 +51,9 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
       return;
     }
     setFailed(true);
+    if (asset.mediaType === 'image') {
+      onImagePreviewFailed?.(asset.id);
+    }
   };
 
   if (asset.mediaType === 'video') {
@@ -69,6 +73,9 @@ function AssetPreview({ asset }: { asset: MediaLibraryAsset }) {
 
   const src = previewUrls[previewIndex] || '';
   if (!src || failed) {
+    if (onImagePreviewFailed) {
+      return <div className="h-full w-full bg-slate-100" />;
+    }
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-slate-100 px-3 text-center text-slate-500">
         <div className="text-sm font-semibold text-slate-700">Preview unavailable</div>
@@ -86,6 +93,7 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [failedImagePreviewIds, setFailedImagePreviewIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,18 +122,27 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
     if (!open) {
       setSearch('');
       setSelectedId(null);
+      setFailedImagePreviewIds([]);
     }
   }, [open]);
+
+  function markImagePreviewFailed(assetId: string) {
+    if (mode !== 'image') return;
+    setFailedImagePreviewIds((current) => (current.includes(assetId) ? current : [...current, assetId]));
+    setSelectedId((current) => (current === assetId ? null : current));
+  }
 
   const filteredItems = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return items.filter((asset) => {
       if (!typeAllowed(asset.mediaType, mode)) return false;
       if (mode === 'image' && !isValidMediaLibraryImageAsset(asset)) return false;
+      if (mode === 'image' && failedImagePreviewIds.includes(asset.id)) return false;
+      if (mode === 'video' && !isValidMediaLibraryVideoAsset(asset)) return false;
       if (!needle) return true;
       return [asset.filename, asset.url, asset.assetUrl, asset.secureUrl, asset.source, ...asset.tags].join(' ').toLowerCase().includes(needle);
     });
-  }, [items, mode, search]);
+  }, [failedImagePreviewIds, items, mode, search]);
 
   const selectedAsset = filteredItems.find((asset) => asset.id === selectedId) || null;
 
@@ -172,7 +189,7 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
                     className={`overflow-hidden rounded-lg border bg-white text-left shadow-sm transition ${selected ? 'border-slate-950 ring-1 ring-slate-950' : 'border-slate-200 hover:border-slate-300'}`}
                   >
                     <div className={`relative aspect-video overflow-hidden ${asset.mediaType === 'video' ? 'bg-slate-950' : 'bg-slate-100'}`}>
-                      <AssetPreview asset={asset} />
+                      <AssetPreview asset={asset} onImagePreviewFailed={mode === 'image' ? markImagePreviewFailed : undefined} />
                       <span className={`absolute left-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold shadow-sm ${asset.mediaType === 'video' ? 'bg-slate-950/80 text-white' : 'bg-white/90 text-slate-700'}`}>
                         {asset.mediaType === 'video' ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
                         {asset.mediaType === 'video' ? 'Video' : 'Image'}
@@ -211,7 +228,7 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
               </>
             ) : null}
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-            <button type="button" disabled={!selectedAsset} onClick={() => selectedAsset && onSelect(selectedAsset)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" disabled={!selectedAsset || (mode === 'image' && !isValidMediaLibraryImageAsset(selectedAsset)) || (mode === 'video' && !isValidMediaLibraryVideoAsset(selectedAsset))} onClick={() => selectedAsset && onSelect(selectedAsset)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
               {actionLabel}
             </button>
           </div>
