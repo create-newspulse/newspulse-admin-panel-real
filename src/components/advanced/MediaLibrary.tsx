@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Archive,
   CalendarDays,
+  Cloud,
   Copy,
   Eye,
   Grid2X2,
@@ -71,6 +72,14 @@ type MediaOverride = Partial<MediaItem> & {
   removed?: boolean;
 };
 
+type CloudinarySyncSummary = {
+  importedImages: number;
+  importedVideos: number;
+  skippedExisting: number;
+  failed: number;
+  totalScanned: number;
+};
+
 type TimelineDayGroup = {
   key: string;
   label: string;
@@ -92,10 +101,12 @@ type TimelineYearGroup = {
 const STORAGE_KEY = 'np_admin_media_library_overrides_v2';
 const MEDIA_LIBRARY_LIST_ROUTE = '/uploads';
 const MEDIA_LIBRARY_EFFECTIVE_LIST_ROUTE = '/admin-api/uploads';
+const MEDIA_LIBRARY_SYNC_CLOUDINARY_ROUTE = '/admin-api/admin/media-library/sync-cloudinary';
 const MEDIA_LIBRARY_STATUS_ROUTE = '/admin-api/media/status';
 const ALLOWED_MEDIA_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4'] as const;
 const ALLOWED_MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.mp4'] as const;
 const REJECTED_FORMATS_MESSAGE = 'Only JPG, JPEG, PNG images and MP4 videos are allowed.';
+const CLOUDINARY_SYNC_CONFIRMATION_MESSAGE = 'This will import missing Cloudinary assets into Media Library. It will not delete files or overwrite existing records.';
 const DEV_MEDIA_ORIGIN = 'http://localhost:5000';
 const MIN_IMAGE_PREVIEW_BYTES = 32;
 const MIN_VIDEO_PREVIEW_BYTES = 1024;
@@ -127,6 +138,86 @@ function safeText(value: unknown, fallback = ''): string {
 function safeNumber(value: unknown): number | undefined {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function safeCount(value: unknown): number | undefined {
+  if (Array.isArray(value)) return value.length;
+  const parsed = safeNumber(value);
+  return parsed === undefined ? undefined : Math.max(0, Math.trunc(parsed));
+}
+
+function readPath(source: any, path: string[]): unknown {
+  return path.reduce((current, key) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return current[key];
+  }, source);
+}
+
+function readCountFromPaths(source: any, paths: string[][]): number {
+  for (const path of paths) {
+    const count = safeCount(readPath(source, path));
+    if (count !== undefined) return count;
+  }
+  return 0;
+}
+
+function normalizeCloudinarySyncSummary(payload: any): CloudinarySyncSummary {
+  const source = payload?.summary || payload?.data?.summary || payload?.result || payload?.counts || payload || {};
+  return {
+    importedImages: readCountFromPaths(source, [
+      ['importedImages'],
+      ['imported_images'],
+      ['imagesImported'],
+      ['imported', 'images'],
+      ['created', 'images'],
+    ]),
+    importedVideos: readCountFromPaths(source, [
+      ['importedVideos'],
+      ['imported_videos'],
+      ['videosImported'],
+      ['imported', 'videos'],
+      ['created', 'videos'],
+    ]),
+    skippedExisting: readCountFromPaths(source, [
+      ['skippedExisting'],
+      ['skipped_existing'],
+      ['existingSkipped'],
+      ['skipped', 'existing'],
+      ['skipped', 'duplicates'],
+      ['duplicates'],
+    ]),
+    failed: readCountFromPaths(source, [
+      ['failed'],
+      ['failedCount'],
+      ['failures'],
+      ['errors'],
+      ['counts', 'failed'],
+    ]),
+    totalScanned: readCountFromPaths(source, [
+      ['totalScanned'],
+      ['total_scanned'],
+      ['assetsScanned'],
+      ['scanned'],
+      ['scanned', 'total'],
+      ['total'],
+    ]),
+  };
+}
+
+function formatCloudinarySyncSummary(summary: CloudinarySyncSummary): string {
+  return [
+    'Cloudinary sync complete.',
+    '',
+    `Imported images: ${summary.importedImages}`,
+    `Imported videos: ${summary.importedVideos}`,
+    `Skipped existing: ${summary.skippedExisting}`,
+    `Failed: ${summary.failed}`,
+    `Total scanned: ${summary.totalScanned}`,
+  ].join('\n');
+}
+
+function formatCloudinarySyncNote(summary: CloudinarySyncSummary): string {
+  return `Cloudinary sync: ${summary.importedImages} images, ${summary.importedVideos} videos imported; ${summary.skippedExisting} existing skipped; ${summary.failed} failed; ${summary.totalScanned} scanned.`;
 }
 
 function isAllowedMediaFile(file: File): boolean {
@@ -818,6 +909,7 @@ export default function MediaLibrary(): JSX.Element {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [syncingCloudinary, setSyncingCloudinary] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [overrides, setOverrides] = useState<Record<string, MediaOverride>>(() => readOverrides());
   const [tab, setTab] = useState<MediaTab>('all');
@@ -1150,6 +1242,42 @@ export default function MediaLibrary(): JSX.Element {
     }
   }
 
+  async function handleSyncCloudinary() {
+    if (syncingCloudinary) return;
+    const confirmed = window.confirm(CLOUDINARY_SYNC_CONFIRMATION_MESSAGE);
+    if (!confirmed) return;
+
+    setSyncingCloudinary(true);
+    setLastUploadNote('');
+    try {
+      const res = await apiClient.post(MEDIA_LIBRARY_SYNC_CLOUDINARY_ROUTE, undefined, {
+        // @ts-expect-error custom flag consumed by api.ts interceptor
+        skipErrorLog: true,
+      });
+      const summary = normalizeCloudinarySyncSummary(res?.data);
+      setLastUploadNote(formatCloudinarySyncNote(summary));
+      await fetchMedia({ bustCache: true });
+      alert(formatCloudinarySyncSummary(summary));
+    } catch (err: any) {
+      const parsedMessage = String(
+        err?.response?.data?.message
+          || err?.response?.data?.error
+          || err?.message
+          || 'Cloudinary sync failed'
+      );
+      console.error('Cloudinary sync failed', {
+        route: MEDIA_LIBRARY_SYNC_CLOUDINARY_ROUTE,
+        status: err?.response?.status ?? null,
+        parsedMessage,
+        responseBody: err?.response?.data ?? null,
+      });
+      setLastUploadNote(parsedMessage);
+      alert(parsedMessage);
+    } finally {
+      setSyncingCloudinary(false);
+    }
+  }
+
   async function generateAIAlt(item: MediaItem) {
     try {
       const res = await apiClient.post('/ai/alt-text', { url: item.url }).catch(() => null);
@@ -1398,6 +1526,16 @@ export default function MediaLibrary(): JSX.Element {
             >
               <RefreshCcw className="h-4 w-4" />
               Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSyncCloudinary()}
+              disabled={syncingCloudinary}
+              aria-busy={syncingCloudinary}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Cloud className="h-4 w-4" />
+              {syncingCloudinary ? 'Syncing...' : 'Sync Cloudinary'}
             </button>
           </div>
         </div>
