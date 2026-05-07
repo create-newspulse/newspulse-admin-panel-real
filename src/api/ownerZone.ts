@@ -1,4 +1,9 @@
 import { api, getOwnerUnlockToken } from '@/lib/http';
+import {
+  createVisibilityPayload,
+  normalizeAdminFeatureVisibility,
+  type AdminFeatureVisibilityState,
+} from '@/lib/adminFeatureVisibility';
 
 export type OwnerStatus = {
   mode?: 'NORMAL' | 'READ_ONLY' | 'LOCKDOWN' | string;
@@ -213,4 +218,17 @@ export async function rollbackApply(snapshotId: string): Promise<any> {
     json: { snapshotId },
     ownerUnlockToken: getOwnerUnlockToken(),
   });
+}
+
+export async function getAdminFeatureVisibility(): Promise<AdminFeatureVisibilityState> {
+  const response = await api('/admin/safe-owner-zone/feature-visibility');
+  return normalizeAdminFeatureVisibility((response as any)?.visibility);
+}
+
+export async function putAdminFeatureVisibility(visibility: AdminFeatureVisibilityState): Promise<AdminFeatureVisibilityState> {
+  const response = await api('/admin/safe-owner-zone/feature-visibility', {
+    method: 'PUT',
+    json: createVisibilityPayload(visibility),
+  });
+  return normalizeAdminFeatureVisibility((response as any)?.visibility);
 }

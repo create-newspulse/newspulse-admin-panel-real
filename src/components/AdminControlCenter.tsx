@@ -148,7 +148,7 @@ export default function AdminControlCenter() {
           <p className="text-lg text-slate-200">Configure AI intelligence, founder controls, and monetization settings</p>
           <div className="mt-4 bg-blue-900/50 border border-blue-500 rounded-lg p-4">
             <p className="text-base text-white">
-              📊 <strong className="text-white">Need system monitoring?</strong> Visit <Link to="/safeownerzone/founder" className="text-blue-300 underline hover:text-blue-200 font-semibold">Safe Owner Zone</Link> for real-time metrics and detailed panels.
+              📊 <strong className="text-white">Need system monitoring?</strong> Visit <Link to="/safeownerzone/founder" className="text-blue-300 underline hover:text-blue-200 font-semibold">Safe Zone</Link> for real-time metrics and detailed panels.
             </p>
           </div>
         </div>

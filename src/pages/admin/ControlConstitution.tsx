@@ -60,7 +60,7 @@ const ControlConstitution = () => {
       <ul className="list-disc ml-6 text-sm text-gray-600 dark:text-gray-400">
         <li>Founder Rules: Kiran Parmar is the only override authority</li>
         <li>System Badge: Enforcement badge is active inside admin panel</li>
-        <li>Logs: Synced inside Safe Owner Zone &amp; Guidebooks</li>
+        <li>Logs: Synced inside Safe Zone &amp; Guidebooks</li>
         <li>PDF View Disabled: File hidden for privacy and security</li>
         <li>KiranOS monitors rules, actions, and auto-deletion logic</li>
         <li>No public AI system can rename or interfere with tools</li>

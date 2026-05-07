@@ -473,7 +473,7 @@ const SafeOwnerZone: React.FC = () => {
 					<div>
 						<h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 flex items-center gap-3">
 							<FaShieldAlt className="text-blue-600 dark:text-blue-400 animate-pulse" /> 
-							Safe Owner Zone v5.0 AI+
+							Safe Zone v5.0 AI+
 						</h1>
 						<p className="text-slate-600 dark:text-slate-400 mt-2 text-lg">
 							🚀 Advanced Intelligent Monitoring & Control System

@@ -108,7 +108,7 @@ export default function SafeOwnerZoneLayout() {
           }
           end
         >
-          <div className="text-sm font-semibold">Safe Owner Zone</div>
+          <div className="text-sm font-semibold">Safe Zone</div>
           <div className="text-xs text-slate-500 dark:text-slate-400">Hub</div>
         </NavLink>
 

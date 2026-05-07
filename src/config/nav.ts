@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  filterNavItemsByOwnerVisibility,
+  type AdminFeatureVisibilityState,
+} from '@/lib/adminFeatureVisibility';
 
 export type Role = 'founder'|'admin'|'editor'|'moderator'|'viewer';
 export type NavItem = {
@@ -37,7 +41,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },
   // Owner Control Center (single link; module navigation handled inside the pages)
-  { key:'soz', label:'Safe Owner Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩' },
+  { key:'soz', label:'Safe Zone', path:'/admin/safe-owner-zone', roles:['founder','admin'], icon:'🧩' },
   { key:'community-hub', label:'Community Hub', path:'/community', roles:['editor','admin','founder','moderator'], icon:'🧑‍🤝‍🧑' },
   // Right side utility items
   // Admin global security dashboard (Zero-Trust controls)
@@ -54,3 +58,11 @@ export function filterNavForRole(role: Role) {
 
 export function leftNav(role: Role) { return filterNavForRole(role).filter(i=> !i.rightSide); }
 export function rightNav(role: Role) { return filterNavForRole(role).filter(i=> i.rightSide); }
+
+export function leftNavWithOwnerVisibility(role: Role, visibility: AdminFeatureVisibilityState) {
+  return filterNavItemsByOwnerVisibility(leftNav(role), role, visibility);
+}
+
+export function rightNavWithOwnerVisibility(role: Role, visibility: AdminFeatureVisibilityState) {
+  return filterNavItemsByOwnerVisibility(rightNav(role), role, visibility);
+}

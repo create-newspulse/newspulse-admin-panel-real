@@ -2,7 +2,9 @@
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
-import { leftNav, rightNav } from '@/config/nav';
+import { leftNavWithOwnerVisibility, rightNavWithOwnerVisibility } from '@/config/nav';
+import { DEFAULT_ADMIN_FEATURE_VISIBILITY, isOwnerRole } from '@/lib/adminFeatureVisibility';
+import { useAdminFeatureVisibility } from '@/hooks/useAdminFeatureVisibility';
 
 export default function Navbar() {
   const { isDark, toggleDark } = useDarkMode();
@@ -10,11 +12,14 @@ export default function Navbar() {
   const location = useLocation();
   const role = (user?.role ?? 'viewer') as any;
   const isAuthPage = location.pathname === '/login' || location.pathname === '/admin/login';
+  const ownerRole = isOwnerRole(role);
+  const { visibility } = useAdminFeatureVisibility({ enabled: isAuthenticated && !isAuthPage && !ownerRole });
 
   // remove unused handleLogout closure (we use inline handler)
 
-  const left = leftNav(role).filter((item) => item.key !== 'community-hub');
-  const right = rightNav(role);
+  const effectiveVisibility = ownerRole ? DEFAULT_ADMIN_FEATURE_VISIBILITY : visibility;
+  const left = leftNavWithOwnerVisibility(role, effectiveVisibility).filter((item) => item.key !== 'community-hub');
+  const right = rightNavWithOwnerVisibility(role, effectiveVisibility);
 
   return (
     <header className="bg-slate-900 text-white px-6 py-4 shadow-md border-b border-slate-700">

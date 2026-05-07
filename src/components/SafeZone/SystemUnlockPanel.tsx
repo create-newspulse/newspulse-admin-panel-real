@@ -16,12 +16,12 @@ const SystemUnlockPanel: React.FC = () => {
 
       <div className="mt-3 rounded-xl border border-green-400/30 bg-white/70 p-4 text-sm text-slate-700 dark:bg-slate-900/30 dark:text-slate-200">
         <div className="font-semibold">Manage Owner Key</div>
-        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">PIN-based unlock has been removed. Use the Safe Owner Zone hub.</div>
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">PIN-based unlock has been removed. Use the Safe Zone hub.</div>
         <Link
           to="/admin/safe-owner-zone"
           className="mt-3 inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
         >
-          Manage Owner Key → Safe Owner Zone
+          Manage Owner Key → Safe Zone
         </Link>
       </div>
     </section>

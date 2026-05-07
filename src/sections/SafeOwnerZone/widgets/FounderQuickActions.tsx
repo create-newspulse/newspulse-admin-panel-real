@@ -39,7 +39,7 @@ export default function FounderQuickActions() {
           to="/admin/safe-owner-zone"
           className="rounded px-3 py-1 bg-blue-600 text-white text-sm"
         >
-          Manage Owner Key → Safe Owner Zone
+          Manage Owner Key → Safe Zone
         </Link>
       ) : null}
       <button

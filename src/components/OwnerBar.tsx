@@ -98,14 +98,14 @@ export default function OwnerBar() {
               <>
                 🔒 LOCKDOWN ACTIVE — Actions are disabled.{' '}
                 <Link className="underline" to="/admin/safe-owner-zone">
-                  Go to Safe Owner Zone.
+                  Go to Safe Zone.
                 </Link>
               </>
             ) : (
               <>
                 🟡 READ-ONLY MODE — Write actions are disabled.{' '}
                 <Link className="underline" to="/admin/safe-owner-zone">
-                  Review in Safe Owner Zone.
+                  Review in Safe Zone.
                 </Link>
               </>
             )}

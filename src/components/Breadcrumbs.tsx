@@ -11,8 +11,8 @@ const Breadcrumbs = () => {
   // Friendly labels for specific segments (applies to any position)
   const SEGMENT_LABELS: Record<string, string> = {
     admin: "Admin",
-    safeownerzone: "Safe Owner Zone",
-    'safe-owner-zone': 'Safe Owner Zone',
+    safeownerzone: "Safe Zone",
+    'safe-owner-zone': 'Safe Zone',
     founder: 'Founder Command',
     'security-lockdown': 'Security Center',
     compliance: 'Compliance',

@@ -11,6 +11,22 @@ import {
   type TeamUser,
 } from '@/api/adminPanelSettingsApi';
 
+const FOUNDER_EMAIL = 'newspulse.team@gmail.com';
+const FOUNDER_NAME = 'News Pulse Founder';
+
+const PLANNED_EDITOR_RESPONSIBILITIES = [
+  'Can access Add News',
+  'Can access Draft Desk',
+  'Can edit drafts/articles only if permission is granted',
+  'Cannot access Safe Zone',
+  'Cannot access Settings',
+  'Cannot access Ads Manager',
+  'Cannot access Broadcast Center',
+  'Cannot manage team members',
+  'Cannot suspend/reset founder',
+  'Cannot change site ownership',
+];
+
 export default function TeamManagement() {
   const { user } = useAuth();
   const role = String(user?.role || '').toLowerCase();
@@ -32,19 +48,7 @@ export default function TeamManagement() {
   const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
 
-  const roles = useMemo(() => ['founder', 'admin', 'editor', 'intern', 'employee'], []);
-
-  const permissionPresets = useMemo(
-    () => [
-      { id: 'articles:read', label: 'Articles: Read' },
-      { id: 'articles:write', label: 'Articles: Write' },
-      { id: 'settings:draft', label: 'Settings: Draft' },
-      { id: 'settings:publish', label: 'Settings: Publish (Founder)' },
-      { id: 'team:manage', label: 'Team: Manage (Founder)' },
-      { id: 'audit:read', label: 'Audit: Read' },
-    ],
-    []
-  );
+  const roles = useMemo(() => ['editor'], []);
 
   async function fetchStaff() {
     setLoading(true);
@@ -76,13 +80,45 @@ export default function TeamManagement() {
     return true;
   };
 
+  const isFounderUser = (u: TeamUser): boolean => {
+    const normalizedRole = String(u?.role || '').toLowerCase();
+    const normalizedEmail = String(u?.email || '').trim().toLowerCase();
+    return normalizedRole === 'founder' || normalizedEmail === FOUNDER_EMAIL;
+  };
+
+  const founderRow = useMemo<TeamUser>(() => {
+    const existing = items.find(isFounderUser);
+    if (existing) {
+      return {
+        ...existing,
+        name: FOUNDER_NAME,
+        email: FOUNDER_EMAIL,
+        role: 'founder',
+        isActive: true,
+        status: 'active',
+      };
+    }
+    return {
+      name: FOUNDER_NAME,
+      email: FOUNDER_EMAIL,
+      role: 'founder',
+      isActive: true,
+      status: 'active',
+    };
+  }, [items]);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isFounder) {
       toast.error('Access denied (founder only).');
       return;
     }
+    const name = String(createForm.name || '').trim();
     const email = String(createForm.email || '').trim();
+    if (!name) {
+      toast.error('Enter the editor\'s real name.');
+      return;
+    }
     if (!email || !email.includes('@')) {
       toast.error('Enter a valid email.');
       return;
@@ -91,8 +127,8 @@ export default function TeamManagement() {
     try {
       const payload = {
         email,
-        name: createForm.name?.trim() || undefined,
-        role: createForm.role,
+        name,
+        role: 'editor',
         designation: createForm.designation?.trim() || undefined,
         permissions: parsePermissions(),
       };
@@ -144,7 +180,10 @@ export default function TeamManagement() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-lg font-semibold">Team Management</div>
-            <div className="mt-1 text-sm text-slate-600">Manage staff roles and access.</div>
+            <div className="mt-1 text-sm text-slate-600">Founder and Editor role planning only.</div>
+            <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              For now, News Pulse uses only Founder and Editor roles. More team roles will be added later when responsibilities are finalized.
+            </div>
             {!isFounder && (
               <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Access denied: founder-only controls are disabled.
@@ -203,8 +242,11 @@ export default function TeamManagement() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-base font-semibold">Create Staff</div>
-          <div className="mt-1 text-sm text-slate-600">Create a staff user (founder only).</div>
+          <div className="text-base font-semibold">Invite Editor</div>
+          <div className="mt-1 text-sm text-slate-600">Only the Editor role can be assigned from this form.</div>
+          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            Required before activation: real name and verified email.
+          </div>
 
           <form
             className="mt-4 space-y-3"
@@ -237,41 +279,8 @@ export default function TeamManagement() {
               <input
                 value={createForm.designation}
                 onChange={(e) => setCreateForm((s) => ({ ...s, designation: e.target.value }))}
-                placeholder="Designation (e.g., Editor)"
+                placeholder="Designation (optional)"
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Permissions</div>
-              <div className="mt-1 text-xs text-slate-600">Select presets or enter comma-separated values.</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {permissionPresets.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      const current = new Set(
-                        createForm.permissions
-                          .split(',')
-                          .map((x) => x.trim())
-                          .filter(Boolean)
-                      );
-                      if (current.has(p.id)) current.delete(p.id);
-                      else current.add(p.id);
-                      setCreateForm((s) => ({ ...s, permissions: Array.from(current).join(', ') }));
-                    }}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={createForm.permissions}
-                onChange={(e) => setCreateForm((s) => ({ ...s, permissions: e.target.value }))}
-                placeholder="permissions (comma-separated)"
-                className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               />
             </div>
 
@@ -284,7 +293,7 @@ export default function TeamManagement() {
                   (isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700')
                 }
               >
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? 'Creating…' : 'Invite Editor'}
               </button>
               {!isFounder && <div className="text-xs text-slate-600">Founder-only</div>}
             </div>
@@ -292,26 +301,40 @@ export default function TeamManagement() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-base font-semibold">Account Controls</div>
-          <div className="mt-1 text-sm text-slate-600">Activate/suspend and force reset controls (founder-only).</div>
+          <div className="text-base font-semibold">Planned Editor Role</div>
+          <div className="mt-1 text-sm text-slate-600">Not assigned yet. Responsibilities are intentionally limited.</div>
 
           <div className="mt-4 space-y-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              Use the per-user actions in the Staff list below.
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-slate-900">Editor</div>
+                  <div className="mt-1 text-xs text-slate-600">Status: Not assigned yet</div>
+                  <div className="mt-1 text-xs text-slate-600">Required before activation: real name + verified email</div>
+                </div>
+                <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
+                  Planned Role
+                </span>
+              </div>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-slate-700">
+                {PLANNED_EDITOR_RESPONSIBILITIES.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="text-base font-semibold">Staff</div>
+        <div className="text-base font-semibold">Current Team</div>
 
         {loading ? (
           <div className="mt-3 text-slate-600">Loading…</div>
         ) : err ? (
-          <div className="mt-3 text-red-700">{err}</div>
-        ) : items.length === 0 ? (
-          <div className="mt-3 text-slate-600">No users found.</div>
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
+            {err} Showing the protected founder account view below.
+          </div>
         ) : (
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-full text-sm">
@@ -325,59 +348,45 @@ export default function TeamManagement() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((u) => {
+                {[founderRow].map((u) => {
                   const id = userId(u);
-                  const active = isUserActive(u);
-                  const busy = rowBusyId === id;
                   return (
                     <tr key={id || `${u.email}-${u.name}`} className="border-t border-slate-200">
-                      <td className="py-2 pr-3">{u.name || '—'}</td>
-                      <td className="py-2 pr-3">{u.email || '—'}</td>
-                      <td className="py-2 pr-3">{u.role || '—'}</td>
+                      <td className="py-2 pr-3 font-medium text-slate-900">{u.name || FOUNDER_NAME}</td>
+                      <td className="py-2 pr-3">{u.email || FOUNDER_EMAIL}</td>
+                      <td className="py-2 pr-3">founder</td>
                       <td className="py-2 pr-3">
-                        <span
-                          className={
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ' +
-                            (active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-800')
-                          }
-                        >
-                          {active ? 'Active' : 'Suspended'}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                            Active
+                          </span>
+                          <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
+                            Founder Protected
+                          </span>
+                        </div>
                       </td>
                       <td className="py-2 pr-3">
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            disabled={!isFounder || busy}
-                            className={
-                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
-                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
-                            }
-                            onClick={() => runRowAction(id, () => activateUser(id), 'User activated')}
+                            disabled
+                            className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400"
                           >
-                            {busy ? 'Working…' : 'Activate'}
+                            Active
                           </button>
                           <button
                             type="button"
-                            disabled={!isFounder || busy}
-                            className={
-                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
-                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
-                            }
-                            onClick={() => runRowAction(id, () => suspendUser(id), 'User suspended')}
+                            disabled
+                            className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400"
                           >
-                            {busy ? 'Working…' : 'Suspend'}
+                            Suspend Disabled
                           </button>
                           <button
                             type="button"
-                            disabled={!isFounder || busy}
-                            className={
-                              'rounded-lg border px-3 py-1.5 text-xs font-semibold ' +
-                              (isFounder ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-200 bg-slate-100 text-slate-400')
-                            }
-                            onClick={() => runRowAction(id, () => forceResetUser(id), 'Reset triggered')}
+                            disabled
+                            className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400"
                           >
-                            {busy ? 'Working…' : 'Force Reset'}
+                            Force Reset Disabled
                           </button>
                         </div>
                       </td>

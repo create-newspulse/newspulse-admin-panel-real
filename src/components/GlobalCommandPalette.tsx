@@ -31,7 +31,7 @@ export default function GlobalCommandPalette({
   const commands: Command[] = useMemo(
     () => [
       { label: 'Go: Dashboard', hint: 'Admin overview', path: '/admin/dashboard' },
-  { label: 'Go: Safe Owner Zone', hint: 'Founder hub', path: '/safeownerzone/founder' },
+  { label: 'Go: Safe Zone', hint: 'Founder hub', path: '/safeownerzone/founder' },
       { label: 'Go: Add News', path: '/add' },
       { label: 'Go: Manage News', path: '/manage-news' },
       { label: 'Go: AI Engine', path: '/admin/ai-engine' },

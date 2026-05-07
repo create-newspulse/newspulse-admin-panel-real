@@ -12,11 +12,11 @@ export default function SignatureUnlock({ onSuccess }: { onSuccess: () => void }
         to="/admin/safe-owner-zone"
         className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
       >
-        Manage Owner Key → Safe Owner Zone
+        Manage Owner Key → Safe Zone
       </Link>
 
       <p className="text-xs text-gray-400 dark:text-slate-400 mt-4">
-        Unlock is managed in the Safe Owner Zone hub.
+        Unlock is managed in the Safe Zone hub.
       </p>
     </div>
   );
