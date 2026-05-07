@@ -29,6 +29,7 @@ const IMAGE_UPLOAD_UNCONFIGURED_MESSAGE = 'Image upload is not configured in thi
 const THUMBNAIL_VIDEO_LINK_MESSAGE = 'This is a video/social link. Paste it in Video URL. Thumbnail needs an image URL.';
 const THUMBNAIL_IMAGE_URL_MESSAGE = 'Thumbnail needs a direct image URL ending in .jpg, .jpeg, .png, .webp, a Cloudinary image URL, S3/R2 image URL, or an uploaded article-cover image URL.';
 const CLOUD_VIDEO_UPLOAD_NOT_CONNECTED_MESSAGE = 'Video upload will use admin storage when available. If upload fails, use External video/source URL.';
+const NEWS_PULSE_PLAYER_HELPER_TEXT = 'For the News Pulse video player, upload your own MP4 video and poster image.';
 const THUMBNAIL_FILE_TYPE_MESSAGE = 'Only JPG, JPEG, PNG, and WEBP images are allowed for thumbnail.';
 const THUMBNAIL_ACCEPT_ATTR = '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp';
 const VIDEO_ACCEPT_ATTR = 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov';
@@ -53,6 +54,8 @@ type EditorState = {
   summary: string;
   category: string;
   sourceName: string;
+  relatedNewsUrl: string;
+  externalSourceUrl: string;
   thumbnailUrl: string;
   posterImageUrl: string;
   sourceType: 'video_url' | 'embed_url';
@@ -76,6 +79,8 @@ const EMPTY_EDITOR: EditorState = {
   summary: '',
   category: '',
   sourceName: '',
+  relatedNewsUrl: '',
+  externalSourceUrl: '',
   thumbnailUrl: '',
   posterImageUrl: '',
   sourceType: 'video_url',
@@ -253,6 +258,11 @@ function readSavedViralVideoId(record: any): string {
   return String(record?._id || record?.id || '').trim();
 }
 
+function publicViralVideoPath(item: Pick<ViralVideoRecord, '_id' | 'slug'>) {
+  const slugOrId = String(item.slug || item._id || '').trim();
+  return slugOrId ? `/viral-videos/${encodeURIComponent(slugOrId)}` : '/viral-videos';
+}
+
 function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): ViralVideoInput {
   const tags = state.tags.split(',').map((tag) => tag.trim()).filter(Boolean);
   const publishedAt = nextStatus === 'published'
@@ -269,6 +279,8 @@ function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): Viral
     summary: state.summary.trim(),
     category: state.category.trim(),
     sourceName: state.sourceName.trim(),
+    relatedNewsUrl: state.relatedNewsUrl.trim(),
+    externalSourceUrl: state.externalSourceUrl.trim(),
     thumbnailUrl,
     posterImageUrl: thumbnailUrl,
     videoUrl,
@@ -299,10 +311,12 @@ function fromRecord(record: ViralVideoRecord): EditorState {
     summary: record.summary || '',
     category: record.category || '',
     sourceName: record.sourceName || '',
+    relatedNewsUrl: record.relatedNewsUrl || '',
+    externalSourceUrl: record.externalSourceUrl || record.videoUrl || '',
     thumbnailUrl,
     posterImageUrl: record.posterImageUrl || thumbnailUrl,
     sourceType: 'video_url',
-    videoUrl: record.videoUrl || record.embedUrl || '',
+    videoUrl: record.videoUrl || record.externalSourceUrl || record.embedUrl || '',
     videoFileUrl: record.videoFileUrl || '',
     embedUrl: '',
     videoType: record.videoType || playbackFields.videoType,
@@ -622,6 +636,7 @@ export default function ViralVideosPage() {
     setEditor((current) => ({
       ...current,
       sourceType: 'video_url',
+      externalSourceUrl: value,
       videoUrl: value,
       embedUrl: '',
       ...derivePlaybackFields(value, current.videoFileUrl),
@@ -750,7 +765,7 @@ export default function ViralVideosPage() {
         <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="text-sm font-semibold text-slate-900">Frontend visibility</div>
+              <div className="text-sm font-semibold text-slate-900">Global frontend ON/OFF</div>
               <div className="mt-1 text-sm text-slate-600">
                 ON allows Viral Videos to appear on homepage and public Viral Videos page. OFF hides them publicly but keeps saved records in admin.
               </div>
@@ -894,7 +909,7 @@ export default function ViralVideosPage() {
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
                       <button type="button" onClick={() => navigate(`/admin/viral-videos/${item._id}/edit`)} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
-                      <button type="button" onClick={() => window.open(item.embedUrl || item.videoUrl || '/viral-videos', '_blank', 'noopener,noreferrer')} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Preview</button>
+                      <button type="button" onClick={() => window.open(publicViralVideoPath(item), '_blank', 'noopener,noreferrer')} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Preview</button>
                       {item.status === 'published' ? (
                         <button type="button" onClick={() => statusMutation.mutate({ id: item._id, status: 'draft' })} className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50">Unpublish</button>
                       ) : (
@@ -951,8 +966,8 @@ export default function ViralVideosPage() {
           <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-sm font-semibold text-slate-900">Frontend visibility controls</div>
-                <div className="mt-1 text-sm text-slate-600">The single global Frontend visibility toggle at the top of this page controls the whole Viral Videos product. Per-video controls below manage Draft or Published, Active ON/OFF, and Homepage featured.</div>
+                  <div className="text-sm font-semibold text-slate-900">Viral video publishing controls</div>
+                  <div className="mt-1 text-sm text-slate-600">The single Global frontend ON/OFF toggle at the top of this page controls the whole Viral Videos product. Per-video controls below manage Draft or Published, Active ON/OFF, and Homepage featured.</div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <label className="rounded-xl border border-slate-200 bg-white p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Publish status</div>
@@ -1035,6 +1050,11 @@ export default function ViralVideosPage() {
                 </div>
 
                 <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Related News URL (optional)</label>
+                  <input value={editor.relatedNewsUrl} onChange={(event) => setEditor((current) => ({ ...current, relatedNewsUrl: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://newspulse.co.in/news/..." />
+                </div>
+
+                <div className="md:col-span-2">
                   <label className="mb-1 block text-sm font-medium text-slate-700">Summary</label>
                   <textarea
                     value={editor.summary}
@@ -1050,11 +1070,19 @@ export default function ViralVideosPage() {
                   <input value={editor.category} onChange={(event) => setEditor((current) => ({ ...current, category: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="Entertainment, Sports, News" />
                 </div>
 
-                <div className="md:col-span-2">
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Thumbnail / poster image</label>
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <label className="mb-1 block text-sm font-semibold text-slate-900">Upload Thumbnail / Poster Image</label>
+                  <div className="mb-3 text-xs text-slate-500">JPG, PNG, or WebP. Recommended 9:16 vertical poster.</div>
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-6 text-slate-600">
+                    <div className="font-semibold text-slate-900">Recommended poster image:</div>
+                    <div>Vertical 9:16</div>
+                    <div>Best: 1080x1920</div>
+                    <div>Accepted: 720x1280</div>
+                    <div>Use clear text and strong image because this appears on homepage and viral video page.</div>
+                  </div>
                   <div className="mb-2 flex flex-wrap items-center gap-3">
-                    <label className={`inline-flex items-center rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 ${thumbnailUploadDisabled ? 'cursor-not-allowed bg-slate-100 opacity-60' : 'cursor-pointer hover:bg-slate-50'}`}>
-                      <span>{uploadingThumbnail ? 'Uploading...' : 'Upload image'}</span>
+                    <label className={`inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold ${thumbnailUploadDisabled ? 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 opacity-60' : 'cursor-pointer border-slate-900 bg-slate-900 text-white hover:bg-slate-700'}`}>
+                      <span>{uploadingThumbnail ? 'Uploading...' : 'Upload Thumbnail / Poster'}</span>
                       <input
                         type="file"
                         accept={THUMBNAIL_ACCEPT_ATTR}
@@ -1070,7 +1098,7 @@ export default function ViralVideosPage() {
                     <button
                       type="button"
                       onClick={() => setMediaLibraryMode('thumbnail')}
-                      className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
                       Choose from Media Library
                     </button>
@@ -1085,7 +1113,7 @@ export default function ViralVideosPage() {
                       handleThumbnailUrlChange(event.target.value);
                     }}
                     className={`w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-slate-500 ${thumbnailValidationMessage ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}
-                    placeholder="https://.../thumbnail.jpg"
+                    placeholder="https://.../poster.jpg"
                   />
                   {thumbnailValidationMessage ? (
                     <div className="mt-2 text-xs font-medium text-red-700">{thumbnailValidationMessage}</div>
@@ -1098,7 +1126,21 @@ export default function ViralVideosPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Video upload file</label>
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-950">
+                    {NEWS_PULSE_PLAYER_HELPER_TEXT}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <label className="mb-1 block text-sm font-semibold text-slate-900">Upload Video File</label>
+                  <div className="mb-3 text-xs text-slate-500">MP4, WebM, or MOV. Recommended 9:16 vertical video.</div>
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-6 text-slate-600">
+                    <div className="font-semibold text-slate-900">Recommended video format:</div>
+                    <div>MP4 vertical 9:16</div>
+                    <div>Best quality: 1080x1920</div>
+                    <div>Good quality: 720x1280</div>
+                    <div>Avoid landscape 1920x1080 because it may crop inside the reel player.</div>
+                  </div>
                   <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -1119,8 +1161,8 @@ export default function ViralVideosPage() {
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <label className={`inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium ${videoUploadDisabled ? 'cursor-not-allowed text-slate-500 opacity-70' : 'cursor-pointer text-slate-700 hover:bg-slate-50'}`}>
-                        <span>{uploadingVideo ? 'Uploading video...' : 'Upload video file'}</span>
+                      <label className={`inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold ${videoUploadDisabled ? 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 opacity-70' : 'cursor-pointer border-slate-900 bg-slate-900 text-white hover:bg-slate-700'}`}>
+                        <span>{uploadingVideo ? 'Uploading video...' : 'Upload Video File'}</span>
                         <input
                           type="file"
                           accept={VIDEO_ACCEPT_ATTR}
@@ -1136,11 +1178,11 @@ export default function ViralVideosPage() {
                       <button
                         type="button"
                         onClick={() => setMediaLibraryMode('video')}
-                        className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
                         Choose from Media Library
                       </button>
-                      <span className="text-xs text-slate-500">Uploaded files save as videoFileUrl and play as News Pulse reels.</span>
+                      <span className="text-xs text-slate-500">Uploaded files save as videoFileUrl and play inside News Pulse.</span>
                     </div>
                     {editor.videoFileUrl ? (
                       <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
@@ -1162,8 +1204,8 @@ export default function ViralVideosPage() {
                       <div className="mt-2 text-xs font-medium text-amber-700">{videoUploadError}</div>
                     ) : null}
                   </div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">External video/source URL</label>
-                  <input value={editor.videoUrl} onChange={(event) => handleExternalVideoUrlChange(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://www.youtube.com/watch?v=... or https://instagram.com/..." />
+                  <label className="mb-1 block text-sm font-medium text-slate-700">External Source URL (optional)</label>
+                  <input value={editor.externalSourceUrl} onChange={(event) => handleExternalVideoUrlChange(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="https://www.youtube.com/watch?v=... or https://instagram.com/..." />
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">{videoTypeLabel(currentVideoType)}</span>
                     <span>Playback mode: {currentPlaybackMode === 'internal' ? 'Internal News Pulse player' : (currentPlaybackMode === 'youtube' ? 'YouTube embed' : (currentPlaybackMode === 'twitter' ? 'X/Twitter embed' : 'External link only'))}</span>
@@ -1211,26 +1253,49 @@ export default function ViralVideosPage() {
               </div>
 
               {showPreview || isEditorOpen ? (
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div className="aspect-[16/10] bg-slate-100">
-                    {thumbnailPreviewUrl && !thumbnailPreviewFailed ? (
-                      <img
-                        src={thumbnailPreviewUrl}
-                        alt={editor.title || 'Preview thumbnail'}
-                        className="h-full w-full object-cover"
-                        onLoad={() => setThumbnailPreviewFailed(false)}
-                        onError={() => setThumbnailPreviewFailed(true)}
-                      />
-                    ) : hasPreviewSource ? (
-                      <div className="flex h-full flex-col items-center justify-center bg-slate-950 px-5 text-center text-slate-100">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/10 shadow-sm">
-                          <Play className="ml-0.5 h-7 w-7 fill-current" aria-hidden="true" />
-                        </div>
-                        <div className="mt-3 text-sm font-semibold">Source link added. Add a thumbnail for better preview.</div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-900">Admin preview</div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Poster image preview</div>
+                      <div className="aspect-[9/16] overflow-hidden rounded-xl bg-slate-100">
+                        {thumbnailPreviewUrl && !thumbnailPreviewFailed ? (
+                          <img
+                            src={thumbnailPreviewUrl}
+                            alt={editor.title || 'Preview poster'}
+                            className="h-full w-full object-cover"
+                            onLoad={() => setThumbnailPreviewFailed(false)}
+                            onError={() => setThumbnailPreviewFailed(true)}
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-500">Add a poster image</div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-500">Add a thumbnail to preview</div>
-                    )}
+                    </div>
+                    <div>
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Video preview</div>
+                      <div className="aspect-[9/16] overflow-hidden rounded-xl bg-slate-950">
+                        {editor.videoFileUrl ? (
+                          <video
+                            src={editor.videoFileUrl}
+                            poster={thumbnailPreviewUrl || undefined}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            className="h-full w-full object-contain"
+                          />
+                        ) : hasPreviewSource ? (
+                          <div className="flex h-full flex-col items-center justify-center px-5 text-center text-slate-100">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/10 shadow-sm">
+                              <Play className="ml-0.5 h-7 w-7 fill-current" aria-hidden="true" />
+                            </div>
+                            <div className="mt-3 text-sm font-semibold">External source added</div>
+                          </div>
+                        ) : (
+                          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-400">Upload an MP4/WebM/MOV file</div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div className="space-y-3 p-4">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
@@ -1245,7 +1310,7 @@ export default function ViralVideosPage() {
                     <div className="text-sm leading-6 text-slate-600">{editor.summary || 'Summary preview will appear here.'}</div>
                     {previewSource ? (
                       <a href={previewSource} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-                        Open source preview
+                        Open source
                       </a>
                     ) : (
                       <button type="button" disabled className="inline-flex cursor-not-allowed rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-500">

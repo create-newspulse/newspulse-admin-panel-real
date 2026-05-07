@@ -72,7 +72,7 @@ function ToolbarButton({
       disabled={disabled}
       title={title}
       className={`px-2 py-1 text-xs rounded border disabled:opacity-50 ${
-        active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white hover:bg-slate-50'
+        active ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white hover:bg-newspulse-slate/10'
       }`}
     >
       {label}
@@ -112,7 +112,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     if (current !== next) editor.commands.setContent(next);
   }, [editor, value]);
 
-  if (!editor) return <div className="text-xs text-slate-500">Loading editor…</div>;
+  if (!editor) return <div className="text-xs text-newspulse-slate">Loading editor…</div>;
 
   const canUndo = editor.can().chain().undo().run();
   const canRedo = editor.can().chain().redo().run();
@@ -147,7 +147,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
 
   return (
     <div className="border rounded">
-      <div className="flex flex-wrap gap-1 p-2 border-b bg-slate-50 items-center">
+      <div className="flex flex-wrap gap-1 p-2 border-b border-newspulse-slate/30 bg-newspulse-slate/10 items-center">
         <ToolbarButton label="Bold" onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} />
         <ToolbarButton label="Italic" onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} />
         <ToolbarButton label="Underline" onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} />
@@ -158,27 +158,27 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton label="Highlight" onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} />
         <ToolbarButton label="Link" onClick={onLink} active={editor.isActive('link')} />
 
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <span className="mx-1 h-4 w-px bg-newspulse-slate/30" />
 
-        <button type="button" onClick={() => insertSymbol('✅')} className="px-2 py-1 text-xs rounded bg-white border hover:bg-slate-50">
+        <button type="button" onClick={() => insertSymbol('✅')} className="px-2 py-1 text-xs rounded bg-newspulse-white border hover:bg-newspulse-slate/10">
           ✅
         </button>
-        <button type="button" onClick={() => insertSymbol('•')} className="px-2 py-1 text-xs rounded bg-white border hover:bg-slate-50">
+        <button type="button" onClick={() => insertSymbol('•')} className="px-2 py-1 text-xs rounded bg-newspulse-white border hover:bg-newspulse-slate/10">
           •
         </button>
-        <button type="button" onClick={() => insertSymbol('➤')} className="px-2 py-1 text-xs rounded bg-white border hover:bg-slate-50">
+        <button type="button" onClick={() => insertSymbol('➤')} className="px-2 py-1 text-xs rounded bg-newspulse-white border hover:bg-newspulse-slate/10">
           ➤
         </button>
-        <button type="button" onClick={() => insertSymbol('—')} className="px-2 py-1 text-xs rounded bg-white border hover:bg-slate-50">
+        <button type="button" onClick={() => insertSymbol('—')} className="px-2 py-1 text-xs rounded bg-newspulse-white border hover:bg-newspulse-slate/10">
           —
         </button>
 
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <span className="mx-1 h-4 w-px bg-newspulse-slate/30" />
 
         <ToolbarButton label="Undo" onClick={() => editor.chain().focus().undo().run()} disabled={!canUndo} />
         <ToolbarButton label="Redo" onClick={() => editor.chain().focus().redo().run()} disabled={!canRedo} />
 
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <span className="mx-1 h-4 w-px bg-newspulse-slate/30" />
 
         <ToolbarButton
           label="Auto Format"

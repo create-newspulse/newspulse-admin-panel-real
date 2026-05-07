@@ -103,7 +103,7 @@ function FeatureTogglesInner(){
     return (
       <div className="p-6">
         <h2 className="text-xl font-semibold">Feature Toggles</h2>
-        <div className="mt-4 text-sm text-red-600">Founder access required.</div>
+        <div className="mt-4 text-sm text-newspulse-red">Founder access required.</div>
         <div className="mt-2 text-xs text-slate-500">Current session: {sessionSummary}</div>
         {sessionSource ? <div className="mt-1 text-xs text-slate-500">{sessionSource}</div> : null}
         {auth.hasMismatch ? <div className="mt-1 text-xs text-amber-600">A stale local session differs from the current cookie session. Refresh or sign in again.</div> : null}
@@ -119,9 +119,9 @@ function FeatureTogglesInner(){
       {!loading && settings.updatedAt && <div className="text-xs text-slate-500">Last updated: {new Date(settings.updatedAt).toLocaleString()}</div>}
       {loading && <div className="p-4 border rounded">Loading settings…</div>}
       {error && (
-        <div className="p-4 border rounded border-red-300 text-red-700 flex items-center justify-between">
+        <div className="p-4 border rounded border-newspulse-red/30 text-newspulse-red flex items-center justify-between">
           <span>{error === 'Founder access required' ? `${error}. Current session: ${sessionSummary}${sessionSource ? ` • ${sessionSource}` : ''}${auth.hasMismatch ? ' • stale local session detected' : ''}` : error}</span>
-          <button onClick={retry} className="px-3 py-1 text-sm bg-red-600 text-white rounded">Retry</button>
+          <button onClick={retry} className="px-3 py-1 text-sm bg-newspulse-red text-newspulse-white rounded">Retry</button>
         </div>
       )}
       {!loading && !error && (

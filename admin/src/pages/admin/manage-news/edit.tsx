@@ -10,7 +10,7 @@ export default function EditNewsPage(){
       {id ? (
         <ArticleForm mode="edit" articleId={id} userRole="admin" />
       ) : (
-        <div className="text-red-600">Missing article id in route.</div>
+        <div className="text-newspulse-red">Missing article id in route.</div>
       )}
     </div>
   );

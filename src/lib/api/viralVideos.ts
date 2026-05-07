@@ -12,6 +12,8 @@ export interface ViralVideoRecord {
   summary?: string;
   category?: string;
   sourceName?: string;
+  relatedNewsUrl?: string;
+  externalSourceUrl?: string;
   thumbnailUrl?: string;
   posterImageUrl?: string;
   posterImage?: {
@@ -44,6 +46,8 @@ export interface ViralVideoInput {
   summary?: string;
   category?: string;
   sourceName?: string;
+  relatedNewsUrl?: string;
+  externalSourceUrl?: string;
   thumbnailUrl?: string;
   posterImageUrl?: string;
   videoUrl?: string;
@@ -161,6 +165,17 @@ function inferPlaybackMode(videoType: ViralVideoType): ViralVideoPlaybackMode {
   return 'external_link';
 }
 
+function isDirectVideoAssetUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const url = new URL(raw, typeof window !== 'undefined' ? window.location.origin : 'https://newspulse.local');
+    return /\.(mp4|webm|mov)$/i.test(url.pathname);
+  } catch {
+    return /\.(mp4|webm|mov)(?:$|[?#])/i.test(raw);
+  }
+}
+
 function normalizeRecord(input: any): ViralVideoRecord {
   const poster = input?.posterImage && typeof input.posterImage === 'object'
     ? input.posterImage
@@ -172,10 +187,22 @@ function normalizeRecord(input: any): ViralVideoRecord {
     || input?.posterUrl
     || ''
   ).trim();
-  const videoFileUrl = String(input?.videoFileUrl || input?.videoFile?.url || input?.uploadedVideoUrl || '').trim();
+  const normalizedVideoUrl = String(input?.videoUrl || '').trim();
+  const rawVideoFileUrl = String(
+    input?.videoFileUrl
+    || input?.videoFile?.url
+    || input?.video?.url
+    || input?.uploadedVideoUrl
+    || input?.videoAssetUrl
+    || ''
+  ).trim();
   const videoTypeRaw = String(input?.videoType || '').trim().toLowerCase();
   const playbackModeRaw = String(input?.playbackMode || '').trim().toLowerCase();
-  const normalizedVideoUrl = String(input?.videoUrl || '').trim();
+  const inferredUploadedVideoUrl = !rawVideoFileUrl
+    && (videoTypeRaw === 'uploaded' || playbackModeRaw === 'internal' || isDirectVideoAssetUrl(normalizedVideoUrl))
+    ? normalizedVideoUrl
+    : '';
+  const videoFileUrl = rawVideoFileUrl || inferredUploadedVideoUrl;
   const videoType: ViralVideoType = videoTypeRaw === 'uploaded' || videoTypeRaw === 'youtube' || videoTypeRaw === 'twitter' || videoTypeRaw === 'external'
     ? videoTypeRaw
     : inferVideoType(normalizedVideoUrl, videoFileUrl);
@@ -199,6 +226,8 @@ function normalizeRecord(input: any): ViralVideoRecord {
     summary: String(input?.summary || input?.caption || '').trim() || undefined,
     category: String(input?.category || '').trim() || undefined,
     sourceName: String(input?.sourceName || input?.source || input?.sourceLabel || '').trim() || undefined,
+    relatedNewsUrl: String(input?.relatedNewsUrl || input?.relatedNews?.url || input?.articleUrl || '').trim() || undefined,
+    externalSourceUrl: String(input?.externalSourceUrl || input?.sourceUrl || input?.externalUrl || '').trim() || undefined,
     thumbnailUrl: thumbnailUrl || undefined,
     posterImageUrl: thumbnailUrl || undefined,
     posterImage: thumbnailUrl ? { url: thumbnailUrl, ...(poster?.publicId ? { publicId: String(poster.publicId) } : {}) } : undefined,
@@ -267,6 +296,9 @@ function buildPayload(input: Partial<ViralVideoInput>) {
     summary: String(input.summary || '').trim(),
     category: String(input.category || '').trim(),
     sourceName: String(input.sourceName || '').trim(),
+    relatedNewsUrl: String(input.relatedNewsUrl || '').trim(),
+    externalSourceUrl: String(input.externalSourceUrl || '').trim(),
+    sourceUrl: String(input.externalSourceUrl || '').trim(),
     thumbnailUrl,
     posterImageUrl,
     posterUrl: posterImageUrl,

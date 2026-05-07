@@ -3,7 +3,7 @@ import { Link, Outlet } from 'react-router-dom';
 export default function AppLayout(){
   return (
     <div>
-      <header className="bg-slate-900 text-white px-6 py-3 flex items-center justify-between">
+      <header className="bg-newspulse-navy text-newspulse-white px-6 py-3 flex items-center justify-between">
         <div className="font-semibold">🛡️ News Pulse Admin</div>
         <nav className="flex gap-4 text-sm">
           <Link to="/admin/manage-news" className="hover:underline">Manage News</Link>

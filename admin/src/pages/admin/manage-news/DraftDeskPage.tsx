@@ -116,15 +116,15 @@ export default function DraftDeskPage(){
       {/* Deleted actions quick-access */}
       {(mode==='deleted' || mode==='hard-delete') && (
         <div className="mb-3 flex items-center gap-2">
-          <span className="text-xs text-slate-600">Deleted view:</span>
+          <span className="text-xs text-newspulse-slate">Deleted view:</span>
           <button
             type="button"
-            className={`px-2 py-1 text-xs rounded border ${mode==='deleted' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            className={`px-2 py-1 text-xs rounded border ${mode==='deleted' ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
             onClick={()=> setMode('deleted')}
           >Restore</button>
           <button
             type="button"
-            className={`px-2 py-1 text-xs rounded border ${mode==='hard-delete' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-600 border-red-600'}`}
+            className={`px-2 py-1 text-xs rounded border ${mode==='hard-delete' ? 'bg-newspulse-red text-newspulse-white border-newspulse-red' : 'bg-newspulse-white text-newspulse-red border-newspulse-red'}`}
             onClick={()=> setMode('hard-delete')}
           >Delete Permanent</button>
         </div>
@@ -135,7 +135,7 @@ export default function DraftDeskPage(){
           <button
             key={m}
             type="button"
-            className={`px-2 py-1 text-xs rounded border ${mode===m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+            className={`px-2 py-1 text-xs rounded border ${mode===m ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
             onClick={()=> setMode(m)}
           >{labelForMode(m)}</button>
         ))}
@@ -151,10 +151,10 @@ export default function DraftDeskPage(){
         />
       </div>
       {toast && <div className="mb-3 text-sm bg-green-100 text-green-700 px-3 py-2 rounded border border-green-200">{toast}</div>}
-      {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
+      {error && <div className="mb-3 text-sm bg-newspulse-red/10 text-newspulse-red px-3 py-2 rounded border border-newspulse-red/20">{error}</div>}
       {isLoading && <div>Loading...</div>}
       <table className="w-full text-sm border">
-        <thead className="bg-slate-100">
+        <thead className="bg-newspulse-slate/10">
           <tr>
             <th className="p-2 text-left">Headline</th>
             <th className="p-2">Language</th>
@@ -175,7 +175,7 @@ export default function DraftDeskPage(){
                   <>
                     <button onClick={()=> onRestore(d._id)} className="btn-secondary">Restore</button>
                     {permanentModeActive && (
-                      <button onClick={()=> onHardDelete(d._id)} className="btn-secondary text-red-600 border-red-600">Delete Permanent</button>
+                      <button onClick={()=> onHardDelete(d._id)} className="btn-secondary text-newspulse-red border-newspulse-red">Delete Permanent</button>
                     )}
                   </>
                 ) : (

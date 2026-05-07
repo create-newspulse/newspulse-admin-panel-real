@@ -153,7 +153,7 @@ export default function SubmissionDetailModal({ id, onClose, onStatusChange, onE
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">Risk:</span>
                   {typeof item.riskScore === 'number' ? (
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${item.riskScore <= 25 ? 'bg-green-100 text-green-700 border-green-200' : item.riskScore <= 60 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-red-100 text-red-700 border-red-200'}`}>{item.riskScore}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${item.riskScore <= 25 ? 'bg-green-100 text-green-700 border-green-200' : item.riskScore <= 60 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-newspulse-red/10 text-newspulse-red border-newspulse-red/20'}`}>{item.riskScore}</span>
                   ) : '—'}
                 </div>
                 <div>

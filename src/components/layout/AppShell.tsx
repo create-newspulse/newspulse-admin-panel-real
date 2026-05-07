@@ -27,12 +27,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [setStats]);
 
   return (
-    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50">
+    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-newspulse-navy dark:text-slate-50">
       <Sidebar />
       <div className="flex-1 min-w-0">
         {/* Top bar */}
         <div className="h-14 border-b dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur sticky top-0 z-10 flex items-center justify-between px-4">
-          <div className="text-sm text-slate-500">{user?.role === 'founder' ? <span>Welcome back, {user?.name || 'Founder'} 👑</span> : <span>Welcome</span>}</div>
+          <div className="text-sm text-newspulse-slate">{user?.role === 'founder' ? <span>Welcome back, {user?.name || 'Founder'} 👑</span> : <span>Welcome</span>}</div>
           <div className="flex items-center gap-2">
             {showTranslationUi ? (
               <select

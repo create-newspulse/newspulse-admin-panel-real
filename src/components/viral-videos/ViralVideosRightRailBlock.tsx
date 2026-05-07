@@ -16,8 +16,9 @@ function isEligibleVideo(item: ViralVideoRecord | null | undefined) {
     && hasVideoSource;
 }
 
-function videoHref(item: ViralVideoRecord) {
-  return item.videoFileUrl || item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
+function videoPlayerPath(item: ViralVideoRecord) {
+  const slugOrId = String(item.slug || item._id || '').trim();
+  return slugOrId ? `/viral-videos/${encodeURIComponent(slugOrId)}` : '/viral-videos';
 }
 
 export default function ViralVideosRightRailBlock() {
@@ -34,7 +35,7 @@ export default function ViralVideosRightRailBlock() {
   }
 
   const featuredItem = item as ViralVideoRecord;
-  const href = videoHref(featuredItem);
+  const href = videoPlayerPath(featuredItem);
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm" aria-label="Viral Videos">
@@ -42,7 +43,7 @@ export default function ViralVideosRightRailBlock() {
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-600">Short Video Desk</div>
       </div>
 
-      <Link to="/viral-videos" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
+      <Link to={href} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
         <div className="relative aspect-video bg-slate-100">
           {featuredItem.thumbnailUrl ? (
             <img src={featuredItem.thumbnailUrl} alt={featuredItem.title} className="h-full w-full object-cover" loading="lazy" />
@@ -55,9 +56,9 @@ export default function ViralVideosRightRailBlock() {
       </Link>
 
       <div className="space-y-2 p-3">
-        <a href={href} target="_blank" rel="noreferrer" className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900 hover:text-rose-700">
+        <Link to={href} className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900 hover:text-rose-700">
           {featuredItem.title}
-        </a>
+        </Link>
         {featuredItem.summary ? <p className="line-clamp-2 text-xs leading-5 text-slate-600">{featuredItem.summary}</p> : null}
       </div>
     </section>

@@ -29,9 +29,9 @@ export default function TagInput({ value, onChange, suggestions = [] }: TagInput
     <div>
       <div className="flex flex-wrap gap-2 mb-2">
         {value.map(tag => (
-          <span key={tag} className="px-2 py-1 text-xs rounded bg-blue-100 text-blue-700 flex items-center gap-1">
+          <span key={tag} className="px-2 py-1 text-xs rounded bg-newspulse-blue/10 text-newspulse-blue flex items-center gap-1">
             {tag}
-            <button type="button" onClick={() => removeTag(tag)} className="text-red-600">×</button>
+            <button type="button" onClick={() => removeTag(tag)} className="text-newspulse-red">×</button>
           </span>
         ))}
       </div>
@@ -45,7 +45,7 @@ export default function TagInput({ value, onChange, suggestions = [] }: TagInput
       {suggestions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2 text-xs">
           {suggestions.slice(0,8).map(s => (
-            <button key={s} type="button" onClick={()=>addTag(s)} className="px-2 py-1 rounded border hover:bg-slate-100">{s}</button>
+            <button key={s} type="button" onClick={()=>addTag(s)} className="px-2 py-1 rounded border border-newspulse-slate/30 hover:bg-newspulse-slate/10">{s}</button>
           ))}
         </div>
       )}

@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { getHomepageFeaturedViralVideo, getPublicViralVideosFrontendSettings } from '@/lib/api/viralVideos';
 
-function openVideoHref(item: { embedUrl?: string; videoUrl?: string; videoFileUrl?: string; slug?: string }) {
-  return item.videoFileUrl || item.embedUrl || item.videoUrl || (item.slug ? `/viral-videos#${encodeURIComponent(item.slug)}` : '/viral-videos');
+function videoPlayerPath(item: { slug?: string; _id?: string }) {
+  const slugOrId = String(item.slug || item._id || '').trim();
+  return slugOrId ? `/viral-videos/${encodeURIComponent(slugOrId)}` : '/viral-videos';
 }
 
 export default function ViralVideosTeaserBlock() {
@@ -58,14 +59,14 @@ export default function ViralVideosTeaserBlock() {
       ) : null}
 
       {activeItem ? (
-        <article className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 md:grid md:grid-cols-[1.2fr_1fr]">
-          <div className="aspect-[16/10] bg-slate-200 md:aspect-auto">
+        <article className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 md:grid md:grid-cols-[minmax(180px,260px)_1fr]">
+          <Link to={videoPlayerPath(activeItem)} className="block aspect-[9/16] bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
             {activeItem.thumbnailUrl ? (
               <img src={activeItem.thumbnailUrl} alt={activeItem.title} className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-slate-500">No thumbnail</div>
             )}
-          </div>
+          </Link>
           <div className="space-y-4 p-5">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
               <span>{String(activeItem.language || 'en').toUpperCase()}</span>
@@ -77,9 +78,9 @@ export default function ViralVideosTeaserBlock() {
             {activeItem.sourceName ? <div className="text-sm font-medium text-slate-500">Source: {activeItem.sourceName}</div> : null}
             {activeItem.category ? <div className="text-sm font-medium text-slate-500">Category: {activeItem.category}</div> : null}
             {activeItem.summary ? <p className="text-sm leading-6 text-slate-600">{activeItem.summary}</p> : null}
-            <a href={openVideoHref(activeItem)} target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+            <Link to={videoPlayerPath(activeItem)} className="inline-flex rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
               Watch now
-            </a>
+            </Link>
           </div>
         </article>
       ) : null}

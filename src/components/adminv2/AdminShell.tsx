@@ -31,7 +31,7 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={() => setIsDark(v => !v)}
-      className="px-3 py-2 rounded-lg text-sm font-medium bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600"
+      className="px-3 py-2 rounded-lg text-sm font-medium bg-newspulse-slate/15 dark:bg-slate-700 text-newspulse-navy dark:text-slate-200 hover:bg-newspulse-slate/25 dark:hover:bg-slate-600"
       aria-label="Toggle theme"
       title="Toggle theme"
     >
@@ -60,12 +60,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             className={({ isActive }) => {
               const active = isActive || (path && path.toLowerCase().startsWith(lc));
               return `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors duration-150 ${
-                active ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-100' : 'hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800'
+                active ? 'bg-newspulse-blue/10 text-newspulse-blue dark:bg-blue-900/30 dark:text-blue-100' : 'hover:bg-newspulse-blue/10 hover:text-newspulse-blue dark:hover:bg-slate-800'
               }`;
             }}
           >
             <span aria-hidden>
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${(path && path.toLowerCase().startsWith(lc)) ? 'bg-blue-600' : 'bg-blue-500'}`} />
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${(path && path.toLowerCase().startsWith(lc)) ? 'bg-newspulse-blue' : 'bg-newspulse-blue/80'}`} />
             </span>
             {item.label}
           </NavLink>
@@ -75,12 +75,12 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   );
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-[#0b1725] text-slate-900 dark:text-slate-100">
+    <div className="min-h-screen bg-slate-100 dark:bg-[#0b1725] text-newspulse-navy dark:text-slate-100">
       <div className="flex">
         {/* Desktop Sidebar */}
         <aside className={`hidden md:block w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/60 backdrop-blur sticky top-0 h-screen`}>
           <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-            <div className="text-xl font-extrabold tracking-tight"><span className="text-blue-600">News</span>Pulse Admin</div>
+            <div className="text-xl font-extrabold tracking-tight"><span className="text-newspulse-blue">News</span>Pulse Admin</div>
           </div>
           {NavLinks}
           <div className="p-3 border-t border-slate-200 dark:border-slate-800">
@@ -94,7 +94,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <div className="absolute inset-0 bg-black/40" onClick={() => setOpen(false)} />
             <div className="absolute inset-y-0 left-0 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shadow-xl">
               <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                <div className="text-lg font-bold"><span className="text-blue-600">News</span>Pulse</div>
+                <div className="text-lg font-bold"><span className="text-newspulse-blue">News</span>Pulse</div>
                 <button className="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setOpen(false)} aria-label="Close">✕</button>
               </div>
               {NavLinks}
@@ -113,13 +113,13 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <div className="font-semibold">Admin Panel</div>
                 <div className="hidden sm:flex items-center gap-2 ml-4 text-xs text-slate-500 dark:text-slate-400">
                   <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">v2</span>
-                  <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">Design System</span>
+                  <span className="px-2 py-0.5 rounded bg-newspulse-blue/10 text-newspulse-blue dark:bg-blue-900/30 dark:text-blue-200">Design System</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <input placeholder="Search…" className="hidden md:block px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                <input placeholder="Search…" className="hidden md:block px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-newspulse-blue text-sm" />
                 <ThemeToggle />
-                <div className="ml-2 w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-500" aria-label="User" />
+                <div className="ml-2 w-8 h-8 rounded-full bg-gradient-to-tr from-newspulse-blue to-newspulse-navy" aria-label="User" />
               </div>
             </div>
           </header>

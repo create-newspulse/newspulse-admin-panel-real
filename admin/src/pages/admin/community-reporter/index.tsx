@@ -93,40 +93,40 @@ export default function CommunityReporterPage(){
             </select>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-xs text-slate-600 mr-1">Priority:</span>
+            <span className="text-xs text-newspulse-slate mr-1">Priority:</span>
             <button
               type="button"
               onClick={()=> setPriorityFilter('ALL')}
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='ALL' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='ALL' ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
               title="Show all priorities"
             >All</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('FOUNDER_REVIEW')}
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='FOUNDER_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='FOUNDER_REVIEW' ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
               title="High priority – founder should review first"
             >🔴 Founder</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('EDITOR_REVIEW')}
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='EDITOR_REVIEW' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='EDITOR_REVIEW' ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
               title="Medium priority – editor can review"
             >🟡 Editor</button>
             <button
               type="button"
               onClick={()=> setPriorityFilter('LOW_PRIORITY')}
-              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='LOW_PRIORITY' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
+              className={`px-2 py-1 text-xs rounded border ${priorityFilter==='LOW_PRIORITY' ? 'bg-newspulse-blue text-newspulse-white border-newspulse-blue' : 'bg-newspulse-white text-newspulse-slate border-newspulse-slate/30'}`}
               title="Low priority – safe to review later"
             >🟢 Low</button>
           </div>
           <button onClick={()=> qc.invalidateQueries({ queryKey:['community-submissions'] })} className="btn-secondary">Refresh</button>
         </div>
       </div>
-      {error && <div className="mb-3 text-sm bg-red-100 text-red-700 px-3 py-2 rounded border border-red-200">{error}</div>}
+      {error && <div className="mb-3 text-sm bg-newspulse-red/10 text-newspulse-red px-3 py-2 rounded border border-newspulse-red/20">{error}</div>}
       {toast && <div className="mb-3 text-sm bg-green-100 text-green-700 px-3 py-2 rounded border border-green-200">{toast}</div>}
       {isLoading && <div>Loading...</div>}
       <table className="w-full text-sm border">
-        <thead className="bg-slate-100">
+        <thead className="bg-newspulse-slate/10">
           <tr>
             <th className="p-2 text-left">Headline</th>
             <th className="p-2 text-left">Name</th>
@@ -141,7 +141,7 @@ export default function CommunityReporterPage(){
         </thead>
         <tbody>
           {submissions.map((s: any)=>(
-            <tr key={s._id || s.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=> open(s._id || s.id)}>
+            <tr key={s._id || s.id} className="border-t hover:bg-newspulse-slate/10 cursor-pointer" onClick={()=> open(s._id || s.id)}>
               <td className="p-2 max-w-[220px] truncate" title={s.headline}>{s.headline}</td>
               <td className="p-2" title={s.userName}>{s.userName}</td>
               <td className="p-2" title={formatLocation(s.location) === '-' ? '' : formatLocation(s.location)}>{formatLocation(s.location)}</td>
@@ -155,14 +155,14 @@ export default function CommunityReporterPage(){
                     Tip
                   </span>
                 ) : (
-                  <span className="text-slate-300"> </span>
+                  <span className="text-newspulse-slate/40"> </span>
                 )}
               </td>
               <td className="p-2" title={s.priority || ''}>{formatPriorityLabel(s.priority)}</td>
               <td className="p-2 font-medium" title={s.status}>{s.status}</td>
               <td className="p-2" title={typeof s.riskScore==='number' ? String(s.riskScore) : '—'}>
                 {typeof s.riskScore==='number' ? (
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${s.riskScore <= 25 ? 'bg-green-100 text-green-700 border-green-200' : s.riskScore <= 60 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-red-100 text-red-700 border-red-200'}`}>{s.riskScore}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium border ${s.riskScore <= 25 ? 'bg-green-100 text-green-700 border-green-200' : s.riskScore <= 60 ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-newspulse-red/10 text-newspulse-red border-newspulse-red/20'}`}>{s.riskScore}</span>
                 ) : '—'}
               </td>
               <td className="p-2" title={s.createdAt}>{s.createdAt ? new Date(s.createdAt).toLocaleString() : '—'}</td>
@@ -170,7 +170,7 @@ export default function CommunityReporterPage(){
           ))}
           {!isLoading && submissions.length===0 && (
             <tr>
-              <td colSpan={9} className="p-4 text-center text-slate-500">No submissions found.</td>
+              <td colSpan={9} className="p-4 text-center text-newspulse-slate">No submissions found.</td>
             </tr>
           )}
         </tbody>

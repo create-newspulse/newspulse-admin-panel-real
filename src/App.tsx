@@ -93,6 +93,7 @@ import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 import Denied from '@pages/Denied';
 import MediaKitPublic from '@pages/MediaKitPublic';
+import ViralVideosArchivePage from '@pages/ViralVideosArchivePage';
 // Settings Center (admin)
 import SettingsCenterLayout from '@pages/admin/settings/SettingsCenterLayout';
 import AdminPanelSettingsLayout from '@pages/admin/settings/AdminPanelSettingsLayout';
@@ -214,6 +215,8 @@ function App() {
               {/* 🧭 Default Redirect to Admin Dashboard */}
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/media-kit" element={<MediaKitPublic />} />
+              <Route path="/viral-videos" element={<ViralVideosArchivePage />} />
+              <Route path="/viral-videos/:slug" element={<ViralVideosArchivePage />} />
               {/* New role-based panel (founder/admin/employee) */}
               <Route path="/panel/*" element={<PanelRouter />} />
 

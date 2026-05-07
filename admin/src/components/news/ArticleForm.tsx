@@ -358,7 +358,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
             className="w-full border px-2 py-2 rounded mt-2"
             placeholder="https://… (optional)"
           />
-          {coverUploadError && <div className="text-xs text-red-600 mt-1">{coverUploadError}</div>}
+          {coverUploadError && <div className="text-xs text-newspulse-red mt-1">{coverUploadError}</div>}
           <div className="mt-2">
             <img
               src={coverPreviewSrc}
@@ -424,7 +424,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
               {['en','hi','gu'].map(l => (
                 <div key={l} className="text-xs">
                   <strong>{l.toUpperCase()}:</strong> {(langIssues[l]||[]).length === 0 ? 'No issues ✅' : `${(langIssues[l]||[]).length} issues`}
-                  {(langIssues[l]||[]).map((iss,i)=>(<div key={i} className="text-red-600">• {iss.message}</div>))}
+                  {(langIssues[l]||[]).map((iss,i)=>(<div key={i} className="text-newspulse-red">• {iss.message}</div>))}
                 </div>
               ))}
             </div>
@@ -433,7 +433,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
             <h3 className="font-semibold mb-2">PTI Compliance</h3>
             <button type="button" onClick={runPti} className="btn-secondary mb-2">Run PTI Check</button>
             <div className="text-sm">Status: {ptiStatus === 'compliant' ? '✅ Compliant' : '⚠️ Needs Review'}</div>
-            {ptiReasons.map(r=> <div key={r} className="text-xs text-red-600">• {r}</div>)}
+            {ptiReasons.map(r=> <div key={r} className="text-xs text-newspulse-red">• {r}</div>)}
           </div>
         </div>
         <div className="space-y-4">
@@ -462,7 +462,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
               <label className="flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={founderOverride} onChange={e=> setFounderOverride(e.target.checked)} /> Enable Force Publish
               </label>
-              {founderOverride && <div className="text-xs text-red-600 mt-1">Publishing will ignore PTI & language issues.</div>}
+              {founderOverride && <div className="text-xs text-newspulse-red mt-1">Publishing will ignore PTI & language issues.</div>}
             </div>
           )}
         </div>
