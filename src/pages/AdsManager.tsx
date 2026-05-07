@@ -880,37 +880,82 @@ function formatAdScheduleRange(startAt?: string | null, endAt?: string | null): 
 }
 
 function getSponsoredFeatureVisibility(feature: SponsoredFeatureInventoryRecord): {
-  label: string;
+  label: 'Live now' | 'Inactive' | 'Scheduled' | 'Expired' | 'Missing link/image';
   className: string;
+  helperText: string;
+  homepageToggleLabel: 'Homepage ON' | 'Homepage OFF';
+  isLiveNow: boolean;
+  blockingReason: 'inactive' | 'scheduled' | 'expired' | 'missing-link-image' | null;
 } {
+  const now = Date.now();
+  const startTime = feature.startAt ? new Date(feature.startAt).getTime() : null;
+  const endTime = feature.endAt ? new Date(feature.endAt).getTime() : null;
+  const hasImage = Boolean(
+    String(feature.coverImage || '').trim()
+    || String(feature.coverImageAsset?.url || '').trim(),
+  );
+  const hasLink = Boolean(
+    String(feature.publicClickTarget || '').trim()
+    || String(feature.destinationUrl || '').trim()
+    || String(feature.linkedSponsoredArticleUrl || '').trim()
+    || String(feature.linkedArticle?.publicUrl || '').trim(),
+  );
+
   if (!feature.isActive) {
     return {
       label: 'Inactive',
       className: 'border-slate-200 bg-slate-50 text-slate-700',
+      helperText: 'This Sponsored Feature is turned off, so it will not appear on homepage.',
+      homepageToggleLabel: 'Homepage OFF',
+      isLiveNow: false,
+      blockingReason: 'inactive',
     };
   }
-
-  const now = Date.now();
-  const startTime = feature.startAt ? new Date(feature.startAt).getTime() : null;
-  const endTime = feature.endAt ? new Date(feature.endAt).getTime() : null;
 
   if (startTime && !Number.isNaN(startTime) && startTime > now) {
     return {
       label: 'Scheduled',
       className: 'border-amber-200 bg-amber-50 text-amber-800',
+      helperText: 'This Sponsored Feature is turned on, but the schedule start date is in the future.',
+      homepageToggleLabel: 'Homepage ON',
+      isLiveNow: false,
+      blockingReason: 'scheduled',
     };
   }
 
   if (endTime && !Number.isNaN(endTime) && endTime < now) {
     return {
-      label: 'Ended',
+      label: 'Expired',
       className: 'border-slate-300 bg-slate-100 text-slate-700',
+      helperText: 'This Sponsored Feature is turned on but the schedule has ended. Extend the end date to show it on homepage.',
+      homepageToggleLabel: 'Homepage ON',
+      isLiveNow: false,
+      blockingReason: 'expired',
+    };
+  }
+
+  if (!hasImage || !hasLink) {
+    return {
+      label: 'Missing link/image',
+      className: 'border-rose-200 bg-rose-50 text-rose-800',
+      helperText: !hasImage && !hasLink
+        ? 'Add both an image and a destination link before this can appear on homepage.'
+        : (!hasImage
+          ? 'Add an image before this can appear on homepage.'
+          : 'Add a destination link before this can appear on homepage.'),
+      homepageToggleLabel: 'Homepage ON',
+      isLiveNow: false,
+      blockingReason: 'missing-link-image',
     };
   }
 
   return {
-    label: 'Visible now',
+    label: 'Live now',
     className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    helperText: 'This Sponsored Feature is eligible to appear on the live homepage now.',
+    homepageToggleLabel: 'Homepage ON',
+    isLiveNow: true,
+    blockingReason: null,
   };
 }
 
@@ -947,7 +992,7 @@ function getSponsoredFeatureCommercialState(
   const destinationUrl = String(feature.destinationUrl || '').trim();
   const comboEnabled = feature.comboCampaignIsActive !== false;
   const linkedArticleLive = Boolean(feature.optionalLinkedSponsoredArticleId) && isSponsoredArticleLiveStatus(linkedArticle?.status);
-  const featureVisibleNow = getSponsoredFeatureVisibility(feature).label === 'Visible now';
+  const featureVisibleNow = getSponsoredFeatureVisibility(feature).isLiveNow;
 
   if (!feature.optionalLinkedSponsoredArticleId) {
     return {
@@ -2023,9 +2068,25 @@ export default function AdsManager() {
   );
 
   const liveSponsoredFeature = React.useMemo(
-    () => sponsoredFeatures.find((feature) => getSponsoredFeatureVisibility(feature).label === 'Visible now') || null,
+    () => sponsoredFeatures.find((feature) => getSponsoredFeatureVisibility(feature).isLiveNow) || null,
     [sponsoredFeatures],
   );
+
+  const homepageVisibilityBlocker = React.useMemo(() => {
+    if (liveSponsoredFeature) return null;
+    const activeFeatures = sponsoredFeatures.filter((feature) => feature.isActive);
+    if (activeFeatures.length === 0) return 'No live record because inactive.';
+    if (activeFeatures.some((feature) => getSponsoredFeatureVisibility(feature).blockingReason === 'expired')) {
+      return 'No live record because schedule ended.';
+    }
+    if (activeFeatures.some((feature) => getSponsoredFeatureVisibility(feature).blockingReason === 'scheduled')) {
+      return 'No live record because start date is future.';
+    }
+    if (activeFeatures.some((feature) => getSponsoredFeatureVisibility(feature).blockingReason === 'missing-link-image')) {
+      return 'No live record because required link or image is missing.';
+    }
+    return 'No live record because inactive.';
+  }, [liveSponsoredFeature, sponsoredFeatures]);
 
   const sponsoredFeaturePreviewTarget = React.useMemo(() => {
     const linkedId = String(form.linkedSponsoredArticleId || '').trim();
@@ -4116,6 +4177,7 @@ export default function AdsManager() {
             <div className="text-sm font-medium">Current active count</div>
             <div className="mt-2 text-3xl font-bold">{sponsoredFeatureActiveCount}</div>
             <div className="mt-1 text-xs text-slate-600">Expected value is usually 0 or 1.</div>
+            <div className="mt-1 text-xs text-slate-500">Active count is separate from live homepage visibility when schedule dates block the record or required link/image fields are missing.</div>
           </div>
           <div className="rounded border border-slate-200 bg-slate-50 p-3">
             <div className="text-sm font-medium">Eligible Sponsored Articles</div>
@@ -4132,7 +4194,7 @@ export default function AdsManager() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-sm font-semibold">Homepage live target</div>
-              <div className="mt-1 text-xs text-slate-600">Use this to confirm which active Sponsored Feature the public homepage can actually click through to.</div>
+              <div className="mt-1 text-xs text-slate-600">Use this to confirm which Sponsored Feature the public homepage can actually click through to right now.</div>
             </div>
             <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${liveSponsoredFeature ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}>
               {liveSponsoredFeature ? 'Live record ready' : 'No live record'}
@@ -4170,7 +4232,7 @@ export default function AdsManager() {
               })()}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-slate-500">No active homepage Sponsored Feature yet. Create one here and mark it active.</div>
+            <div className="mt-3 text-sm text-slate-500">{homepageVisibilityBlocker || 'No active homepage Sponsored Feature yet. Create one here and mark it active.'}</div>
           )}
         </div>
 
@@ -4197,8 +4259,16 @@ export default function AdsManager() {
                         <div className="mt-1 text-sm text-slate-600">{feature.sponsorName || 'Sponsor name missing'}</div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void toggleSponsoredFeatureActive(feature)}
+                          disabled={busy}
+                          className={`rounded border px-3 py-1.5 text-xs font-medium ${feature.isActive ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'}`}
+                        >
+                          {busy ? 'Saving…' : visibility.homepageToggleLabel}
+                        </button>
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${feature.isActive ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                          {feature.isActive ? 'Active' : 'Inactive'}
+                          {feature.isActive ? 'Homepage ON' : 'Homepage OFF'}
                         </span>
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium ${visibility.className}`}>
                           {visibility.label}
@@ -4209,6 +4279,10 @@ export default function AdsManager() {
                     {feature.shortSummary ? (
                       <p className="mt-3 text-sm leading-6 text-slate-700">{feature.shortSummary}</p>
                     ) : null}
+
+                    <div className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      <span className="font-semibold text-slate-900">Homepage status:</span> {visibility.helperText}
+                    </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-slate-600 md:grid-cols-2">
                       <div>
@@ -4245,14 +4319,6 @@ export default function AdsManager() {
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void toggleSponsoredFeatureActive(feature)}
-                        disabled={busy}
-                        className={`rounded border px-3 py-1.5 text-xs font-medium ${feature.isActive ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800'}`}
-                      >
-                        {busy ? 'Saving…' : (feature.isActive ? 'Turn Off' : 'Turn On')}
-                      </button>
                       <button
                         type="button"
                         onClick={() => void toggleSponsoredFeatureCombo(feature)}
