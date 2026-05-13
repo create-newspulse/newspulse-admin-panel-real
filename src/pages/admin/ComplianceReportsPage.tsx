@@ -1,6 +1,12 @@
 import React from 'react';
 import toast from 'react-hot-toast';
 import {
+  DEFAULT_COMPLIANCE_SETTINGS,
+  getComplianceSettings,
+  updateComplianceSettings,
+  type ComplianceSettings,
+} from '@/lib/adminComplianceSettingsApi';
+import {
   createComplianceReport,
   deleteComplianceReport,
   listComplianceReports,
@@ -12,8 +18,6 @@ import {
 
 const ZERO_NOTE = 'No grievances were received during this reporting month.';
 const NIL_VALUE = 'Nil';
-const WEBSITE_URL = 'https://www.newspulse.co.in';
-const GRIEVANCE_EMAIL = 'grievance@newspulse.co.in';
 
 const MONTH_OPTIONS = [
   'January',
@@ -181,13 +185,16 @@ function reportStatusLabel(status: ComplianceReportStatus): string {
 
 export default function ComplianceReportsPage() {
   const [reports, setReports] = React.useState<ComplianceReportRecord[]>([]);
+  const [complianceSettings, setComplianceSettings] = React.useState<ComplianceSettings>(DEFAULT_COMPLIANCE_SETTINGS);
   const [formValues, setFormValues] = React.useState<FormValues>(() => emptyForm());
   const [isLabelManuallyEdited, setIsLabelManuallyEdited] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isSavingComplianceSettings, setIsSavingComplianceSettings] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [exportingKey, setExportingKey] = React.useState<string | null>(null);
+  const [complianceSettingsError, setComplianceSettingsError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const summary = React.useMemo(() => {
@@ -213,6 +220,31 @@ export default function ComplianceReportsPage() {
   React.useEffect(() => {
     void loadReports();
   }, [loadReports]);
+
+  React.useEffect(() => {
+    let ignore = false;
+
+    const loadComplianceSettings = async () => {
+      setComplianceSettingsError(null);
+      try {
+        const next = await getComplianceSettings();
+        if (!ignore) {
+          setComplianceSettings(next);
+        }
+      } catch (err: any) {
+        if (!ignore) {
+          setComplianceSettings(DEFAULT_COMPLIANCE_SETTINGS);
+          setComplianceSettingsError(err?.message || 'Failed to load compliance settings');
+        }
+      }
+    };
+
+    void loadComplianceSettings();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     setFormValues((current) => {
@@ -280,6 +312,45 @@ export default function ComplianceReportsPage() {
       },
     [],
   );
+
+  const handleComplianceSettingsChange = React.useCallback(
+    (field: keyof ComplianceSettings) =>
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const value = event.target.value;
+        setComplianceSettings((current) => ({ ...current, [field]: value }));
+      },
+    [],
+  );
+
+  const handleComplianceSettingsToggle = React.useCallback(
+    (field: 'showPublisherEntity' | 'showFounderPublisher' | 'showChiefEditor') =>
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const checked = event.target.checked;
+        setComplianceSettings((current) => ({ ...current, [field]: checked }));
+      },
+    [],
+  );
+
+  const saveComplianceSettings = React.useCallback(async () => {
+    setIsSavingComplianceSettings(true);
+    setComplianceSettingsError(null);
+    try {
+      const saved = await updateComplianceSettings(complianceSettings);
+      try {
+        const refreshed = await getComplianceSettings();
+        setComplianceSettings(refreshed);
+      } catch {
+        setComplianceSettings(saved);
+      }
+      toast.success('Compliance settings saved');
+    } catch (err: any) {
+      const message = err?.message || 'Failed to save compliance settings';
+      setComplianceSettingsError(message);
+      toast.error(message);
+    } finally {
+      setIsSavingComplianceSettings(false);
+    }
+  }, [complianceSettings]);
 
   const handleEdit = React.useCallback((report: ComplianceReportRecord) => {
     const reportId = getReportId(report);
@@ -394,8 +465,8 @@ export default function ComplianceReportsPage() {
 
       doc.setFontSize(11);
       writeBlock('Report Label', report.label || buildDefaultLabel(report.month, String(report.year)));
-      writeBlock('Website', WEBSITE_URL);
-      writeBlock('Grievance Email', GRIEVANCE_EMAIL);
+      writeBlock('Website', complianceSettings.websiteUrl || DEFAULT_COMPLIANCE_SETTINGS.websiteUrl);
+      writeBlock('Grievance Email', complianceSettings.grievanceEmail || DEFAULT_COMPLIANCE_SETTINGS.grievanceEmail);
       writeBlock('Published Date', formatDate(report.publishedDate));
       writeBlock('Status', reportStatusLabel(report.status));
       writeBlock('Grievances Received', String(report.complaintsReceived));
@@ -417,7 +488,7 @@ export default function ComplianceReportsPage() {
     } finally {
       setExportingKey(null);
     }
-  }, []);
+  }, [complianceSettings]);
 
   const exportExcel = React.useCallback(async (report: ComplianceReportRecord) => {
     const reportId = getReportId(report);
@@ -433,11 +504,11 @@ export default function ComplianceReportsPage() {
 
       const summarySheet = XLSX.utils.aoa_to_sheet([
         ['Field', 'Value'],
-        ['Organization', 'News Pulse Media'],
+        ['Organization', complianceSettings.publisherEntity || DEFAULT_COMPLIANCE_SETTINGS.publisherEntity],
         ['Report Title', 'Monthly Compliance Report'],
         ['Report Label', report.label || buildDefaultLabel(report.month, String(report.year))],
-        ['Website', WEBSITE_URL],
-        ['Grievance Email', GRIEVANCE_EMAIL],
+        ['Website', complianceSettings.websiteUrl || DEFAULT_COMPLIANCE_SETTINGS.websiteUrl],
+        ['Grievance Email', complianceSettings.grievanceEmail || DEFAULT_COMPLIANCE_SETTINGS.grievanceEmail],
         ['Published Date', formatDate(report.publishedDate)],
         ['Status', reportStatusLabel(report.status)],
         ['Grievances Received', report.complaintsReceived],
@@ -491,7 +562,7 @@ export default function ComplianceReportsPage() {
     } finally {
       setExportingKey(null);
     }
-  }, []);
+  }, [complianceSettings]);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -520,6 +591,222 @@ export default function ComplianceReportsPage() {
               <div className="mt-2 text-2xl font-semibold text-white">{summary.draft}</div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-100">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Compliance Settings</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Maintain separate founder, grievance officer, and editorial lead details without changing monthly report behavior.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void saveComplianceSettings()}
+            disabled={isSavingComplianceSettings}
+            className="rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSavingComplianceSettings ? 'Saving…' : 'Save Details'}
+          </button>
+        </div>
+
+        {complianceSettingsError ? (
+          <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {complianceSettingsError}
+          </div>
+        ) : null}
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-3">
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Founder / Publisher Details</h3>
+              <p className="mt-1 text-sm text-slate-500">Used for founder and publishing entity information.</p>
+            </div>
+            <div className="mt-4 grid gap-4">
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Founder Name</span>
+                <input
+                  type="text"
+                  value={complianceSettings.founderName}
+                  onChange={handleComplianceSettingsChange('founderName')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Founder Designation</span>
+                <input
+                  type="text"
+                  value={complianceSettings.founderDesignation}
+                  onChange={handleComplianceSettingsChange('founderDesignation')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Publisher / Entity</span>
+                <input
+                  type="text"
+                  value={complianceSettings.publisherEntity}
+                  onChange={handleComplianceSettingsChange('publisherEntity')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Website URL</span>
+                <input
+                  type="url"
+                  value={complianceSettings.websiteUrl}
+                  onChange={handleComplianceSettingsChange('websiteUrl')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Grievance Officer Details</h3>
+              <p className="mt-1 text-sm text-slate-500">Used for grievance handling contact details.</p>
+            </div>
+            <div className="mt-4 grid gap-4">
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Grievance Officer Name</span>
+                <input
+                  type="text"
+                  value={complianceSettings.grievanceOfficerName}
+                  onChange={handleComplianceSettingsChange('grievanceOfficerName')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Designation</span>
+                <input
+                  type="text"
+                  value={complianceSettings.grievanceOfficerDesignation}
+                  onChange={handleComplianceSettingsChange('grievanceOfficerDesignation')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Grievance Email</span>
+                <input
+                  type="email"
+                  value={complianceSettings.grievanceEmail}
+                  onChange={handleComplianceSettingsChange('grievanceEmail')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Location</span>
+                <input
+                  type="text"
+                  value={complianceSettings.grievanceOfficerLocation}
+                  onChange={handleComplianceSettingsChange('grievanceOfficerLocation')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Editorial Lead / Chief Editor Details</h3>
+              <p className="mt-1 text-sm text-slate-500">Used for editorial leadership contact details.</p>
+            </div>
+            <div className="mt-4 grid gap-4">
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Chief Editor Name</span>
+                <input
+                  type="text"
+                  value={complianceSettings.chiefEditorName}
+                  onChange={handleComplianceSettingsChange('chiefEditorName')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Designation</span>
+                <input
+                  type="text"
+                  value={complianceSettings.chiefEditorDesignation}
+                  onChange={handleComplianceSettingsChange('chiefEditorDesignation')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">Editorial Email optional</span>
+                <input
+                  type="email"
+                  value={complianceSettings.editorialEmail}
+                  onChange={handleComplianceSettingsChange('editorialEmail')}
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5 xl:col-span-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Public Display Controls</h3>
+              <p className="mt-1 text-sm text-slate-500">Choose which publisher and editorial identity fields appear on the public Grievance Redressal page.</p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={complianceSettings.showPublisherEntity}
+                  onChange={handleComplianceSettingsToggle('showPublisherEntity')}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-300"
+                />
+                <span>
+                  <span className="block font-medium text-slate-900">Show Publisher / Entity</span>
+                  <span className="mt-1 block text-xs text-slate-500">Field: showPublisherEntity</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={complianceSettings.showFounderPublisher}
+                  onChange={handleComplianceSettingsToggle('showFounderPublisher')}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-300"
+                />
+                <span>
+                  <span className="block font-medium text-slate-900">Show Founder / Publisher</span>
+                  <span className="mt-1 block text-xs text-slate-500">Field: showFounderPublisher</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={complianceSettings.showChiefEditor}
+                  onChange={handleComplianceSettingsToggle('showChiefEditor')}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-300"
+                />
+                <span>
+                  <span className="block font-medium text-slate-900">Show Chief Editor</span>
+                  <span className="mt-1 block text-xs text-slate-500">Field: showChiefEditor</span>
+                </span>
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-700">
+              Grievance Officer, Official Grievance Email, and Location are always shown on the public Grievance Redressal page for compliance clarity.
+            </div>
+          </section>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Do not publish Aadhaar, PAN, DSC, home address, personal mobile number, or private documents on the public website.
         </div>
       </section>
 

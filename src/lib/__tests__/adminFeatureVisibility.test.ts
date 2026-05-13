@@ -24,6 +24,7 @@ describe('adminFeatureVisibility contract', () => {
         seo: false,
         analytics: true,
         moderation: false,
+        complianceReports: true,
         aiEngine: true,
         settings: false,
         dashboard: false,
@@ -46,6 +47,7 @@ describe('adminFeatureVisibility contract', () => {
     expect(normalized.seo).toBe(false);
     expect(normalized.analytics).toBe(true);
     expect(normalized.moderation).toBe(false);
+    expect(normalized['compliance-reports']).toBe(true);
     expect(normalized['ai-engine']).toBe(true);
     expect(normalized.settings).toBe(false);
   });
@@ -67,6 +69,7 @@ describe('adminFeatureVisibility contract', () => {
       seo: false,
       analytics: true,
       moderation: false,
+      'compliance-reports': true,
       'ai-engine': true,
       settings: false,
     });
@@ -88,6 +91,7 @@ describe('adminFeatureVisibility contract', () => {
         seo: false,
         analytics: true,
         moderation: false,
+        complianceReports: true,
         aiEngine: true,
         settings: false,
       },

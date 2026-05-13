@@ -14,6 +14,7 @@ export const OWNER_CONTROLLED_FEATURES = [
   { key: 'seo', apiKey: 'seo', label: 'SEO' },
   { key: 'analytics', apiKey: 'analytics', label: 'Analytics' },
   { key: 'moderation', apiKey: 'moderation', label: 'Moderation' },
+  { key: 'compliance-reports', apiKey: 'complianceReports', label: 'Compliance Reports' },
   { key: 'ai-engine', apiKey: 'aiEngine', label: 'AI Engine' },
   { key: 'settings', apiKey: 'settings', label: 'Settings' },
 ] as const;

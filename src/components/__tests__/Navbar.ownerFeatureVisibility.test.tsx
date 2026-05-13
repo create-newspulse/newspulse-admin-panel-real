@@ -42,7 +42,7 @@ describe('Navbar owner feature visibility', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        new Response(JSON.stringify({ success: true, visibility: { addNews: false, manageNews: true, settings: false } }), {
+        new Response(JSON.stringify({ success: true, visibility: { addNews: false, manageNews: true, complianceReports: false, settings: false } }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -60,6 +60,7 @@ describe('Navbar owner feature visibility', () => {
     });
 
     expect(screen.getByRole('link', { name: /manage news/i })).toHaveAttribute('href', '/admin/articles');
+    expect(screen.queryByRole('link', { name: /compliance reports/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /settings/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /safe zone/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
