@@ -37,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'seo', label:'SEO', path:'/admin/seo', roles:['admin','founder'], icon:'🔍' },
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'👩‍💻' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬' },
+  { key:'compliance-reports', label:'Compliance Reports', path:'/admin/compliance-reports', roles:['admin','founder'], icon:'🧾' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠' },
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️' },

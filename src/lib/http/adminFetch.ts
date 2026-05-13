@@ -537,6 +537,10 @@ export async function adminPatch<T = any>(path: string, json?: unknown, init: Ad
   return adminJson<T>(path, { ...init, method: 'PATCH', json });
 }
 
+export async function adminPut<T = any>(path: string, json?: unknown, init: AdminFetchOptions = {}): Promise<T> {
+  return adminJson<T>(path, { ...init, method: 'PUT', json });
+}
+
 export async function adminDelete<T = any>(path: string, init: AdminFetchOptions = {}): Promise<T> {
   return adminJson<T>(path, { ...init, method: 'DELETE' });
 }

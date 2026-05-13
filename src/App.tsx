@@ -70,6 +70,7 @@ import MediaLibrary from '@components/advanced/MediaLibrary';
 import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
 import CategoriesAnalyticsPage from '@/pages/admin/analytics/CategoriesAnalyticsPage';
+import ComplianceReportsPage from '@/pages/admin/ComplianceReportsPage';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
@@ -246,6 +247,7 @@ function App() {
               <Route path="/admin/add" element={<Navigate to="/add" replace />} />
               {/* Manage News canonical route + redirects */}
               <Route path="/admin/articles" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/compliance-reports" element={<RequireRole allow={['founder','admin']}><LockCheckWrapper><ComplianceReportsPage /></LockCheckWrapper></RequireRole>} />
               <Route path="/admin/viral-videos" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/viral-videos/new" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/admin/viral-videos/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
