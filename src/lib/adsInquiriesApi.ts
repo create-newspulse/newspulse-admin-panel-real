@@ -1,6 +1,60 @@
 import { AdminApiError, adminFetch, adminJson, adminPost } from '@/lib/http/adminFetch';
 
-export const ADS_INQUIRIES_BASE = '/admin-api/ads/inquiries';
+function stripTrailingSlashes(value: string): string {
+  return String(value || '').replace(/\/+$/, '');
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function normalizeConfiguredApiBase(rawValue: unknown): string {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+
+  if (raw === '/admin-api' || raw.startsWith('/admin-api/')) {
+    return stripTrailingSlashes(raw).replace(/\/api$/i, '');
+  }
+
+  if (isAbsoluteHttpUrl(raw)) {
+    const base = stripTrailingSlashes(raw);
+    if (/\/admin-api$/i.test(base) || /\/admin-api\//i.test(base)) return base;
+    return /\/api$/i.test(base) ? base : `${base}/api`;
+  }
+
+  const normalized = raw.startsWith('/') ? raw : `/${raw}`;
+  if (normalized === '/api' || normalized.startsWith('/api/')) {
+    return stripTrailingSlashes(normalized);
+  }
+
+  return stripTrailingSlashes(normalized).replace(/\/api$/i, '');
+}
+
+function resolveAdsInquiriesBase(): string {
+  const env = ((import.meta as any)?.env || {}) as Record<string, unknown>;
+  const candidates = [
+    env.VITE_ADMIN_API_URL,
+    env.VITE_ADMIN_API_BASE,
+    env.VITE_ADMIN_API_PROXY_BASE,
+    env.VITE_ADMIN_API_BASE_URL,
+    env.VITE_API_BASE_URL,
+    env.VITE_API_URL,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeConfiguredApiBase(candidate);
+    if (normalized) {
+      if (normalized === '/admin-api' || normalized.startsWith('/admin-api/')) {
+        return `${normalized}/ads/inquiries`;
+      }
+      return `${normalized}/ads/inquiries`;
+    }
+  }
+
+  return '/admin-api/ads/inquiries';
+}
+
+export const ADS_INQUIRIES_BASE = resolveAdsInquiriesBase();
 const DEFAULT_LOCAL_ADMIN_API_TARGET = 'http://localhost:5000';
 
 export type AdInquiry = {
@@ -186,6 +240,14 @@ async function runInquiryMutation<T>(args: {
 export function getAdsInquiriesAdminApiTarget(): string {
   const env = (import.meta as any)?.env || {};
   return String(
+    env.VITE_ADMIN_API_URL
+    || env.VITE_ADMIN_API_BASE
+    || env.VITE_ADMIN_API_PROXY_BASE
+    || env.VITE_ADMIN_API_BASE_URL
+    || env.VITE_API_BASE_URL
+    || env.VITE_API_URL
+    || ''
+  ).trim() || String(
     env.VITE_ADMIN_API_TARGET
     || env.VITE_DEV_PROXY_TARGET
     || env.VITE_BACKEND_ORIGIN
@@ -300,7 +362,7 @@ export async function markAdInquiryRead(id: string): Promise<AdInquiry | { ok: t
   const raw = await runInquiryMutation<any>({
     action: 'mark-read',
     method: 'PATCH',
-    path: `/${safeId}/read`,
+    path: `/${safeId}/mark-read`,
   });
 
   const inquiry = raw?.inquiry ?? raw?.data?.inquiry ?? raw?.data ?? raw;
@@ -316,7 +378,7 @@ export async function moveAdInquiryToTrash(id: string): Promise<AdInquiry | { ok
   const raw = await runInquiryMutation<any>({
     action: 'move-to-trash',
     method: 'PATCH',
-    path: `/${safeId}/trash`,
+    path: `/${safeId}/delete`,
   });
 
   const inquiry = raw?.inquiry ?? raw?.data?.inquiry ?? raw?.data ?? raw;
@@ -349,32 +411,50 @@ export async function restoreAdInquiry(id: string): Promise<AdInquiry | { ok: tr
 
 export async function markAdInquiriesRead(ids: string[]): Promise<{ ok: true } | unknown> {
   const safeIds = ids.map((id) => String(id || '').trim()).filter(Boolean);
-  return runInquiryMutation<any>({
-    action: 'bulk-mark-read',
-    method: 'PATCH',
-    path: '/bulk/read',
-    json: { ids: safeIds },
-  });
+  try {
+    return await runInquiryMutation<any>({
+      action: 'bulk-mark-read',
+      method: 'PATCH',
+      path: '/bulk/read',
+      json: { ids: safeIds },
+    });
+  } catch (err: any) {
+    if (err?.status !== 404 && err?.status !== 405) throw err;
+    await Promise.all(safeIds.map((id) => markAdInquiryRead(id)));
+    return { ok: true };
+  }
 }
 
 export async function moveAdInquiriesToTrash(ids: string[]): Promise<{ ok: true } | unknown> {
   const safeIds = ids.map((id) => String(id || '').trim()).filter(Boolean);
-  return runInquiryMutation<any>({
-    action: 'bulk-move-to-trash',
-    method: 'PATCH',
-    path: '/bulk/trash',
-    json: { ids: safeIds },
-  });
+  try {
+    return await runInquiryMutation<any>({
+      action: 'bulk-move-to-trash',
+      method: 'PATCH',
+      path: '/bulk/trash',
+      json: { ids: safeIds },
+    });
+  } catch (err: any) {
+    if (err?.status !== 404 && err?.status !== 405) throw err;
+    await Promise.all(safeIds.map((id) => moveAdInquiryToTrash(id)));
+    return { ok: true };
+  }
 }
 
 export async function restoreAdInquiries(ids: string[]): Promise<{ ok: true } | unknown> {
   const safeIds = ids.map((id) => String(id || '').trim()).filter(Boolean);
-  return runInquiryMutation<any>({
-    action: 'bulk-restore',
-    method: 'PATCH',
-    path: '/bulk/restore',
-    json: { ids: safeIds },
-  });
+  try {
+    return await runInquiryMutation<any>({
+      action: 'bulk-restore',
+      method: 'PATCH',
+      path: '/bulk/restore',
+      json: { ids: safeIds },
+    });
+  } catch (err: any) {
+    if (err?.status !== 404 && err?.status !== 405) throw err;
+    await Promise.all(safeIds.map((id) => restoreAdInquiry(id)));
+    return { ok: true };
+  }
 }
 
 export async function permanentlyDeleteAdInquiries(ids: string[]): Promise<{ ok: true } | unknown> {
@@ -389,11 +469,17 @@ export async function permanentlyDeleteAdInquiries(ids: string[]): Promise<{ ok:
 
 export async function permanentlyDeleteAdInquiry(id: string): Promise<{ ok: true } | unknown> {
   const safeId = encodeURIComponent(String(id));
-  return runInquiryMutation<any>({
-    action: 'permanent-delete',
-    method: 'DELETE',
-    path: `/${safeId}/permanent`,
-  });
+  const rawId = String(id || '').trim();
+  try {
+    return await runInquiryMutation<any>({
+      action: 'permanent-delete',
+      method: 'DELETE',
+      path: `/${safeId}/permanent`,
+    });
+  } catch (err: any) {
+    if (err?.status !== 404 && err?.status !== 405) throw err;
+    return permanentlyDeleteAdInquiries([rawId]);
+  }
 }
 
 export type AdInquiryReplyPayload = {
