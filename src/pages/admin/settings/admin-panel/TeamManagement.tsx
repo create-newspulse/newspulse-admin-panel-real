@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { toast } from 'react-hot-toast';
@@ -30,11 +30,13 @@ import {
 } from '@/lib/adminAccessControl';
 
 const FOUNDER_EMAIL = 'newspulse.team@gmail.com';
-const FOUNDER_NAME = 'News Pulse Founder';
+const FOUNDER_NAME = 'NewsPulse Founder';
+const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
 
 type BadgeTone = 'full' | 'protected' | 'editorial' | 'desk' | 'field' | 'live' | 'technical' | 'revenue' | 'finance' | 'growth' | 'limited';
 type RoleBadge = { label: string; tone: BadgeTone };
-type StatusTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue';
+type StatusTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue' | 'violet';
+type SessionStatusLabel = 'Active Session' | 'No Active Session' | 'Logged Out' | 'Session Expired';
 type RoleConfig = {
   id: string;
   label: string;
@@ -200,9 +202,95 @@ const checkboxGridClass = 'grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3'
 const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
 const fieldLabelClass = 'space-y-1.5 text-sm font-semibold text-slate-800';
 
+const DEPARTMENT_OPTIONS = [
+  'Administration',
+  'Finance & Accounts',
+  'Operations / Newsroom Management',
+  'Editorial / Newsroom',
+  'Copy Desk / Editorial Desk',
+  'Fact Check / Compliance',
+  'Field Reporting / Newsroom',
+  'Broadcast / Live TV',
+  'Video Production',
+  'Growth / Monetization',
+  'Social Media',
+  'Technology / IT',
+  'Training / Internship',
+];
+
+const ASSIGNED_SECTION_OPTIONS = [
+  'All Sections',
+  'National',
+  'International',
+  'Business',
+  'Technology',
+  'Science',
+  'Sports',
+  'Entertainment',
+  'Lifestyle',
+  'Gujarat',
+  'Editorial',
+  'Viral Videos',
+  'Live TV',
+  'Ads',
+  'Finance',
+  'Compliance',
+  'SEO',
+  'Analytics',
+  'Technical',
+  'Training',
+];
+
+const COVERAGE_AREA_OPTIONS = [
+  'All Gujarat',
+  'Ahmedabad',
+  'Surat',
+  'Rajkot',
+  'Vadodara',
+  'Gandhinagar',
+  'Kutch',
+  'Saurashtra',
+  'South Gujarat',
+  'North Gujarat',
+  'Central Gujarat',
+];
+
+const ROLE_DEPARTMENT_MAP: Record<string, string> = {
+  founder: 'Founder / Ownership',
+  admin: 'Administration',
+  finance_accounts_manager: 'Finance & Accounts',
+  manager: 'Operations / Newsroom Management',
+  editor: 'Editorial / Newsroom',
+  copy_editor: 'Copy Desk / Editorial Desk',
+  fact_checker: 'Fact Check / Compliance',
+  reporter: 'Field Reporting / Newsroom',
+  live_tv_controller: 'Broadcast / Live TV',
+  video_editor: 'Video Production',
+  ads_revenue_growth_manager: 'Growth / Monetization',
+  social_media_manager: 'Social Media',
+  tech_support: 'Technology / IT',
+  intern: 'Training / Internship',
+};
+
+const FOUNDER_DEPARTMENT = 'Founder / Ownership';
+
 function toggleValue<T extends string>(values: T[], value: T, checked: boolean): T[] {
   if (checked) return Array.from(new Set([...values, value]));
   return values.filter((item) => item !== value);
+}
+
+function defaultDepartmentForRole(role?: string): string {
+  return ROLE_DEPARTMENT_MAP[normalizeRoleId(role)] || '';
+}
+
+function isFounderRole(role?: string): boolean {
+  return normalizeRoleId(role) === 'founder';
+}
+
+function safeDepartmentForRole(role?: string, department?: string): string {
+  const roleDefault = defaultDepartmentForRole(role);
+  if (!isFounderRole(role) && department === FOUNDER_DEPARTMENT) return roleDefault;
+  return department || roleDefault;
 }
 
 function defaultModulesForRole(role?: string): AdminModuleKey[] {
@@ -233,11 +321,12 @@ function labelFromStatus(value?: unknown, fallback = '-'): string {
 
 function statusTone(value?: unknown): StatusTone {
   const status = String(value || '').trim().toLowerCase();
-  if (['active', 'online', 'present', 'approved'].includes(status)) return 'emerald';
+  if (['active', 'online', 'present', 'approved', 'active session'].includes(status)) return 'emerald';
   if (['idle', 'late', 'half day', 'half_day', 'pending'].includes(status)) return 'amber';
   if (['on break', 'on_break'].includes(status)) return 'sky';
   if (['on leave', 'on_leave', 'off day', 'off_day'].includes(status)) return 'blue';
-  if (['suspended', 'locked', 'expired', 'absent', 'rejected'].includes(status)) return 'rose';
+  if (['you'].includes(status)) return 'violet';
+  if (['suspended', 'locked', 'expired', 'absent', 'rejected', 'session expired'].includes(status)) return 'rose';
   return 'slate';
 }
 
@@ -249,6 +338,7 @@ function StatusPill({ label, tone }: { label: string; tone?: StatusTone }) {
     sky: 'border-sky-200 bg-sky-100 text-sky-800',
     slate: 'border-slate-200 bg-slate-100 text-slate-700',
     blue: 'border-blue-200 bg-blue-100 text-blue-800',
+    violet: 'border-violet-200 bg-violet-100 text-violet-800',
   };
   return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${map[tone || statusTone(label)]}`}>{label}</span>;
 }
@@ -266,38 +356,65 @@ function accountStatusFor(teamUser: TeamUser, active: boolean): 'Active' | 'Susp
   return 'Active';
 }
 
-function onlineStatusFor(teamUser: TeamUser): 'Online' | 'Idle' | 'Offline' | 'On Break' {
-  const status = String(teamUser?.onlineStatus || teamUser?.presenceStatus || teamUser?.sessionStatus || '').trim().toLowerCase();
-  if (['online', 'idle', 'offline'].includes(status)) return labelFromStatus(status) as 'Online' | 'Idle' | 'Offline';
-  if (status === 'on_break' || status === 'on break') return 'On Break';
-  if (teamUser?.onBreak === true) return 'On Break';
-  return 'Offline';
+function listText(value: unknown): string {
+  if (Array.isArray(value)) return value.filter(Boolean).join(', ') || '-';
+  if (typeof value === 'string' && value.trim()) return value;
+  return '-';
 }
 
-function attendanceStatusFor(teamUser: TeamUser): 'Present' | 'Absent' | 'Late' | 'Half Day' | 'On Leave' | 'Off Day' {
-  const status = String(teamUser?.attendanceStatus || teamUser?.todayAttendance?.status || teamUser?.todayAttendanceStatus || '').trim().toLowerCase();
-  if (status === 'present') return 'Present';
-  if (status === 'late') return 'Late';
-  if (status === 'half_day' || status === 'half day') return 'Half Day';
-  if (status === 'on_leave' || status === 'on leave') return 'On Leave';
-  if (status === 'off_day' || status === 'off day') return 'Off Day';
-  return 'Absent';
+function displayDepartment(teamUser: TeamUser, founder: boolean): string {
+  if (founder) return FOUNDER_DEPARTMENT;
+  return listText(teamUser.department);
 }
 
-function breakStatusFor(teamUser: TeamUser): string {
-  const status = String(teamUser?.breakStatus || teamUser?.todayAttendance?.breakStatus || '').trim();
-  if (status) return labelFromStatus(status);
-  return teamUser?.onBreak === true ? 'On Break' : 'Not On Break';
+function normalizedIdentity(value?: unknown): string {
+  return String(value || '').trim().toLowerCase();
 }
 
-function shiftFor(teamUser: TeamUser): string {
-  const schedule = teamUser?.schedule || teamUser?.todaySchedule || teamUser?.shift;
-  if (typeof schedule === 'string' && schedule.trim()) return schedule;
-  const start = schedule?.startTime || teamUser?.shiftStart || teamUser?.scheduleStart;
-  const end = schedule?.endTime || teamUser?.shiftEnd || teamUser?.scheduleEnd;
-  const offDay = schedule?.weeklyOffDay || teamUser?.weeklyOffDay;
-  const range = [start, end].filter(Boolean).join(' - ');
-  return [range, offDay ? `Off: ${offDay}` : ''].filter(Boolean).join(' · ') || '-';
+function isPrimaryFounderEmail(email?: unknown): boolean {
+  return normalizedIdentity(email) === FOUNDER_EMAIL;
+}
+
+function isFounderLikeUser(teamUser: TeamUser): boolean {
+  const normalizedRole = normalizedIdentity(teamUser?.role);
+  const normalizedEmail = normalizedIdentity(teamUser?.email);
+  const normalizedName = normalizedIdentity(teamUser?.name);
+  return normalizedRole === 'founder' || normalizedRole === 'owner' || normalizedEmail === FOUNDER_EMAIL || LEGACY_FOUNDER_EMAILS.has(normalizedEmail) || normalizedName === 'founder admin';
+}
+
+function isPrimaryFounderUser(teamUser: TeamUser): boolean {
+  return isPrimaryFounderEmail(teamUser?.email);
+}
+
+function shouldRenderStaffUser(teamUser: TeamUser): boolean {
+  if (!isFounderLikeUser(teamUser)) return true;
+  return isPrimaryFounderUser(teamUser);
+}
+
+function matchesCurrentUser(teamUser: TeamUser, currentUser: any): boolean {
+  const rowId = normalizedIdentity(teamUser.id || teamUser._id || (teamUser as any).userId);
+  const currentId = normalizedIdentity(currentUser?.id || currentUser?._id || currentUser?.userId);
+  if (rowId && currentId && rowId === currentId) return true;
+  const rowEmail = normalizedIdentity(teamUser.email);
+  const currentEmail = normalizedIdentity(currentUser?.email);
+  return !!rowEmail && !!currentEmail && rowEmail === currentEmail;
+}
+
+function getSessionStatusDisplay(teamUser: TeamUser, currentUser: any): SessionStatusLabel {
+  if (matchesCurrentUser(teamUser, currentUser)) return 'Active Session';
+  const rawStatus = normalizedIdentity((teamUser as any).sessionStatus || (teamUser as any).authSessionStatus || (teamUser as any).session?.status);
+  if (['active', 'active_session', 'authenticated', 'valid'].includes(rawStatus)) return 'Active Session';
+  if (['expired', 'session_expired'].includes(rawStatus)) return 'Session Expired';
+  if (['logged_out', 'logout', 'signed_out'].includes(rawStatus)) return 'Logged Out';
+  const sessionExpiresAt = (teamUser as any).sessionExpiresAt || (teamUser as any).session?.expiresAt;
+  if (sessionExpiresAt) {
+    const expires = new Date(String(sessionExpiresAt)).getTime();
+    if (!Number.isNaN(expires) && expires < Date.now()) return 'Session Expired';
+  }
+  const hasActiveSession = (teamUser as any).hasActiveSession === true || (teamUser as any).activeSession === true || (teamUser as any).session?.active === true;
+  if (hasActiveSession) return 'Active Session';
+  if ((teamUser as any).lastLogout || (teamUser as any).lastLogoutAt || (teamUser as any).logoutAt) return 'Logged Out';
+  return 'No Active Session';
 }
 
 function CheckboxList<T extends string>({
@@ -325,6 +442,44 @@ function CheckboxList<T extends string>({
         </label>
       ))}
     </div>
+  );
+}
+
+function MultiSelectDropdown({
+  label,
+  helper,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  helper: string;
+  values: string[];
+  options: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <label className={fieldLabelClass}>
+      <span>{label}</span>
+      <details className="group rounded-lg border border-slate-300 bg-white text-sm text-slate-900">
+        <summary className="cursor-pointer list-none px-3 py-2 font-medium text-slate-700 group-open:border-b group-open:border-slate-200">
+          {values.length ? values.join(', ') : `Select ${label}`}
+        </summary>
+        <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto p-2 sm:grid-cols-2">
+          {options.map((option) => (
+            <label key={option} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={values.includes(option)}
+                onChange={(event) => onChange(toggleValue(values, option, event.target.checked))}
+              />
+              {option}
+            </label>
+          ))}
+        </div>
+      </details>
+      <span className="text-xs font-normal leading-5 text-slate-500">{helper}</span>
+    </label>
   );
 }
 
@@ -363,8 +518,9 @@ export default function TeamManagement() {
     staffId: '',
     role: 'editor',
     designation: '',
-    department: '',
-    assignedSections: '',
+    department: defaultDepartmentForRole('editor'),
+    assignedSections: [] as string[],
+    coverageArea: [] as string[],
     accountStatus: 'active',
     permissions: '',
     expiresAt: '',
@@ -388,6 +544,7 @@ export default function TeamManagement() {
   const [overrideDrafts, setOverrideDrafts] = useState<Record<string, { moduleAccess: AdminModuleKey[]; specialRights: SpecialRightKey[] }>>({});
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+  const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
   const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
 
@@ -440,6 +597,32 @@ export default function TeamManagement() {
     return manual.length ? manual : selectedRole?.permissions || [];
   };
 
+  const setRoleAndDepartment = (nextRole: string) => {
+    setCreateForm((state) => ({
+      ...state,
+      role: nextRole,
+      department: safeDepartmentForRole(nextRole, defaultDepartmentForRole(nextRole)),
+    }));
+  };
+
+  const setDepartment = (department: string) => {
+    setCreateForm((state) => {
+      if (!isFounderRole(state.role) && department === FOUNDER_DEPARTMENT) {
+        toast.error('Founder / Ownership is reserved for Founder role only.');
+        return { ...state, department: defaultDepartmentForRole(state.role) };
+      }
+      return { ...state, department };
+    });
+  };
+
+  const setAssignedSections = (assignedSections: string[]) => {
+    setCreateForm((state) => ({
+      ...state,
+      assignedSections,
+      coverageArea: assignedSections.includes('Gujarat') && !state.coverageArea.length ? ['All Gujarat'] : state.coverageArea,
+    }));
+  };
+
   const userId = (teamUser: TeamUser) => String(teamUser?._id || teamUser?.id || '');
   const isUserActive = (teamUser: TeamUser): boolean => {
     if (typeof teamUser?.isActive === 'boolean') return teamUser.isActive;
@@ -448,16 +631,23 @@ export default function TeamManagement() {
     return true;
   };
   const isFounderUser = (teamUser: TeamUser): boolean => {
-    const normalizedRole = String(teamUser?.role || '').toLowerCase();
-    const normalizedEmail = String(teamUser?.email || '').trim().toLowerCase();
-    return normalizedRole === 'founder' || normalizedEmail === FOUNDER_EMAIL;
+    return isPrimaryFounderUser(teamUser);
   };
 
   const founderRow = useMemo<TeamUser>(() => {
-    const existing = items.find(isFounderUser);
+    const existing = items.find(isPrimaryFounderUser);
     return { ...(existing || {}), name: FOUNDER_NAME, email: FOUNDER_EMAIL, role: 'founder', isActive: true, status: 'active' };
   }, [items]);
-  const teamRows = useMemo(() => [founderRow, ...items.filter((item) => !isFounderUser(item))], [founderRow, items]);
+  const teamRows = useMemo(() => [founderRow, ...items.filter((item) => !isPrimaryFounderUser(item) && shouldRenderStaffUser(item))], [founderRow, items]);
+  const founderLikeCount = useMemo(() => items.filter(isFounderLikeUser).length, [items]);
+
+  useEffect(() => {
+    setCreateForm((state) => {
+      const corrected = safeDepartmentForRole(state.role, state.department);
+      if (corrected === state.department) return state;
+      return { ...state, department: corrected };
+    });
+  }, [createForm.role, createForm.department]);
 
   useEffect(() => {
     setOverrideDrafts((current) => {
@@ -484,6 +674,12 @@ export default function TeamManagement() {
       toast.error('Founder role is protected and cannot be assigned from invites.');
       return;
     }
+    const roleDepartment = defaultDepartmentForRole(createForm.role);
+    if (!isFounderRole(createForm.role) && createForm.department === FOUNDER_DEPARTMENT) {
+      setCreateForm((state) => ({ ...state, department: roleDepartment }));
+      toast.error('Founder / Ownership is reserved for Founder role only. Department was corrected for the selected role.');
+      return;
+    }
     const name = createForm.name.trim();
     const email = createForm.email.trim();
     if (!name) {
@@ -505,8 +701,9 @@ export default function TeamManagement() {
         permissions: parsePermissions(),
         moduleAccess: defaultModulesForRole(createForm.role),
         specialRights: defaultRightsForRole(createForm.role),
-        department: createForm.department.trim() || undefined,
-        assignedSections: createForm.assignedSections.split(',').map((item) => item.trim()).filter(Boolean),
+        department: safeDepartmentForRole(createForm.role, createForm.department).trim() || undefined,
+        assignedSections: createForm.assignedSections,
+        coverageArea: createForm.assignedSections.includes('Gujarat') && !createForm.coverageArea.length ? ['All Gujarat'] : createForm.coverageArea,
         status: createForm.accountStatus,
         accessExpiresAt: createForm.expiresAt || undefined,
         generateTemporaryPassword: createForm.generateTemporaryPassword,
@@ -516,7 +713,7 @@ export default function TeamManagement() {
       setCreatedTempPassword(tempPassword ? String(tempPassword) : null);
       setCreatedEmail(email);
       toast.success('Team member invited');
-      setCreateForm({ name: '', email: '', staffId: '', role: 'editor', designation: '', department: '', assignedSections: '', accountStatus: 'active', permissions: '', expiresAt: '', generateTemporaryPassword: true, mustChangePassword: true });
+      setCreateForm({ name: '', email: '', staffId: '', role: 'editor', designation: '', department: defaultDepartmentForRole('editor'), assignedSections: [], coverageArea: [], accountStatus: 'active', permissions: '', expiresAt: '', generateTemporaryPassword: true, mustChangePassword: true });
       await fetchStaff();
     } catch (err2: any) {
       toast.error(toFriendlyErrorMessage(err2, 'Create failed'));
@@ -727,11 +924,20 @@ export default function TeamManagement() {
             <label className={fieldLabelClass}>Full Name<input value={createForm.name} onChange={(e) => setCreateForm((state) => ({ ...state, name: e.target.value }))} placeholder="Full Name" className={inputClass} /></label>
             <label className={fieldLabelClass}>Email / Login ID<input value={createForm.email} onChange={(e) => setCreateForm((state) => ({ ...state, email: e.target.value }))} placeholder="Email / Login ID" className={inputClass} /></label>
             <label className={fieldLabelClass}>Staff ID<input value={createForm.staffId} onChange={(e) => setCreateForm((state) => ({ ...state, staffId: e.target.value }))} placeholder={`Staff ID (${draftStaffId})`} aria-label="Staff ID" className={inputClass} /></label>
-            <label className={fieldLabelClass}>Role<select value={createForm.role} onChange={(e) => setCreateForm((state) => ({ ...state, role: e.target.value }))} className={inputClass}>
+            <label className={fieldLabelClass}>Role<select value={createForm.role} onChange={(e) => setRoleAndDepartment(e.target.value)} className={inputClass}>
               {roleOptions.map((roleItem) => <option key={roleItem.id} value={roleItem.id} disabled={roleItem.protected}>{roleItem.label}{roleItem.protected ? ' (protected)' : ''}</option>)}
             </select></label>
-            <label className={fieldLabelClass}>Department<input value={createForm.department} onChange={(e) => setCreateForm((state) => ({ ...state, department: e.target.value }))} placeholder="Department" className={inputClass} /></label>
-            <label className={fieldLabelClass}>Assigned Sections<input value={createForm.assignedSections} onChange={(e) => setCreateForm((state) => ({ ...state, assignedSections: e.target.value }))} placeholder="Assigned Sections" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Department<select value={createForm.department} onChange={(e) => setDepartment(e.target.value)} className={inputClass}>
+              <option value="">Select Department</option>
+              {DEPARTMENT_OPTIONS.map((department) => <option key={department} value={department}>{department}</option>)}
+            </select><span className="text-xs font-normal leading-5 text-slate-500">Department is auto-selected from Role. Founder can adjust if needed.</span></label>
+            <MultiSelectDropdown
+              label="Assigned Sections"
+              helper="Select website sections this staff member can work on. Gujarat means full Gujarat coverage."
+              values={createForm.assignedSections}
+              options={ASSIGNED_SECTION_OPTIONS}
+              onChange={setAssignedSections}
+            />
             <label className={fieldLabelClass}>Account Status<select value={createForm.accountStatus} onChange={(e) => setCreateForm((state) => ({ ...state, accountStatus: e.target.value }))} className={inputClass}>
               <option value="active">Active</option>
               <option value="pending">Pending</option>
@@ -740,7 +946,19 @@ export default function TeamManagement() {
             </select></label>
             <label className={fieldLabelClass}>Access Expiry Date<input type="date" value={createForm.expiresAt} onChange={(e) => setCreateForm((state) => ({ ...state, expiresAt: e.target.value }))} className={inputClass} /></label>
             <label className={fieldLabelClass}>Designation<input value={createForm.designation} onChange={(e) => setCreateForm((state) => ({ ...state, designation: e.target.value }))} placeholder="Designation" className={inputClass} /></label>
+            <MultiSelectDropdown
+              label="Coverage Area"
+              helper="Select city/region responsibility. Use All Gujarat for state-wide coverage."
+              values={createForm.coverageArea}
+              options={COVERAGE_AREA_OPTIONS}
+              onChange={(coverageArea) => setCreateForm((state) => ({ ...state, coverageArea }))}
+            />
           </div>
+          {createForm.assignedSections.includes('Gujarat') && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+              Gujarat in Assigned Sections means full Gujarat state coverage, including all cities and districts. Coverage Area decides exact city/region responsibility.
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={createForm.generateTemporaryPassword} onChange={(e) => setCreateForm((state) => ({ ...state, generateTemporaryPassword: e.target.checked }))} />
@@ -917,7 +1135,7 @@ export default function TeamManagement() {
 
       <SectionCard
         title="Staff Activity & Attendance"
-        subtitle="Track online status, login/logout, attendance, breaks, off days, leave, and schedules."
+        subtitle="Track session status, login/logout, attendance, breaks, off days, leave, and schedules."
         actions={(
           <button
             type="button"
@@ -933,51 +1151,61 @@ export default function TeamManagement() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Staff List" subtitle="Account Status is account access. Online Status is live presence.">
+      <SectionCard title="Staff List" subtitle="Account Status is account access. Session Status is login/session state.">
         {loading ? <div className="text-slate-600">Loading...</div> : err ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">{err} Showing the protected founder account view below.</div> : null}
+        {isFounder && founderLikeCount > 1 ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Multiple Founder-like records detected. Review old/test accounts.</div> : null}
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead><tr className="text-left text-slate-600"><th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Email / Login ID</th><th className="py-2 pr-3">Staff ID</th><th className="py-2 pr-3">Role</th><th className="py-2 pr-3">Account Status</th><th className="py-2 pr-3">Online Status</th><th className="py-2 pr-3">Last Login</th><th className="py-2 pr-3">Last Logout</th><th className="py-2 pr-3">Actions</th></tr></thead>
+            <thead><tr className="text-left text-slate-600"><th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Email / Login ID</th><th className="py-2 pr-3">Staff ID</th><th className="py-2 pr-3">Role</th><th className="py-2 pr-3">Account Status</th><th className="py-2 pr-3">Session Status</th><th className="py-2 pr-3">Last Login</th><th className="py-2 pr-3">Last Logout</th><th className="py-2 pr-3">Actions</th></tr></thead>
             <tbody>
               {teamRows.map((teamUser) => {
                 const id = userId(teamUser);
                 const founder = isFounderUser(teamUser);
                 const active = founder || isUserActive(teamUser);
                 const accountStatus = founder ? 'Active' : accountStatusFor(teamUser, active);
-                const onlineStatus = onlineStatusFor(teamUser);
+                const sessionStatus = getSessionStatusDisplay(teamUser, user);
+                const currentUser = matchesCurrentUser(teamUser, user);
                 const busy = rowBusyId === id;
                 const rowRole = founder ? roleById('founder') : roleById(teamUser.role);
                 const rowBadges = founder ? [badge('Founder', 'protected'), ...(rowRole?.badges || [])] : rowRole?.badges || [badge('Limited', 'limited')];
+                const rowKey = id || `${teamUser.email}-${teamUser.name}`;
                 return (
-                  <tr key={id || `${teamUser.email}-${teamUser.name}`} className="border-t border-slate-200 align-top">
-                    <td className="py-3 pr-3 font-medium text-slate-900">{teamUser.name || (founder ? FOUNDER_NAME : 'Unnamed staff')}</td>
-                    <td className="py-3 pr-3 text-slate-700">{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</td>
-                    <td className="py-3 pr-3 text-slate-700">{teamUser.staffId || (founder ? 'FOUNDER' : '-')}</td>
-                    <td className="py-3 pr-3"><div className="font-semibold text-slate-900">{rowRole?.label || teamUser.role || 'Staff'}</div><div className="mt-1 flex flex-wrap gap-1.5">{rowBadges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div></td>
-                    <td className="py-3 pr-3"><StatusPill label={accountStatus} /></td>
-                    <td className="py-3 pr-3"><StatusPill label={onlineStatus} /></td>
-                    <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</td>
-                    <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogout || teamUser.lastLogoutAt || teamUser.logoutAt)}</td>
-                    <td className="py-3 pr-3">
-                      {founder ? (
+                  <Fragment key={rowKey}>
+                    <tr key={rowKey} className="border-t border-slate-200 align-top">
+                      <td className="py-3 pr-3 font-medium text-slate-900"><div className="flex flex-wrap items-center gap-2"><span>{teamUser.name || (founder ? FOUNDER_NAME : 'Unnamed staff')}</span>{currentUser ? <StatusPill label="You" tone="violet" /> : null}</div></td>
+                      <td className="py-3 pr-3 text-slate-700">{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</td>
+                      <td className="py-3 pr-3 text-slate-700">{teamUser.staffId || (founder ? 'FOUNDER' : '-')}</td>
+                      <td className="py-3 pr-3"><div className="font-semibold text-slate-900">{rowRole?.label || teamUser.role || 'Staff'}</div><div className="mt-1 flex flex-wrap gap-1.5">{rowBadges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div></td>
+                      <td className="py-3 pr-3"><StatusPill label={accountStatus} /></td>
+                      <td className="py-3 pr-3"><StatusPill label={sessionStatus} /></td>
+                      <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</td>
+                      <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogout || teamUser.lastLogoutAt || teamUser.logoutAt)}</td>
+                      <td className="py-3 pr-3">
                         <div className="flex flex-wrap gap-2">
-                          {['Generate Temporary Password Disabled', 'Reset Password Disabled', 'Force Change Password Disabled', 'Suspend Account Disabled', 'Lock Account Disabled', 'Logout All Devices Disabled'].map((label) => (
-                            <button key={label} type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">{label}</button>
-                          ))}
+                          <button type="button" onClick={() => setExpandedStaffId(expandedStaffId === rowKey ? null : rowKey)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">{expandedStaffId === rowKey ? 'Hide Details' : 'View Details'}</button>
+                          {founder ? (
+                            <><span className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-800">Protected</span>{['Generate Temporary Password Disabled', 'Reset Password Disabled', 'Force Change Password Disabled', 'Suspend Account Disabled', 'Lock Account Disabled', 'Logout All Devices Disabled'].map((label) => (<button key={label} type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">{label}</button>))}</>
+                          ) : (
+                            <><button type="button" disabled={!isFounder || !id || busy} onClick={() => runPasswordReset(teamUser, 'Temporary password generated')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Generate Temporary Password</button><button type="button" disabled={!isFounder || !id || busy} onClick={() => runPasswordReset(teamUser, 'Password reset')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Reset Password</button><button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">Force Change Password</button><button type="button" disabled={!isFounder || !id || busy || !active} onClick={() => runRowAction(id, () => suspendUser(id), 'Account suspended')} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Suspend Account</button><button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">Lock Account</button><button type="button" disabled={!isFounder || !id || busy} onClick={() => runLogoutAllDevices(teamUser)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Logout All Devices</button>{!active && <button type="button" disabled={!isFounder || !id || busy} onClick={() => runRowAction(id, () => activateUser(id), 'Account activated')} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">Activate Account</button>}</>
+                          )}
                         </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" disabled={!isFounder || !id || busy} onClick={() => runPasswordReset(teamUser, 'Temporary password generated')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Generate Temporary Password</button>
-                          <button type="button" disabled={!isFounder || !id || busy} onClick={() => runPasswordReset(teamUser, 'Password reset')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Reset Password</button>
-                          <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">Force Change Password</button>
-                          <button type="button" disabled={!isFounder || !id || busy || !active} onClick={() => runRowAction(id, () => suspendUser(id), 'Account suspended')} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Suspend Account</button>
-                          <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400">Lock Account</button>
-                          <button type="button" disabled={!isFounder || !id || busy} onClick={() => runLogoutAllDevices(teamUser)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Logout All Devices</button>
-                          {!active && <button type="button" disabled={!isFounder || !id || busy} onClick={() => runRowAction(id, () => activateUser(id), 'Account activated')} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">Activate Account</button>}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {expandedStaffId === rowKey ? (
+                      <tr key={`${rowKey}-details`} className="border-t border-slate-100 bg-slate-50/70">
+                        <td colSpan={9} className="p-4">
+                          <div className="grid grid-cols-1 gap-3 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-4">
+                            <div><div className="text-xs font-semibold uppercase text-slate-500">Department</div><div className="mt-1 font-medium text-slate-900">{displayDepartment(teamUser, founder)}</div></div>
+                            <div><div className="text-xs font-semibold uppercase text-slate-500">Assigned Sections</div><div className="mt-1 font-medium text-slate-900">{listText(teamUser.assignedSections)}</div></div>
+                            <div><div className="text-xs font-semibold uppercase text-slate-500">Coverage Area</div><div className="mt-1 font-medium text-slate-900">{listText((teamUser as any).coverageArea)}</div></div>
+                            <div><div className="text-xs font-semibold uppercase text-slate-500">Access Expiry Date</div><div className="mt-1 font-medium text-slate-900">{formatDateTime((teamUser as any).accessExpiresAt || (teamUser as any).expiresAt)}</div></div>
+                            <div className="xl:col-span-2"><div className="text-xs font-semibold uppercase text-slate-500">Special Rights</div><div className="mt-1 font-medium text-slate-900">{listText(teamUser.specialRights)}</div></div>
+                            {founder ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800 xl:col-span-2">Founder / Ownership is reserved for the protected Founder account only.</div> : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>

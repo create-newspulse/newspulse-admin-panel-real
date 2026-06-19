@@ -16,7 +16,6 @@ import {
   getTeamSessionLogs,
   rejectLeaveRequest,
   requestLeave,
-  sendTeamPresenceHeartbeat,
   toFriendlyErrorMessage,
   type AttendanceRecord,
   type LeaveRequestRow,
@@ -33,6 +32,7 @@ type Props = {
 type ActivityTab = 'activity' | 'attendance' | 'breaks' | 'leave' | 'schedule' | 'reports';
 type LoadState = 'idle' | 'loading' | 'ready' | 'offline';
 type BadgeTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue' | 'violet';
+type SessionStatusLabel = 'Active Session' | 'No Active Session' | 'Logged Out' | 'Session Expired';
 
 const ACCESS_DENIED = 'Access Denied\n\nYou do not have permission to view staff activity or attendance.\nFounder permission is required.';
 
@@ -46,9 +46,28 @@ const tabLabels: Record<ActivityTab, string> = {
 };
 
 const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const PRIMARY_FOUNDER_EMAIL = 'newspulse.team@gmail.com';
+const PRIMARY_FOUNDER_NAME = 'NewsPulse Founder';
+const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
 
 function normalize(value?: unknown): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function isPrimaryFounderEmail(email?: unknown): boolean {
+  return normalize(email) === PRIMARY_FOUNDER_EMAIL;
+}
+
+function isFounderLikeRow(row: { role?: string; email?: string; name?: string }): boolean {
+  const normalizedRole = normalize(row.role);
+  const normalizedEmail = normalize(row.email);
+  const normalizedName = normalize(row.name);
+  return normalizedRole === 'founder' || normalizedRole === 'owner' || normalizedEmail === PRIMARY_FOUNDER_EMAIL || LEGACY_FOUNDER_EMAILS.has(normalizedEmail) || normalizedName === 'founder admin';
+}
+
+function shouldRenderActivityRow(row: { role?: string; email?: string; name?: string }): boolean {
+  if (!isFounderLikeRow(row)) return true;
+  return isPrimaryFounderEmail(row.email);
 }
 
 function userKey(row?: { userId?: string; id?: string; _id?: string; email?: string; staffId?: string } | null): string {
@@ -100,11 +119,12 @@ function statusLabel(value?: unknown, fallback = 'Pending'): string {
 
 function toneForStatus(value?: unknown): BadgeTone {
   const status = normalize(value);
-  if (['online', 'present', 'approved', 'active'].includes(status)) return 'emerald';
+  if (['online', 'present', 'approved', 'active', 'active session'].includes(status)) return 'emerald';
   if (['idle', 'late', 'pending', 'half day', 'half_day'].includes(status)) return 'amber';
   if (['on break', 'on_break'].includes(status)) return 'sky';
   if (['on leave', 'on_leave', 'off day', 'off_day'].includes(status)) return 'blue';
-  if (['rejected', 'absent', 'suspended', 'locked', 'expired'].includes(status)) return 'rose';
+  if (['you'].includes(status)) return 'violet';
+  if (['rejected', 'absent', 'suspended', 'locked', 'expired', 'session expired'].includes(status)) return 'rose';
   return 'slate';
 }
 
@@ -162,6 +182,31 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+function matchesCurrentUser(row: { userId?: string; id?: string; _id?: string; email?: string; staffId?: string }, currentUser: any): boolean {
+  const rowId = normalize(row.userId || row.id || row._id);
+  const currentId = normalize(currentUser?.id || currentUser?._id || currentUser?.userId);
+  if (rowId && currentId && rowId === currentId) return true;
+  const rowEmail = normalize(row.email);
+  const currentEmail = normalize(currentUser?.email);
+  return !!rowEmail && !!currentEmail && rowEmail === currentEmail;
+}
+
+function getSessionStatusDisplay(row: any, currentUser: any): SessionStatusLabel {
+  if (matchesCurrentUser(row, currentUser)) return 'Active Session';
+  const rawStatus = normalize(row.sessionStatus || row.authSessionStatus || row.session?.status);
+  if (['active', 'active_session', 'authenticated', 'valid'].includes(rawStatus)) return 'Active Session';
+  if (['expired', 'session_expired'].includes(rawStatus)) return 'Session Expired';
+  if (['logged_out', 'logout', 'signed_out'].includes(rawStatus)) return 'Logged Out';
+  const sessionExpiresAt = row.sessionExpiresAt || row.session?.expiresAt;
+  if (sessionExpiresAt) {
+    const expires = new Date(String(sessionExpiresAt)).getTime();
+    if (!Number.isNaN(expires) && expires < Date.now()) return 'Session Expired';
+  }
+  if (row.hasActiveSession === true || row.activeSession === true || row.session?.active === true) return 'Active Session';
+  if (row.lastLogout || row.logoutAt || row.lastLogoutAt) return 'Logged Out';
+  return 'No Active Session';
+}
+
 export default function StaffActivityAttendance({ teamRows = [] }: Props) {
   const { user } = useAuth();
   const role = normalize(user?.role);
@@ -187,15 +232,16 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
     if (teamRows.length) return teamRows;
     const byKey = new Map<string, TeamUser>();
     const add = (row: any) => {
+      if (!shouldRenderActivityRow(row)) return;
       const key = userKey(row);
       if (!key || byKey.has(key)) return;
       byKey.set(key, {
         id: row.id || row.userId,
         _id: row._id,
-        name: row.name,
-        email: row.email,
-        staffId: row.staffId,
-        role: row.role,
+        name: isPrimaryFounderEmail(row.email) ? PRIMARY_FOUNDER_NAME : row.name,
+        email: isPrimaryFounderEmail(row.email) ? PRIMARY_FOUNDER_EMAIL : row.email,
+        staffId: isPrimaryFounderEmail(row.email) ? 'FOUNDER' : row.staffId,
+        role: isPrimaryFounderEmail(row.email) ? 'founder' : row.role,
       });
     };
     presence.forEach(add);
@@ -212,8 +258,8 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
     return inferredTeamRows.filter((row) => isSamePerson(row as any, user));
   }, [canViewAll, inferredTeamRows, user]);
 
-  const filteredPresence = useMemo(() => canViewAll ? presence : presence.filter((row) => isSamePerson(row, user)), [canViewAll, presence, user]);
-  const filteredLogs = useMemo(() => canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user)), [canViewAll, sessionLogs, user]);
+  const filteredPresence = useMemo(() => (canViewAll ? presence : presence.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow), [canViewAll, presence, user]);
+  const filteredLogs = useMemo(() => (canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow), [canViewAll, sessionLogs, user]);
   const filteredAttendanceToday = useMemo(() => canViewAll ? attendanceToday : attendanceToday.filter((row) => isSamePerson(row, user)), [attendanceToday, canViewAll, user]);
   const filteredAttendanceReport = useMemo(() => canViewAll ? attendanceReport : attendanceReport.filter((row) => isSamePerson(row, user)), [attendanceReport, canViewAll, user]);
   const filteredLeaveRequests = useMemo(() => canViewAll ? leaveRequests : leaveRequests.filter((row) => isSamePerson(row, user)), [canViewAll, leaveRequests, user]);
@@ -222,15 +268,25 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
   const activityRows = useMemo(() => {
     const byKey = new Map<string, TeamPresenceRow & TeamSessionLog & TeamUser>();
     visibleTeamRows.forEach((row) => byKey.set(teamUserKey(row), { ...row }));
-    filteredPresence.forEach((row) => byKey.set(userKey(row), { ...(byKey.get(userKey(row)) || {}), ...row }));
-    filteredLogs.forEach((row) => byKey.set(userKey(row), { ...(byKey.get(userKey(row)) || {}), ...row }));
+    filteredPresence.forEach((row) => {
+      if (!shouldRenderActivityRow(row)) return;
+      const key = userKey(row);
+      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: 'FOUNDER', role: 'founder' } : row;
+      byKey.set(key, { ...(byKey.get(key) || {}), ...normalized });
+    });
+    filteredLogs.forEach((row) => {
+      if (!shouldRenderActivityRow(row)) return;
+      const key = userKey(row);
+      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: 'FOUNDER', role: 'founder' } : row;
+      byKey.set(key, { ...(byKey.get(key) || {}), ...normalized });
+    });
     return Array.from(byKey.values());
   }, [filteredLogs, filteredPresence, visibleTeamRows]);
 
   const dashboardCards = useMemo(() => {
-    const onlineNow = presence.filter((row) => normalize(row.onlineStatus || row.status) === 'online').length;
-    const idle = presence.filter((row) => normalize(row.onlineStatus || row.status) === 'idle').length;
-    const onBreakPresence = presence.filter((row) => ['on break', 'on_break'].includes(normalize(row.onlineStatus || row.status))).length;
+    const activeSessions = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'Active Session').length;
+    const noActiveSessions = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'No Active Session').length;
+    const loggedOut = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'Logged Out').length;
     const presentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'present').length;
     const absentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'absent').length;
     const lateToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'late').length;
@@ -238,9 +294,9 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
     const offDay = attendanceToday.filter((row) => ['off day', 'off_day'].includes(normalize(row.attendanceStatus || row.status))).length;
     const pendingLeave = leaveRequests.filter((row) => normalize(row.status) === 'pending').length;
     return [
-      ['Online Now', onlineNow],
-      ['Idle', idle],
-      ['On Break', onBreakPresence],
+      ['Active Sessions', activeSessions],
+      ['No Active Session', noActiveSessions],
+      ['Logged Out', loggedOut],
       ['Present Today', presentToday],
       ['Absent Today', absentToday],
       ['Late Today', lateToday],
@@ -248,7 +304,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
       ['Off Day', offDay],
       ['Pending Leave Requests', pendingLeave],
     ] as const;
-  }, [attendanceToday, leaveRequests, presence]);
+  }, [activityRows, attendanceToday, leaveRequests, user]);
 
   async function loadActivity(range = reportRange) {
     if (!canUseOwn && !canViewAll) return;
@@ -274,7 +330,6 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
 
   useEffect(() => {
     void loadActivity();
-    if (canUseOwn) void sendTeamPresenceHeartbeat().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseOwn, canViewAll]);
 
@@ -319,7 +374,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-base font-semibold text-slate-950">Staff Activity &amp; Attendance</div>
-          <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Track online status, login/logout, attendance, breaks, off days, leave, and schedules.</div>
+          <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Track session state, login/logout, attendance, breaks, off days, leave, and schedules.</div>
         </div>
         <button type="button" onClick={() => loadActivity()} disabled={loadState === 'loading'} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
           {loadState === 'loading' ? 'Refreshing...' : 'Refresh Activity'}
@@ -345,7 +400,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
         ) : null}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {['Online Presence', 'Attendance Today', 'Break Status', 'Leave / Off Days', 'Schedule', 'Reports'].map((label) => (
+          {['Session Status', 'Attendance Today', 'Break Status', 'Leave / Off Days', 'Schedule', 'Reports'].map((label) => (
             <div key={label} className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 shadow-sm">{label}</div>
           ))}
         </div>
@@ -367,20 +422,21 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
           <div className="space-y-4">
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Role</th><th className="py-2 pr-4">Online Status</th><th className="py-2 pr-4">Last Seen</th><th className="py-2 pr-4">Last Login</th><th className="py-2 pr-4">Last Logout</th><th className="py-2 pr-4">Device</th><th className="py-2 pr-4">Session Status</th></tr></thead>
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Role</th><th className="py-2 pr-4">Session Status</th><th className="py-2 pr-4">Last Seen</th><th className="py-2 pr-4">Last Login</th><th className="py-2 pr-4">Last Logout</th><th className="py-2 pr-4">Device</th><th className="py-2 pr-4">Session Details</th></tr></thead>
                 <tbody>
                   {activityRows.map((row) => {
-                    const status = row.onlineStatus || row.status || 'offline';
+                    const sessionStatus = getSessionStatusDisplay(row, user);
+                    const currentUser = matchesCurrentUser(row, user);
                     return (
                       <tr key={userKey(row) || `${row.email}-${row.name}`} className="border-t border-slate-200 align-top">
-                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</span>{currentUser ? <Badge tone="violet">You</Badge> : null}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
                         <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
-                        <td className="py-3 pr-4"><Badge tone={toneForStatus(status)}>{statusLabel(status, 'Offline')}</Badge></td>
+                        <td className="py-3 pr-4"><Badge tone={toneForStatus(sessionStatus)}>{sessionStatus}</Badge></td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastSeen)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogin || row.loginAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogout || row.logoutAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText([row.device, row.browser].filter(Boolean).join(' / '))}</td>
-                        <td className="py-3 pr-4 text-slate-700"><div>{displayText(row.sessionDuration || row.duration, 'No active session')}</div><div className="mt-1 text-xs text-slate-500">{displayText(row.logoutReason, 'No logout reason')}</div></td>
+                        <td className="py-3 pr-4 text-slate-700"><div>{displayText(row.sessionDuration || row.duration, sessionStatus)}</div><div className="mt-1 text-xs text-slate-500">{displayText(row.logoutReason, 'No logout reason')}</div></td>
                       </tr>
                     );
                   })}
