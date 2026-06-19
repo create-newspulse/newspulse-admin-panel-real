@@ -27,10 +27,10 @@ import {
 } from '@/api/adminPanelSettingsApi';
 
 type Props = {
-  teamRows: TeamUser[];
+  teamRows?: TeamUser[];
 };
 
-type ActivityTab = 'activity' | 'attendance' | 'breaks' | 'leave' | 'schedule';
+type ActivityTab = 'activity' | 'attendance' | 'breaks' | 'leave' | 'schedule' | 'reports';
 type LoadState = 'idle' | 'loading' | 'ready' | 'offline';
 type BadgeTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue' | 'violet';
 
@@ -42,6 +42,7 @@ const tabLabels: Record<ActivityTab, string> = {
   breaks: 'Break',
   leave: 'Leave / Off Days',
   schedule: 'Schedule',
+  reports: 'Reports',
 };
 
 const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -161,7 +162,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-export default function StaffActivityAttendance({ teamRows }: Props) {
+export default function StaffActivityAttendance({ teamRows = [] }: Props) {
   const { user } = useAuth();
   const role = normalize(user?.role);
   const canViewAll = role === 'founder' || hasGrant(user);
@@ -182,10 +183,34 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
   const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', staffId: '', role: '', startTime: '', endTime: '', weeklyOffDay: 'Sunday', active: true });
 
+  const inferredTeamRows = useMemo<TeamUser[]>(() => {
+    if (teamRows.length) return teamRows;
+    const byKey = new Map<string, TeamUser>();
+    const add = (row: any) => {
+      const key = userKey(row);
+      if (!key || byKey.has(key)) return;
+      byKey.set(key, {
+        id: row.id || row.userId,
+        _id: row._id,
+        name: row.name,
+        email: row.email,
+        staffId: row.staffId,
+        role: row.role,
+      });
+    };
+    presence.forEach(add);
+    sessionLogs.forEach(add);
+    attendanceToday.forEach(add);
+    attendanceReport.forEach(add);
+    leaveRequests.forEach(add);
+    schedules.forEach(add);
+    return Array.from(byKey.values());
+  }, [attendanceReport, attendanceToday, leaveRequests, presence, schedules, sessionLogs, teamRows]);
+
   const visibleTeamRows = useMemo(() => {
-    if (canViewAll) return teamRows;
-    return teamRows.filter((row) => isSamePerson(row as any, user));
-  }, [canViewAll, teamRows, user]);
+    if (canViewAll) return inferredTeamRows;
+    return inferredTeamRows.filter((row) => isSamePerson(row as any, user));
+  }, [canViewAll, inferredTeamRows, user]);
 
   const filteredPresence = useMemo(() => canViewAll ? presence : presence.filter((row) => isSamePerson(row, user)), [canViewAll, presence, user]);
   const filteredLogs = useMemo(() => canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user)), [canViewAll, sessionLogs, user]);
@@ -290,11 +315,11 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
   };
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section id="staff-activity-attendance" className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-base font-semibold text-slate-950">Staff Activity &amp; Attendance</div>
-          <div className="mt-1 text-sm text-slate-600">Security login/logout tracking is kept separate from attendance check-in/check-out records.</div>
+          <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Track online status, login/logout, attendance, breaks, off days, leave, and schedules.</div>
         </div>
         <button type="button" onClick={() => loadActivity()} disabled={loadState === 'loading'} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
           {loadState === 'loading' ? 'Refreshing...' : 'Refresh Activity'}
@@ -303,6 +328,9 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
 
       <div className="mt-4 space-y-4">
         <BackendOfflineBanner loadState={loadState} />
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">
+          Login/logout is for security tracking. Check-in/check-out is for attendance.
+        </div>
         {!canViewAll && canUseOwn ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">You can view only your own attendance, schedule, leave, and login/logout records.</div> : null}
 
         {canViewAll ? (
@@ -315,6 +343,12 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
             ))}
           </div>
         ) : null}
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          {['Online Presence', 'Attendance Today', 'Break Status', 'Leave / Off Days', 'Schedule', 'Reports'].map((label) => (
+            <div key={label} className="rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 shadow-sm">{label}</div>
+          ))}
+        </div>
 
         <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
           {(Object.keys(tabLabels) as ActivityTab[]).map((tab) => (
@@ -333,22 +367,20 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
           <div className="space-y-4">
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Online Status</th><th className="py-2 pr-4">Last Login</th><th className="py-2 pr-4">Last Logout</th><th className="py-2 pr-4">Last Seen</th><th className="py-2 pr-4">Device / Browser</th><th className="py-2 pr-4">IP Address</th><th className="py-2 pr-4">Session Duration</th><th className="py-2 pr-4">Logout Reason</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Role</th><th className="py-2 pr-4">Online Status</th><th className="py-2 pr-4">Last Seen</th><th className="py-2 pr-4">Last Login</th><th className="py-2 pr-4">Last Logout</th><th className="py-2 pr-4">Device</th><th className="py-2 pr-4">Session Status</th></tr></thead>
                 <tbody>
                   {activityRows.map((row) => {
                     const status = row.onlineStatus || row.status || 'offline';
                     return (
                       <tr key={userKey(row) || `${row.email}-${row.name}`} className="border-t border-slate-200 align-top">
                         <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
+                        <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
                         <td className="py-3 pr-4"><Badge tone={toneForStatus(status)}>{statusLabel(status, 'Offline')}</Badge></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastSeen)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogin || row.loginAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogout || row.logoutAt)}</td>
-                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastSeen)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText([row.device, row.browser].filter(Boolean).join(' / '))}</td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.ipAddress || row.ip)}</td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.sessionDuration || row.duration)}</td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.logoutReason)}</td>
-                        <td className="py-3 pr-4"><ActionButton disabled={loadState === 'offline'}>View Logs</ActionButton></td>
+                        <td className="py-3 pr-4 text-slate-700"><div>{displayText(row.sessionDuration || row.duration, 'No active session')}</div><div className="mt-1 text-xs text-slate-500">{displayText(row.logoutReason, 'No logout reason')}</div></td>
                       </tr>
                     );
                   })}
@@ -375,20 +407,20 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Today Attendance</th><th className="py-2 pr-4">Check-in Time</th><th className="py-2 pr-4">Check-out Time</th><th className="py-2 pr-4">Total Work Time</th><th className="py-2 pr-4">Total Break Time</th><th className="py-2 pr-4">Attendance Status</th><th className="py-2 pr-4">Correction Status</th></tr></thead>
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Check In</th><th className="py-2 pr-4">Check Out</th><th className="py-2 pr-4">Total Work Time</th><th className="py-2 pr-4">Break Time</th><th className="py-2 pr-4">Attendance Status</th><th className="py-2 pr-4">Shift</th><th className="py-2 pr-4">Actions</th></tr></thead>
                 <tbody>
                   {(filteredAttendanceReport.length ? filteredAttendanceReport : filteredAttendanceToday).map((row) => {
                     const attendanceStatus = row.attendanceStatus || row.status || 'absent';
                     return (
                       <tr key={valueId(row) || `${row.email}-${row.date}`} className="border-t border-slate-200 align-top">
                         <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.date, 'Today')}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkInTime || row.checkInAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkOutTime || row.checkOutAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText(row.totalWorkTime || row.workDuration)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText(row.totalBreakTime || row.breakDuration)}</td>
                         <td className="py-3 pr-4"><Badge tone={toneForStatus(attendanceStatus)}>{statusLabel(attendanceStatus, 'Absent')}</Badge></td>
-                        <td className="py-3 pr-4"><Badge tone={toneForStatus(row.correctionStatus)}>{statusLabel(row.correctionStatus, 'No Correction')}</Badge></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.shift || row.schedule || row.shiftName)}</td>
+                        <td className="py-3 pr-4"><ActionButton disabled={!canManage || loadState === 'offline'}>Correct Attendance</ActionButton></td>
                       </tr>
                     );
                   })}
@@ -434,7 +466,7 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Leave Request</th><th className="py-2 pr-4">Dates</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4">Off Day Calendar</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Staff</th><th className="py-2 pr-4">Leave Type</th><th className="py-2 pr-4">Start Date</th><th className="py-2 pr-4">End Date</th><th className="py-2 pr-4">Reason</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4">Approve / Reject</th></tr></thead>
                 <tbody>
                   {filteredLeaveRequests.map((row) => {
                     const id = valueId(row);
@@ -442,10 +474,11 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
                     return (
                       <tr key={id || `${row.email}-${row.startDate}`} className="border-t border-slate-200 align-top">
                         <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.reason || row.type, 'Leave request')}</td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.startDate)} to {displayText(row.endDate)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{statusLabel(row.type, 'Leave')}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.startDate)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.endDate)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.reason, '-')}</td>
                         <td className="py-3 pr-4"><Badge tone={toneForStatus(row.status)}>{statusLabel(row.status, 'Pending')}</Badge></td>
-                        <td className="py-3 pr-4 text-slate-700">{displayText(row.offDay || row.weeklyOffDay, 'Not marked')}</td>
                         <td className="py-3 pr-4"><div className="flex flex-wrap gap-2"><ActionButton disabled={!canManage || !pending || !id || loadState === 'offline'} onClick={() => runAction('Leave approved', () => approveLeaveRequest(id))}>Approve Leave</ActionButton><ActionButton disabled={!canManage || !pending || !id || loadState === 'offline'} onClick={() => runAction('Leave rejected', () => rejectLeaveRequest(id))}>Reject Leave</ActionButton><ActionButton disabled={!canManage || loadState === 'offline'}>Mark Off Day</ActionButton></div></td>
                       </tr>
                     );
@@ -472,23 +505,37 @@ export default function StaffActivityAttendance({ teamRows }: Props) {
             {!canManage ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">View My Schedule is limited to your own schedule.</div> : null}
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Schedule</th><th className="py-2 pr-4">Staff / Role</th><th className="py-2 pr-4">Start Time</th><th className="py-2 pr-4">End Time</th><th className="py-2 pr-4">Weekly Off Day</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Shift Name</th><th className="py-2 pr-4">Start Time</th><th className="py-2 pr-4">End Time</th><th className="py-2 pr-4">Weekly Off</th><th className="py-2 pr-4">Assigned Staff</th><th className="py-2 pr-4">Assigned Role</th><th className="py-2 pr-4">Status</th></tr></thead>
                 <tbody>
                   {filteredSchedules.map((row) => (
                     <tr key={valueId(row) || `${row.staffId}-${row.role}-${row.startTime}`} className="border-t border-slate-200 align-top">
                       <td className="py-3 pr-4 font-semibold text-slate-950">{displayText(row.title, 'Default schedule')}</td>
-                      <td className="py-3 pr-4 text-slate-700">{displayText([row.staffId || row.email, row.role].filter(Boolean).join(' / '), 'Own schedule')}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.startTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.endTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.weeklyOffDay)}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayText(row.staffId || row.email, 'Own schedule')}</td>
+                      <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
                       <td className="py-3 pr-4"><Badge tone={row.active === false || normalize(row.status) === 'inactive' ? 'slate' : 'emerald'}>{row.active === false || normalize(row.status) === 'inactive' ? 'Inactive' : 'Active'}</Badge></td>
-                      <td className="py-3 pr-4"><ActionButton disabled={!canManage || loadState === 'offline'}>Assign Schedule</ActionButton></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {!filteredSchedules.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No schedules available yet.</div> : null}
+          </div>
+        )}
+
+        {activeTab === 'reports' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              Reports use the same attendance dataset and range filters shown in the Attendance tab.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {['daily', 'weekly', 'monthly'].map((range) => (
+                <button key={range} type="button" onClick={() => { setReportRange(range); void loadActivity(range); }} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${reportRange === range ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>{statusLabel(range)}</button>
+              ))}
+              <ActionButton disabled={loadState === 'offline'}>Export Report</ActionButton>
+            </div>
           </div>
         )}
       </div>

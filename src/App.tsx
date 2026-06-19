@@ -102,6 +102,7 @@ import SettingsCenterLayout from '@pages/admin/settings/SettingsCenterLayout';
 import AdminPanelSettingsLayout from '@pages/admin/settings/AdminPanelSettingsLayout';
 import PublicSiteSettingsLayout from '@pages/admin/settings/PublicSiteSettingsLayout';
 import TeamManagement from '@pages/admin/settings/admin-panel/TeamManagement';
+import StaffActivityAttendance from '@pages/admin/settings/admin-panel/StaffActivityAttendance';
 import SecurityAdmin from '@pages/admin/settings/admin-panel/SecurityAdmin';
 import TranslationSettings from '@pages/admin/settings/admin-panel/TranslationSettings';
 import TranslationGlossary from '@pages/admin/settings/admin-panel/TranslationGlossary';
@@ -359,6 +360,7 @@ function App() {
                 <Route path="admin-panel" element={<AdminPanelSettingsLayout />}>
                   <Route index element={<Navigate to="team" replace />} />
                   <Route path="team" element={<AdminModuleRoute moduleKey="team_management"><TeamManagement /></AdminModuleRoute>} />
+                  <Route path="staff-activity-attendance" element={<AdminModuleRoute moduleKey="team_management"><StaffActivityAttendance /></AdminModuleRoute>} />
                   <Route path="security" element={<SecurityAdmin />} />
                   <Route path="translation" element={<TranslationSettings />} />
                   <Route path="translation-glossary" element={<TranslationGlossary />} />

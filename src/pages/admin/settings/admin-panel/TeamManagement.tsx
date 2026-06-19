@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { toast } from 'react-hot-toast';
 import {
@@ -27,7 +28,6 @@ import {
   type AdminModuleKey,
   type SpecialRightKey,
 } from '@/lib/adminAccessControl';
-import StaffActivityAttendance from './StaffActivityAttendance';
 
 const FOUNDER_EMAIL = 'newspulse.team@gmail.com';
 const FOUNDER_NAME = 'News Pulse Founder';
@@ -197,6 +197,8 @@ const roleById = (role?: string) => {
 };
 
 const checkboxGridClass = 'grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3';
+const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
+const fieldLabelClass = 'space-y-1.5 text-sm font-semibold text-slate-800';
 
 function toggleValue<T extends string>(values: T[], value: T, checked: boolean): T[] {
   if (checked) return Array.from(new Set([...values, value]));
@@ -312,7 +314,7 @@ function CheckboxList<T extends string>({
   return (
     <div className={checkboxGridClass}>
       {items.map((item) => (
-        <label key={item.key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        <label key={item.key} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
           <input
             type="checkbox"
             checked={values.includes(item.key)}
@@ -334,16 +336,23 @@ function BadgePill({ badge: roleBadge }: { badge: RoleBadge }) {
   );
 }
 
-function SectionCard({ title, children }: { title: string; children: ReactNode }) {
+function SectionCard({ title, subtitle, id, actions, children }: { title: string; subtitle?: string; id?: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-base font-semibold text-slate-950">{title}</div>
+    <section id={id} className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-base font-semibold text-slate-950">{title}</div>
+          {subtitle ? <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{subtitle}</p> : null}
+        </div>
+        {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+      </div>
       <div className="mt-4">{children}</div>
     </section>
   );
 }
 
 export default function TeamManagement() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const role = String(user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
@@ -653,7 +662,7 @@ export default function TeamManagement() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-lg font-semibold text-slate-950">Team Management</div>
-            <div className="mt-1 text-sm text-slate-600">News Pulse role planning, Founder protection, staff invites, editorial permissions, and Live TV access control.</div>
+            <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Founder protection, staff accounts, roles, access control, password safety, and attendance planning.</div>
             {!isFounder && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Access denied: founder-only controls are disabled.</div>}
           </div>
           <button type="button" onClick={fetchStaff} disabled={loading} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
@@ -692,7 +701,7 @@ export default function TeamManagement() {
       )}
 
       <SectionCard title="Founder Protection">
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-950">
           <div className="text-base font-semibold">Founder Protection Active</div>
           <div className="mt-3 space-y-1 leading-6">
             <p>Founder has full ownership and all rights reserved.</p>
@@ -703,37 +712,69 @@ export default function TeamManagement() {
       </SectionCard>
 
       <SectionCard title="Password Reset / Temporary Password">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-800">
           <div className="text-base font-semibold text-slate-950">News Pulse never stores readable passwords.</div>
           <div className="mt-3 space-y-1 leading-6">
             <p>No one can view current staff passwords, including Founder and Admin.</p>
-            <p>Founder/Admin can reset passwords, generate one-time temporary passwords, force password changes, suspend accounts, and revoke sessions.</p>
             <p>Temporary passwords are visible only once and expire automatically.</p>
           </div>
         </div>
       </SectionCard>
 
-      <SectionCard title="Role Overview">
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {ROLE_CONFIGS.map((roleItem) => (
-            <div key={roleItem.id} className={`rounded-xl border p-4 ${roleItem.protected ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="font-semibold text-slate-950">{roleItem.label}</div>
-                <div className="flex flex-wrap gap-1.5">{roleItem.badges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-slate-700">{roleItem.description}</p>
+      <SectionCard title="Create Staff Account" subtitle="Invite staff with account status, role, access expiry, and password-safety options.">
+        <form className="space-y-5" onSubmit={handleCreate}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <label className={fieldLabelClass}>Full Name<input value={createForm.name} onChange={(e) => setCreateForm((state) => ({ ...state, name: e.target.value }))} placeholder="Full Name" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Email / Login ID<input value={createForm.email} onChange={(e) => setCreateForm((state) => ({ ...state, email: e.target.value }))} placeholder="Email / Login ID" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Staff ID<input value={createForm.staffId} onChange={(e) => setCreateForm((state) => ({ ...state, staffId: e.target.value }))} placeholder={`Staff ID (${draftStaffId})`} aria-label="Staff ID" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Role<select value={createForm.role} onChange={(e) => setCreateForm((state) => ({ ...state, role: e.target.value }))} className={inputClass}>
+              {roleOptions.map((roleItem) => <option key={roleItem.id} value={roleItem.id} disabled={roleItem.protected}>{roleItem.label}{roleItem.protected ? ' (protected)' : ''}</option>)}
+            </select></label>
+            <label className={fieldLabelClass}>Department<input value={createForm.department} onChange={(e) => setCreateForm((state) => ({ ...state, department: e.target.value }))} placeholder="Department" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Assigned Sections<input value={createForm.assignedSections} onChange={(e) => setCreateForm((state) => ({ ...state, assignedSections: e.target.value }))} placeholder="Assigned Sections" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Account Status<select value={createForm.accountStatus} onChange={(e) => setCreateForm((state) => ({ ...state, accountStatus: e.target.value }))} className={inputClass}>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="suspended">Suspended</option>
+              <option value="locked">Locked</option>
+            </select></label>
+            <label className={fieldLabelClass}>Access Expiry Date<input type="date" value={createForm.expiresAt} onChange={(e) => setCreateForm((state) => ({ ...state, expiresAt: e.target.value }))} className={inputClass} /></label>
+            <label className={fieldLabelClass}>Designation<input value={createForm.designation} onChange={(e) => setCreateForm((state) => ({ ...state, designation: e.target.value }))} placeholder="Designation" className={inputClass} /></label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
+              <input type="checkbox" checked={createForm.generateTemporaryPassword} onChange={(e) => setCreateForm((state) => ({ ...state, generateTemporaryPassword: e.target.checked }))} />
+              Generate Temporary Password
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
+              <input type="checkbox" checked={createForm.mustChangePassword} onChange={(e) => setCreateForm((state) => ({ ...state, mustChangePassword: e.target.checked }))} />
+              Must Change Password on First Login
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <label className={fieldLabelClass}>Special Permissions<textarea value={createForm.permissions} onChange={(e) => setCreateForm((state) => ({ ...state, permissions: e.target.value }))} placeholder="Optional, comma-separated" className={`${inputClass} min-h-28`} /></label>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <div className="font-semibold text-slate-900">Selected role plan: {selectedRole?.label}</div>
+              <p className="mt-2 leading-6">{selectedRole?.description}</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">{selectedRole?.badges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div>
+              <div className="mt-3 text-xs text-slate-600">Default permissions are applied unless special permissions are entered above.</div>
             </div>
-          ))}
-        </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={!isFounder || creating} className={`rounded-lg px-4 py-2 text-sm font-semibold ${isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700'}`}>{creating ? 'Creating...' : 'Create Account'}</button>
+            {!isFounder && <div className="text-xs text-slate-600">Founder-only</div>}
+          </div>
+        </form>
       </SectionCard>
 
-      <SectionCard title="Create / Manage Roles">
-        <form className="space-y-4" onSubmit={handleSaveRole}>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-            <input value={roleForm.roleName} onChange={(e) => setRoleForm((state) => ({ ...state, roleName: e.target.value }))} placeholder="Role Name" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input type="number" min={1} value={roleForm.sortOrder} onChange={(e) => setRoleForm((state) => ({ ...state, sortOrder: Number(e.target.value) }))} placeholder="Sort Order" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input value={roleForm.description} onChange={(e) => setRoleForm((state) => ({ ...state, description: e.target.value }))} placeholder="Role Description" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm lg:col-span-2" />
+      <SectionCard title="Create / Manage Roles" subtitle="Create custom roles, set display rank, and grant module access or special rights.">
+        <form className="space-y-5" onSubmit={handleSaveRole}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+            <label className={fieldLabelClass}>Role Name<input value={roleForm.roleName} onChange={(e) => setRoleForm((state) => ({ ...state, roleName: e.target.value }))} placeholder="Role Name" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Sort Order / Display Rank<input type="number" min={1} value={roleForm.sortOrder} onChange={(e) => setRoleForm((state) => ({ ...state, sortOrder: Number(e.target.value) }))} placeholder="99" className={inputClass} /></label>
+            <label className={`${fieldLabelClass} lg:col-span-2`}>Role Description<input value={roleForm.description} onChange={(e) => setRoleForm((state) => ({ ...state, description: e.target.value }))} placeholder="Role Description" className={inputClass} /></label>
           </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">Lower number appears higher in the role list. Custom roles can use 99 by default.</div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 font-semibold text-slate-700">Custom Role</span>
             <span className="text-slate-600">System Role / Custom Role indicator</span>
@@ -753,53 +794,7 @@ export default function TeamManagement() {
         </form>
       </SectionCard>
 
-      <SectionCard title="Create Staff Account">
-        <form className="space-y-4" onSubmit={handleCreate}>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <input value={createForm.name} onChange={(e) => setCreateForm((state) => ({ ...state, name: e.target.value }))} placeholder="Full name" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input value={createForm.email} onChange={(e) => setCreateForm((state) => ({ ...state, email: e.target.value }))} placeholder="Email / Login ID" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input value={createForm.staffId} onChange={(e) => setCreateForm((state) => ({ ...state, staffId: e.target.value }))} placeholder={`Staff ID (${draftStaffId})`} aria-label="Staff ID" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <select value={createForm.role} onChange={(e) => setCreateForm((state) => ({ ...state, role: e.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
-              {roleOptions.map((roleItem) => <option key={roleItem.id} value={roleItem.id} disabled={roleItem.protected}>{roleItem.label}{roleItem.protected ? ' (protected)' : ''}</option>)}
-            </select>
-            <input value={createForm.department} onChange={(e) => setCreateForm((state) => ({ ...state, department: e.target.value }))} placeholder="Department" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input value={createForm.assignedSections} onChange={(e) => setCreateForm((state) => ({ ...state, assignedSections: e.target.value }))} placeholder="Assigned Sections (comma-separated)" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <select value={createForm.accountStatus} onChange={(e) => setCreateForm((state) => ({ ...state, accountStatus: e.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
-              <option value="active">Active</option>
-              <option value="pending">Pending</option>
-              <option value="suspended">Suspended</option>
-              <option value="locked">Locked</option>
-            </select>
-            <input type="date" value={createForm.expiresAt} onChange={(e) => setCreateForm((state) => ({ ...state, expiresAt: e.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <input value={createForm.designation} onChange={(e) => setCreateForm((state) => ({ ...state, designation: e.target.value }))} placeholder="Designation (optional)" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <input type="checkbox" checked={createForm.generateTemporaryPassword} onChange={(e) => setCreateForm((state) => ({ ...state, generateTemporaryPassword: e.target.checked }))} />
-              Generate Temporary Password
-            </label>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <input type="checkbox" checked={createForm.mustChangePassword} onChange={(e) => setCreateForm((state) => ({ ...state, mustChangePassword: e.target.checked }))} />
-              Must Change Password on First Login
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <textarea value={createForm.permissions} onChange={(e) => setCreateForm((state) => ({ ...state, permissions: e.target.value }))} placeholder="Special permissions (optional, comma-separated)" className="min-h-24 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-              <div className="font-semibold text-slate-900">Selected role plan: {selectedRole?.label}</div>
-              <p className="mt-2 leading-6">{selectedRole?.description}</p>
-              <div className="mt-3 flex flex-wrap gap-1.5">{selectedRole?.badges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div>
-              <div className="mt-3 text-xs text-slate-600">Default permissions are applied unless special permissions are entered above.</div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" disabled={!isFounder || creating} className={`rounded-lg px-4 py-2 text-sm font-semibold ${isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700'}`}>{creating ? 'Creating...' : 'Create Account'}</button>
-            {!isFounder && <div className="text-xs text-slate-600">Founder-only</div>}
-          </div>
-        </form>
-      </SectionCard>
-
-      <SectionCard title="Role Access Control">
+      <SectionCard title="Role Access Control" subtitle="Review default modules and special rights for system and custom roles.">
         <div className="space-y-4">
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">Role gives default access. Founder can customize access for any individual staff member.</div>
           <div className="overflow-x-auto">
@@ -825,6 +820,20 @@ export default function TeamManagement() {
               </tbody>
             </table>
           </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Role Overview">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+          {ROLE_CONFIGS.map((roleItem) => (
+            <div key={roleItem.id} className={`rounded-xl border p-4 ${roleItem.protected ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="font-semibold text-slate-950">{roleItem.label}</div>
+                <div className="flex flex-wrap gap-1.5">{roleItem.badges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-700">{roleItem.description}</p>
+            </div>
+          ))}
         </div>
       </SectionCard>
 
@@ -906,13 +915,29 @@ export default function TeamManagement() {
         </div>
       </SectionCard>
 
-      <StaffActivityAttendance teamRows={teamRows} />
+      <SectionCard
+        title="Staff Activity & Attendance"
+        subtitle="Track online status, login/logout, attendance, breaks, off days, leave, and schedules."
+        actions={(
+          <button
+            type="button"
+            onClick={() => navigate('/admin/settings/admin-panel/staff-activity-attendance')}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Open Staff Activity & Attendance
+          </button>
+        )}
+      >
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+          Login/logout and attendance records now live on their own Settings Center page.
+        </div>
+      </SectionCard>
 
-      <SectionCard title="Staff List">
+      <SectionCard title="Staff List" subtitle="Account Status is account access. Online Status is live presence.">
         {loading ? <div className="text-slate-600">Loading...</div> : err ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">{err} Showing the protected founder account view below.</div> : null}
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead><tr className="text-left text-slate-600"><th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Email / Login ID</th><th className="py-2 pr-3">Staff ID</th><th className="py-2 pr-3">Role</th><th className="py-2 pr-3">Account Status</th><th className="py-2 pr-3">Online Status</th><th className="py-2 pr-3">Last Login</th><th className="py-2 pr-3">Last Logout</th><th className="py-2 pr-3">Today Attendance</th><th className="py-2 pr-3">Break Status</th><th className="py-2 pr-3">Shift / Schedule</th><th className="py-2 pr-3">Actions</th></tr></thead>
+            <thead><tr className="text-left text-slate-600"><th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Email / Login ID</th><th className="py-2 pr-3">Staff ID</th><th className="py-2 pr-3">Role</th><th className="py-2 pr-3">Account Status</th><th className="py-2 pr-3">Online Status</th><th className="py-2 pr-3">Last Login</th><th className="py-2 pr-3">Last Logout</th><th className="py-2 pr-3">Actions</th></tr></thead>
             <tbody>
               {teamRows.map((teamUser) => {
                 const id = userId(teamUser);
@@ -920,11 +945,9 @@ export default function TeamManagement() {
                 const active = founder || isUserActive(teamUser);
                 const accountStatus = founder ? 'Active' : accountStatusFor(teamUser, active);
                 const onlineStatus = onlineStatusFor(teamUser);
-                const attendanceStatus = attendanceStatusFor(teamUser);
-                const breakStatus = breakStatusFor(teamUser);
                 const busy = rowBusyId === id;
                 const rowRole = founder ? roleById('founder') : roleById(teamUser.role);
-                const rowBadges = rowRole?.badges || [badge('Limited', 'limited')];
+                const rowBadges = founder ? [badge('Founder', 'protected'), ...(rowRole?.badges || [])] : rowRole?.badges || [badge('Limited', 'limited')];
                 return (
                   <tr key={id || `${teamUser.email}-${teamUser.name}`} className="border-t border-slate-200 align-top">
                     <td className="py-3 pr-3 font-medium text-slate-900">{teamUser.name || (founder ? FOUNDER_NAME : 'Unnamed staff')}</td>
@@ -935,9 +958,6 @@ export default function TeamManagement() {
                     <td className="py-3 pr-3"><StatusPill label={onlineStatus} /></td>
                     <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</td>
                     <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogout || teamUser.lastLogoutAt || teamUser.logoutAt)}</td>
-                    <td className="py-3 pr-3"><StatusPill label={attendanceStatus} /></td>
-                    <td className="py-3 pr-3"><StatusPill label={breakStatus} tone={breakStatus === 'On Break' ? 'sky' : 'slate'} /></td>
-                    <td className="py-3 pr-3 text-slate-700">{shiftFor(teamUser)}</td>
                     <td className="py-3 pr-3">
                       {founder ? (
                         <div className="flex flex-wrap gap-2">
