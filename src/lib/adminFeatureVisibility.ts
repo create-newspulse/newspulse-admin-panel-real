@@ -6,6 +6,7 @@ export const OWNER_CONTROLLED_FEATURES = [
   { key: 'reporter-portal', apiKey: 'reporterPortalAdmin', label: 'Reporter Portal Admin' },
   { key: 'broadcast-center', apiKey: 'broadcastCenter', label: 'Broadcast Center' },
   { key: 'ads', apiKey: 'adsManager', label: 'Ads Manager' },
+  { key: 'finance', apiKey: 'financeDesk', label: 'Finance Desk' },
   { key: 'media', apiKey: 'media', label: 'Media' },
   { key: 'viral-videos', apiKey: 'viralVideos', label: 'Viral Videos' },
   { key: 'aira', apiKey: 'aira', label: 'AIRA' },

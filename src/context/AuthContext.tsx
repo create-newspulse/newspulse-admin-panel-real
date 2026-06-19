@@ -5,7 +5,19 @@ import { adminApi } from '@/lib/adminApi';
 import { hasLikelyAdminSession } from '@/lib/api';
 import { ADMIN_API_BASE } from '@/lib/http/adminFetch';
 
-type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string };
+type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string; [key: string]: any };
+
+function normalizeAuthUser(raw: any, fallback?: Partial<User>): User {
+  const source = raw || {};
+  return {
+    ...source,
+    id: String(source.id || source._id || fallback?.id || ''),
+    _id: String(source._id || source.id || fallback?._id || ''),
+    email: String(source.email || fallback?.email || ''),
+    name: String(source.name || fallback?.name || ''),
+    role: String(source.role || fallback?.role || ''),
+  };
+}
 
 export interface AuthContextValue {
   user: User | null;
@@ -111,13 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: data.role,
         name: data.name,
       };
-      const normalizedUser: User = {
-        id: String(u.id || u._id || ''),
-        _id: String(u._id || u.id || ''),
-        email: String(u.email || ''),
-        name: String(u.name || ''),
-        role: String(u.role || ''),
-      };
+      const normalizedUser = normalizeAuthUser(u);
       setUser(normalizedUser);
 
       // Persist minimal auth info
@@ -139,13 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const rawMe = me.data || {};
         const u2 = rawMe.user || rawMe.data?.user || rawMe.data || rawMe;
         if (u2 && (u2.email || u2.role)) {
-          const refreshed: User = {
-            id: String(u2.id || u2._id || normalizedUser.id || ''),
-            _id: String(u2._id || u2.id || normalizedUser._id || ''),
-            email: String(u2.email || normalizedUser.email || ''),
-            name: String(u2.name || normalizedUser.name || ''),
-            role: String(u2.role || normalizedUser.role || ''),
-          };
+          const refreshed = normalizeAuthUser(u2, normalizedUser);
           setUser(refreshed);
           try {
             const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
@@ -351,13 +351,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const raw = res.data || {};
       const u = raw.user || raw.data?.user || raw.data || raw;
       if (u && (u.email || u.role)) {
-        const restored: User = {
-          id: String(u.id || u._id || ''),
-          _id: String(u._id || u.id || ''),
-          email: String(u.email || ''),
-          name: String(u.name || ''),
-          role: String(u.role || ''),
-        };
+        const restored = normalizeAuthUser(u);
         setUser(restored);
         try {
           const persistPayload = { token: token, email: restored.email, role: restored.role, ts: Date.now() };

@@ -1,0 +1,497 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { toast } from 'react-hot-toast';
+import { useAuth } from '@context/AuthContext';
+import {
+  approveLeaveRequest,
+  attendanceBreakEnd,
+  attendanceBreakStart,
+  attendanceCheckIn,
+  attendanceCheckOut,
+  createSchedule,
+  getAttendanceReport,
+  getAttendanceToday,
+  getLeaveRequests,
+  getSchedules,
+  getTeamPresence,
+  getTeamSessionLogs,
+  rejectLeaveRequest,
+  requestLeave,
+  sendTeamPresenceHeartbeat,
+  toFriendlyErrorMessage,
+  type AttendanceRecord,
+  type LeaveRequestRow,
+  type ScheduleRow,
+  type TeamPresenceRow,
+  type TeamSessionLog,
+  type TeamUser,
+} from '@/api/adminPanelSettingsApi';
+
+type Props = {
+  teamRows: TeamUser[];
+};
+
+type ActivityTab = 'activity' | 'attendance' | 'breaks' | 'leave' | 'schedule';
+type LoadState = 'idle' | 'loading' | 'ready' | 'offline';
+type BadgeTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue' | 'violet';
+
+const ACCESS_DENIED = 'Access Denied\n\nYou do not have permission to view staff activity or attendance.\nFounder permission is required.';
+
+const tabLabels: Record<ActivityTab, string> = {
+  activity: 'Staff Activity',
+  attendance: 'Attendance',
+  breaks: 'Break',
+  leave: 'Leave / Off Days',
+  schedule: 'Schedule',
+};
+
+const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function normalize(value?: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function userKey(row?: { userId?: string; id?: string; _id?: string; email?: string; staffId?: string } | null): string {
+  return normalize(row?.userId || row?.id || row?._id || row?.email || row?.staffId);
+}
+
+function teamUserKey(row?: TeamUser | null): string {
+  return normalize(row?.id || row?._id || row?.email || row?.staffId);
+}
+
+function isSamePerson(row: { userId?: string; id?: string; _id?: string; email?: string; staffId?: string }, currentUser: any): boolean {
+  const currentKeys = [currentUser?.id, currentUser?._id, currentUser?.email, currentUser?.staffId].map(normalize).filter(Boolean);
+  const rowKeys = [row.userId, row.id, row._id, row.email, row.staffId].map(normalize).filter(Boolean);
+  return rowKeys.some((key) => currentKeys.includes(key));
+}
+
+function hasGrant(user: any): boolean {
+  const permissions = [
+    ...(Array.isArray(user?.permissions) ? user.permissions : []),
+    ...(Array.isArray(user?.specialRights) ? user.specialRights : []),
+    ...(Array.isArray(user?.moduleAccess) ? user.moduleAccess : []),
+    ...(Array.isArray(user?.accessOverrides?.specialRights) ? user.accessOverrides.specialRights : []),
+    ...(Array.isArray(user?.accessOverrides?.modules) ? user.accessOverrides.modules : []),
+  ].map(normalize);
+  return permissions.some((item) => ['team.view_activity', 'auth.view_login_activity', 'team_management', 'can_view_staff_activity', 'can_manage_attendance'].includes(item));
+}
+
+function displayDateTime(value?: string | null): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function displayText(value?: unknown, fallback = '-'): string {
+  const text = String(value || '').trim();
+  return text || fallback;
+}
+
+function valueId(row: { id?: string; _id?: string }): string {
+  return String(row.id || row._id || '').trim();
+}
+
+function statusLabel(value?: unknown, fallback = 'Pending'): string {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  return raw.split(/[_\s-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(' ');
+}
+
+function toneForStatus(value?: unknown): BadgeTone {
+  const status = normalize(value);
+  if (['online', 'present', 'approved', 'active'].includes(status)) return 'emerald';
+  if (['idle', 'late', 'pending', 'half day', 'half_day'].includes(status)) return 'amber';
+  if (['on break', 'on_break'].includes(status)) return 'sky';
+  if (['on leave', 'on_leave', 'off day', 'off_day'].includes(status)) return 'blue';
+  if (['rejected', 'absent', 'suspended', 'locked', 'expired'].includes(status)) return 'rose';
+  return 'slate';
+}
+
+function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?: BadgeTone }) {
+  const classes: Record<BadgeTone, string> = {
+    emerald: 'border-emerald-200 bg-emerald-100 text-emerald-800',
+    amber: 'border-amber-200 bg-amber-100 text-amber-800',
+    rose: 'border-rose-200 bg-rose-100 text-rose-800',
+    sky: 'border-sky-200 bg-sky-100 text-sky-800',
+    slate: 'border-slate-200 bg-slate-100 text-slate-700',
+    blue: 'border-blue-200 bg-blue-100 text-blue-800',
+    violet: 'border-violet-200 bg-violet-100 text-violet-800',
+  };
+  return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${classes[tone]}`}>{children}</span>;
+}
+
+function AccessDenied() {
+  return (
+    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+      {ACCESS_DENIED.split('\n').map((line, index) => (
+        <p key={`${line}-${index}`} className={index === 0 ? 'text-base font-semibold' : line ? 'mt-1' : 'mt-3'}>{line}</p>
+      ))}
+    </div>
+  );
+}
+
+function BackendOfflineBanner({ loadState }: { loadState: LoadState }) {
+  if (loadState !== 'offline') return null;
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      Backend not connected yet. Activity, attendance, leave, and schedule controls are shown safely with unavailable actions disabled.
+    </div>
+  );
+}
+
+function ActionButton({ children, disabled, onClick }: { children: ReactNode; disabled?: boolean; onClick?: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+export default function StaffActivityAttendance({ teamRows }: Props) {
+  const { user } = useAuth();
+  const role = normalize(user?.role);
+  const canViewAll = role === 'founder' || hasGrant(user);
+  const canUseOwn = Boolean(user?.id || user?._id || user?.email);
+  const canManage = canViewAll;
+
+  const [activeTab, setActiveTab] = useState<ActivityTab>('activity');
+  const [loadState, setLoadState] = useState<LoadState>('idle');
+  const [presence, setPresence] = useState<TeamPresenceRow[]>([]);
+  const [sessionLogs, setSessionLogs] = useState<TeamSessionLog[]>([]);
+  const [attendanceToday, setAttendanceToday] = useState<AttendanceRecord[]>([]);
+  const [attendanceReport, setAttendanceReport] = useState<AttendanceRecord[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
+  const [reportRange, setReportRange] = useState('daily');
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [breakReason, setBreakReason] = useState('');
+  const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' });
+  const [scheduleForm, setScheduleForm] = useState({ title: '', staffId: '', role: '', startTime: '', endTime: '', weeklyOffDay: 'Sunday', active: true });
+
+  const visibleTeamRows = useMemo(() => {
+    if (canViewAll) return teamRows;
+    return teamRows.filter((row) => isSamePerson(row as any, user));
+  }, [canViewAll, teamRows, user]);
+
+  const filteredPresence = useMemo(() => canViewAll ? presence : presence.filter((row) => isSamePerson(row, user)), [canViewAll, presence, user]);
+  const filteredLogs = useMemo(() => canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user)), [canViewAll, sessionLogs, user]);
+  const filteredAttendanceToday = useMemo(() => canViewAll ? attendanceToday : attendanceToday.filter((row) => isSamePerson(row, user)), [attendanceToday, canViewAll, user]);
+  const filteredAttendanceReport = useMemo(() => canViewAll ? attendanceReport : attendanceReport.filter((row) => isSamePerson(row, user)), [attendanceReport, canViewAll, user]);
+  const filteredLeaveRequests = useMemo(() => canViewAll ? leaveRequests : leaveRequests.filter((row) => isSamePerson(row, user)), [canViewAll, leaveRequests, user]);
+  const filteredSchedules = useMemo(() => canViewAll ? schedules : schedules.filter((row) => isSamePerson(row, user)), [canViewAll, schedules, user]);
+
+  const activityRows = useMemo(() => {
+    const byKey = new Map<string, TeamPresenceRow & TeamSessionLog & TeamUser>();
+    visibleTeamRows.forEach((row) => byKey.set(teamUserKey(row), { ...row }));
+    filteredPresence.forEach((row) => byKey.set(userKey(row), { ...(byKey.get(userKey(row)) || {}), ...row }));
+    filteredLogs.forEach((row) => byKey.set(userKey(row), { ...(byKey.get(userKey(row)) || {}), ...row }));
+    return Array.from(byKey.values());
+  }, [filteredLogs, filteredPresence, visibleTeamRows]);
+
+  const dashboardCards = useMemo(() => {
+    const onlineNow = presence.filter((row) => normalize(row.onlineStatus || row.status) === 'online').length;
+    const idle = presence.filter((row) => normalize(row.onlineStatus || row.status) === 'idle').length;
+    const onBreakPresence = presence.filter((row) => ['on break', 'on_break'].includes(normalize(row.onlineStatus || row.status))).length;
+    const presentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'present').length;
+    const absentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'absent').length;
+    const lateToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'late').length;
+    const onLeave = attendanceToday.filter((row) => ['on leave', 'on_leave'].includes(normalize(row.attendanceStatus || row.status))).length;
+    const offDay = attendanceToday.filter((row) => ['off day', 'off_day'].includes(normalize(row.attendanceStatus || row.status))).length;
+    const pendingLeave = leaveRequests.filter((row) => normalize(row.status) === 'pending').length;
+    return [
+      ['Online Now', onlineNow],
+      ['Idle', idle],
+      ['On Break', onBreakPresence],
+      ['Present Today', presentToday],
+      ['Absent Today', absentToday],
+      ['Late Today', lateToday],
+      ['On Leave', onLeave],
+      ['Off Day', offDay],
+      ['Pending Leave Requests', pendingLeave],
+    ] as const;
+  }, [attendanceToday, leaveRequests, presence]);
+
+  async function loadActivity(range = reportRange) {
+    if (!canUseOwn && !canViewAll) return;
+    setLoadState('loading');
+    const results = await Promise.allSettled([
+      getTeamPresence(),
+      getTeamSessionLogs(),
+      getAttendanceToday(),
+      getAttendanceReport(range),
+      getLeaveRequests(),
+      getSchedules(),
+    ]);
+    const [presenceResult, logsResult, todayResult, reportResult, leaveResult, scheduleResult] = results;
+    if (presenceResult.status === 'fulfilled') setPresence(presenceResult.value);
+    if (logsResult.status === 'fulfilled') setSessionLogs(logsResult.value);
+    if (todayResult.status === 'fulfilled') setAttendanceToday(todayResult.value);
+    if (reportResult.status === 'fulfilled') setAttendanceReport(reportResult.value);
+    if (leaveResult.status === 'fulfilled') setLeaveRequests(leaveResult.value);
+    if (scheduleResult.status === 'fulfilled') setSchedules(scheduleResult.value);
+    const anySuccess = results.some((result) => result.status === 'fulfilled');
+    setLoadState(anySuccess ? 'ready' : 'offline');
+  }
+
+  useEffect(() => {
+    void loadActivity();
+    if (canUseOwn) void sendTeamPresenceHeartbeat().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canUseOwn, canViewAll]);
+
+  const runAction = async (label: string, action: () => Promise<any>) => {
+    setActionBusy(label);
+    try {
+      await action();
+      toast.success(label);
+      await loadActivity();
+    } catch (err: any) {
+      toast.error(toFriendlyErrorMessage(err, loadState === 'offline' ? 'Backend not connected yet' : 'Action failed'));
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const submitLeave = async () => {
+    if (!leaveForm.startDate || !leaveForm.endDate) {
+      toast.error('Select leave start and end dates.');
+      return;
+    }
+    await runAction('Leave request submitted', () => requestLeave({ ...leaveForm, type: 'leave' }));
+    setLeaveForm({ startDate: '', endDate: '', reason: '' });
+  };
+
+  const submitSchedule = async () => {
+    if (!canManage) return;
+    if (!scheduleForm.startTime || !scheduleForm.endTime) {
+      toast.error('Enter schedule start and end time.');
+      return;
+    }
+    await runAction('Schedule assigned', () => createSchedule(scheduleForm));
+  };
+
+  const renderAccessCheck = (children: ReactNode) => {
+    if (!canViewAll && !canUseOwn) return <AccessDenied />;
+    return children;
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-base font-semibold text-slate-950">Staff Activity &amp; Attendance</div>
+          <div className="mt-1 text-sm text-slate-600">Security login/logout tracking is kept separate from attendance check-in/check-out records.</div>
+        </div>
+        <button type="button" onClick={() => loadActivity()} disabled={loadState === 'loading'} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
+          {loadState === 'loading' ? 'Refreshing...' : 'Refresh Activity'}
+        </button>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <BackendOfflineBanner loadState={loadState} />
+        {!canViewAll && canUseOwn ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">You can view only your own attendance, schedule, leave, and login/logout records.</div> : null}
+
+        {canViewAll ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {dashboardCards.map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+                <div className="mt-2 text-2xl font-semibold text-slate-950">{value}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+          {(Object.keys(tabLabels) as ActivityTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-lg border px-3 py-2 text-sm font-semibold ${activeTab === tab ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+            >
+              {tabLabels[tab]}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'activity' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Online Status</th><th className="py-2 pr-4">Last Login</th><th className="py-2 pr-4">Last Logout</th><th className="py-2 pr-4">Last Seen</th><th className="py-2 pr-4">Device / Browser</th><th className="py-2 pr-4">IP Address</th><th className="py-2 pr-4">Session Duration</th><th className="py-2 pr-4">Logout Reason</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <tbody>
+                  {activityRows.map((row) => {
+                    const status = row.onlineStatus || row.status || 'offline';
+                    return (
+                      <tr key={userKey(row) || `${row.email}-${row.name}`} className="border-t border-slate-200 align-top">
+                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
+                        <td className="py-3 pr-4"><Badge tone={toneForStatus(status)}>{statusLabel(status, 'Offline')}</Badge></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogin || row.loginAt)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastLogout || row.logoutAt)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastSeen)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText([row.device, row.browser].filter(Boolean).join(' / '))}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.ipAddress || row.ip)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.sessionDuration || row.duration)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.logoutReason)}</td>
+                        <td className="py-3 pr-4"><ActionButton disabled={loadState === 'offline'}>View Logs</ActionButton></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!activityRows.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No activity records available yet.</div> : null}
+          </div>
+        )}
+
+        {activeTab === 'attendance' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {['daily', 'weekly', 'monthly'].map((range) => (
+                <button key={range} type="button" onClick={() => { setReportRange(range); void loadActivity(range); }} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${reportRange === range ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>{statusLabel(range)}</button>
+              ))}
+              <ActionButton disabled={loadState === 'offline'}>Export Report</ActionButton>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <ActionButton disabled={!canUseOwn || loadState === 'offline' || Boolean(actionBusy)} onClick={() => runAction('Checked in', attendanceCheckIn)}>Check In</ActionButton>
+              <ActionButton disabled={!canUseOwn || loadState === 'offline' || Boolean(actionBusy)} onClick={() => runAction('Checked out', attendanceCheckOut)}>Check Out</ActionButton>
+              <ActionButton disabled={!canManage || loadState === 'offline'}>Correct Attendance</ActionButton>
+              <ActionButton disabled={!canManage || loadState === 'offline'}>Mark Off Day</ActionButton>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Today Attendance</th><th className="py-2 pr-4">Check-in Time</th><th className="py-2 pr-4">Check-out Time</th><th className="py-2 pr-4">Total Work Time</th><th className="py-2 pr-4">Total Break Time</th><th className="py-2 pr-4">Attendance Status</th><th className="py-2 pr-4">Correction Status</th></tr></thead>
+                <tbody>
+                  {(filteredAttendanceReport.length ? filteredAttendanceReport : filteredAttendanceToday).map((row) => {
+                    const attendanceStatus = row.attendanceStatus || row.status || 'absent';
+                    return (
+                      <tr key={valueId(row) || `${row.email}-${row.date}`} className="border-t border-slate-200 align-top">
+                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.date, 'Today')}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkInTime || row.checkInAt)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkOutTime || row.checkOutAt)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.totalWorkTime || row.workDuration)}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.totalBreakTime || row.breakDuration)}</td>
+                        <td className="py-3 pr-4"><Badge tone={toneForStatus(attendanceStatus)}>{statusLabel(attendanceStatus, 'Absent')}</Badge></td>
+                        <td className="py-3 pr-4"><Badge tone={toneForStatus(row.correctionStatus)}>{statusLabel(row.correctionStatus, 'No Correction')}</Badge></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!filteredAttendanceToday.length && !filteredAttendanceReport.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No attendance records available yet.</div> : null}
+          </div>
+        )}
+
+        {activeTab === 'breaks' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto]">
+              <input value={breakReason} onChange={(event) => setBreakReason(event.target.value)} placeholder="Break reason" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+              <ActionButton disabled={!canUseOwn || loadState === 'offline' || Boolean(actionBusy)} onClick={() => runAction('Break started', () => attendanceBreakStart(breakReason.trim() || undefined))}>Start Break</ActionButton>
+              <ActionButton disabled={!canUseOwn || loadState === 'offline' || Boolean(actionBusy)} onClick={() => runAction('Break ended', attendanceBreakEnd)}>End Break</ActionButton>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {filteredAttendanceToday.map((row) => (
+                <div key={valueId(row) || `${row.email}-break`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    <Field label="Current break status" value={<Badge tone={toneForStatus(row.breakStatus)}>{statusLabel(row.breakStatus, 'Not On Break')}</Badge>} />
+                    <Field label="Break start" value={displayDateTime(row.breakStart || row.breakStartedAt)} />
+                    <Field label="Break end" value={displayDateTime(row.breakEnd || row.breakEndedAt)} />
+                    <Field label="Total break time" value={displayText(row.totalBreakTime || row.breakDuration)} />
+                    <Field label="Break reason" value={displayText(row.breakReason)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {!filteredAttendanceToday.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No break records available yet.</div> : null}
+          </div>
+        )}
+
+        {activeTab === 'leave' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_2fr_auto]">
+              <input type="date" value={leaveForm.startDate} onChange={(event) => setLeaveForm((state) => ({ ...state, startDate: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+              <input type="date" value={leaveForm.endDate} onChange={(event) => setLeaveForm((state) => ({ ...state, endDate: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+              <input value={leaveForm.reason} onChange={(event) => setLeaveForm((state) => ({ ...state, reason: event.target.value }))} placeholder="Leave reason" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+              <ActionButton disabled={!canUseOwn || loadState === 'offline' || Boolean(actionBusy)} onClick={submitLeave}>Request Leave</ActionButton>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Name</th><th className="py-2 pr-4">Leave Request</th><th className="py-2 pr-4">Dates</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4">Off Day Calendar</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <tbody>
+                  {filteredLeaveRequests.map((row) => {
+                    const id = valueId(row);
+                    const pending = normalize(row.status) === 'pending';
+                    return (
+                      <tr key={id || `${row.email}-${row.startDate}`} className="border-t border-slate-200 align-top">
+                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.reason || row.type, 'Leave request')}</td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.startDate)} to {displayText(row.endDate)}</td>
+                        <td className="py-3 pr-4"><Badge tone={toneForStatus(row.status)}>{statusLabel(row.status, 'Pending')}</Badge></td>
+                        <td className="py-3 pr-4 text-slate-700">{displayText(row.offDay || row.weeklyOffDay, 'Not marked')}</td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap gap-2"><ActionButton disabled={!canManage || !pending || !id || loadState === 'offline'} onClick={() => runAction('Leave approved', () => approveLeaveRequest(id))}>Approve Leave</ActionButton><ActionButton disabled={!canManage || !pending || !id || loadState === 'offline'} onClick={() => runAction('Leave rejected', () => rejectLeaveRequest(id))}>Reject Leave</ActionButton><ActionButton disabled={!canManage || loadState === 'offline'}>Mark Off Day</ActionButton></div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!filteredLeaveRequests.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No leave requests or off days available yet.</div> : null}
+          </div>
+        )}
+
+        {activeTab === 'schedule' && renderAccessCheck(
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+              <input value={scheduleForm.title} onChange={(event) => setScheduleForm((state) => ({ ...state, title: event.target.value }))} placeholder="Schedule name" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage} />
+              <input value={scheduleForm.staffId} onChange={(event) => setScheduleForm((state) => ({ ...state, staffId: event.target.value }))} placeholder="Assign to staff ID" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage} />
+              <input value={scheduleForm.role} onChange={(event) => setScheduleForm((state) => ({ ...state, role: event.target.value }))} placeholder="Assign to role" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage} />
+              <select value={scheduleForm.weeklyOffDay} onChange={(event) => setScheduleForm((state) => ({ ...state, weeklyOffDay: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage}>{dayOptions.map((day) => <option key={day} value={day}>{day}</option>)}</select>
+              <input type="time" value={scheduleForm.startTime} onChange={(event) => setScheduleForm((state) => ({ ...state, startTime: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage} />
+              <input type="time" value={scheduleForm.endTime} onChange={(event) => setScheduleForm((state) => ({ ...state, endTime: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={!canManage} />
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"><input type="checkbox" checked={scheduleForm.active} onChange={(event) => setScheduleForm((state) => ({ ...state, active: event.target.checked }))} disabled={!canManage} /> Active</label>
+              <ActionButton disabled={!canManage || loadState === 'offline' || Boolean(actionBusy)} onClick={submitSchedule}>Assign Schedule</ActionButton>
+            </div>
+            {!canManage ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">View My Schedule is limited to your own schedule.</div> : null}
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Schedule</th><th className="py-2 pr-4">Staff / Role</th><th className="py-2 pr-4">Start Time</th><th className="py-2 pr-4">End Time</th><th className="py-2 pr-4">Weekly Off Day</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4">Actions</th></tr></thead>
+                <tbody>
+                  {filteredSchedules.map((row) => (
+                    <tr key={valueId(row) || `${row.staffId}-${row.role}-${row.startTime}`} className="border-t border-slate-200 align-top">
+                      <td className="py-3 pr-4 font-semibold text-slate-950">{displayText(row.title, 'Default schedule')}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayText([row.staffId || row.email, row.role].filter(Boolean).join(' / '), 'Own schedule')}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayText(row.startTime)}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayText(row.endTime)}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayText(row.weeklyOffDay)}</td>
+                      <td className="py-3 pr-4"><Badge tone={row.active === false || normalize(row.status) === 'inactive' ? 'slate' : 'emerald'}>{row.active === false || normalize(row.status) === 'inactive' ? 'Inactive' : 'Active'}</Badge></td>
+                      <td className="py-3 pr-4"><ActionButton disabled={!canManage || loadState === 'offline'}>Assign Schedule</ActionButton></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!filteredSchedules.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No schedules available yet.</div> : null}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

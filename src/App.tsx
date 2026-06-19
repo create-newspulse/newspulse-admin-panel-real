@@ -18,6 +18,7 @@ import LockCheckWrapper from '@components/LockCheckWrapper';
 import OwnerBar from '@/components/OwnerBar';
 import ProtectedRoute from '@components/ProtectedRoute';
 import FounderRoute from '@components/FounderRoute';
+import AdminModuleRoute from '@components/AdminModuleRoute';
 
 // Use explicit extension so Vercel resolver doesn't miss the TSX file
 import LockedPage from '@pages/LockedPage.tsx';
@@ -71,6 +72,7 @@ import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
 import CategoriesAnalyticsPage from '@/pages/admin/analytics/CategoriesAnalyticsPage';
 import ComplianceReportsPage from '@/pages/admin/ComplianceReportsPage';
+import FinanceDesk from '@pages/admin/FinanceDesk';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
@@ -223,7 +225,7 @@ function App() {
 
               {/* 🔐 Admin Protected Routes */}
               {/* Legacy /add now redirects to /admin/add-news (updated editor) */}
-              <Route path="/add" element={<AddNews />} />
+              <Route path="/add" element={<AdminModuleRoute moduleKey="add_news"><AddNews /></AdminModuleRoute>} />
               <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New dedicated modern edit route using ArticleForm */}
               <Route path="/admin/articles/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ArticleEditPage /></LockCheckWrapper></ProtectedRoute>} />
@@ -244,36 +246,43 @@ function App() {
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
               {/* Add News legacy redirect */}
-              <Route path="/admin/add" element={<Navigate to="/add" replace />} />
+              <Route path="/admin/add" element={<AdminModuleRoute moduleKey="add_news"><Navigate to="/add" replace /></AdminModuleRoute>} />
+              <Route path="/admin/add-news" element={<AdminModuleRoute moduleKey="add_news"><AddNews /></AdminModuleRoute>} />
               {/* Manage News canonical route + redirects */}
-              <Route path="/admin/articles" element={<ProtectedRoute><LockCheckWrapper><ManageNews /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/compliance-reports" element={<RequireRole allow={['founder','admin']}><LockCheckWrapper><ComplianceReportsPage /></LockCheckWrapper></RequireRole>} />
-              <Route path="/admin/viral-videos" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/viral-videos/new" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/viral-videos/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/articles" element={<AdminModuleRoute moduleKey="manage_news"><LockCheckWrapper><ManageNews /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/compliance-reports" element={<AdminModuleRoute moduleKey="compliance_reports"><LockCheckWrapper><ComplianceReportsPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/viral-videos" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/viral-videos/new" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/viral-videos/:id/edit" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/manage-news" element={<Navigate to="/admin/articles" replace />} />
-              <Route path="/admin/manage-news" element={<Navigate to="/admin/articles" replace />} />
+              <Route path="/admin/manage-news" element={<AdminModuleRoute moduleKey="manage_news"><Navigate to="/admin/articles" replace /></AdminModuleRoute>} />
               <Route path="/admin/news" element={<Navigate to="/admin/articles" replace />} />
               <Route path="/admin/manage" element={<Navigate to="/admin/articles" replace />} />
 
               {/* Ads Manager */}
-              <Route path="/admin/ads" element={<ProtectedRoute><LockCheckWrapper><AdsManager /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/ads" element={<AdminModuleRoute moduleKey="ads_manager"><LockCheckWrapper><AdsManager /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/ads-manager" element={<AdminModuleRoute moduleKey="ads_manager"><LockCheckWrapper><AdsManager /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/finance" element={<AdminModuleRoute moduleKey="finance_desk"><FinanceDesk /></AdminModuleRoute>} />
               <Route path="/admin/sponsored-content" element={<Navigate to="/admin/ads" replace />} />
               {/* Draft Desk */}
-              <Route path="/draft-desk" element={<ProtectedRoute><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/draft-desk/:id" element={<ProtectedRoute><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/draft-desk" element={<AdminModuleRoute moduleKey="draft_desk"><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/draft-desk/:id" element={<AdminModuleRoute moduleKey="draft_desk"><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></AdminModuleRoute>} />
               {/* Legacy Draft Desk routes */}
               <Route path="/admin/drafts" element={<Navigate to="/draft-desk" replace />} />
               <Route path="/admin/drafts/:id" element={<Navigate to="/draft-desk/:id" replace />} />
 
               {/* 📡 Broadcast Center (Founder-only) */}
-              <Route path="/admin/broadcast-center" element={<RequireRole allow={['founder']}><BroadcastCenter /></RequireRole>} />
+              <Route path="/admin/draft-desk" element={<AdminModuleRoute moduleKey="draft_desk"><Navigate to="/draft-desk" replace /></AdminModuleRoute>} />
+
+              {/* 📡 Broadcast Center */}
+              <Route path="/admin/broadcast-center" element={<AdminModuleRoute moduleKey="broadcast_center"><BroadcastCenter /></AdminModuleRoute>} />
               <Route path="/broadcast-center" element={<Navigate to="/admin/broadcast-center" replace />} />
 
               {/* Community Reporter Queue & Detail */}
               <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
               {/* New canonical community reporter queue route (founder/admin view) */}
-              <Route path="/community/reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
+              <Route path="/community/reporter" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterPage /></AdminModuleRoute>} />
+              <Route path="/admin/community-reporter-queue" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterPage /></AdminModuleRoute>} />
               {/* Legacy/typo route kept for backward compatibility */}
               <Route path="/community/reporter-queue" element={<ProtectedRoute><LegacyCommunityReporterQueueRedirect /></ProtectedRoute>} />
               <Route path="/community/reporter-queue/:id" element={<ProtectedRoute><LegacyCommunityReporterQueueDetailRedirect /></ProtectedRoute>} />
@@ -298,8 +307,9 @@ function App() {
               {/* Journalist Applications (founder/admin only) */}
               <Route path="/community/journalist-applications" element={<ProtectedRoute><LockCheckWrapper><JournalistApplications /></LockCheckWrapper></ProtectedRoute>} />
               {/* Reporter Portal (admin + public alias) */}
-              <Route path="/admin/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/community/portal" element={<ProtectedRoute><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/admin/community/portal" element={<AdminModuleRoute moduleKey="reporter_portal_admin"><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/reporter-portal-admin" element={<AdminModuleRoute moduleKey="reporter_portal_admin"><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/community/portal" element={<AdminModuleRoute moduleKey="reporter_portal_admin"><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></AdminModuleRoute>} />
               {/* Internal founder-only Reporter Portal preview */}
               <Route path="/community/reporter-portal" element={<FounderRoute><ReporterPortalPreview /></FounderRoute>} />
               {/* AI Test route removed in favor of the new AI Engine */}
@@ -309,7 +319,7 @@ function App() {
               <Route path="/admin/locked" element={<LockedPage />} />
 
               {/* 🛡️ Founder-Only Routes */}
-              <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/admin/dashboard" element={<AdminModuleRoute moduleKey="dashboard"><Dashboard /></AdminModuleRoute>} />
 
               {/* Admin tools (Founder/Admin only) */}
               <Route
@@ -339,16 +349,16 @@ function App() {
               <Route
                 path="/admin/settings"
                 element={
-                  <FounderRoute>
+                  <AdminModuleRoute moduleKey={['settings', 'team_management']}>
                     <SettingsCenterLayout />
-                  </FounderRoute>
+                  </AdminModuleRoute>
                 }
               >
                 <Route index element={<Navigate to="admin-panel" replace />} />
 
                 <Route path="admin-panel" element={<AdminPanelSettingsLayout />}>
                   <Route index element={<Navigate to="team" replace />} />
-                  <Route path="team" element={<FounderRoute><TeamManagement /></FounderRoute>} />
+                  <Route path="team" element={<AdminModuleRoute moduleKey="team_management"><TeamManagement /></AdminModuleRoute>} />
                   <Route path="security" element={<SecurityAdmin />} />
                   <Route path="translation" element={<TranslationSettings />} />
                   <Route path="translation-glossary" element={<TranslationGlossary />} />
@@ -357,7 +367,7 @@ function App() {
                   <Route path="preview" element={<AdminPreview />} />
                 </Route>
 
-                <Route path="public-site" element={<PublicSiteSettingsLayout />}>
+                <Route path="public-site" element={<FounderRoute><PublicSiteSettingsLayout /></FounderRoute>}>
                   <Route index element={<Navigate to="homepage" replace />} />
                   <Route path="homepage" element={<HomepageModulesSettings />} />
                   <Route path="tickers" element={<TickersSettings />} />
@@ -381,9 +391,9 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <LockCheckWrapper>
-                      <RequireRole allow={['founder', 'admin']}>
+                      <AdminModuleRoute moduleKey="safe_zone">
                         <SafeOwnerZoneShell />
-                      </RequireRole>
+                      </AdminModuleRoute>
                     </LockCheckWrapper>
                   </ProtectedRoute>
                 }
@@ -420,15 +430,16 @@ function App() {
               <Route path="/admin/live-feed-manager" element={<FounderRoute><LiveFeedManager /></FounderRoute>} />
               <Route path="/admin/embed-manager" element={<FounderRoute><EmbedManager /></FounderRoute>} />
               {/* Live TV */}
-              <Route path="/admin/live" element={<ProtectedRoute><LiveTVControl /></ProtectedRoute>} />
+              <Route path="/admin/live" element={<AdminModuleRoute moduleKey="live_tv"><LiveTVControl /></AdminModuleRoute>} />
+              <Route path="/admin/live-tv" element={<AdminModuleRoute moduleKey="live_tv"><LiveTVControl /></AdminModuleRoute>} />
               <Route path="/admin/toggle-controls" element={<FounderRoute><ToggleControls /></FounderRoute>} />
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
-              <Route path="/admin/ai-engine" element={<FounderRoute><AIEngine /></FounderRoute>} />
+              <Route path="/admin/ai-engine" element={<AdminModuleRoute moduleKey="ai_engine"><AIEngine /></AdminModuleRoute>} />
               <Route path="/admin/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
-              <Route path="/admin/aira" element={<FounderRoute><Aira /></FounderRoute>} />
+              <Route path="/admin/aira" element={<AdminModuleRoute moduleKey="aira"><Aira /></AdminModuleRoute>} />
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
-              <Route path="/admin/editorial" element={<ProtectedRoute><Editorial /></ProtectedRoute>} />
+              <Route path="/admin/editorial" element={<AdminModuleRoute moduleKey="editorial"><Editorial /></AdminModuleRoute>} />
 
               {/* Legacy Safe Owner Zone v5 routes: redirect to canonical /admin/safe-owner-zone */}
               <Route path="/safeownerzone" element={<Navigate to="/admin/safe-owner-zone" replace />} />
@@ -452,15 +463,16 @@ function App() {
                     : <Navigate to="/admin/dashboard" replace />
                 }
               />
-              <Route path="/admin/media-library" element={<ProtectedRoute><MediaLibrary /></ProtectedRoute>} />
+              <Route path="/admin/media" element={<AdminModuleRoute moduleKey="media"><Navigate to="/admin/media-library" replace /></AdminModuleRoute>} />
+              <Route path="/admin/media-library" element={<AdminModuleRoute moduleKey="media"><MediaLibrary /></AdminModuleRoute>} />
               {/* Readership analytics (real backend /api/admin/analytics/*) */}
-              <Route path="/admin/analytics/articles" element={<ProtectedRoute><ArticlesAnalyticsPage /></ProtectedRoute>} />
-              <Route path="/admin/analytics/categories" element={<ProtectedRoute><CategoriesAnalyticsPage /></ProtectedRoute>} />
-              <Route path="/admin/analytics" element={<ProtectedRoute><AnalyticsDashboard /></ProtectedRoute>} />
+              <Route path="/admin/analytics/articles" element={<AdminModuleRoute moduleKey="analytics"><ArticlesAnalyticsPage /></AdminModuleRoute>} />
+              <Route path="/admin/analytics/categories" element={<AdminModuleRoute moduleKey="analytics"><CategoriesAnalyticsPage /></AdminModuleRoute>} />
+              <Route path="/admin/analytics" element={<AdminModuleRoute moduleKey="analytics"><AnalyticsDashboard /></AdminModuleRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
               <Route path="/admin/web-stories" element={<ProtectedRoute><WebStoriesEditor /></ProtectedRoute>} />
-              <Route path="/admin/moderation" element={<ProtectedRoute><CommentModerationDashboard /></ProtectedRoute>} />
-              <Route path="/admin/seo" element={<ProtectedRoute><SEOToolsDashboard /></ProtectedRoute>} />
+              <Route path="/admin/moderation" element={<AdminModuleRoute moduleKey="moderation"><CommentModerationDashboard /></AdminModuleRoute>} />
+              <Route path="/admin/seo" element={<AdminModuleRoute moduleKey="seo"><SEOToolsDashboard /></AdminModuleRoute>} />
               <Route path="/admin/founder-control" element={<FounderRoute><FounderControlCenter /></FounderRoute>} />
               {/* New Founder Control route alias */}
               <Route path="/admin/founder" element={<FounderRoute><FounderControlPage /></FounderRoute>} />
