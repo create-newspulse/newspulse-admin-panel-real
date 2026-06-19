@@ -48,6 +48,7 @@ const tabLabels: Record<ActivityTab, string> = {
 const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const PRIMARY_FOUNDER_EMAIL = 'newspulse.team@gmail.com';
 const PRIMARY_FOUNDER_NAME = 'NewsPulse Founder';
+const PRIMARY_FOUNDER_STAFF_ID = 'NP-FND-0001';
 const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
 
 function normalize(value?: unknown): string {
@@ -105,6 +106,13 @@ function displayDateTime(value?: string | null): string {
 function displayText(value?: unknown, fallback = '-'): string {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+function displayStaffId(value?: unknown, founder = false): string {
+  if (founder) return PRIMARY_FOUNDER_STAFF_ID;
+  const text = String(value || '').trim();
+  if (!text || /^np-backend/i.test(text)) return 'Pending ID';
+  return text;
 }
 
 function valueId(row: { id?: string; _id?: string }): string {
@@ -240,7 +248,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
         _id: row._id,
         name: isPrimaryFounderEmail(row.email) ? PRIMARY_FOUNDER_NAME : row.name,
         email: isPrimaryFounderEmail(row.email) ? PRIMARY_FOUNDER_EMAIL : row.email,
-        staffId: isPrimaryFounderEmail(row.email) ? 'FOUNDER' : row.staffId,
+        staffId: isPrimaryFounderEmail(row.email) ? PRIMARY_FOUNDER_STAFF_ID : row.staffId,
         role: isPrimaryFounderEmail(row.email) ? 'founder' : row.role,
       });
     };
@@ -271,13 +279,13 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
     filteredPresence.forEach((row) => {
       if (!shouldRenderActivityRow(row)) return;
       const key = userKey(row);
-      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: 'FOUNDER', role: 'founder' } : row;
+      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: PRIMARY_FOUNDER_STAFF_ID, role: 'founder' } : row;
       byKey.set(key, { ...(byKey.get(key) || {}), ...normalized });
     });
     filteredLogs.forEach((row) => {
       if (!shouldRenderActivityRow(row)) return;
       const key = userKey(row);
-      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: 'FOUNDER', role: 'founder' } : row;
+      const normalized = isPrimaryFounderEmail(row.email) ? { ...row, name: PRIMARY_FOUNDER_NAME, email: PRIMARY_FOUNDER_EMAIL, staffId: PRIMARY_FOUNDER_STAFF_ID, role: 'founder' } : row;
       byKey.set(key, { ...(byKey.get(key) || {}), ...normalized });
     });
     return Array.from(byKey.values());
@@ -569,7 +577,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.startTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.endTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.weeklyOffDay)}</td>
-                      <td className="py-3 pr-4 text-slate-700">{displayText(row.staffId || row.email, 'Own schedule')}</td>
+                      <td className="py-3 pr-4 text-slate-700">{displayStaffId(row.staffId, isPrimaryFounderEmail(row.email))}</td>
                       <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
                       <td className="py-3 pr-4"><Badge tone={row.active === false || normalize(row.status) === 'inactive' ? 'slate' : 'emerald'}>{row.active === false || normalize(row.status) === 'inactive' ? 'Inactive' : 'Active'}</Badge></td>
                     </tr>

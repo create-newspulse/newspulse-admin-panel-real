@@ -42,6 +42,19 @@ export type CreateTeamUserPayload = {
   specialRights?: string[];
 };
 
+export type TeamStaffIdPreviewResponse = {
+  staffId?: string;
+  nextStaffId?: string;
+  previewStaffId?: string;
+  data?: {
+    staffId?: string;
+    nextStaffId?: string;
+    previewStaffId?: string;
+    [k: string]: any;
+  };
+  [k: string]: any;
+};
+
 export type TeamRolePayload = {
   id?: string;
   roleName: string;
@@ -219,6 +232,27 @@ export async function createTeamUser(payload: CreateTeamUserPayload): Promise<an
     method: 'POST',
     json: payload,
   });
+}
+
+function extractPreviewStaffId(raw: TeamStaffIdPreviewResponse | null | undefined): string | null {
+  const value = raw?.staffId || raw?.nextStaffId || raw?.previewStaffId || raw?.data?.staffId || raw?.data?.nextStaffId || raw?.data?.previewStaffId;
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+export async function getNextTeamStaffIdPreview(): Promise<string | null> {
+  for (const path of ['/team/next-staff-id', '/admin/team/next-staff-id']) {
+    try {
+      const raw = await adminJson<TeamStaffIdPreviewResponse>(path, { cache: 'no-store' } as any);
+      const preview = extractPreviewStaffId(raw);
+      if (preview) return preview;
+    } catch (err: any) {
+      const status = Number(err?.status ?? err?.response?.status ?? 0);
+      if ([404, 405, 501].includes(status)) continue;
+      throw err;
+    }
+  }
+  return null;
 }
 
 export async function updateTeamUser(id: string, payload: Partial<CreateTeamUserPayload>): Promise<any> {

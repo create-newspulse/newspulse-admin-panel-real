@@ -6,6 +6,7 @@ import {
   activateUser,
   createTeamRole,
   createTeamUser,
+  getNextTeamStaffIdPreview,
   getTeamRoles,
   forceResetUser,
   getTeamUsers,
@@ -31,6 +32,7 @@ import {
 
 const FOUNDER_EMAIL = 'newspulse.team@gmail.com';
 const FOUNDER_NAME = 'NewsPulse Founder';
+const FOUNDER_STAFF_ID = 'NP-FND-0001';
 const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
 
 type BadgeTone = 'full' | 'protected' | 'editorial' | 'desk' | 'field' | 'live' | 'technical' | 'revenue' | 'finance' | 'growth' | 'limited';
@@ -367,6 +369,13 @@ function displayDepartment(teamUser: TeamUser, founder: boolean): string {
   return listText(teamUser.department);
 }
 
+function displayStaffId(staffId?: unknown, founder = false): string {
+  if (founder) return FOUNDER_STAFF_ID;
+  const value = String(staffId || '').trim();
+  if (!value || /^np-backend/i.test(value)) return 'Pending ID';
+  return value;
+}
+
 function normalizedIdentity(value?: unknown): string {
   return String(value || '').trim().toLowerCase();
 }
@@ -415,6 +424,13 @@ function getSessionStatusDisplay(teamUser: TeamUser, currentUser: any): SessionS
   if (hasActiveSession) return 'Active Session';
   if ((teamUser as any).lastLogout || (teamUser as any).lastLogoutAt || (teamUser as any).logoutAt) return 'Logged Out';
   return 'No Active Session';
+}
+
+function extractCreatedStaffId(response: any): string | null {
+  const value = response?.staffId || response?.user?.staffId || response?.data?.staffId || response?.data?.user?.staffId;
+  const text = String(value || '').trim();
+  if (!text || /^np-backend/i.test(text)) return null;
+  return text;
 }
 
 function CheckboxList<T extends string>({
@@ -515,7 +531,6 @@ export default function TeamManagement() {
   const [createForm, setCreateForm] = useState({
     name: '',
     email: '',
-    staffId: '',
     role: 'editor',
     designation: '',
     department: defaultDepartmentForRole('editor'),
@@ -547,14 +562,12 @@ export default function TeamManagement() {
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
   const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
+  const [createdStaffId, setCreatedStaffId] = useState<string | null>(null);
+  const [nextStaffIdPreview, setNextStaffIdPreview] = useState<string | null>(null);
+  const [loadingStaffIdPreview, setLoadingStaffIdPreview] = useState(false);
 
   const selectedRole = useMemo(() => roleById(createForm.role) || roleById('editor'), [createForm.role]);
-  const draftStaffId = useMemo(() => {
-    if (createForm.staffId.trim()) return createForm.staffId.trim();
-    const seed = createForm.email || createForm.name || 'backend-generated';
-    const compact = seed.replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase();
-    return compact ? `NP-${compact}` : 'Backend-generated';
-  }, [createForm.email, createForm.name, createForm.staffId]);
+  const staffIdPreviewText = nextStaffIdPreview ? `Next New Staff ID: ${nextStaffIdPreview}` : 'Auto-generated on create';
 
   const roleOptions = useMemo(() => {
     const customRoles = roles.slice().sort((a, b) => Number(a.sortOrder ?? 999) - Number(b.sortOrder ?? 999)).map((item) => {
@@ -589,6 +602,18 @@ export default function TeamManagement() {
       setErr(toFriendlyErrorMessage(e, 'Failed to load staff.'));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshStaffIdPreview() {
+    setLoadingStaffIdPreview(true);
+    try {
+      const preview = await getNextTeamStaffIdPreview();
+      setNextStaffIdPreview(preview);
+    } catch {
+      setNextStaffIdPreview(null);
+    } finally {
+      setLoadingStaffIdPreview(false);
     }
   }
 
@@ -636,7 +661,7 @@ export default function TeamManagement() {
 
   const founderRow = useMemo<TeamUser>(() => {
     const existing = items.find(isPrimaryFounderUser);
-    return { ...(existing || {}), name: FOUNDER_NAME, email: FOUNDER_EMAIL, role: 'founder', isActive: true, status: 'active' };
+    return { ...(existing || {}), name: FOUNDER_NAME, email: FOUNDER_EMAIL, staffId: FOUNDER_STAFF_ID, role: 'founder', isActive: true, status: 'active' };
   }, [items]);
   const teamRows = useMemo(() => [founderRow, ...items.filter((item) => !isPrimaryFounderUser(item) && shouldRenderStaffUser(item))], [founderRow, items]);
   const founderLikeCount = useMemo(() => items.filter(isFounderLikeUser).length, [items]);
@@ -695,7 +720,6 @@ export default function TeamManagement() {
       const res: any = await createTeamUser({
         email,
         name,
-        staffId: draftStaffId,
         role: createForm.role,
         designation: createForm.designation.trim() || undefined,
         permissions: parsePermissions(),
@@ -709,12 +733,14 @@ export default function TeamManagement() {
         generateTemporaryPassword: createForm.generateTemporaryPassword,
         mustChangePassword: createForm.mustChangePassword,
       } as any);
+      const assignedStaffId = extractCreatedStaffId(res);
       const tempPassword = res?.temporaryPassword || res?.tempPassword || res?.password || res?.data?.temporaryPassword || res?.data?.tempPassword || res?.data?.password || null;
       setCreatedTempPassword(tempPassword ? String(tempPassword) : null);
       setCreatedEmail(email);
-      toast.success('Team member invited');
-      setCreateForm({ name: '', email: '', staffId: '', role: 'editor', designation: '', department: defaultDepartmentForRole('editor'), assignedSections: [], coverageArea: [], accountStatus: 'active', permissions: '', expiresAt: '', generateTemporaryPassword: true, mustChangePassword: true });
-      await fetchStaff();
+      setCreatedStaffId(assignedStaffId);
+      toast.success(assignedStaffId ? `Account created. Staff ID: ${assignedStaffId}` : 'Account created. Staff ID will be assigned by the backend.');
+      setCreateForm({ name: '', email: '', role: 'editor', designation: '', department: defaultDepartmentForRole('editor'), assignedSections: [], coverageArea: [], accountStatus: 'active', permissions: '', expiresAt: '', generateTemporaryPassword: true, mustChangePassword: true });
+      await Promise.all([fetchStaff(), refreshStaffIdPreview()]);
     } catch (err2: any) {
       toast.error(toFriendlyErrorMessage(err2, 'Create failed'));
     } finally {
@@ -785,6 +811,7 @@ export default function TeamManagement() {
   const captureTemporaryPassword = (res: any, fallbackEmail?: string) => {
     const tempPassword = res?.temporaryPassword || res?.tempPassword || res?.password || res?.data?.temporaryPassword || res?.data?.tempPassword || res?.data?.password || null;
     if (tempPassword) {
+      setCreatedStaffId(null);
       setCreatedTempPassword(String(tempPassword));
       setCreatedEmail(fallbackEmail || res?.email || res?.data?.email || null);
     }
@@ -849,7 +876,8 @@ export default function TeamManagement() {
   };
 
   useEffect(() => {
-    fetchStaff();
+    void fetchStaff();
+    void refreshStaffIdPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -862,7 +890,7 @@ export default function TeamManagement() {
             <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Founder protection, staff accounts, roles, access control, password safety, and attendance planning.</div>
             {!isFounder && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Access denied: founder-only controls are disabled.</div>}
           </div>
-          <button type="button" onClick={fetchStaff} disabled={loading} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="button" onClick={() => { void fetchStaff(); void refreshStaffIdPreview(); }} disabled={loading} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
@@ -874,6 +902,7 @@ export default function TeamManagement() {
             <div id="temporary-password-title" className="text-lg font-semibold">Temporary Password</div>
             <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-950">Temporary password is visible only once. Copy it now. It will not be shown again.</div>
             <div className="mt-3 text-sm">For: <span className="font-semibold">{createdEmail}</span></div>
+            {createdStaffId ? <div className="mt-2 text-sm">Staff ID: <span className="font-semibold">{createdStaffId}</span></div> : null}
             <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-sm">{createdTempPassword}</div>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -891,7 +920,7 @@ export default function TeamManagement() {
               >
                 Copy
               </button>
-              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={() => { setCreatedTempPassword(null); setCreatedEmail(null); }}>Close</button>
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={() => { setCreatedTempPassword(null); setCreatedEmail(null); setCreatedStaffId(null); }}>Close</button>
             </div>
           </div>
         </div>
@@ -923,7 +952,7 @@ export default function TeamManagement() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <label className={fieldLabelClass}>Full Name<input value={createForm.name} onChange={(e) => setCreateForm((state) => ({ ...state, name: e.target.value }))} placeholder="Full Name" className={inputClass} /></label>
             <label className={fieldLabelClass}>Email / Login ID<input value={createForm.email} onChange={(e) => setCreateForm((state) => ({ ...state, email: e.target.value }))} placeholder="Email / Login ID" className={inputClass} /></label>
-            <label className={fieldLabelClass}>Staff ID<input value={createForm.staffId} onChange={(e) => setCreateForm((state) => ({ ...state, staffId: e.target.value }))} placeholder={`Staff ID (${draftStaffId})`} aria-label="Staff ID" className={inputClass} /></label>
+            <label className={fieldLabelClass}>Staff ID<input value={loadingStaffIdPreview ? 'Loading next new Staff ID...' : staffIdPreviewText} readOnly aria-readonly="true" placeholder="Auto-generated, e.g. NP-2026-0001" aria-label="Staff ID" className={inputClass} /></label>
             <label className={fieldLabelClass}>Role<select value={createForm.role} onChange={(e) => setRoleAndDepartment(e.target.value)} className={inputClass}>
               {roleOptions.map((roleItem) => <option key={roleItem.id} value={roleItem.id} disabled={roleItem.protected}>{roleItem.label}{roleItem.protected ? ' (protected)' : ''}</option>)}
             </select></label>
@@ -953,6 +982,11 @@ export default function TeamManagement() {
               options={COVERAGE_AREA_OPTIONS}
               onChange={(coverageArea) => setCreateForm((state) => ({ ...state, coverageArea }))}
             />
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="font-semibold text-slate-900">Staff ID is auto-generated and used for internal records, attendance, reports, and access logs.</div>
+            <div className="mt-1 text-xs text-slate-600">Founder ID is protected as {FOUNDER_STAFF_ID}. This ID is for new staff accounts only.</div>
+            <div className="mt-1 text-xs text-slate-600">{nextStaffIdPreview ? `Next New Staff ID: ${nextStaffIdPreview}` : 'Auto-generated on create'}</div>
           </div>
           {createForm.assignedSections.includes('Gujarat') && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
@@ -1099,7 +1133,7 @@ export default function TeamManagement() {
                 <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="font-semibold text-slate-950">{teamUser.name || 'Unnamed staff'} · {roleLabel(teamUser.role)}</div>
-                    <div className="mt-1 text-xs text-slate-600">{teamUser.email || '-'} {teamUser.staffId ? `· ${teamUser.staffId}` : ''}</div>
+                    <div className="mt-1 text-xs text-slate-600">{teamUser.email || '-'} · {displayStaffId(teamUser.staffId)}</div>
                   </div>
                   <button type="button" disabled={!isFounder || !id || savingOverrideId === id} onClick={() => saveOverride(teamUser)} className="w-fit rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{savingOverrideId === id ? 'Saving...' : 'Save Override'}</button>
                 </div>
@@ -1174,7 +1208,7 @@ export default function TeamManagement() {
                     <tr key={rowKey} className="border-t border-slate-200 align-top">
                       <td className="py-3 pr-3 font-medium text-slate-900"><div className="flex flex-wrap items-center gap-2"><span>{teamUser.name || (founder ? FOUNDER_NAME : 'Unnamed staff')}</span>{currentUser ? <StatusPill label="You" tone="violet" /> : null}</div></td>
                       <td className="py-3 pr-3 text-slate-700">{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</td>
-                      <td className="py-3 pr-3 text-slate-700">{teamUser.staffId || (founder ? 'FOUNDER' : '-')}</td>
+                      <td className="py-3 pr-3 text-slate-700">{displayStaffId(teamUser.staffId, founder)}</td>
                       <td className="py-3 pr-3"><div className="font-semibold text-slate-900">{rowRole?.label || teamUser.role || 'Staff'}</div><div className="mt-1 flex flex-wrap gap-1.5">{rowBadges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div></td>
                       <td className="py-3 pr-3"><StatusPill label={accountStatus} /></td>
                       <td className="py-3 pr-3"><StatusPill label={sessionStatus} /></td>
@@ -1195,6 +1229,11 @@ export default function TeamManagement() {
                       <tr key={`${rowKey}-details`} className="border-t border-slate-100 bg-slate-50/70">
                         <td colSpan={9} className="p-4">
                           <div className="grid grid-cols-1 gap-3 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="xl:col-span-2 rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs font-semibold uppercase text-slate-500">{founder ? 'Founder Staff ID' : 'Staff ID'}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 font-medium text-slate-900"><span>{displayStaffId(teamUser.staffId, founder)}</span>{founder ? <StatusPill label="Protected" tone="rose" /> : null}</div>
+                              <div className="mt-2 text-xs leading-5 text-slate-600">Staff ID is permanent and cannot be changed after account creation.</div>
+                            </div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Department</div><div className="mt-1 font-medium text-slate-900">{displayDepartment(teamUser, founder)}</div></div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Assigned Sections</div><div className="mt-1 font-medium text-slate-900">{listText(teamUser.assignedSections)}</div></div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Coverage Area</div><div className="mt-1 font-medium text-slate-900">{listText((teamUser as any).coverageArea)}</div></div>
