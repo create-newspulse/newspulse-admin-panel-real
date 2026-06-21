@@ -5,6 +5,9 @@ export type AccountProfile = {
   _id?: string;
   email?: string;
   recoveryEmail?: string;
+  recovery_email?: string;
+  backupEmail?: string;
+  recovery?: string;
   founderRecoveryEmail?: string;
   name?: string;
   fullName?: string;
@@ -67,6 +70,7 @@ export type AccountSession = {
 export type ChangeOwnPasswordPayload = {
   currentPassword: string;
   newPassword: string;
+  confirmPassword: string;
 };
 
 export type ChangeFounderEmailPayload = {
@@ -82,11 +86,6 @@ function normalizeObject<T>(raw: any): T {
 function normalizeList<T>(raw: any): T[] {
   const value = raw?.data?.sessions || raw?.sessions || raw?.items || raw?.data || raw;
   return Array.isArray(value) ? value as T[] : [];
-}
-
-function isEndpointUnavailable(error: unknown): boolean {
-  const status = Number((error as any)?.status ?? (error as any)?.response?.status ?? 0);
-  return status === 404 || status === 405 || status === 501;
 }
 
 export function accountErrorMessage(error: unknown, fallback: string): string {
@@ -117,18 +116,10 @@ export async function getAccountSessions(): Promise<AccountSession[]> {
 }
 
 export async function changeOwnPassword(payload: ChangeOwnPasswordPayload): Promise<any> {
-  try {
-    return await adminJson('/admin-api/admin/account/change-password', {
-      method: 'POST',
-      json: payload,
-    });
-  } catch (error) {
-    if (!isEndpointUnavailable(error)) throw error;
-    return adminJson('/admin/auth/change-password', {
-      method: 'POST',
-      json: payload,
-    });
-  }
+  return adminJson('/admin-api/admin/account/change-password', {
+    method: 'POST',
+    json: payload,
+  });
 }
 
 export async function changeFounderEmail(payload: ChangeFounderEmailPayload): Promise<any> {

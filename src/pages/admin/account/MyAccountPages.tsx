@@ -59,7 +59,7 @@ function profileEmail(profile: AccountProfile | null, authUser: any): string {
 }
 
 function profileRecoveryEmail(profile: AccountProfile | null, authUser: any): string {
-  return displayText(profile?.recoveryEmail || profile?.founderRecoveryEmail || authUser?.recoveryEmail || authUser?.founderRecoveryEmail);
+  return displayText(profile?.recoveryEmail || profile?.recovery_email || profile?.backupEmail || profile?.recovery || profile?.founderRecoveryEmail || authUser?.recoveryEmail || authUser?.recovery_email || authUser?.backupEmail || authUser?.recovery || authUser?.founderRecoveryEmail);
 }
 
 function profileRole(profile: AccountProfile | null, authUser: any): string {
@@ -323,7 +323,7 @@ export function FounderMyAccount() {
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold leading-6 text-rose-900">Founder account is permanently protected. It cannot be deleted, suspended, demoted, or restricted by staff/admin actions.</div>
       </Card>
 
-      <AccountPasswordForm title="Change Founder Password" description="Founder changes the Founder account password here. Team staff resets remain in Team Management." buttonLabel="Update Password" onChanged={reload} />
+      <AccountPasswordForm title="Change Founder Password" description="Founder changes the Founder account password here. Team staff resets remain in Team Management." currentPasswordHelper="Current password is the temporary password used to login, until Founder changes it." buttonLabel="Update Password" onChanged={reload} />
 
       <FounderEmailChangeCard profile={profile} onChanged={reload} />
 

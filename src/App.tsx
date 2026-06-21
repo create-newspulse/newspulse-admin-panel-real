@@ -172,6 +172,9 @@ function CommunitySubmitRedirect() {
 }
 
 function mustChangePasswordFor(user: any): boolean {
+  try {
+    if (sessionStorage.getItem('np_admin_password_changed') === 'true') return false;
+  } catch {}
   return user?.mustChangePassword === true || user?.passwordChangeRequired === true || user?.forcePasswordChange === true;
 }
 

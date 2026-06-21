@@ -5,15 +5,24 @@ import { accountErrorMessage, changeOwnPassword } from '@/api/accountApi';
 type AccountPasswordFormProps = {
   title?: string;
   description?: string;
+  currentPasswordHelper?: string;
   buttonLabel?: string;
   onChanged?: () => void;
 };
+
+function passwordErrorMessage(error: unknown): string {
+  const status = Number((error as any)?.status ?? (error as any)?.response?.status ?? 0);
+  if (status === 401) return 'Session expired. Please login again.';
+  if (status === 403) return 'Founder permission required.';
+  return accountErrorMessage(error, 'Failed to change password');
+}
 
 const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-900 dark:text-white';
 
 export default function AccountPasswordForm({
   title = 'Change My Password',
   description = 'Change Password is for your own account only.',
+  currentPasswordHelper,
   buttonLabel = 'Update Password',
   onChanged,
 }: AccountPasswordFormProps) {
@@ -43,20 +52,21 @@ export default function AccountPasswordForm({
     setError(null);
     setSubmitting(true);
     try {
-      const res: any = await changeOwnPassword({ currentPassword, newPassword });
+      const res: any = await changeOwnPassword({ currentPassword, newPassword, confirmPassword });
       if (res?.success === false || res?.ok === false) {
         const message = res?.message || 'Failed to change password';
         setError(message);
         toast.error(message);
         return;
       }
-      toast.success('Password updated');
+      try { sessionStorage.setItem('np_admin_password_changed', 'true'); } catch {}
+      toast.success('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       onChanged?.();
     } catch (err) {
-      const message = accountErrorMessage(err, 'Failed to change password');
+      const message = passwordErrorMessage(err);
       setError(message);
       toast.error(message);
     } finally {
@@ -74,6 +84,7 @@ export default function AccountPasswordForm({
         <label className="space-y-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
           Current password
           <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" className={inputClass} required />
+          {currentPasswordHelper ? <span className="block text-xs font-normal leading-5 text-slate-500 dark:text-slate-400">{currentPasswordHelper}</span> : null}
         </label>
         <label className="space-y-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
           New password
