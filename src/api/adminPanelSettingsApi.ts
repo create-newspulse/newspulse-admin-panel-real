@@ -1,77 +1,19 @@
 import { adminJson, AdminApiError } from '@/lib/http/adminFetch';
 
-export type TeamUser = {
-  id?: string;
-  _id?: string;
-  email?: string;
-  name?: string;
-  staffId?: string;
-  role?: string;
-  designation?: string;
-  department?: string;
-  assignedSections?: string[];
-  permissions?: string[];
-  moduleAccess?: string[];
-  specialRights?: string[];
-  accessOverrides?: {
-    modules?: string[];
-    specialRights?: string[];
-    [k: string]: any;
-  };
-  isActive?: boolean;
-  status?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  [k: string]: any;
-};
-
-export type CreateTeamUserPayload = {
-  email: string;
-  name?: string;
-  staffId?: string;
-  role?: string;
-  designation?: string;
-  department?: string;
-  assignedSections?: string[];
-  status?: string;
-  accessExpiresAt?: string;
-  generateTemporaryPassword?: boolean;
-  mustChangePassword?: boolean;
-  permissions?: string[];
-  moduleAccess?: string[];
-  specialRights?: string[];
-};
-
-export type TeamStaffIdPreviewResponse = {
-  staffId?: string;
-  nextStaffId?: string;
-  previewStaffId?: string;
-  data?: {
-    staffId?: string;
-    nextStaffId?: string;
-    previewStaffId?: string;
-    [k: string]: any;
-  };
-  [k: string]: any;
-};
-
-export type TeamRolePayload = {
-  id?: string;
-  roleName: string;
-  description?: string;
-  sortOrder?: number;
-  systemRole?: boolean;
-  moduleAccess?: string[];
-  specialRights?: string[];
-};
-
-export type TeamRole = TeamRolePayload & {
-  _id?: string;
-  protected?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-  [k: string]: any;
-};
+export type { CreateTeamUserPayload, TeamRole, TeamRolePayload, TeamStaffIdPreviewResponse, TeamUser } from '@/api/teamManagementApi';
+export {
+  activateUser,
+  createTeamRole,
+  createTeamUser,
+  forceResetUser,
+  getNextTeamStaffIdPreview,
+  getTeamRoles,
+  getTeamUsers,
+  saveStaffAccessOverride,
+  suspendUser,
+  updateTeamRole,
+  updateTeamUser,
+} from '@/api/teamManagementApi';
 
 export type TeamPresenceRow = {
   id?: string;
@@ -219,85 +161,6 @@ export function toFriendlyErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof AdminApiError) return err.message || fallback;
   const e: any = err as any;
   return e?.message || e?.response?.data?.message || e?.response?.data?.error || fallback;
-}
-
-// Team management
-export async function getTeamUsers(): Promise<TeamUser[]> {
-  const raw = await adminJson<any>('/admin/team/users', { cache: 'no-store' } as any);
-  return normalizeList<TeamUser>(raw);
-}
-
-export async function createTeamUser(payload: CreateTeamUserPayload): Promise<any> {
-  return adminJson('/admin/team/users', {
-    method: 'POST',
-    json: payload,
-  });
-}
-
-function extractPreviewStaffId(raw: TeamStaffIdPreviewResponse | null | undefined): string | null {
-  const value = raw?.staffId || raw?.nextStaffId || raw?.previewStaffId || raw?.data?.staffId || raw?.data?.nextStaffId || raw?.data?.previewStaffId;
-  const text = String(value || '').trim();
-  return text || null;
-}
-
-export async function getNextTeamStaffIdPreview(): Promise<string | null> {
-  for (const path of ['/team/next-staff-id', '/admin/team/next-staff-id']) {
-    try {
-      const raw = await adminJson<TeamStaffIdPreviewResponse>(path, { cache: 'no-store' } as any);
-      const preview = extractPreviewStaffId(raw);
-      if (preview) return preview;
-    } catch (err: any) {
-      const status = Number(err?.status ?? err?.response?.status ?? 0);
-      if ([404, 405, 501].includes(status)) continue;
-      throw err;
-    }
-  }
-  return null;
-}
-
-export async function updateTeamUser(id: string, payload: Partial<CreateTeamUserPayload>): Promise<any> {
-  return adminJson(`/admin/team/users/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    json: payload,
-  });
-}
-
-export async function getTeamRoles(): Promise<TeamRole[]> {
-  const raw = await adminJson<any>('/admin/team/roles', { cache: 'no-store' } as any);
-  return normalizeList<TeamRole>(raw);
-}
-
-export async function createTeamRole(payload: TeamRolePayload): Promise<any> {
-  return adminJson('/admin/team/roles', {
-    method: 'POST',
-    json: payload,
-  });
-}
-
-export async function updateTeamRole(id: string, payload: Partial<TeamRolePayload>): Promise<any> {
-  return adminJson(`/admin/team/roles/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    json: payload,
-  });
-}
-
-export async function saveStaffAccessOverride(id: string, payload: { moduleAccess?: string[]; specialRights?: string[] }): Promise<any> {
-  return adminJson(`/admin/team/users/${encodeURIComponent(id)}/access-override`, {
-    method: 'PUT',
-    json: payload,
-  });
-}
-
-export async function activateUser(id: string): Promise<any> {
-  return adminJson(`/admin/team/users/${encodeURIComponent(id)}/activate`, { method: 'POST' });
-}
-
-export async function suspendUser(id: string): Promise<any> {
-  return adminJson(`/admin/team/users/${encodeURIComponent(id)}/suspend`, { method: 'POST' });
-}
-
-export async function forceResetUser(id: string): Promise<any> {
-  return adminJson(`/admin/team/users/${encodeURIComponent(id)}/force-reset`, { method: 'POST' });
 }
 
 // Security

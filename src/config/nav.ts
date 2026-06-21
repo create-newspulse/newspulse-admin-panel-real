@@ -52,6 +52,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'security', label:'Zero-Trust Security', path:'/admin/security', roles:['admin','founder'], icon:'🧱', rightSide:true, hidden: true },
   { key:'lang', label:'Language', path:'#lang', roles:['viewer','editor','admin','founder','moderator'], icon:'🌐', rightSide:true, hidden: true },
   { key:'dark', label:'Dark', path:'#dark', roles:['viewer','editor','admin','founder','moderator'], icon:'🌙', rightSide:true },
+  { key:'founder-my-account', label:'Founder My Account', path:'/admin/founder/my-account', roles:['founder'], icon:'👤', rightSide:true },
+  { key:'my-account', label:'My Account', path:'/admin/my-account', roles:['viewer','editor','admin','moderator','manager','reporter','copyeditor','copy_editor','factchecker','fact_checker','livetv_controller','video_editor','finance_accounts_manager','ads_revenue_growth_manager','social_media_manager','tech_support','intern'], icon:'👤', rightSide:true },
   { key:'logout', label:'Logout', path:'/logout', roles:['viewer','editor','admin','founder','moderator'], icon:'🚪', rightSide:true },
   { key:'change-password', label:'Change Password', path:'/admin/change-password', roles:['editor','admin','founder','moderator'], icon:'🔑', rightSide:true, hidden: true },
 ];

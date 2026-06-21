@@ -1,23 +1,29 @@
-import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { toast } from 'react-hot-toast';
 import {
   activateUser,
+  changeTeamUserEmail,
   createTeamRole,
   createTeamUser,
   getNextTeamStaffIdPreview,
   getTeamRoles,
   forceResetUser,
   getTeamUsers,
-  logoutAll,
+  isTeamApiUnauthorized,
+  isTeamRoleApiUnavailable,
+  logTeamApiError,
   saveStaffAccessOverride,
   suspendUser,
-  toFriendlyErrorMessage,
+  TEAM_ROLE_API_UNAVAILABLE_MESSAGE,
+  toTeamApiErrorMessage,
   updateTeamRole,
   type TeamUser,
   type TeamRole,
-} from '@/api/adminPanelSettingsApi';
+} from '@/api/teamManagementApi';
+import { logoutAll } from '@/api/adminPanelSettingsApi';
+import { AdminApiError } from '@/lib/http/adminFetch';
 import {
   ADMIN_MODULES,
   DEFAULT_ROLE_ACCESS,
@@ -33,7 +39,9 @@ import {
 const FOUNDER_EMAIL = 'newspulse.team@gmail.com';
 const FOUNDER_NAME = 'NewsPulse Founder';
 const FOUNDER_STAFF_ID = 'NP-FND-0001';
+const KIRAN_FOUNDER_EMAIL = 'kiran@newspulse.co.in';
 const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
+const SHARED_NEWS_PULSE_SYSTEM_EMAILS = new Set(['newspulse.team@gmail.com', 'newspulse.admin@gmail.com', 'newspulse.ads@gmail.com']);
 
 type BadgeTone = 'full' | 'protected' | 'editorial' | 'desk' | 'field' | 'live' | 'technical' | 'revenue' | 'finance' | 'growth' | 'limited';
 type RoleBadge = { label: string; tone: BadgeTone };
@@ -46,6 +54,13 @@ type RoleConfig = {
   permissions: string[];
   badges: RoleBadge[];
   protected?: boolean;
+};
+type EmailChangeForm = {
+  newEmail: string;
+  reason: string;
+  forcePasswordChange: boolean;
+  logoutAllDevices: boolean;
+  confirmedSamePerson: boolean;
 };
 
 const PERMISSION_GROUPS = [
@@ -315,12 +330,6 @@ function formatDateTime(value?: string | null): string {
   return date.toLocaleString();
 }
 
-function labelFromStatus(value?: unknown, fallback = '-'): string {
-  const raw = String(value || '').trim();
-  if (!raw) return fallback;
-  return raw.split(/[\s_-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(' ');
-}
-
 function statusTone(value?: unknown): StatusTone {
   const status = String(value || '').trim().toLowerCase();
   if (['active', 'online', 'present', 'approved', 'active session'].includes(status)) return 'emerald';
@@ -384,6 +393,11 @@ function isPrimaryFounderEmail(email?: unknown): boolean {
   return normalizedIdentity(email) === FOUNDER_EMAIL;
 }
 
+function isProtectedFounderCreateEmail(email?: unknown): boolean {
+  const normalizedEmail = normalizedIdentity(email);
+  return normalizedEmail === KIRAN_FOUNDER_EMAIL || normalizedEmail === FOUNDER_EMAIL || LEGACY_FOUNDER_EMAILS.has(normalizedEmail);
+}
+
 function isFounderLikeUser(teamUser: TeamUser): boolean {
   const normalizedRole = normalizedIdentity(teamUser?.role);
   const normalizedEmail = normalizedIdentity(teamUser?.email);
@@ -398,6 +412,40 @@ function isPrimaryFounderUser(teamUser: TeamUser): boolean {
 function shouldRenderStaffUser(teamUser: TeamUser): boolean {
   if (!isFounderLikeUser(teamUser)) return true;
   return isPrimaryFounderUser(teamUser);
+}
+
+function isProtectedSystemAccount(teamUser: TeamUser): boolean {
+  return (teamUser as any).protectedSystemAccount === true || (teamUser as any).isProtectedSystemAccount === true || (teamUser as any).systemAccountProtected === true;
+}
+
+function isBlockedSharedSystemEmail(email: string, teamUser: TeamUser): boolean {
+  return SHARED_NEWS_PULSE_SYSTEM_EMAILS.has(normalizedIdentity(email)) && !isProtectedSystemAccount(teamUser);
+}
+
+function emailLooksValid(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+}
+
+function staffMustChangePassword(teamUser: TeamUser): boolean {
+  return (teamUser as any).mustChangePassword === true || (teamUser as any).passwordChangeRequired === true || (teamUser as any).forcePasswordChange === true;
+}
+
+function getEmailChangeErrorMessage(err: unknown): string {
+  const status = Number((err as any)?.status ?? (err as any)?.response?.status ?? 0);
+  const code = String((err as any)?.code || (err as any)?.body?.code || (err as any)?.response?.data?.code || '').toLowerCase();
+  const backendMessage = toTeamApiErrorMessage(err, 'Email update failed.');
+  if (status === 401) return 'Session expired. Please login again.';
+  if (status === 403) return 'Founder permission required.';
+  if (status === 409 || code.includes('duplicate') || code.includes('conflict') || /already (used|exists|in use)/i.test(backendMessage)) return 'This email is already used by another account.';
+  if (status === 400 || err instanceof AdminApiError) return backendMessage;
+  return backendMessage;
+}
+
+function emailChangeSessionsMessage(response: any): string | null {
+  const value = response?.sessionsRevoked ?? response?.revokedSessions ?? response?.sessionsLoggedOut ?? response?.data?.sessionsRevoked ?? response?.data?.revokedSessions ?? response?.data?.sessionsLoggedOut;
+  if (typeof value === 'number') return value > 0 ? `${value} active session${value === 1 ? '' : 's'} revoked.` : 'No active sessions needed revocation.';
+  if (value === true) return 'All active sessions were revoked.';
+  return null;
 }
 
 function matchesCurrentUser(teamUser: TeamUser, currentUser: any): boolean {
@@ -565,9 +613,21 @@ export default function TeamManagement() {
   const [createdStaffId, setCreatedStaffId] = useState<string | null>(null);
   const [nextStaffIdPreview, setNextStaffIdPreview] = useState<string | null>(null);
   const [loadingStaffIdPreview, setLoadingStaffIdPreview] = useState(false);
+  const [roleErr, setRoleErr] = useState<string | null>(null);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+  const [sessionBlocked, setSessionBlocked] = useState(false);
+  const [emailChangeUser, setEmailChangeUser] = useState<TeamUser | null>(null);
+  const [emailChangeForm, setEmailChangeForm] = useState<EmailChangeForm>({ newEmail: '', reason: '', forcePasswordChange: true, logoutAllDevices: true, confirmedSamePerson: false });
+  const [emailChangeErr, setEmailChangeErr] = useState<string | null>(null);
+  const [emailChangeSuccess, setEmailChangeSuccess] = useState<string | null>(null);
+  const [changingEmail, setChangingEmail] = useState(false);
+  const fetchStaffInFlightRef = useRef(false);
+  const staffIdPreviewInFlightRef = useRef(false);
 
   const selectedRole = useMemo(() => roleById(createForm.role) || roleById('editor'), [createForm.role]);
-  const staffIdPreviewText = nextStaffIdPreview ? `Next New Staff ID: ${nextStaffIdPreview}` : 'Auto-generated on create';
+  const staffIdPreviewLabel = nextStaffIdPreview ? `Next Non-Founder Staff ID: ${nextStaffIdPreview}` : 'Next Non-Founder Staff ID';
+  const staffIdPreviewText = nextStaffIdPreview || 'Auto-generated on create';
+  const founderEmailTypedInCreate = isProtectedFounderCreateEmail(createForm.email);
 
   const roleOptions = useMemo(() => {
     const customRoles = roles.slice().sort((a, b) => Number(a.sortOrder ?? 999) - Number(b.sortOrder ?? 999)).map((item) => {
@@ -588,32 +648,53 @@ export default function TeamManagement() {
   }, [roles]);
 
   async function fetchStaff() {
+    if (fetchStaffInFlightRef.current || sessionBlocked) return;
+    fetchStaffInFlightRef.current = true;
     setLoading(true);
     setErr(null);
+    setRoleErr(null);
     try {
-      const [list, roleList] = await Promise.all([
-        getTeamUsers(),
-        getTeamRoles().catch(() => [] as TeamRole[]),
-      ]);
+      const list = await getTeamUsers();
+      const roleList = await getTeamRoles().catch((roleError) => {
+        logTeamApiError('load roles failed', roleError);
+        if (isTeamRoleApiUnavailable(roleError)) {
+          setRoleErr(TEAM_ROLE_API_UNAVAILABLE_MESSAGE);
+          return [] as TeamRole[];
+        }
+        if (isTeamApiUnauthorized(roleError)) {
+          setSessionBlocked(true);
+          throw roleError;
+        }
+        setRoleErr(toTeamApiErrorMessage(roleError, 'Failed to load roles.'));
+        return [] as TeamRole[];
+      });
       setItems(Array.isArray(list) ? list : []);
       setRoles(Array.isArray(roleList) ? roleList : []);
     } catch (e: any) {
+      logTeamApiError('load users failed', e);
       setItems([]);
-      setErr(toFriendlyErrorMessage(e, 'Failed to load staff.'));
+      if (isTeamApiUnauthorized(e)) setSessionBlocked(true);
+      setErr(toTeamApiErrorMessage(e, 'Failed to load staff.'));
     } finally {
       setLoading(false);
+      fetchStaffInFlightRef.current = false;
     }
   }
 
   async function refreshStaffIdPreview() {
+    if (staffIdPreviewInFlightRef.current || sessionBlocked) return;
+    staffIdPreviewInFlightRef.current = true;
     setLoadingStaffIdPreview(true);
     try {
       const preview = await getNextTeamStaffIdPreview();
       setNextStaffIdPreview(preview);
-    } catch {
+    } catch (previewError) {
+      logTeamApiError('load next staff id failed', previewError);
+      if (isTeamApiUnauthorized(previewError)) setSessionBlocked(true);
       setNextStaffIdPreview(null);
     } finally {
       setLoadingStaffIdPreview(false);
+      staffIdPreviewInFlightRef.current = false;
     }
   }
 
@@ -659,6 +740,39 @@ export default function TeamManagement() {
     return isPrimaryFounderUser(teamUser);
   };
 
+  const canChangeStaffEmail = (teamUser: TeamUser): boolean => {
+    const id = userId(teamUser);
+    if (!isFounder || !id || isFounderUser(teamUser)) return false;
+    if (matchesCurrentUser(teamUser, user)) return false;
+    return true;
+  };
+
+  const openEmailChangeModal = (teamUser: TeamUser) => {
+    if (isFounderUser(teamUser)) {
+      toast.error('Founder email is protected. Change only through Safe Zone Founder Security.');
+      return;
+    }
+    if (matchesCurrentUser(teamUser, user)) {
+      toast.error('You cannot change your own email from Team Management.');
+      return;
+    }
+    if (!canChangeStaffEmail(teamUser)) {
+      toast.error('Founder permission required.');
+      return;
+    }
+    setEmailChangeUser(teamUser);
+    setEmailChangeForm({ newEmail: '', reason: '', forcePasswordChange: true, logoutAllDevices: true, confirmedSamePerson: false });
+    setEmailChangeErr(null);
+    setEmailChangeSuccess(null);
+  };
+
+  const closeEmailChangeModal = () => {
+    if (changingEmail) return;
+    setEmailChangeUser(null);
+    setEmailChangeErr(null);
+    setEmailChangeSuccess(null);
+  };
+
   const founderRow = useMemo<TeamUser>(() => {
     const existing = items.find(isPrimaryFounderUser);
     return { ...(existing || {}), name: FOUNDER_NAME, email: FOUNDER_EMAIL, staffId: FOUNDER_STAFF_ID, role: 'founder', isActive: true, status: 'active' };
@@ -695,7 +809,7 @@ export default function TeamManagement() {
       toast.error('Access denied (founder only).');
       return;
     }
-    if (createForm.role === 'founder') {
+    if (normalizeRoleId(createForm.role) === 'founder') {
       toast.error('Founder role is protected and cannot be assigned from invites.');
       return;
     }
@@ -715,24 +829,31 @@ export default function TeamManagement() {
       toast.error('Enter a valid email.');
       return;
     }
+    if (isProtectedFounderCreateEmail(email)) {
+      const message = 'This looks like Founder email. Do not create Founder as staff. Use Founder My Account / backend repair.';
+      setCreateErr(message);
+      toast.error(message);
+      return;
+    }
     setCreating(true);
+    setCreateErr(null);
     try {
       const res: any = await createTeamUser({
         email,
-        name,
+        fullName: name,
         role: createForm.role,
         designation: createForm.designation.trim() || undefined,
-        permissions: parsePermissions(),
+        specialPermissions: parsePermissions(),
         moduleAccess: defaultModulesForRole(createForm.role),
         specialRights: defaultRightsForRole(createForm.role),
         department: safeDepartmentForRole(createForm.role, createForm.department).trim() || undefined,
         assignedSections: createForm.assignedSections,
-        coverageArea: createForm.assignedSections.includes('Gujarat') && !createForm.coverageArea.length ? ['All Gujarat'] : createForm.coverageArea,
-        status: createForm.accountStatus,
-        accessExpiresAt: createForm.expiresAt || undefined,
+        coverageAreas: createForm.assignedSections.includes('Gujarat') && !createForm.coverageArea.length ? ['All Gujarat'] : createForm.coverageArea,
+        accountStatus: createForm.accountStatus,
+        accessExpiryDate: createForm.expiresAt || undefined,
         generateTemporaryPassword: createForm.generateTemporaryPassword,
         mustChangePassword: createForm.mustChangePassword,
-      } as any);
+      });
       const assignedStaffId = extractCreatedStaffId(res);
       const tempPassword = res?.temporaryPassword || res?.tempPassword || res?.password || res?.data?.temporaryPassword || res?.data?.tempPassword || res?.data?.password || null;
       setCreatedTempPassword(tempPassword ? String(tempPassword) : null);
@@ -742,7 +863,11 @@ export default function TeamManagement() {
       setCreateForm({ name: '', email: '', role: 'editor', designation: '', department: defaultDepartmentForRole('editor'), assignedSections: [], coverageArea: [], accountStatus: 'active', permissions: '', expiresAt: '', generateTemporaryPassword: true, mustChangePassword: true });
       await Promise.all([fetchStaff(), refreshStaffIdPreview()]);
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Create failed'));
+      logTeamApiError('create user failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      const message = toTeamApiErrorMessage(err2, 'Create failed');
+      setCreateErr(message);
+      toast.error(message);
     } finally {
       setCreating(false);
     }
@@ -784,7 +909,9 @@ export default function TeamManagement() {
       setRoleForm({ roleName: 'Custom Desk Role', description: '', sortOrder: 99, systemRole: false, moduleAccess: defaultModulesForRole('editor'), specialRights: defaultRightsForRole('editor') });
       await fetchStaff();
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Save role failed'));
+      logTeamApiError('save role failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      toast.error(toTeamApiErrorMessage(err2, 'Save role failed'));
     } finally {
       setSavingRole(false);
     }
@@ -802,7 +929,9 @@ export default function TeamManagement() {
       toast.success(label);
       await fetchStaff();
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Action failed'));
+      logTeamApiError('row action failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      toast.error(toTeamApiErrorMessage(err2, 'Action failed'));
     } finally {
       setRowBusyId(null);
     }
@@ -831,7 +960,9 @@ export default function TeamManagement() {
       toast.success(label);
       await fetchStaff();
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Password reset failed'));
+      logTeamApiError('password reset failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      toast.error(toTeamApiErrorMessage(err2, 'Password reset failed'));
     } finally {
       setRowBusyId(null);
     }
@@ -849,9 +980,68 @@ export default function TeamManagement() {
       await logoutAll(id);
       toast.success('All devices logged out');
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Logout all devices failed'));
+      logTeamApiError('logout devices failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      toast.error(toTeamApiErrorMessage(err2, 'Logout all devices failed'));
     } finally {
       setRowBusyId(null);
+    }
+  };
+
+  const handleEmailChange = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!emailChangeUser) return;
+    const id = userId(emailChangeUser);
+    if (!canChangeStaffEmail(emailChangeUser)) {
+      setEmailChangeErr(isFounderUser(emailChangeUser) ? 'Founder email is protected. Change only through Safe Zone Founder Security.' : 'Founder permission required.');
+      return;
+    }
+    const newEmail = emailChangeForm.newEmail.trim().toLowerCase();
+    const currentEmail = String(emailChangeUser.email || '').trim().toLowerCase();
+    const reason = emailChangeForm.reason.trim();
+    if (!emailLooksValid(newEmail)) {
+      setEmailChangeErr('Enter a valid email address.');
+      return;
+    }
+    if (newEmail === currentEmail) {
+      setEmailChangeErr('New email must be different from the current email.');
+      return;
+    }
+    if (!reason) {
+      setEmailChangeErr('Reason for Change is required.');
+      return;
+    }
+    if (!emailChangeForm.confirmedSamePerson) {
+      setEmailChangeErr('Confirm this is the same staff person, not a new replacement user.');
+      return;
+    }
+    if (isBlockedSharedSystemEmail(newEmail, emailChangeUser)) {
+      setEmailChangeErr('Shared News Pulse system emails cannot be used for normal staff accounts.');
+      return;
+    }
+    setChangingEmail(true);
+    setEmailChangeErr(null);
+    setEmailChangeSuccess(null);
+    try {
+      const res = await changeTeamUserEmail(id, {
+        newEmail,
+        reason,
+        forcePasswordChange: emailChangeForm.forcePasswordChange,
+        logoutAllDevices: emailChangeForm.logoutAllDevices,
+      });
+      const sessionsMessage = emailChangeSessionsMessage(res);
+      const successMessage = sessionsMessage ? `Email updated successfully. Staff ID remains unchanged. User must login with the new email and change password. ${sessionsMessage}` : 'Email updated successfully. Staff ID remains unchanged. User must login with the new email and change password.';
+      setEmailChangeSuccess(successMessage);
+      toast.success('Email updated successfully. Staff ID remains unchanged.');
+      await fetchStaff();
+    } catch (err2: any) {
+      logTeamApiError('change user email failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      const message = getEmailChangeErrorMessage(err2);
+      setEmailChangeErr(message);
+      toast.error(message);
+    } finally {
+      setChangingEmail(false);
     }
   };
 
@@ -869,7 +1059,9 @@ export default function TeamManagement() {
       toast.success('Staff access override saved');
       await fetchStaff();
     } catch (err2: any) {
-      toast.error(toFriendlyErrorMessage(err2, 'Save override failed'));
+      logTeamApiError('save access override failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      toast.error(toTeamApiErrorMessage(err2, 'Save override failed'));
     } finally {
       setSavingOverrideId(null);
     }
@@ -890,8 +1082,8 @@ export default function TeamManagement() {
             <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Founder protection, staff accounts, roles, access control, password safety, and attendance planning.</div>
             {!isFounder && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Access denied: founder-only controls are disabled.</div>}
           </div>
-          <button type="button" onClick={() => { void fetchStaff(); void refreshStaffIdPreview(); }} disabled={loading} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
-            {loading ? 'Refreshing...' : 'Refresh'}
+          <button type="button" onClick={() => { void fetchStaff(); void refreshStaffIdPreview(); }} disabled={loading || sessionBlocked} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
+            {sessionBlocked ? 'Login required' : loading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -926,6 +1118,43 @@ export default function TeamManagement() {
         </div>
       )}
 
+      {emailChangeUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="change-staff-email-title">
+          <form onSubmit={handleEmailChange} className="w-full max-w-xl rounded-2xl border border-blue-200 bg-white p-5 text-slate-950 shadow-2xl">
+            <div id="change-staff-email-title" className="text-lg font-semibold">Change Staff Email / Login ID</div>
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-950">
+              Only change email if this is the same staff member. If this is a new person replacing old staff, suspend the old account and create a new account instead.
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4">
+              <label className={fieldLabelClass}>Current Email / Login ID<input value={emailChangeUser.email || ''} readOnly aria-readonly="true" className={inputClass} /></label>
+              <label className={fieldLabelClass}>New Email / Login ID<input type="email" value={emailChangeForm.newEmail} onChange={(event) => setEmailChangeForm((state) => ({ ...state, newEmail: event.target.value }))} placeholder="new.email@example.com" className={inputClass} required /></label>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">Email/Login ID is used for login and password reset. Use a unique email for each staff account.</div>
+              <label className={fieldLabelClass}>Reason for Change<textarea value={emailChangeForm.reason} onChange={(event) => setEmailChangeForm((state) => ({ ...state, reason: event.target.value }))} placeholder="Explain why this same staff member needs a new login email." className={`${inputClass} min-h-24`} required /></label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={emailChangeForm.forcePasswordChange} onChange={(event) => setEmailChangeForm((state) => ({ ...state, forcePasswordChange: event.target.checked }))} />
+                  Force Password Change
+                </label>
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={emailChangeForm.logoutAllDevices} onChange={(event) => setEmailChangeForm((state) => ({ ...state, logoutAllDevices: event.target.checked }))} />
+                  Logout All Devices
+                </label>
+              </div>
+              <label className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold leading-6 text-rose-900">
+                <input type="checkbox" className="mt-1" checked={emailChangeForm.confirmedSamePerson} onChange={(event) => setEmailChangeForm((state) => ({ ...state, confirmedSamePerson: event.target.checked }))} required />
+                I confirm this is the same staff person, not a new replacement user.
+              </label>
+            </div>
+            {emailChangeErr ? <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">{emailChangeErr}</div> : null}
+            {emailChangeSuccess ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold leading-6 text-emerald-800">{emailChangeSuccess}</div> : null}
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+              <button type="button" onClick={closeEmailChangeModal} disabled={changingEmail} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={changingEmail || !emailChangeForm.confirmedSamePerson} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{changingEmail ? 'Updating...' : 'Update Email'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <SectionCard title="Founder Protection">
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-950">
           <div className="text-base font-semibold">Founder Protection Active</div>
@@ -949,13 +1178,16 @@ export default function TeamManagement() {
 
       <SectionCard title="Create Staff Account" subtitle="Invite staff with account status, role, access expiry, and password-safety options.">
         <form className="space-y-5" onSubmit={handleCreate}>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">
+            Founder account cannot be created here. This form is only for staff accounts. Founder account is protected and must be managed from Founder My Account / Safe Zone.
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <label className={fieldLabelClass}>Full Name<input value={createForm.name} onChange={(e) => setCreateForm((state) => ({ ...state, name: e.target.value }))} placeholder="Full Name" className={inputClass} /></label>
             <label className={fieldLabelClass}>Email / Login ID<input value={createForm.email} onChange={(e) => setCreateForm((state) => ({ ...state, email: e.target.value }))} placeholder="Email / Login ID" className={inputClass} /></label>
-            <label className={fieldLabelClass}>Staff ID<input value={loadingStaffIdPreview ? 'Loading next new Staff ID...' : staffIdPreviewText} readOnly aria-readonly="true" placeholder="Auto-generated, e.g. NP-2026-0001" aria-label="Staff ID" className={inputClass} /></label>
+            <label className={fieldLabelClass}>{staffIdPreviewLabel}<input value={loadingStaffIdPreview ? 'Loading next staff ID...' : staffIdPreviewText} readOnly aria-readonly="true" placeholder="Auto-generated, e.g. NP-2026-0001" aria-label="Next Non-Founder Staff ID" className={inputClass} /></label>
             <label className={fieldLabelClass}>Role<select value={createForm.role} onChange={(e) => setRoleAndDepartment(e.target.value)} className={inputClass}>
               {roleOptions.map((roleItem) => <option key={roleItem.id} value={roleItem.id} disabled={roleItem.protected}>{roleItem.label}{roleItem.protected ? ' (protected)' : ''}</option>)}
-            </select></label>
+            </select><span className="text-xs font-normal leading-5 text-slate-500">Founder is protected and cannot be created here.</span></label>
             <label className={fieldLabelClass}>Department<select value={createForm.department} onChange={(e) => setDepartment(e.target.value)} className={inputClass}>
               <option value="">Select Department</option>
               {DEPARTMENT_OPTIONS.map((department) => <option key={department} value={department}>{department}</option>)}
@@ -983,11 +1215,13 @@ export default function TeamManagement() {
               onChange={(coverageArea) => setCreateForm((state) => ({ ...state, coverageArea }))}
             />
           </div>
+          {founderEmailTypedInCreate ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-800">This looks like Founder email. Do not create Founder as staff. Use Founder My Account / backend repair.</div> : null}
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
             <div className="font-semibold text-slate-900">Staff ID is auto-generated and used for internal records, attendance, reports, and access logs.</div>
             <div className="mt-1 text-xs text-slate-600">Founder ID is protected as {FOUNDER_STAFF_ID}. This ID is for new staff accounts only.</div>
-            <div className="mt-1 text-xs text-slate-600">{nextStaffIdPreview ? `Next New Staff ID: ${nextStaffIdPreview}` : 'Auto-generated on create'}</div>
+            <div className="mt-1 text-xs text-slate-600">{nextStaffIdPreview ? `Next Non-Founder Staff ID: ${nextStaffIdPreview}` : 'Auto-generated on create'}</div>
           </div>
+          {createErr ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-800">{createErr}</div> : null}
           {createForm.assignedSections.includes('Gujarat') && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
               Gujarat in Assigned Sections means full Gujarat state coverage, including all cities and districts. Coverage Area decides exact city/region responsibility.
@@ -1020,6 +1254,7 @@ export default function TeamManagement() {
       </SectionCard>
 
       <SectionCard title="Create / Manage Roles" subtitle="Create custom roles, set display rank, and grant module access or special rights.">
+        {roleErr ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">{roleErr}</div> : null}
         <form className="space-y-5" onSubmit={handleSaveRole}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
             <label className={fieldLabelClass}>Role Name<input value={roleForm.roleName} onChange={(e) => setRoleForm((state) => ({ ...state, roleName: e.target.value }))} placeholder="Role Name" className={inputClass} /></label>
@@ -1188,6 +1423,15 @@ export default function TeamManagement() {
       <SectionCard title="Staff List" subtitle="Account Status is account access. Session Status is login/session state.">
         {loading ? <div className="text-slate-600">Loading...</div> : err ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">{err} Showing the protected founder account view below.</div> : null}
         {isFounder && founderLikeCount > 1 ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Multiple Founder-like records detected. Review old/test accounts.</div> : null}
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+            <div className="font-semibold">Email/Login ID change policy</div>
+            <p className="mt-2">Same staff person = update email, keep same Staff ID, logout all devices, force password change.</p>
+            <p>New staff person = create new account, new Staff ID. Do not reuse old account.</p>
+            <p>Old staff leaves = suspend/lock account and keep audit history.</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">Do not reuse an old staff account for a new person. Suspend old account and create new account.</div>
+        </div>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead><tr className="text-left text-slate-600"><th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Email / Login ID</th><th className="py-2 pr-3">Staff ID</th><th className="py-2 pr-3">Role</th><th className="py-2 pr-3">Account Status</th><th className="py-2 pr-3">Session Status</th><th className="py-2 pr-3">Last Login</th><th className="py-2 pr-3">Last Logout</th><th className="py-2 pr-3">Actions</th></tr></thead>
@@ -1200,6 +1444,7 @@ export default function TeamManagement() {
                 const sessionStatus = getSessionStatusDisplay(teamUser, user);
                 const currentUser = matchesCurrentUser(teamUser, user);
                 const busy = rowBusyId === id;
+                const mustChangePassword = staffMustChangePassword(teamUser);
                 const rowRole = founder ? roleById('founder') : roleById(teamUser.role);
                 const rowBadges = founder ? [badge('Founder', 'protected'), ...(rowRole?.badges || [])] : rowRole?.badges || [badge('Limited', 'limited')];
                 const rowKey = id || `${teamUser.email}-${teamUser.name}`;
@@ -1210,7 +1455,7 @@ export default function TeamManagement() {
                       <td className="py-3 pr-3 text-slate-700">{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</td>
                       <td className="py-3 pr-3 text-slate-700">{displayStaffId(teamUser.staffId, founder)}</td>
                       <td className="py-3 pr-3"><div className="font-semibold text-slate-900">{rowRole?.label || teamUser.role || 'Staff'}</div><div className="mt-1 flex flex-wrap gap-1.5">{rowBadges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div></td>
-                      <td className="py-3 pr-3"><StatusPill label={accountStatus} /></td>
+                      <td className="py-3 pr-3"><div className="flex flex-wrap gap-1.5"><StatusPill label={accountStatus} />{mustChangePassword ? <StatusPill label="Must Change Password" tone="amber" /> : null}</div></td>
                       <td className="py-3 pr-3"><StatusPill label={sessionStatus} /></td>
                       <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</td>
                       <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogout || teamUser.lastLogoutAt || teamUser.logoutAt)}</td>
@@ -1232,14 +1477,26 @@ export default function TeamManagement() {
                             <div className="xl:col-span-2 rounded-xl border border-slate-200 bg-white p-3">
                               <div className="text-xs font-semibold uppercase text-slate-500">{founder ? 'Founder Staff ID' : 'Staff ID'}</div>
                               <div className="mt-1 flex flex-wrap items-center gap-2 font-medium text-slate-900"><span>{displayStaffId(teamUser.staffId, founder)}</span>{founder ? <StatusPill label="Protected" tone="rose" /> : null}</div>
-                              <div className="mt-2 text-xs leading-5 text-slate-600">Staff ID is permanent and cannot be changed after account creation.</div>
+                              <div className="mt-2 text-xs leading-5 text-slate-600">Staff ID is read-only. Staff ID does not change when email changes.</div>
+                            </div>
+                            <div className="xl:col-span-2 rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs font-semibold uppercase text-slate-500">Email / Login ID</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 font-medium text-slate-900"><span>{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</span>{mustChangePassword ? <StatusPill label="Must Change Password" tone="amber" /> : null}</div>
+                              <div className="mt-2 text-xs leading-5 text-slate-600">Email/Login ID is used for login and password reset. Use a unique email for each staff account.</div>
+                              {founder ? (
+                                <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-5 text-rose-800">Founder email is protected. Change only through Safe Zone Founder Security.</div>
+                              ) : currentUser ? (
+                                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">You cannot change your own email from this screen.</div>
+                              ) : (
+                                <button type="button" disabled={!canChangeStaffEmail(teamUser)} onClick={() => openEmailChangeModal(teamUser)} className="mt-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">Change Email / Login ID</button>
+                              )}
                             </div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Department</div><div className="mt-1 font-medium text-slate-900">{displayDepartment(teamUser, founder)}</div></div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Assigned Sections</div><div className="mt-1 font-medium text-slate-900">{listText(teamUser.assignedSections)}</div></div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Coverage Area</div><div className="mt-1 font-medium text-slate-900">{listText((teamUser as any).coverageArea)}</div></div>
                             <div><div className="text-xs font-semibold uppercase text-slate-500">Access Expiry Date</div><div className="mt-1 font-medium text-slate-900">{formatDateTime((teamUser as any).accessExpiresAt || (teamUser as any).expiresAt)}</div></div>
                             <div className="xl:col-span-2"><div className="text-xs font-semibold uppercase text-slate-500">Special Rights</div><div className="mt-1 font-medium text-slate-900">{listText(teamUser.specialRights)}</div></div>
-                            {founder ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800 xl:col-span-2">Founder / Ownership is reserved for the protected Founder account only.</div> : null}
+                            {founder ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800 xl:col-span-2">Founder / Ownership is reserved for the protected Founder account only. Founder email is protected. Change only through Safe Zone Founder Security.</div> : null}
                           </div>
                         </td>
                       </tr>

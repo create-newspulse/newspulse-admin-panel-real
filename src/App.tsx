@@ -62,7 +62,6 @@ import EnhancedSecurityDashboard from '@components/advanced/EnhancedSecurityDash
 import EditorialWorkflowEngine from '@components/advanced/EditorialWorkflowEngine';
 import FounderControlCenter from '@components/advanced/FounderControlCenter';
 import FounderControlPage from '@pages/admin/founder-control';
-import FeatureTogglesPage from '@pages/founder/FeatureTogglesPage';
 import FeatureTogglesCommunityReporter from '@/pages/founder/FeatureTogglesCommunityReporter';
 // Temporary import of Community Reporter page from legacy admin folder until unified move
 import CommunityReporterPage from '@pages/admin/CommunityReporterPage';
@@ -78,6 +77,7 @@ import CommentModerationDashboard from '@components/advanced/CommentModerationDa
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 import AIEngine from '@pages/admin/AIEngine';
 import ChangePassword from '@pages/admin/ChangePassword';
+import { ChangePasswordSettingsRedirect, FounderMyAccount, StaffMyAccount } from '@pages/admin/account/MyAccountPages';
 import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
@@ -171,14 +171,21 @@ function CommunitySubmitRedirect() {
   return null;
 }
 
+function mustChangePasswordFor(user: any): boolean {
+  return user?.mustChangePassword === true || user?.passwordChangeRequired === true || user?.forcePasswordChange === true;
+}
+
 function App() {
   if (import.meta.env.DEV) console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const location = useLocation();
   const isAuthPage = ['/login', '/admin/login', '/employee/login'].includes(location.pathname);
   const showTranslationUi = translationUiEnabled();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const mustChangePassword = isAuthenticated && mustChangePasswordFor(user);
+  const accountPasswordPath = String(user?.role || '').toLowerCase() === 'founder' ? '/admin/founder/my-account' : '/admin/my-account';
+  const mustChangePasswordBlocked = mustChangePassword && location.pathname.startsWith('/admin') && location.pathname !== accountPasswordPath;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
@@ -215,7 +222,7 @@ function App() {
           ) : null}
 
           <main className="p-4 md:p-6 max-w-7xl mx-auto">
-            <Routes>
+            {mustChangePasswordBlocked ? <Navigate to={`${accountPasswordPath}#change-password`} replace /> : <Routes>
               {/* 🧭 Default Redirect to Admin Dashboard */}
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/media-kit" element={<MediaKitPublic />} />
@@ -364,7 +371,7 @@ function App() {
                   <Route path="security" element={<SecurityAdmin />} />
                   <Route path="translation" element={<TranslationSettings />} />
                   <Route path="translation-glossary" element={<TranslationGlossary />} />
-                  <Route path="change-password" element={<ChangePassword />} />
+                  <Route path="change-password" element={<ChangePasswordSettingsRedirect />} />
                   <Route path="audit" element={<AuditLogsView />} />
                   <Route path="preview" element={<AdminPreview />} />
                 </Route>
@@ -438,6 +445,8 @@ function App() {
               <Route path="/admin/control-constitution" element={<FounderRoute><ControlConstitution /></FounderRoute>} />
               <Route path="/admin/diagnostics" element={<FounderRoute><Diagnostics /></FounderRoute>} />
               <Route path="/admin/ai-engine" element={<AdminModuleRoute moduleKey="ai_engine"><AIEngine /></AdminModuleRoute>} />
+              <Route path="/admin/founder/my-account" element={<ProtectedRoute><FounderMyAccount /></ProtectedRoute>} />
+              <Route path="/admin/my-account" element={<ProtectedRoute><StaffMyAccount /></ProtectedRoute>} />
               <Route path="/admin/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
               <Route path="/admin/aira" element={<AdminModuleRoute moduleKey="aira"><Aira /></AdminModuleRoute>} />
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
@@ -494,7 +503,7 @@ function App() {
               <Route path="/denied" element={<Denied />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<NotFound />} />
-            </Routes>
+            </Routes>}
           </main>
 
           {/* 🔎 Global Command Palette (Ctrl/Cmd+K) */}

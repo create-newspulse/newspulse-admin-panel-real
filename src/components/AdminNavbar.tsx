@@ -8,6 +8,9 @@ export default function AdminNavbar() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const { logout, user } = useAuth();
   const role = ((user?.role || "viewer").toLowerCase() as Role);
+  const isFounder = String(user?.role || '').toLowerCase() === 'founder';
+  const accountPath = isFounder ? '/admin/founder/my-account' : '/admin/my-account';
+  const accountLabel = isFounder ? 'Founder My Account' : 'My Account';
 
   const handleLogout = () => {
     const confirm =
@@ -48,6 +51,15 @@ export default function AdminNavbar() {
             {item.icon} {item.label}
           </NavLink>
         ))}
+
+        <NavLink
+          to={accountPath}
+          className={({ isActive }) =>
+            isActive ? `${navLinkClass} ${activeLinkClass}` : navLinkClass
+          }
+        >
+          👤 {accountLabel}
+        </NavLink>
 
         <button
           onClick={handleLogout}

@@ -48,6 +48,8 @@ const Breadcrumbs = () => {
     "/admin/community/portal": "Reporter Portal Admin",
     "/broadcast-center": "Broadcast Center",
     "/admin/broadcast-center": "Broadcast Center",
+    "/admin/founder/my-account": "Founder My Account",
+    "/admin/my-account": "My Account",
 
     // Settings Center – mode + section friendly labels
     "/admin/settings/admin-panel": "Admin Panel Settings",
