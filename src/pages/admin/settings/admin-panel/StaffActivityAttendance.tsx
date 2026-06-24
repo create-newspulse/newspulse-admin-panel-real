@@ -30,6 +30,7 @@ type Props = {
 };
 
 type ActivityTab = 'activity' | 'attendance' | 'breaks' | 'leave' | 'schedule' | 'reports';
+type StaffActivityFilter = 'active' | 'expired' | 'suspended' | 'archived' | 'testDeleted' | 'all';
 type LoadState = 'idle' | 'loading' | 'ready' | 'offline';
 type BadgeTone = 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'blue' | 'violet';
 type SessionStatusLabel = 'Active Session' | 'No Active Session' | 'Logged Out' | 'Session Expired';
@@ -50,6 +51,14 @@ const PRIMARY_FOUNDER_EMAIL = 'newspulse.team@gmail.com';
 const PRIMARY_FOUNDER_NAME = 'NewsPulse Founder';
 const PRIMARY_FOUNDER_STAFF_ID = 'NP-FND-0001';
 const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai']);
+const STAFF_ACTIVITY_FILTERS: { key: StaffActivityFilter; label: string }[] = [
+  { key: 'active', label: 'Active Staff' },
+  { key: 'expired', label: 'Expired' },
+  { key: 'suspended', label: 'Suspended' },
+  { key: 'archived', label: 'Archived' },
+  { key: 'testDeleted', label: 'Test/Deleted' },
+  { key: 'all', label: 'Show All' },
+];
 
 function normalize(value?: unknown): string {
   return String(value || '').trim().toLowerCase();
@@ -69,6 +78,65 @@ function isFounderLikeRow(row: { role?: string; email?: string; name?: string })
 function shouldRenderActivityRow(row: { role?: string; email?: string; name?: string }): boolean {
   if (!isFounderLikeRow(row)) return true;
   return isPrimaryFounderEmail(row.email);
+}
+
+function containsTestMarker(value: unknown): boolean {
+  return /\btest\b/i.test(String(value || ''));
+}
+
+function activityAccountStatus(row: any): string {
+  return normalize(row?.accountStatus || row?.account?.accountStatus || row?.user?.accountStatus || row?.staffAccountStatus || row?.lifecycleStatus);
+}
+
+function isArchivedActivityRow(row: any): boolean {
+  const status = activityAccountStatus(row);
+  return status === 'archived' || row?.archived === true || row?.isArchived === true || !!row?.archivedAt;
+}
+
+function isDeletedOrTestRemovedActivityRow(row: any): boolean {
+  const status = activityAccountStatus(row);
+  return ['deleted', 'removed', 'test_removed', 'deleted_test', 'test-deleted'].includes(status) || row?.deleted === true || row?.isDeleted === true || row?.testRemoved === true || !!row?.deletedAt || !!row?.removedAt;
+}
+
+function hasActivityCleanupReason(row: any): boolean {
+  const cleanupReason = normalize(row?.cleanupReason || row?.cleanup?.reason || row?.cleanupTag);
+  return !!cleanupReason || cleanupReason.includes('test_or_duplicate_cleanup');
+}
+
+function isDuplicateDisabledActivityRow(row: any): boolean {
+  return normalize(row?.logoutReason || row?.lastLogoutReason || row?.session?.logoutReason) === 'founder_duplicate_login_disabled';
+}
+
+function isTestActivityRow(row: any): boolean {
+  const flags = [row?.isTestAccount, row?.testAccount, row?.demoAccount, row?.fakeAccount, row?.isDemo, row?.isFake, row?.isUnwanted, row?.unwantedAccount, row?.canDeleteAsTest];
+  if (flags.some((value) => value === true)) return true;
+  if (containsTestMarker(row?.fullName || row?.name) || containsTestMarker(row?.designation)) return true;
+  const markers = [row?.accountType, row?.accountPurpose, row?.environment, row?.staffType, row?.accountCategory, row?.testStatus, ...(Array.isArray(row?.tags) ? row.tags : []), ...(Array.isArray(row?.labels) ? row.labels : [])].map(normalize);
+  return markers.some((value) => ['test', 'demo', 'fake', 'unwanted'].includes(value));
+}
+
+function isCleanupHiddenActivityRow(row: any): boolean {
+  if (isPrimaryFounderEmail(row?.email)) return false;
+  return isArchivedActivityRow(row) || isDeletedOrTestRemovedActivityRow(row) || hasActivityCleanupReason(row) || isDuplicateDisabledActivityRow(row) || isTestActivityRow(row);
+}
+
+function activityFilterStatus(row: any): 'active' | 'expired' | 'suspended' {
+  const status = activityAccountStatus(row);
+  if (status === 'expired') return 'expired';
+  if (['suspended', 'inactive', 'disabled'].includes(status)) return 'suspended';
+  return 'active';
+}
+
+function matchesStaffActivityFilter(row: any, filter: StaffActivityFilter): boolean {
+  if (isPrimaryFounderEmail(row?.email)) return true;
+  const status = activityFilterStatus(row);
+  if (filter === 'active') return status === 'active' && !isCleanupHiddenActivityRow(row);
+  if (filter === 'expired') return status === 'expired' && !isCleanupHiddenActivityRow(row);
+  if (filter === 'suspended') return status === 'suspended' && !isCleanupHiddenActivityRow(row);
+  if (filter === 'archived') return isArchivedActivityRow(row) || hasActivityCleanupReason(row) || isDuplicateDisabledActivityRow(row);
+  if (filter === 'testDeleted') return isDeletedOrTestRemovedActivityRow(row) || isTestActivityRow(row) || hasActivityCleanupReason(row) || isDuplicateDisabledActivityRow(row);
+  if (filter === 'all') return true;
+  return true;
 }
 
 function userKey(row?: { userId?: string; id?: string; _id?: string; email?: string; staffId?: string } | null): string {
@@ -147,6 +215,17 @@ function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?: Badge
     violet: 'border-violet-200 bg-violet-100 text-violet-800',
   };
   return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${classes[tone]}`}>{children}</span>;
+}
+
+function CleanupBadges({ row }: { row: any }) {
+  return (
+    <>
+      {isArchivedActivityRow(row) ? <Badge tone="slate">Archived</Badge> : null}
+      {isDeletedOrTestRemovedActivityRow(row) ? <Badge tone="rose">Deleted Test</Badge> : null}
+      {isDuplicateDisabledActivityRow(row) ? <Badge tone="amber">Duplicate Disabled</Badge> : null}
+      {isTestActivityRow(row) && !isDeletedOrTestRemovedActivityRow(row) ? <Badge tone="amber">Test Account</Badge> : null}
+    </>
+  );
 }
 
 function AccessDenied() {
@@ -232,6 +311,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [reportRange, setReportRange] = useState('daily');
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [staffActivityFilter, setStaffActivityFilter] = useState<StaffActivityFilter>('active');
   const [breakReason, setBreakReason] = useState('');
   const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' });
   const [scheduleForm, setScheduleForm] = useState({ title: '', staffId: '', role: '', startTime: '', endTime: '', weeklyOffDay: 'Sunday', active: true });
@@ -262,16 +342,16 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
   }, [attendanceReport, attendanceToday, leaveRequests, presence, schedules, sessionLogs, teamRows]);
 
   const visibleTeamRows = useMemo(() => {
-    if (canViewAll) return inferredTeamRows;
-    return inferredTeamRows.filter((row) => isSamePerson(row as any, user));
-  }, [canViewAll, inferredTeamRows, user]);
+    const scopedRows = canViewAll ? inferredTeamRows : inferredTeamRows.filter((row) => isSamePerson(row as any, user));
+    return scopedRows.filter((row) => matchesStaffActivityFilter(row, staffActivityFilter));
+  }, [canViewAll, inferredTeamRows, staffActivityFilter, user]);
 
-  const filteredPresence = useMemo(() => (canViewAll ? presence : presence.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow), [canViewAll, presence, user]);
-  const filteredLogs = useMemo(() => (canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow), [canViewAll, sessionLogs, user]);
-  const filteredAttendanceToday = useMemo(() => canViewAll ? attendanceToday : attendanceToday.filter((row) => isSamePerson(row, user)), [attendanceToday, canViewAll, user]);
-  const filteredAttendanceReport = useMemo(() => canViewAll ? attendanceReport : attendanceReport.filter((row) => isSamePerson(row, user)), [attendanceReport, canViewAll, user]);
-  const filteredLeaveRequests = useMemo(() => canViewAll ? leaveRequests : leaveRequests.filter((row) => isSamePerson(row, user)), [canViewAll, leaveRequests, user]);
-  const filteredSchedules = useMemo(() => canViewAll ? schedules : schedules.filter((row) => isSamePerson(row, user)), [canViewAll, schedules, user]);
+  const filteredPresence = useMemo(() => (canViewAll ? presence : presence.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [canViewAll, presence, staffActivityFilter, user]);
+  const filteredLogs = useMemo(() => (canViewAll ? sessionLogs : sessionLogs.filter((row) => isSamePerson(row, user))).filter(shouldRenderActivityRow).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [canViewAll, sessionLogs, staffActivityFilter, user]);
+  const filteredAttendanceToday = useMemo(() => (canViewAll ? attendanceToday : attendanceToday.filter((row) => isSamePerson(row, user))).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [attendanceToday, canViewAll, staffActivityFilter, user]);
+  const filteredAttendanceReport = useMemo(() => (canViewAll ? attendanceReport : attendanceReport.filter((row) => isSamePerson(row, user))).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [attendanceReport, canViewAll, staffActivityFilter, user]);
+  const filteredLeaveRequests = useMemo(() => (canViewAll ? leaveRequests : leaveRequests.filter((row) => isSamePerson(row, user))).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [canViewAll, leaveRequests, staffActivityFilter, user]);
+  const filteredSchedules = useMemo(() => (canViewAll ? schedules : schedules.filter((row) => isSamePerson(row, user))).filter((row) => matchesStaffActivityFilter(row, staffActivityFilter)), [canViewAll, schedules, staffActivityFilter, user]);
 
   const activityRows = useMemo(() => {
     const byKey = new Map<string, TeamPresenceRow & TeamSessionLog & TeamUser>();
@@ -295,12 +375,12 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
     const activeSessions = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'Active Session').length;
     const noActiveSessions = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'No Active Session').length;
     const loggedOut = activityRows.filter((row) => getSessionStatusDisplay(row, user) === 'Logged Out').length;
-    const presentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'present').length;
-    const absentToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'absent').length;
-    const lateToday = attendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'late').length;
-    const onLeave = attendanceToday.filter((row) => ['on leave', 'on_leave'].includes(normalize(row.attendanceStatus || row.status))).length;
-    const offDay = attendanceToday.filter((row) => ['off day', 'off_day'].includes(normalize(row.attendanceStatus || row.status))).length;
-    const pendingLeave = leaveRequests.filter((row) => normalize(row.status) === 'pending').length;
+    const presentToday = filteredAttendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'present').length;
+    const absentToday = filteredAttendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'absent').length;
+    const lateToday = filteredAttendanceToday.filter((row) => normalize(row.attendanceStatus || row.status) === 'late').length;
+    const onLeave = filteredAttendanceToday.filter((row) => ['on leave', 'on_leave'].includes(normalize(row.attendanceStatus || row.status))).length;
+    const offDay = filteredAttendanceToday.filter((row) => ['off day', 'off_day'].includes(normalize(row.attendanceStatus || row.status))).length;
+    const pendingLeave = filteredLeaveRequests.filter((row) => normalize(row.status) === 'pending').length;
     return [
       ['Active Sessions', activeSessions],
       ['No Active Session', noActiveSessions],
@@ -312,7 +392,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
       ['Off Day', offDay],
       ['Pending Leave Requests', pendingLeave],
     ] as const;
-  }, [activityRows, attendanceToday, leaveRequests, user]);
+  }, [activityRows, filteredAttendanceToday, filteredLeaveRequests, user]);
 
   async function loadActivity(range = reportRange) {
     if (!canUseOwn && !canViewAll) return;
@@ -397,6 +477,21 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
         {!canViewAll && canUseOwn ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">You can view only your own attendance, schedule, leave, and login/logout records.</div> : null}
 
         {canViewAll ? (
+          <div className="flex flex-wrap gap-2">
+            {STAFF_ACTIVITY_FILTERS.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => setStaffActivityFilter(filter.key)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${staffActivityFilter === filter.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {canViewAll ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {dashboardCards.map(([label, value]) => (
               <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -437,7 +532,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
                     const currentUser = matchesCurrentUser(row, user);
                     return (
                       <tr key={userKey(row) || `${row.email}-${row.name}`} className="border-t border-slate-200 align-top">
-                        <td className="py-3 pr-4"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</span>{currentUser ? <Badge tone="violet">You</Badge> : null}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Unnamed staff')}</span>{currentUser ? <Badge tone="violet">You</Badge> : null}<CleanupBadges row={row} /></div><div className="mt-1 text-xs text-slate-600">{displayText(row.email)}</div></td>
                         <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
                         <td className="py-3 pr-4"><Badge tone={toneForStatus(sessionStatus)}>{sessionStatus}</Badge></td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.lastSeen)}</td>
@@ -477,7 +572,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
                     const attendanceStatus = row.attendanceStatus || row.status || 'absent';
                     return (
                       <tr key={valueId(row) || `${row.email}-${row.date}`} className="border-t border-slate-200 align-top">
-                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</span><CleanupBadges row={row} /></div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkInTime || row.checkInAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayDateTime(row.checkOutTime || row.checkOutAt)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText(row.totalWorkTime || row.workDuration)}</td>
@@ -505,7 +600,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {filteredAttendanceToday.map((row) => (
                 <div key={valueId(row) || `${row.email}-break`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div>
+                  <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</span><CleanupBadges row={row} /></div>
                   <div className="mt-3 space-y-2 text-sm text-slate-700">
                     <Field label="Current break status" value={<Badge tone={toneForStatus(row.breakStatus)}>{statusLabel(row.breakStatus, 'Not On Break')}</Badge>} />
                     <Field label="Break start" value={displayDateTime(row.breakStart || row.breakStartedAt)} />
@@ -537,7 +632,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
                     const pending = normalize(row.status) === 'pending';
                     return (
                       <tr key={id || `${row.email}-${row.startDate}`} className="border-t border-slate-200 align-top">
-                        <td className="py-3 pr-4"><div className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
+                        <td className="py-3 pr-4"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-slate-950">{displayText(row.name, 'Staff')}</span><CleanupBadges row={row} /></div><div className="mt-1 text-xs text-slate-600">{displayText(row.email || row.staffId)}</div></td>
                         <td className="py-3 pr-4 text-slate-700">{statusLabel(row.type, 'Leave')}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText(row.startDate)}</td>
                         <td className="py-3 pr-4 text-slate-700">{displayText(row.endDate)}</td>
@@ -577,7 +672,7 @@ export default function StaffActivityAttendance({ teamRows = [] }: Props) {
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.startTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.endTime)}</td>
                       <td className="py-3 pr-4 text-slate-700">{displayText(row.weeklyOffDay)}</td>
-                      <td className="py-3 pr-4 text-slate-700">{displayStaffId(row.staffId, isPrimaryFounderEmail(row.email))}</td>
+                      <td className="py-3 pr-4 text-slate-700"><div className="flex flex-wrap items-center gap-2"><span>{displayStaffId(row.staffId, isPrimaryFounderEmail(row.email))}</span><CleanupBadges row={row} /></div></td>
                       <td className="py-3 pr-4 text-slate-700">{statusLabel(row.role, 'Staff')}</td>
                       <td className="py-3 pr-4"><Badge tone={row.active === false || normalize(row.status) === 'inactive' ? 'slate' : 'emerald'}>{row.active === false || normalize(row.status) === 'inactive' ? 'Inactive' : 'Active'}</Badge></td>
                     </tr>

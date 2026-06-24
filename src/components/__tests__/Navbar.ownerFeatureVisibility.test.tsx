@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe('Navbar owner feature visibility', () => {
-  it('hides disabled modules and Safe Zone for non-owner users', async () => {
+  it('shows disabled modules as locked for non-owner users', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -56,13 +56,13 @@ describe('Navbar owner feature visibility', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByRole('link', { name: /add news/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /add news/i })).toHaveAttribute('aria-disabled', 'true');
     });
 
     expect(screen.getByRole('link', { name: /manage news/i })).toHaveAttribute('href', '/admin/articles');
-    expect(screen.queryByRole('link', { name: /compliance reports/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /settings/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /safe zone/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /compliance reports/i })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: /settings/i })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: /safe zone/i })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument();
   });
 });

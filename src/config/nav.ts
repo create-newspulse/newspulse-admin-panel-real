@@ -15,6 +15,7 @@ export type NavItem = {
   moduleKey?: AdminModuleKey;
   rightSide?: boolean;
   hidden?: boolean;
+  locked?: boolean;
 };
 
 // Central navigation definition
@@ -74,9 +75,10 @@ export function rightNavWithOwnerVisibility(role: Role, visibility: AdminFeature
 }
 
 export function leftNavWithAccess(user: any, visibility: AdminFeatureVisibilityState) {
-  return NAV_ITEMS.filter((item) => !item.hidden && !item.rightSide).filter((item) => {
-    if (item.moduleKey) return canAccessAdminModule(user, item.moduleKey, visibility);
-    return item.roles.includes(String(user?.role || 'viewer').toLowerCase());
+  const role = String(user?.role || 'viewer').toLowerCase();
+  return NAV_ITEMS.filter((item) => !item.hidden && !item.rightSide).flatMap((item) => {
+    if (item.moduleKey) return [{ ...item, locked: !canAccessAdminModule(user, item.moduleKey, visibility) }];
+    return item.roles.includes(role) ? [item] : [];
   });
 }
 

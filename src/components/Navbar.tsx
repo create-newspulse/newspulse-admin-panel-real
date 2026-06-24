@@ -1,5 +1,6 @@
 
 import { NavLink, Link, useLocation } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
 import { leftNavWithAccess, rightNavWithAccess } from '@/config/nav';
@@ -35,8 +36,21 @@ export default function Navbar() {
           <nav className="flex flex-wrap items-center gap-4 text-sm font-medium">
 
             {/* 🔗 Main Menu */}
-            {left.map(({ path, icon, label, key }) => {
-              return (
+            {left.map(({ path, icon, label, key, locked }) => {
+              return locked ? (
+                <button
+                  key={key}
+                  type="button"
+                  aria-disabled="true"
+                  title="Access Denied. Founder permission is required."
+                  onClick={() => toast.error('Access Denied. Founder permission is required.')}
+                  className="flex cursor-not-allowed items-center gap-1 rounded px-2 py-1 text-slate-400 transition-colors hover:text-slate-300"
+                >
+                  <span>{icon}</span>
+                  <span>{label}</span>
+                  <span className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">Locked</span>
+                </button>
+              ) : (
                 <NavLink
                   key={key}
                   to={path}

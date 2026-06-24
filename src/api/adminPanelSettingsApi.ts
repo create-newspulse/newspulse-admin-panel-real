@@ -260,7 +260,7 @@ export async function changePassword(payload: ChangePasswordPayload): Promise<an
 
 // Audit
 export async function getAuditLogs(limit = 50): Promise<AuditLogRow[]> {
-  const raw = await adminJson<any>(`/admin/audit?limit=${encodeURIComponent(String(limit))}`, { cache: 'no-store' } as any);
+  const raw = await adminJson<any>(`/admin-api/admin/audit-logs?limit=${encodeURIComponent(String(limit))}`, { cache: 'no-store' } as any);
   return normalizeList<AuditLogRow>(raw);
 }
 

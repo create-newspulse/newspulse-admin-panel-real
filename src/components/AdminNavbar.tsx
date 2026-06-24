@@ -1,14 +1,21 @@
 // 📂 components/Admin/AdminNavbar.tsx
 import { NavLink } from "react-router-dom";
 import { useState } from "react";
+import { toast } from "react-hot-toast";
 import { useAuth } from "@/context/AuthContext";
-import { leftNav, type Role } from "@/config/nav";
+import { leftNavWithAccess, type Role } from "@/config/nav";
+import { useAdminFeatureVisibility } from "@/hooks/useAdminFeatureVisibility";
+import { DEFAULT_ADMIN_FEATURE_VISIBILITY, isOwnerRole } from "@/lib/adminFeatureVisibility";
 
 export default function AdminNavbar() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const { logout, user } = useAuth();
   const role = ((user?.role || "viewer").toLowerCase() as Role);
   const isFounder = String(user?.role || '').toLowerCase() === 'founder';
+  const ownerRole = isOwnerRole(role);
+  const { visibility } = useAdminFeatureVisibility({ enabled: !ownerRole });
+  const effectiveVisibility = ownerRole ? DEFAULT_ADMIN_FEATURE_VISIBILITY : visibility;
+  const left = leftNavWithAccess(user, effectiveVisibility).filter((item) => item.key !== 'community-hub');
   const accountPath = isFounder ? '/admin/founder/my-account' : '/admin/my-account';
   const accountLabel = isFounder ? 'Founder My Account' : 'My Account';
 
@@ -40,7 +47,18 @@ export default function AdminNavbar() {
       </div>
 
       <div className="flex flex-wrap gap-4 items-center">
-        {leftNav(role).filter(i => !i.hidden).slice(0,5).map(item => (
+        {left.slice(0, 5).map(item => item.locked ? (
+          <button
+            key={item.key}
+            type="button"
+            aria-disabled="true"
+            title="Access Denied. Founder permission is required."
+            onClick={() => toast.error('Access Denied. Founder permission is required.')}
+            className="cursor-not-allowed text-sm font-medium text-gray-400 transition hover:text-gray-300"
+          >
+            {item.icon} {item.label} <span className="text-xs">Locked</span>
+          </button>
+        ) : (
           <NavLink
             key={item.key}
             to={item.path}

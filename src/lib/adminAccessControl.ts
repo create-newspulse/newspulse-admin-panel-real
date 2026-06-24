@@ -22,15 +22,26 @@ export type AdminModuleKey =
   | 'ai_engine'
   | 'settings'
   | 'safe_zone'
+  | 'staff_tasks'
+  | 'audit_logs'
   | 'team_management';
 
 export type SpecialRightKey =
+  | 'can_create_news'
+  | 'can_edit_news'
+  | 'can_submit_news'
   | 'can_publish_news'
+  | 'can_schedule_news'
   | 'can_delete_news'
   | 'can_approve_news'
   | 'can_reject_or_send_back_news'
   | 'can_pin_breaking_news'
+  | 'can_restore_news'
   | 'can_prepare_live_tv'
+  | 'can_edit_live_tv_title'
+  | 'can_add_stream_link'
+  | 'can_update_ticker'
+  | 'can_schedule_live_tv'
   | 'can_start_live_tv'
   | 'can_stop_live_tv'
   | 'can_emergency_stop_live_tv'
@@ -56,6 +67,30 @@ export type SpecialRightKey =
   | 'can_approve_withdrawal'
   | 'can_approve_final_finance_report'
   | 'can_view_compliance'
+  | 'can_create_task'
+  | 'can_assign_task'
+  | 'can_edit_task'
+  | 'can_update_task_status'
+  | 'can_complete_task'
+  | 'can_close_task'
+  | 'can_delete_task'
+  | 'can_view_team_tasks'
+  | 'can_manage_department_tasks'
+  | 'can_comment_on_task'
+  | 'can_escalate_task'
+  | 'can_view_staff_details'
+  | 'can_edit_staff_basic_details'
+  | 'can_change_staff_email'
+  | 'can_generate_temporary_password'
+  | 'can_force_password_change'
+  | 'can_logout_all_devices'
+  | 'can_extend_or_reactivate_staff'
+  | 'can_suspend_staff_account'
+  | 'can_lock_staff_account'
+  | 'can_archive_staff'
+  | 'can_delete_staff_permanently'
+  | 'can_control_founder_account'
+  | 'can_grant_account_control_rights'
   | 'can_create_staff'
   | 'can_suspend_staff'
   | 'can_reset_staff_password'
@@ -110,16 +145,27 @@ export const ADMIN_MODULES: AdminModuleDefinition[] = [
   { key: 'ai_engine', label: 'AI Engine', ownerVisibilityKey: 'ai-engine' },
   { key: 'settings', label: 'Settings', ownerVisibilityKey: 'settings' },
   { key: 'safe_zone', label: 'Safe Zone' },
+  { key: 'staff_tasks', label: 'Staff Tasks' },
+  { key: 'audit_logs', label: 'Audit Logs' },
   { key: 'team_management', label: 'Team Management', ownerVisibilityKey: 'settings' },
 ];
 
 export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
+  { key: 'can_create_news', label: 'Create news' },
+  { key: 'can_edit_news', label: 'Edit news' },
+  { key: 'can_submit_news', label: 'Submit news' },
   { key: 'can_publish_news', label: 'Can publish news' },
+  { key: 'can_schedule_news', label: 'Schedule news' },
   { key: 'can_delete_news', label: 'Can delete news' },
   { key: 'can_approve_news', label: 'Can approve news' },
   { key: 'can_reject_or_send_back_news', label: 'Can reject/send back news' },
   { key: 'can_pin_breaking_news', label: 'Can pin breaking news' },
+  { key: 'can_restore_news', label: 'Restore news' },
   { key: 'can_prepare_live_tv', label: 'Can prepare Live TV' },
+  { key: 'can_edit_live_tv_title', label: 'Can edit Live TV title' },
+  { key: 'can_add_stream_link', label: 'Can add stream link' },
+  { key: 'can_update_ticker', label: 'Can update ticker' },
+  { key: 'can_schedule_live_tv', label: 'Can schedule Live TV' },
   { key: 'can_start_live_tv', label: 'Can start Live TV' },
   { key: 'can_stop_live_tv', label: 'Can stop Live TV' },
   { key: 'can_emergency_stop_live_tv', label: 'Can emergency stop Live TV' },
@@ -145,6 +191,30 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'can_approve_withdrawal', label: 'Can approve withdrawal' },
   { key: 'can_approve_final_finance_report', label: 'Can approve final finance report' },
   { key: 'can_view_compliance', label: 'Can view compliance' },
+  { key: 'can_create_task', label: 'Can create task' },
+  { key: 'can_assign_task', label: 'Can assign task' },
+  { key: 'can_edit_task', label: 'Can edit task' },
+  { key: 'can_update_task_status', label: 'Can update task status' },
+  { key: 'can_complete_task', label: 'Can complete task' },
+  { key: 'can_close_task', label: 'Can close task' },
+  { key: 'can_delete_task', label: 'Can delete task' },
+  { key: 'can_view_team_tasks', label: 'Can view team tasks' },
+  { key: 'can_manage_department_tasks', label: 'Can manage department tasks' },
+  { key: 'can_comment_on_task', label: 'Can comment on task' },
+  { key: 'can_escalate_task', label: 'Can escalate task' },
+  { key: 'can_view_staff_details', label: 'Can view staff details' },
+  { key: 'can_edit_staff_basic_details', label: 'Can edit staff basic details' },
+  { key: 'can_change_staff_email', label: 'Can change staff email/login' },
+  { key: 'can_generate_temporary_password', label: 'Can generate temporary password' },
+  { key: 'can_force_password_change', label: 'Can force password change' },
+  { key: 'can_logout_all_devices', label: 'Can logout all devices' },
+  { key: 'can_extend_or_reactivate_staff', label: 'Can extend/reactivate staff' },
+  { key: 'can_suspend_staff_account', label: 'Can suspend account' },
+  { key: 'can_lock_staff_account', label: 'Can lock account' },
+  { key: 'can_archive_staff', label: 'Can archive staff' },
+  { key: 'can_delete_staff_permanently', label: 'Can delete staff permanently' },
+  { key: 'can_control_founder_account', label: 'Can control Founder account' },
+  { key: 'can_grant_account_control_rights', label: 'Can give/remove account-control rights' },
   { key: 'can_create_staff', label: 'Can create staff' },
   { key: 'can_suspend_staff', label: 'Can suspend staff' },
   { key: 'can_reset_staff_password', label: 'Can reset staff password' },
@@ -238,7 +308,7 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
     description: 'Broadcast role for stream preparation, schedules, tickers, and recordings.',
     systemRole: true,
     modules: LIVE_MODULES,
-    specialRights: ['can_prepare_live_tv', 'can_start_live_tv', 'can_stop_live_tv'],
+    specialRights: ['can_prepare_live_tv', 'can_edit_live_tv_title', 'can_add_stream_link', 'can_update_ticker', 'can_schedule_live_tv'],
   },
   {
     id: 'video_editor',
