@@ -467,9 +467,9 @@ export function getEffectiveSpecialRights(user: any): SpecialRightKey[] {
 export function canAccessAdminModule(user: any, moduleKey: AdminModuleKey, visibility?: AdminFeatureVisibilityState): boolean {
   const roleId = normalizeRoleId(user?.role);
   if (roleId === 'founder') return true;
+  if (moduleKey === 'dpdp_privacy_requests') return false;
   const hasModuleAccess = getEffectiveModuleAccess(user).includes(moduleKey);
   if (!hasModuleAccess) return false;
-  if (moduleKey === 'dpdp_privacy_requests' && !getEffectiveSpecialRights(user).includes('can_manage_dpdp_privacy_requests')) return false;
   const definition = ADMIN_MODULES.find((item) => item.key === moduleKey);
   if (definition?.ownerVisibilityKey && visibility?.[definition.ownerVisibilityKey] === false) return false;
   return true;
