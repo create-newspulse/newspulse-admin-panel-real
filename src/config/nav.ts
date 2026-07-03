@@ -42,6 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'👩‍💻', moduleKey:'analytics' },
   { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬', moduleKey:'moderation' },
   { key:'compliance-reports', label:'Compliance Reports', path:'/admin/compliance-reports', roles:['admin','founder'], icon:'🧾', moduleKey:'compliance_reports' },
+  { key:'dpdp-compliance', label:'DPDP Compliance', path:'/admin/dpdp/privacy-requests', roles:['founder','admin'], icon:'🛡️', moduleKey:'dpdp_privacy_requests' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠', moduleKey:'ai_engine' },
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️', moduleKey:'settings' },

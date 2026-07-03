@@ -71,6 +71,7 @@ import AnalyticsDashboard from '@components/advanced/AnalyticsDashboard';
 import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
 import CategoriesAnalyticsPage from '@/pages/admin/analytics/CategoriesAnalyticsPage';
 import ComplianceReportsPage from '@/pages/admin/ComplianceReportsPage';
+import DpdpPrivacyRequestsPage from '@/pages/admin/DpdpPrivacyRequestsPage';
 import FinanceDesk from '@pages/admin/FinanceDesk';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
 import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
@@ -262,6 +263,8 @@ function App() {
               {/* Manage News canonical route + redirects */}
               <Route path="/admin/articles" element={<AdminModuleRoute moduleKey="manage_news"><LockCheckWrapper><ManageNews /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/admin/compliance-reports" element={<AdminModuleRoute moduleKey="compliance_reports"><LockCheckWrapper><ComplianceReportsPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/dpdp/privacy-requests" element={<AdminModuleRoute moduleKey="dpdp_privacy_requests"><LockCheckWrapper><DpdpPrivacyRequestsPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/admin/dpdp-compliance" element={<Navigate to="/admin/dpdp/privacy-requests" replace />} />
               <Route path="/admin/viral-videos" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/admin/viral-videos/new" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/admin/viral-videos/:id/edit" element={<AdminModuleRoute moduleKey="viral_videos"><LockCheckWrapper><ViralVideosPage /></LockCheckWrapper></AdminModuleRoute>} />

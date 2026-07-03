@@ -19,6 +19,7 @@ export type AdminModuleKey =
   | 'analytics'
   | 'moderation'
   | 'compliance_reports'
+  | 'dpdp_privacy_requests'
   | 'ai_engine'
   | 'settings'
   | 'safe_zone'
@@ -67,6 +68,7 @@ export type SpecialRightKey =
   | 'can_approve_withdrawal'
   | 'can_approve_final_finance_report'
   | 'can_view_compliance'
+  | 'can_manage_dpdp_privacy_requests'
   | 'can_create_task'
   | 'can_assign_task'
   | 'can_edit_task'
@@ -142,6 +144,7 @@ export const ADMIN_MODULES: AdminModuleDefinition[] = [
   { key: 'analytics', label: 'Analytics', ownerVisibilityKey: 'analytics' },
   { key: 'moderation', label: 'Moderation', ownerVisibilityKey: 'moderation' },
   { key: 'compliance_reports', label: 'Compliance Reports', ownerVisibilityKey: 'compliance-reports' },
+  { key: 'dpdp_privacy_requests', label: 'DPDP Privacy Requests' },
   { key: 'ai_engine', label: 'AI Engine', ownerVisibilityKey: 'ai-engine' },
   { key: 'settings', label: 'Settings', ownerVisibilityKey: 'settings' },
   { key: 'safe_zone', label: 'Safe Zone' },
@@ -191,6 +194,7 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'can_approve_withdrawal', label: 'Can approve withdrawal' },
   { key: 'can_approve_final_finance_report', label: 'Can approve final finance report' },
   { key: 'can_view_compliance', label: 'Can view compliance' },
+  { key: 'can_manage_dpdp_privacy_requests', label: 'Can manage DPDP privacy requests' },
   { key: 'can_create_task', label: 'Can create task' },
   { key: 'can_assign_task', label: 'Can assign task' },
   { key: 'can_edit_task', label: 'Can edit task' },
@@ -235,6 +239,7 @@ const LIVE_MODULES: AdminModuleKey[] = ['dashboard', 'broadcast_center', 'live_t
 const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval'];
 const FINANCE_OPERATIONS_RIGHTS: SpecialRightKey[] = ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status'];
 const FOUNDER_ONLY_FINANCE_RIGHTS: SpecialRightKey[] = ['can_approve_payment', 'can_delete_finance_record', 'can_change_bank_details', 'can_change_payment_gateway', 'can_approve_withdrawal', 'can_approve_final_finance_report'];
+const FOUNDER_ONLY_DPDP_RIGHTS: SpecialRightKey[] = ['can_manage_dpdp_privacy_requests'];
 
 export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
   {
@@ -251,8 +256,8 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
     label: 'Admin',
     description: 'Senior admin for newsroom operations, publishing support, analytics, and moderation. Safe Zone and Team Management require explicit Founder grant.',
     systemRole: true,
-    modules: ALL_MODULE_KEYS.filter((key) => key !== 'safe_zone' && key !== 'team_management'),
-    specialRights: ALL_SPECIAL_RIGHT_KEYS.filter((key) => !['can_access_safe_zone', 'can_use_emergency_lock', 'can_delete_roles', ...FOUNDER_ONLY_FINANCE_RIGHTS].includes(key)),
+    modules: ALL_MODULE_KEYS.filter((key) => key !== 'safe_zone' && key !== 'team_management' && key !== 'dpdp_privacy_requests'),
+    specialRights: ALL_SPECIAL_RIGHT_KEYS.filter((key) => !['can_access_safe_zone', 'can_use_emergency_lock', 'can_delete_roles', ...FOUNDER_ONLY_FINANCE_RIGHTS, ...FOUNDER_ONLY_DPDP_RIGHTS].includes(key)),
   },
   {
     id: 'finance_accounts_manager',
@@ -464,6 +469,7 @@ export function canAccessAdminModule(user: any, moduleKey: AdminModuleKey, visib
   if (roleId === 'founder') return true;
   const hasModuleAccess = getEffectiveModuleAccess(user).includes(moduleKey);
   if (!hasModuleAccess) return false;
+  if (moduleKey === 'dpdp_privacy_requests' && !getEffectiveSpecialRights(user).includes('can_manage_dpdp_privacy_requests')) return false;
   const definition = ADMIN_MODULES.find((item) => item.key === moduleKey);
   if (definition?.ownerVisibilityKey && visibility?.[definition.ownerVisibilityKey] === false) return false;
   return true;
