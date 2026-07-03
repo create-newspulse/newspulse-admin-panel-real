@@ -1,6 +1,16 @@
 import { z } from 'zod';
 
 const SUPPORTED_INSPIRATION_LANGUAGES = ['en', 'hi', 'gu'] as const;
+export const LIVE_TV_MODES = [
+  'News Pulse Live',
+  'AIRA Bulletin',
+  'Offline Replay',
+  'Scheduled Show',
+  'Breaking Mode',
+  'Maintenance / Coming Soon',
+] as const;
+export const LIVE_TV_PROVIDERS = ['YouTube', 'Custom Embed'] as const;
+export const LIVE_TV_LANGUAGES = ['English', 'Hindi', 'Gujarati'] as const;
 
 const LocalizedTextSchema = z
   .object({
@@ -43,6 +53,20 @@ const TickerSchema = z
     enabled: z.boolean().default(false),
     speedSec: z.number().int().min(5).max(300).optional(),
     maxItems: z.number().int().min(1).max(100).optional(),
+  })
+  .passthrough();
+
+const LiveTvSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    mode: z.enum(LIVE_TV_MODES).default('News Pulse Live'),
+    provider: z.enum(LIVE_TV_PROVIDERS).default('YouTube'),
+    embedUrl: z.string().default(''),
+    fallbackVideoUrl: z.string().default(''),
+    title: z.string().default(''),
+    subtitle: z.string().default(''),
+    language: z.enum(LIVE_TV_LANGUAGES).default('English'),
+    showOnHomepage: z.boolean().default(true),
   })
   .passthrough();
 
@@ -229,6 +253,94 @@ function normalizeDailyWondersSettings(input: unknown): Record<string, unknown> 
   };
 }
 
+function normalizeLiveTvMode(value: unknown): (typeof LIVE_TV_MODES)[number] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!raw) return 'News Pulse Live';
+  if (raw === 'news pulse live' || raw === 'live' || raw === 'news' || raw === 'news_pulse_live') return 'News Pulse Live';
+  if (raw === 'aira bulletin' || raw === 'aira' || raw === 'bulletin' || raw === 'aira_bulletin') return 'AIRA Bulletin';
+  if (raw === 'offline replay' || raw === 'offline' || raw === 'replay' || raw === 'offline_replay') return 'Offline Replay';
+  if (raw === 'scheduled show' || raw === 'scheduled' || raw === 'scheduled_show') return 'Scheduled Show';
+  if (raw === 'breaking mode' || raw === 'breaking' || raw === 'breaking_mode') return 'Breaking Mode';
+  if (raw === 'maintenance / coming soon' || raw === 'maintenance' || raw === 'coming soon' || raw === 'maintenance_coming_soon') return 'Maintenance / Coming Soon';
+  return 'News Pulse Live';
+}
+
+function normalizeLiveTvProvider(value: unknown): (typeof LIVE_TV_PROVIDERS)[number] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (raw === 'custom embed' || raw === 'custom' || raw === 'embed') return 'Custom Embed';
+  return 'YouTube';
+}
+
+function normalizeLiveTvLanguage(value: unknown): (typeof LIVE_TV_LANGUAGES)[number] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (raw === 'hindi' || raw === 'hi') return 'Hindi';
+  if (raw === 'gujarati' || raw === 'gu') return 'Gujarati';
+  return 'English';
+}
+
+function normalizeHttpUrl(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return '';
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function normalizeYouTubeUrl(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return '';
+
+  const validHttpUrl = normalizeHttpUrl(value);
+  if (!validHttpUrl) return '';
+
+  try {
+    const url = new URL(validHttpUrl);
+    const host = url.hostname.toLowerCase();
+    const isYoutubeHost =
+      host === 'youtube.com' ||
+      host === 'www.youtube.com' ||
+      host === 'm.youtube.com' ||
+      host === 'music.youtube.com' ||
+      host === 'youtu.be' ||
+      host === 'www.youtu.be' ||
+      host === 'www.youtube-nocookie.com' ||
+      host === 'youtube-nocookie.com';
+
+    if (!isYoutubeHost) return '';
+    if (url.pathname.includes('/embed/')) return url.toString();
+
+    const embedUrl = getYouTubeEmbedUrl(validHttpUrl);
+    return embedUrl || '';
+  } catch {
+    return '';
+  }
+}
+
+function normalizeLiveTvVideoUrl(raw: unknown, provider: (typeof LIVE_TV_PROVIDERS)[number]): string {
+  return provider === 'YouTube' ? normalizeYouTubeUrl(raw) : normalizeHttpUrl(raw);
+}
+
+export function normalizeLiveTvSettingsValue(input: unknown): z.infer<typeof LiveTvSchema> {
+  const value = input && typeof input === 'object' ? { ...(input as Record<string, unknown>) } : {};
+  const provider = normalizeLiveTvProvider(value.provider);
+
+  return {
+    ...value,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : false,
+    mode: normalizeLiveTvMode(value.mode),
+    provider,
+    embedUrl: normalizeLiveTvVideoUrl(value.embedUrl, provider),
+    fallbackVideoUrl: normalizeLiveTvVideoUrl(value.fallbackVideoUrl, provider),
+    title: typeof value.title === 'string' ? value.title : '',
+    subtitle: typeof value.subtitle === 'string' ? value.subtitle : '',
+    language: normalizeLiveTvLanguage(value.language),
+    showOnHomepage: typeof value.showOnHomepage === 'boolean' ? value.showOnHomepage : true,
+  };
+}
+
 export const PublicSiteSettingsSchema = z
   .object({
     homepage: z
@@ -247,12 +359,7 @@ export const PublicSiteSettingsSchema = z
       })
       .default({}),
 
-    liveTv: z
-      .object({
-        enabled: z.boolean().default(false),
-        embedUrl: z.string().default(''),
-      })
-      .default({}),
+    liveTv: LiveTvSchema.default({}),
 
     inspirationHub: InspirationHubSchema.default({}),
 
@@ -285,7 +392,17 @@ export const DEFAULT_PUBLIC_SITE_SETTINGS: PublicSiteSettings = {
     live: { enabled: false, speedSec: 65, maxItems: 15, order: 4 },
     breaking: { enabled: false, speedSec: 55, maxItems: 12, order: 5 },
   },
-  liveTv: { enabled: false, embedUrl: '' },
+  liveTv: {
+    enabled: false,
+    mode: 'News Pulse Live',
+    provider: 'YouTube',
+    embedUrl: '',
+    fallbackVideoUrl: '',
+    title: '',
+    subtitle: '',
+    language: 'English',
+    showOnHomepage: true,
+  },
   inspirationHub: {
     enabled: false,
     droneTvEnabled: false,
@@ -359,6 +476,7 @@ export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSi
       ...(input.homepage || {}),
       modules: normalizeHomepageModulesRecord((input as any)?.homepage?.modules) as any,
     },
+    liveTv: normalizeLiveTvSettingsValue((input as any)?.liveTv) as any,
     inspirationHub: normalizeInspirationHubSettings((input as any)?.inspirationHub) as any,
     dailyWonders: normalizeDailyWondersSettings((input as any)?.dailyWonders) as any,
   };
@@ -366,6 +484,7 @@ export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSi
 
 export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSettings>>(patch: T): T {
   const rawModules = (patch as any)?.homepage?.modules;
+  const rawLiveTv = (patch as any)?.liveTv;
   const rawInspirationHub = (patch as any)?.inspirationHub;
   const rawDailyWonders = (patch as any)?.dailyWonders;
   const next: any = {
@@ -377,6 +496,10 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
       ...((patch as any).homepage || {}),
       modules: normalizeHomepageModulesRecord(rawModules),
     };
+  }
+
+  if (rawLiveTv && typeof rawLiveTv === 'object') {
+    next.liveTv = normalizeLiveTvSettingsValue(rawLiveTv);
   }
 
   if (rawInspirationHub && typeof rawInspirationHub === 'object') {

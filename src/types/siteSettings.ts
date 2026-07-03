@@ -117,7 +117,14 @@ export const SiteSettingsSchema = z.object({
   // Public site Live TV embed
   liveTv: z.object({
     enabled: z.boolean().default(false),
-    embedUrl: z.string().url().or(z.literal('')).default(''),
+    mode: z.string().default('News Pulse Live'),
+    provider: z.string().default('YouTube'),
+    embedUrl: z.string().default(''),
+    fallbackVideoUrl: z.string().default(''),
+    title: z.string().default(''),
+    subtitle: z.string().default(''),
+    language: z.string().default('English'),
+    showOnHomepage: z.boolean().default(true),
   }).default({}),
 
   inspirationHub: z.object({

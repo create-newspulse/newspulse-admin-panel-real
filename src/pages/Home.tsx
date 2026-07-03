@@ -7,6 +7,7 @@ import { trackAnalytics } from '../lib/trackAnalytics';
 import WeatherStrip from '../components/WeatherStrip';
 import DailyWonderSlider from '../components/DailyWonderSlider';
 import DailyQuoteBlock from '../components/DailyQuoteBlock';
+import LiveTvSection from '../components/LiveTvSection';
 import TodayInHistoryBlock from '../components/TodayInHistoryBlock';
 import PollCard from '../components/PollCard';
 
@@ -39,6 +40,10 @@ export default function Home() {
       >
         🔊 {t('playWelcome')}
       </button>
+
+      <div className="mt-8">
+        <LiveTvSection />
+      </div>
 
       {/* 📊 Poll of the Day */}
       <div className="mt-8">
