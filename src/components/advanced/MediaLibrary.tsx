@@ -41,6 +41,29 @@ type LinkedContent = {
   status?: string;
 };
 
+type BulkUsageEntry = {
+  mediaId: string;
+  articleTitle: string;
+  sectionOrPage: string;
+  urlOrId: string;
+};
+
+type BulkUsageCheckResult = {
+  used: boolean;
+  usage: BulkUsageEntry[];
+};
+
+type BulkActionResult = {
+  message?: string;
+  cloudinaryWarning?: string;
+};
+
+type PendingTrashReview = {
+  items: MediaItem[];
+  usage: BulkUsageEntry[];
+  requiresFounderConfirmation: boolean;
+};
+
 type MediaItem = {
   id: string;
   url: string;
@@ -97,6 +120,8 @@ const ALLOWED_MEDIA_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4'] as con
 const ALLOWED_MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.mp4'] as const;
 const REJECTED_FORMATS_MESSAGE = 'Only JPG, JPEG, PNG images and MP4 videos are allowed.';
 const DEV_MEDIA_ORIGIN = 'http://localhost:5000';
+const PERMANENT_DELETE_CONFIRM_TEXT = 'PERMANENT DELETE';
+const CLOUDINARY_CONFIG_WARNING = 'Cloudinary config missing. Item was marked in library but cloud storage delete was skipped.';
 const MIN_IMAGE_PREVIEW_BYTES = 32;
 const MIN_VIDEO_PREVIEW_BYTES = 1024;
 const videoFramePreviewCache = new Map<string, string>();
@@ -186,6 +211,51 @@ function formatKindLabel(kind: LinkedContent['kind']): string {
   if (kind === 'story') return 'Story';
   if (kind === 'page') return 'Page';
   return 'Other content';
+}
+
+function unwrapApiPayload(payload: any): any {
+  if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') return payload.data;
+  return payload;
+}
+
+function normalizeBulkUsageEntry(raw: any): BulkUsageEntry {
+  const mediaId = safeText(raw?.mediaId || raw?.assetId || raw?.id || raw?._id);
+  const articleTitle = safeText(raw?.articleTitle || raw?.title || raw?.article?.title || raw?.contentTitle, 'Untitled content');
+  const sectionOrPage = safeText(raw?.section || raw?.page || raw?.kind || raw?.location || raw?.type, 'Website');
+  const urlOrId = safeText(raw?.url || raw?.path || raw?.articleUrl || raw?.contentUrl || raw?.contentId || raw?.articleId || raw?.id, mediaId);
+  return { mediaId, articleTitle, sectionOrPage, urlOrId };
+}
+
+function normalizeBulkUsageCheck(payload: any): BulkUsageCheckResult {
+  const root = unwrapApiPayload(payload);
+  const rawUsage = Array.isArray(root?.usage)
+    ? root.usage
+    : (Array.isArray(root?.usedMedia) ? root.usedMedia : (Array.isArray(root?.items) ? root.items : []));
+  const usage = rawUsage.map(normalizeBulkUsageEntry).filter((entry) => entry.mediaId || entry.articleTitle || entry.urlOrId);
+  const used = root?.used === true || root?.hasUsage === true || root?.isUsed === true || usage.length > 0;
+  return { used, usage };
+}
+
+function normalizeBulkActionResult(payload: any): BulkActionResult {
+  const root = unwrapApiPayload(payload);
+  const rawMessage = safeText(root?.message || root?.detail || root?.warning);
+  const cloudinaryMissing = root?.cloudinaryConfigMissing === true
+    || root?.cloudinarySkipped === true
+    || /cloudinary.*(missing|not configured|skipped)/i.test(rawMessage);
+  return {
+    message: rawMessage || undefined,
+    cloudinaryWarning: cloudinaryMissing ? CLOUDINARY_CONFIG_WARNING : undefined,
+  };
+}
+
+function extractErrorMessage(err: any, fallback: string): string {
+  return safeText(
+    err?.response?.data?.message
+      || err?.response?.data?.error
+      || err?.response?.data?.detail
+      || err?.message,
+    fallback,
+  );
 }
 
 function normalizeMediaUrl(value: unknown): string {
@@ -836,14 +906,18 @@ export default function MediaLibrary(): JSX.Element {
   const [draftAltText, setDraftAltText] = useState('');
   const [draftCaption, setDraftCaption] = useState('');
   const [replaceTargetId, setReplaceTargetId] = useState('');
-  const [forceDeleteArmed, setForceDeleteArmed] = useState(false);
   const [lastUploadNote, setLastUploadNote] = useState('');
   const [viewerItem, setViewerItem] = useState<MediaItem | null>(null);
   const [viewerError, setViewerError] = useState('');
   const [pendingTrashItems, setPendingTrashItems] = useState<MediaItem[] | null>(null);
+  const [pendingTrashUsage, setPendingTrashUsage] = useState<BulkUsageEntry[]>([]);
+  const [founderTrashConfirmed, setFounderTrashConfirmed] = useState(false);
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
   const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([]);
   const [pendingPermanentDeleteItems, setPendingPermanentDeleteItems] = useState<MediaItem[] | null>(null);
+  const [permanentDeleteConfirmText, setPermanentDeleteConfirmText] = useState('');
+  const [permanentDeleteBlockedUsage, setPermanentDeleteBlockedUsage] = useState<BulkUsageEntry[]>([]);
+  const [bulkActionBusy, setBulkActionBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -960,8 +1034,12 @@ export default function MediaLibrary(): JSX.Element {
   }, [mergedItems, selectedMediaIds]);
 
   const visibleTrashIds = useMemo(() => visibleItems.filter((item) => item.isDeleted).map((item) => item.id), [visibleItems]);
+  const visibleMediaIds = useMemo(() => visibleItems.filter((item) => !item.isDeleted).map((item) => item.id), [visibleItems]);
   const allVisibleTrashSelected = visibleTrashIds.length > 0 && visibleTrashIds.every((id) => selectedTrashIds.includes(id));
-  const pendingDeleteHasBlockedUsedItems = !!pendingPermanentDeleteItems?.some((item) => item.usageCount > 0 && !isFounder);
+  const allVisibleMediaSelected = visibleMediaIds.length > 0 && visibleMediaIds.every((id) => selectedMediaIds.includes(id));
+  const selectedBulkItems = isTrashManagementView ? selectedTrashItems : selectedMediaItems;
+  const selectedBulkCount = selectedBulkItems.length;
+  const pendingDeleteHasBlockedUsedItems = permanentDeleteBlockedUsage.length > 0;
 
   const timelineGroups = useMemo(() => buildTimelineGroups(visibleItems), [visibleItems]);
 
@@ -973,14 +1051,12 @@ export default function MediaLibrary(): JSX.Element {
       setDraftAltText(selectedItem.altText || '');
       setDraftCaption(selectedItem.caption || '');
       setReplaceTargetId(selectedItem.replaceWithId || '');
-      setForceDeleteArmed(false);
       return;
     }
     setDraftFilename('');
     setDraftAltText('');
     setDraftCaption('');
     setReplaceTargetId('');
-    setForceDeleteArmed(false);
   }, [selectedItem]);
 
   useEffect(() => {
@@ -1016,8 +1092,7 @@ export default function MediaLibrary(): JSX.Element {
 
   const canPermanentlyDeleteSelected = isTrashManagementView
     && !!selectedItem
-    && selectedItem.isDeleted
-    && (selectedItem.usageCount === 0 || (isFounder && forceDeleteArmed));
+    && selectedItem.isDeleted;
 
   async function fetchMedia(opts?: { bustCache?: boolean }): Promise<MediaItem[]> {
     setLoading(true);
@@ -1060,6 +1135,43 @@ export default function MediaLibrary(): JSX.Element {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshMediaAndCounts() {
+    await fetchMedia({ bustCache: true });
+    const status = await getMediaStatus(apiClient);
+    setMediaStatus(status);
+  }
+
+  async function checkBulkUsage(ids: string[]): Promise<BulkUsageCheckResult> {
+    const res = await apiClient.post('/api/admin/media/bulk-usage-check', { ids });
+    return normalizeBulkUsageCheck(res?.data);
+  }
+
+  async function bulkTrash(ids: string[], force = false): Promise<BulkActionResult> {
+    const res = await apiClient.post('/api/admin/media/bulk-trash', { ids, force });
+    return normalizeBulkActionResult(res?.data);
+  }
+
+  async function bulkRestore(ids: string[]): Promise<BulkActionResult> {
+    const res = await apiClient.post('/api/admin/media/bulk-restore', { ids });
+    return normalizeBulkActionResult(res?.data);
+  }
+
+  async function bulkPermanentDelete(ids: string[]): Promise<BulkActionResult> {
+    const res = await apiClient.delete('/api/admin/media/bulk-permanent-delete', {
+      data: { ids, confirm: PERMANENT_DELETE_CONFIRM_TEXT },
+    });
+    return normalizeBulkActionResult(res?.data);
+  }
+
+  function showBulkActionResult(result: BulkActionResult, fallback: string) {
+    if (result.cloudinaryWarning) {
+      setLastUploadNote(result.cloudinaryWarning);
+      alert(result.cloudinaryWarning);
+      return;
+    }
+    alert(result.message || fallback);
   }
 
   function updateOverride(id: string, patch: MediaOverride) {
@@ -1200,40 +1312,70 @@ export default function MediaLibrary(): JSX.Element {
     alert('Media metadata updated in admin library');
   }
 
-  function requestMoveToTrash(item: MediaItem) {
+  async function requestMoveToTrash(item: MediaItem) {
     if (item.isDeleted) return;
-    setPendingTrashItems([item]);
+    await requestMoveItemsToTrash([item]);
   }
 
-  function requestMoveItemsToTrash(itemsToTrash: MediaItem[]) {
+  async function requestMoveItemsToTrash(itemsToTrash: MediaItem[]) {
     const activeItems = itemsToTrash.filter((item) => !item.isDeleted);
     if (activeItems.length === 0) return;
-    setPendingTrashItems(activeItems);
+    setBulkActionBusy(true);
+    try {
+      const usage = await checkBulkUsage(activeItems.map((item) => item.id));
+      if (usage.used) {
+        setPendingTrashItems(activeItems);
+        setPendingTrashUsage(usage.usage);
+        setFounderTrashConfirmed(false);
+        return;
+      }
+      const result = await bulkTrash(activeItems.map((item) => item.id));
+      showBulkActionResult(result, 'Selected media moved to Trash');
+      clearMediaSelection();
+      await refreshMediaAndCounts();
+    } catch (err: any) {
+      alert(extractErrorMessage(err, 'Failed to move selected media to Trash'));
+    } finally {
+      setBulkActionBusy(false);
+    }
   }
 
-  function confirmMoveToTrash() {
+  async function confirmMoveToTrash() {
     if (!pendingTrashItems || pendingTrashItems.length === 0) return;
-    const deletedAt = new Date().toISOString();
-    const movedIds = new Set(pendingTrashItems.map((item) => item.id));
-    pendingTrashItems.forEach((item) => {
-      updateOverride(item.id, { isDeleted: true, deletedAt });
-    });
-    setSelectedMediaIds((current) => current.filter((id) => !movedIds.has(id)));
-    setPendingTrashItems(null);
+    if (pendingTrashUsage.length > 0 && !founderTrashConfirmed) return;
+    setBulkActionBusy(true);
+    try {
+      const result = await bulkTrash(pendingTrashItems.map((item) => item.id), pendingTrashUsage.length > 0);
+      showBulkActionResult(result, 'Selected media moved to Trash');
+      clearMediaSelection();
+      setPendingTrashItems(null);
+      setPendingTrashUsage([]);
+      setFounderTrashConfirmed(false);
+      await refreshMediaAndCounts();
+    } catch (err: any) {
+      alert(extractErrorMessage(err, 'Failed to move selected media to Trash'));
+    } finally {
+      setBulkActionBusy(false);
+    }
   }
 
-  function restoreFromTrash(item: MediaItem) {
-    updateOverride(item.id, { isDeleted: false, deletedAt: undefined });
-    setSelectedTrashIds((current) => current.filter((id) => id !== item.id));
+  async function restoreFromTrash(item: MediaItem) {
+    await restoreItems([item]);
   }
 
-  function restoreItems(itemsToRestore: MediaItem[]) {
+  async function restoreItems(itemsToRestore: MediaItem[]) {
     if (itemsToRestore.length === 0) return;
-    itemsToRestore.forEach((item) => {
-      updateOverride(item.id, { isDeleted: false, deletedAt: undefined });
-    });
-    const restoredIds = new Set(itemsToRestore.map((item) => item.id));
-    setSelectedTrashIds((current) => current.filter((id) => !restoredIds.has(id)));
+    setBulkActionBusy(true);
+    try {
+      const result = await bulkRestore(itemsToRestore.map((item) => item.id));
+      showBulkActionResult(result, 'Selected media restored');
+      clearTrashSelection();
+      await refreshMediaAndCounts();
+    } catch (err: any) {
+      alert(extractErrorMessage(err, 'Failed to restore selected media'));
+    } finally {
+      setBulkActionBusy(false);
+    }
   }
 
   function toggleArchive(item: MediaItem) {
@@ -1252,43 +1394,42 @@ export default function MediaLibrary(): JSX.Element {
     alert('Replacement plan saved. Update linked content before permanent deletion.');
   }
 
-  function permanentlyDelete(item: MediaItem) {
-    const isForceDelete = item.usageCount > 0;
-    if (isForceDelete && !isFounder) {
-      alert('Only founder-level admins can force delete media that is still referenced.');
-      return;
-    }
-    if (isForceDelete && !forceDeleteArmed) {
-      alert('Review linked content and arm force delete before continuing.');
-      return;
-    }
-    const confirmation = isForceDelete
-      ? 'Force delete this media? Linked content may still reference it until those references are replaced.'
-      : 'Delete this media permanently from the library?';
-    if (!window.confirm(confirmation)) return;
-    updateOverride(item.id, { removed: true });
-    setSelectedId(null);
-  }
-
-  function requestPermanentDelete(itemsToDelete: MediaItem[]) {
+  async function requestPermanentDelete(itemsToDelete: MediaItem[]) {
     if (itemsToDelete.length === 0) return;
-    setPendingPermanentDeleteItems(itemsToDelete);
+    if (!isTrashManagementView || itemsToDelete.some((item) => !item.isDeleted)) return;
+    setBulkActionBusy(true);
+    try {
+      const usage = await checkBulkUsage(itemsToDelete.map((item) => item.id));
+      setPendingPermanentDeleteItems(itemsToDelete);
+      setPermanentDeleteConfirmText('');
+      setPermanentDeleteBlockedUsage(usage.used ? usage.usage : []);
+    } catch (err: any) {
+      alert(extractErrorMessage(err, 'Failed to verify media usage before permanent delete'));
+    } finally {
+      setBulkActionBusy(false);
+    }
   }
 
-  function confirmPermanentDelete() {
+  async function confirmPermanentDelete() {
     if (!pendingPermanentDeleteItems || pendingPermanentDeleteItems.length === 0) return;
     if (pendingDeleteHasBlockedUsedItems) return;
-
+    if (permanentDeleteConfirmText !== PERMANENT_DELETE_CONFIRM_TEXT) return;
     const idsToDelete = new Set(pendingPermanentDeleteItems.map((item) => item.id));
-    pendingPermanentDeleteItems.forEach((item) => {
-      updateOverride(item.id, { removed: true });
-    });
-
-    setSelectedTrashIds((current) => current.filter((id) => !idsToDelete.has(id)));
-    if (selectedId && idsToDelete.has(selectedId)) {
-      setSelectedId(null);
+    setBulkActionBusy(true);
+    try {
+      const result = await bulkPermanentDelete(pendingPermanentDeleteItems.map((item) => item.id));
+      showBulkActionResult(result, 'Selected media permanently deleted');
+      clearTrashSelection();
+      if (selectedId && idsToDelete.has(selectedId)) setSelectedId(null);
+      setPendingPermanentDeleteItems(null);
+      setPermanentDeleteConfirmText('');
+      setPermanentDeleteBlockedUsage([]);
+      await refreshMediaAndCounts();
+    } catch (err: any) {
+      alert(extractErrorMessage(err, 'Failed to permanently delete selected media'));
+    } finally {
+      setBulkActionBusy(false);
     }
-    setPendingPermanentDeleteItems(null);
   }
 
   function toggleTrashSelection(itemId: string, checked: boolean) {
@@ -1317,6 +1458,26 @@ export default function MediaLibrary(): JSX.Element {
       }
       return Array.from(new Set([...current, ...visibleTrashIds]));
     });
+  }
+
+  function toggleSelectAllMedia() {
+    setSelectedMediaIds((current) => {
+      if (allVisibleMediaSelected) {
+        const visibleSet = new Set(visibleMediaIds);
+        return current.filter((id) => !visibleSet.has(id));
+      }
+      return Array.from(new Set([...current, ...visibleMediaIds]));
+    });
+  }
+
+  function selectAllVisible() {
+    if (isTrashManagementView) toggleSelectAllTrash();
+    else toggleSelectAllMedia();
+  }
+
+  function clearBulkSelection() {
+    if (isTrashManagementView) clearTrashSelection();
+    else clearMediaSelection();
   }
 
   function clearTrashSelection() {
@@ -1589,11 +1750,8 @@ export default function MediaLibrary(): JSX.Element {
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Trash management</div>
-                  <div className="mt-1 text-sm text-rose-900">Trash shows deleted assets only. Permanent delete removes the media record from this admin library view; it does not request Cloudinary asset deletion.</div>
+                  <div className="mt-1 text-sm text-rose-900">Trash shows deleted assets only. Permanent delete is available here after a usage check and backend confirmation.</div>
                 </div>
-                <button type="button" onClick={toggleSelectAllTrash} className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100">
-                  {allVisibleTrashSelected ? 'Deselect visible' : 'Select visible'}
-                </button>
               </div>
             </div>
           ) : null}
@@ -1601,35 +1759,44 @@ export default function MediaLibrary(): JSX.Element {
 
         <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="border-b border-slate-200 p-4 xl:border-b-0 xl:border-r">
-            {!isTrashManagementView && selectedMediaItems.length > 0 ? (
-              <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-sky-200 bg-sky-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm font-semibold text-sky-900">{selectedMediaItems.length} selected</div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => requestMoveItemsToTrash(selectedMediaItems)} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">
-                    <Trash2 className="h-4 w-4" />
-                    Move to Trash
-                  </button>
-                  <button type="button" onClick={clearMediaSelection} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                    Clear selection
-                  </button>
-                </div>
+            <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">{selectedBulkCount} selected</div>
+                <div className="mt-1 text-xs text-slate-500">Move to Trash first. Permanent delete is allowed only after usage check.</div>
               </div>
-            ) : null}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={selectAllVisible} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {(isTrashManagementView ? allVisibleTrashSelected : allVisibleMediaSelected) ? 'Deselect visible' : 'Select all visible'}
+                </button>
+                <button type="button" onClick={clearBulkSelection} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Clear selection
+                </button>
+              </div>
+            </div>
 
-            {isTrashManagementView && selectedTrashItems.length > 0 ? (
-              <div className="mb-4 flex flex-col gap-3 rounded-3xl border border-rose-200 bg-rose-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm font-semibold text-rose-900">{selectedTrashItems.length} selected</div>
+            {selectedBulkCount > 0 ? (
+              <div className="sticky top-3 z-20 mb-4 flex flex-col gap-3 rounded-3xl border border-slate-900/10 bg-white/95 p-4 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm font-semibold text-slate-900">{selectedBulkCount} selected</div>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => restoreItems(selectedTrashItems)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                    <RotateCcw className="h-4 w-4" />
-                    Restore selected
-                  </button>
-                  <button type="button" onClick={() => requestPermanentDelete(selectedTrashItems)} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">
-                    <Trash2 className="h-4 w-4" />
-                    Permanently delete selected
-                  </button>
-                  <button type="button" onClick={clearTrashSelection} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                    Clear selection
+                  {!isTrashManagementView ? (
+                    <button type="button" disabled={bulkActionBusy} onClick={() => void requestMoveItemsToTrash(selectedMediaItems)} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60">
+                      <Trash2 className="h-4 w-4" />
+                      Move to Trash
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" disabled={bulkActionBusy} onClick={() => void restoreItems(selectedTrashItems)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                        <RotateCcw className="h-4 w-4" />
+                        Restore
+                      </button>
+                      <button type="button" disabled={bulkActionBusy} onClick={() => void requestPermanentDelete(selectedTrashItems)} className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60">
+                        <Trash2 className="h-4 w-4" />
+                        Permanently Delete
+                      </button>
+                    </>
+                  )}
+                  <button type="button" onClick={clearBulkSelection} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    Clear Selection
                   </button>
                 </div>
               </div>
@@ -1698,11 +1865,11 @@ export default function MediaLibrary(): JSX.Element {
                       </button>
                       {item.isDeleted && isTrashManagementView ? (
                         <div className="mt-2 grid grid-cols-2 gap-2">
-                          <button type="button" onClick={() => restoreFromTrash(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                          <button type="button" onClick={() => void restoreFromTrash(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                             <RotateCcw className="h-3.5 w-3.5" />
                             Restore
                           </button>
-                          <button type="button" onClick={() => requestPermanentDelete([item])} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-rose-700">
+                          <button type="button" onClick={() => void requestPermanentDelete([item])} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-rose-700">
                             <Trash2 className="h-3.5 w-3.5" />
                             Permanent Delete
                           </button>
@@ -1738,13 +1905,16 @@ export default function MediaLibrary(): JSX.Element {
                       <div className="text-sm text-slate-700">{formatDateTime(item.uploadedAt)}</div>
                       <div className="text-sm text-slate-700">{item.usageCount}</div>
                       <div className="flex flex-wrap gap-2">
-                        {item.isDeleted && isTrashManagementView ? (
-                          <label className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700">
+                        {(!item.isDeleted || isTrashManagementView) ? (
+                          <label className={`inline-flex h-7 w-7 items-center justify-center rounded-full border ${item.isDeleted ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-sky-200 bg-sky-50 text-sky-700'}`}>
                             <input
                               type="checkbox"
-                              checked={selectedTrashIds.includes(item.id)}
-                              onChange={(event) => toggleTrashSelection(item.id, event.target.checked)}
-                              className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                              checked={item.isDeleted ? selectedTrashIds.includes(item.id) : selectedMediaIds.includes(item.id)}
+                              onChange={(event) => {
+                                if (item.isDeleted) toggleTrashSelection(item.id, event.target.checked);
+                                else toggleMediaSelection(item.id, event.target.checked);
+                              }}
+                              className={`h-4 w-4 rounded border-slate-300 ${item.isDeleted ? 'text-rose-600 focus:ring-rose-500' : 'text-sky-600 focus:ring-sky-500'}`}
                               aria-label={`Select ${item.filename}`}
                             />
                           </label>
@@ -1753,8 +1923,8 @@ export default function MediaLibrary(): JSX.Element {
                         <button type="button" onClick={() => void copyUrl(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Copy URL</button>
                         {item.isDeleted && isTrashManagementView ? (
                           <>
-                            <button type="button" onClick={() => restoreFromTrash(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Restore</button>
-                            <button type="button" onClick={() => requestPermanentDelete([item])} className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-700">Delete Permanently</button>
+                            <button type="button" onClick={() => void restoreFromTrash(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Restore</button>
+                            <button type="button" onClick={() => void requestPermanentDelete([item])} className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-700">Delete Permanently</button>
                           </>
                         ) : null}
                         <button type="button" onClick={() => setSelectedId(item.id)} className="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800">Actions</button>
@@ -1799,13 +1969,16 @@ export default function MediaLibrary(): JSX.Element {
                                           <span>Used {item.usageCount}</span>
                                         </div>
                                       </div>
-                                      {item.isDeleted && isTrashManagementView ? (
-                                        <label className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700">
+                                      {(!item.isDeleted || isTrashManagementView) ? (
+                                        <label className={`inline-flex h-7 w-7 items-center justify-center rounded-full border ${item.isDeleted ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-sky-200 bg-sky-50 text-sky-700'}`}>
                                           <input
                                             type="checkbox"
-                                            checked={selectedTrashIds.includes(item.id)}
-                                            onChange={(event) => toggleTrashSelection(item.id, event.target.checked)}
-                                            className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                                            checked={item.isDeleted ? selectedTrashIds.includes(item.id) : selectedMediaIds.includes(item.id)}
+                                            onChange={(event) => {
+                                              if (item.isDeleted) toggleTrashSelection(item.id, event.target.checked);
+                                              else toggleMediaSelection(item.id, event.target.checked);
+                                            }}
+                                            className={`h-4 w-4 rounded border-slate-300 ${item.isDeleted ? 'text-rose-600 focus:ring-rose-500' : 'text-sky-600 focus:ring-sky-500'}`}
                                             aria-label={`Select ${item.filename}`}
                                           />
                                         </label>
@@ -1817,8 +1990,8 @@ export default function MediaLibrary(): JSX.Element {
                                       <button type="button" onClick={() => void copyUrl(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Copy URL</button>
                                       {item.isDeleted && isTrashManagementView ? (
                                         <>
-                                          <button type="button" onClick={() => restoreFromTrash(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Restore</button>
-                                          <button type="button" onClick={() => requestPermanentDelete([item])} className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-700">Delete Permanently</button>
+                                          <button type="button" onClick={() => void restoreFromTrash(item)} className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Restore</button>
+                                          <button type="button" onClick={() => void requestPermanentDelete([item])} className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-700">Delete Permanently</button>
                                         </>
                                       ) : null}
                                     </div>
@@ -1991,34 +2164,25 @@ export default function MediaLibrary(): JSX.Element {
 
                   <div className="mt-4 grid gap-2">
                     {!selectedItem.isDeleted ? (
-                      <button type="button" onClick={() => requestMoveToTrash(selectedItem)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100">
+                      <button type="button" onClick={() => void requestMoveToTrash(selectedItem)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100">
                         <Trash2 className="h-4 w-4" />
                         Move to Trash
                       </button>
                     ) : isTrashManagementView ? (
                       <>
-                        <button type="button" onClick={() => restoreFromTrash(selectedItem)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        <button type="button" onClick={() => void restoreFromTrash(selectedItem)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                           <RotateCcw className="h-4 w-4" />
                           Restore
                         </button>
 
-                        {selectedItem.usageCount > 0 && isFounder ? (
-                          <label className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
-                            <input type="checkbox" checked={forceDeleteArmed} onChange={(e) => setForceDeleteArmed(e.target.checked)} className="mt-1" />
-                            <span>
-                              Founder-only force delete. Use only after reviewing linked content. This does not update live stories automatically.
-                            </span>
-                          </label>
-                        ) : null}
-
                         <button
                           type="button"
-                          onClick={() => requestPermanentDelete([selectedItem])}
+                          onClick={() => void requestPermanentDelete([selectedItem])}
                           disabled={!canPermanentlyDeleteSelected}
                           className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold ${canPermanentlyDeleteSelected ? 'bg-rose-600 text-white hover:bg-rose-700' : 'cursor-not-allowed bg-slate-200 text-slate-500'}`}
                         >
                           <Trash2 className="h-4 w-4" />
-                          {selectedItem.usageCount > 0 ? 'Force Delete Permanently' : 'Delete Permanently'}
+                          Delete Permanently
                         </button>
                       </>
                     ) : (
@@ -2036,7 +2200,7 @@ export default function MediaLibrary(): JSX.Element {
                   Use the grid, list, or timeline to open an asset. The side panel lets you rename, edit alt text and caption, copy URLs, inspect usage, archive safely, and move items through Trash before permanent deletion.
                 </div>
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-500">
-                  High-authority action: founder-level admins can explicitly force delete referenced media only after reviewing linked content.
+                  Move to Trash first. Permanent delete is allowed only in the Trash tab after usage check.
                 </div>
               </div>
             )}
@@ -2123,14 +2287,22 @@ export default function MediaLibrary(): JSX.Element {
       ) : null}
 
       {pendingTrashItems ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={() => setPendingTrashItems(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={() => {
+          setPendingTrashItems(null);
+          setPendingTrashUsage([]);
+          setFounderTrashConfirmed(false);
+        }}>
           <div className="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-600">Move to Trash</div>
                 <div className="mt-1 text-xl font-semibold text-slate-900">{pendingTrashItems.length === 1 ? 'Review media before trashing' : 'Review selected media before trashing'}</div>
               </div>
-              <button type="button" onClick={() => setPendingTrashItems(null)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900">
+              <button type="button" onClick={() => {
+                setPendingTrashItems(null);
+                setPendingTrashUsage([]);
+                setFounderTrashConfirmed(false);
+              }} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -2154,14 +2326,20 @@ export default function MediaLibrary(): JSX.Element {
                 )}
               </div>
 
-              {pendingTrashItems.some((item) => item.usageCount > 0) ? (
+              {pendingTrashUsage.length > 0 ? (
                 <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     <div>
-                      <div className="font-semibold">One or more selected assets are currently used in content.</div>
-                      <div className="mt-1 text-xs leading-5 text-amber-800">
-                        Moving media to Trash will hide it from active library views, but existing stories or pages may still reference the file until those references are updated.
+                      <div className="font-semibold">This media is currently used on the website. Removing it may break images/videos.</div>
+                      <div className="mt-3 space-y-2">
+                        {pendingTrashUsage.map((entry, index) => (
+                          <div key={`${entry.mediaId}-${entry.urlOrId}-${index}`} className="rounded-2xl border border-amber-200 bg-white/80 p-3 text-xs text-amber-900">
+                            <div className="font-semibold">{entry.articleTitle}</div>
+                            <div className="mt-1">{entry.sectionOrPage}</div>
+                            <div className="mt-1 break-all text-amber-800">{entry.urlOrId}</div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -2172,19 +2350,29 @@ export default function MediaLibrary(): JSX.Element {
                 </div>
               )}
 
-              {pendingTrashItems.some((item) => item.usageCount > 0) ? (
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                  {pendingTrashItems.length === 1 ? 'Move this media file to Trash? You can restore it later.' : 'Move selected media files to Trash? You can restore them later.'}
-                </div>
+              {pendingTrashUsage.length > 0 ? (
+                <label className="flex items-start gap-2 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+                  <input type="checkbox" checked={founderTrashConfirmed} onChange={(event) => setFounderTrashConfirmed(event.target.checked)} className="mt-1" />
+                  <span>Founder confirmation: move used media to Trash anyway.</span>
+                </label>
               ) : null}
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setPendingTrashItems(null)} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <button type="button" onClick={() => {
+                  setPendingTrashItems(null);
+                  setPendingTrashUsage([]);
+                  setFounderTrashConfirmed(false);
+                }} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
                   Cancel
                 </button>
-                <button type="button" onClick={confirmMoveToTrash} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700">
+                {pendingTrashUsage.length > 0 ? (
+                  <button type="button" onClick={() => alert('Open each listed article/page and replace this media before moving it to Trash.')} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    Replace media
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => void confirmMoveToTrash()} disabled={bulkActionBusy || (pendingTrashUsage.length > 0 && !founderTrashConfirmed)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60">
                   <Trash2 className="h-4 w-4" />
-                  Move to Trash
+                  {pendingTrashUsage.length > 0 ? 'Move to Trash anyway' : 'Move to Trash'}
                 </button>
               </div>
             </div>
@@ -2193,14 +2381,22 @@ export default function MediaLibrary(): JSX.Element {
       ) : null}
 
       {pendingPermanentDeleteItems ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={() => setPendingPermanentDeleteItems(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={() => {
+          setPendingPermanentDeleteItems(null);
+          setPermanentDeleteConfirmText('');
+          setPermanentDeleteBlockedUsage([]);
+        }}>
           <div className="w-full max-w-lg rounded-[28px] border border-rose-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-rose-100 px-5 py-4">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-600">Permanent delete</div>
                 <div className="mt-1 text-xl font-semibold text-slate-900">Confirm destructive action</div>
               </div>
-              <button type="button" onClick={() => setPendingPermanentDeleteItems(null)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900">
+              <button type="button" onClick={() => {
+                setPendingPermanentDeleteItems(null);
+                setPermanentDeleteConfirmText('');
+                setPermanentDeleteBlockedUsage([]);
+              }} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -2223,19 +2419,44 @@ export default function MediaLibrary(): JSX.Element {
 
               <div className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
                 <div className="font-semibold">This will permanently delete the media record. This action cannot be undone.</div>
-                <div className="mt-2 text-xs leading-5 text-rose-800">This does not request permanent deletion of the Cloudinary asset.</div>
+                <div className="mt-2 text-xs leading-5 text-rose-800">Type {PERMANENT_DELETE_CONFIRM_TEXT} to confirm.</div>
                 {pendingDeleteHasBlockedUsedItems ? (
-                  <div className="mt-2 text-xs leading-5 text-rose-800">
-                    One or more selected items are still tracked as used. Founder-level access is required to permanently delete referenced media.
+                  <div className="mt-3 rounded-2xl border border-rose-200 bg-white p-3 text-xs leading-5 text-rose-900">
+                    <div className="font-semibold">This media is still used on the website. Permanent delete is blocked.</div>
+                    <div className="mt-2 space-y-2">
+                      {permanentDeleteBlockedUsage.map((entry, index) => (
+                        <div key={`${entry.mediaId}-${entry.urlOrId}-${index}`}>
+                          <div className="font-semibold">{entry.articleTitle}</div>
+                          <div>{entry.sectionOrPage}</div>
+                          <div className="break-all">{entry.urlOrId}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
 
+              {!pendingDeleteHasBlockedUsedItems ? (
+                <label className="block text-sm font-semibold text-slate-700">
+                  Confirmation text
+                  <input
+                    value={permanentDeleteConfirmText}
+                    onChange={(event) => setPermanentDeleteConfirmText(event.target.value)}
+                    placeholder={PERMANENT_DELETE_CONFIRM_TEXT}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm font-normal text-slate-800"
+                  />
+                </label>
+              ) : null}
+
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setPendingPermanentDeleteItems(null)} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <button type="button" onClick={() => {
+                  setPendingPermanentDeleteItems(null);
+                  setPermanentDeleteConfirmText('');
+                  setPermanentDeleteBlockedUsage([]);
+                }} className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
                   Cancel
                 </button>
-                <button type="button" onClick={confirmPermanentDelete} disabled={pendingDeleteHasBlockedUsedItems} className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold ${pendingDeleteHasBlockedUsedItems ? 'cursor-not-allowed bg-slate-200 text-slate-500' : 'bg-rose-600 text-white hover:bg-rose-700'}`}>
+                <button type="button" onClick={() => void confirmPermanentDelete()} disabled={pendingDeleteHasBlockedUsedItems || bulkActionBusy || permanentDeleteConfirmText !== PERMANENT_DELETE_CONFIRM_TEXT} className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold ${pendingDeleteHasBlockedUsedItems || permanentDeleteConfirmText !== PERMANENT_DELETE_CONFIRM_TEXT ? 'cursor-not-allowed bg-slate-200 text-slate-500' : 'bg-rose-600 text-white hover:bg-rose-700'}`}>
                   <Trash2 className="h-4 w-4" />
                   {pendingPermanentDeleteItems.length === 1 ? 'Delete Permanently' : 'Delete Selected Permanently'}
                 </button>
