@@ -13,6 +13,7 @@ import {
   createViralVideo,
   deleteViralVideo,
   getViralVideo,
+  getViralVideosDailyCount,
   getHomepageFeaturedViralVideo,
   listViralVideos,
   updateAdminViralVideosFrontendSettings,
@@ -20,7 +21,9 @@ import {
   updateViralVideoStatus,
   type HomepageViralVideoSelection,
   type ViralVideoInput,
+  type ViralVideoListParams,
   type ViralVideoRecord,
+  type ViralVideoStatus,
   type ViralVideosFrontendSettings,
 } from '@/lib/api/viralVideos';
 
@@ -41,6 +44,7 @@ const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktim
 const ACCEPTED_VIDEO_EXTENSIONS = /\.(mp4|webm|mov)$/i;
 const VIDEO_FILE_TYPE_MESSAGE = 'Only MP4, WebM, or MOV videos are allowed.';
 const VIDEO_FILE_SIZE_MESSAGE = 'Video file is too large. Please upload below 100MB.';
+const DAILY_LIMIT_WARNING = 'Daily viral video limit reached. You can save this video as Draft or schedule it for tomorrow.';
 const DEFAULT_CLOUD_VIDEO_UPLOAD_CAPABILITY = {
   enabled: false,
   available: false,
@@ -65,20 +69,26 @@ type EditorState = {
   videoType: 'uploaded' | 'youtube' | 'twitter' | 'external';
   playbackMode: 'internal' | 'youtube' | 'twitter' | 'external_link';
   language: string;
+  duration: string;
   tags: string;
-  publish: boolean;
+  status: ViralVideoStatus;
+  uploadedBy: string;
   isActive: boolean;
+  showOnHomepage: boolean;
   featured: boolean;
   publishedAt: string;
+  scheduledAt: string;
   sortOrder: string;
 };
+
+type ViralVideoQuickFilter = 'today' | 'yesterday' | 'this-week' | 'all' | 'draft' | 'published' | 'unpublished' | 'archived';
 
 const EMPTY_EDITOR: EditorState = {
   title: '',
   slug: '',
   summary: '',
-  category: '',
-  sourceName: '',
+  category: 'Viral',
+  sourceName: 'News Pulse',
   relatedNewsUrl: '',
   externalSourceUrl: '',
   thumbnailUrl: '',
@@ -90,11 +100,15 @@ const EMPTY_EDITOR: EditorState = {
   videoType: 'external',
   playbackMode: 'external_link',
   language: 'en',
+  duration: '',
   tags: '',
-  publish: false,
+  status: 'draft',
+  uploadedBy: 'News Pulse/Admin',
   isActive: true,
+  showOnHomepage: false,
   featured: false,
   publishedAt: '',
+  scheduledAt: '',
   sortOrder: '',
 };
 
@@ -119,6 +133,13 @@ function formatDate(value?: string | null) {
   if (!value) return '-';
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : '-';
+}
+
+function languageLabel(value?: string | null) {
+  const language = String(value || 'en').trim().toLowerCase();
+  if (language === 'hi') return 'Hindi';
+  if (language === 'gu') return 'Gujarati';
+  return 'English';
 }
 
 function parseUrl(value: string): URL | null {
@@ -259,15 +280,29 @@ function readSavedViralVideoId(record: any): string {
 }
 
 function publicViralVideoPath(item: Pick<ViralVideoRecord, '_id' | 'slug'>) {
-  const slugOrId = String(item.slug || item._id || '').trim();
-  return slugOrId ? `/viral-videos/${encodeURIComponent(slugOrId)}` : '/viral-videos';
+  const slug = String(item.slug || '').trim();
+  return slug ? `/viral-videos/${encodeURIComponent(slug)}` : '/viral-videos';
 }
 
-function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): ViralVideoInput {
+function isDailyLimitError(error: any): boolean {
+  const message = readViralVideoErrorMessage(error, '').toLowerCase();
+  return /daily.*limit|limit.*reached|maximum.*15|15.*published/.test(message);
+}
+
+function quickFilterParams(filter: ViralVideoQuickFilter): Pick<ViralVideoListParams, 'date' | 'period' | 'status'> {
+  if (filter === 'today') return { date: 'today' };
+  if (filter === 'yesterday') return { date: 'yesterday' };
+  if (filter === 'this-week') return { period: 'this-week' };
+  if (filter === 'all') return { period: 'all' };
+  return { status: filter };
+}
+
+function toPayload(state: EditorState, nextStatus: ViralVideoStatus): ViralVideoInput {
   const tags = state.tags.split(',').map((tag) => tag.trim()).filter(Boolean);
   const publishedAt = nextStatus === 'published'
     ? (state.publishedAt ? new Date(state.publishedAt).toISOString() : new Date().toISOString())
     : null;
+  const scheduledAt = state.scheduledAt ? new Date(state.scheduledAt).toISOString() : null;
   const thumbnailUrl = (state.thumbnailUrl || state.posterImageUrl).trim();
   const videoUrl = state.videoUrl.trim();
   const videoFileUrl = state.videoFileUrl.trim();
@@ -277,8 +312,8 @@ function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): Viral
     title: state.title.trim(),
     slug: slugify(state.slug || state.title),
     summary: state.summary.trim(),
-    category: state.category.trim(),
-    sourceName: state.sourceName.trim(),
+    category: state.category.trim() || 'Viral',
+    sourceName: state.sourceName.trim() || 'News Pulse',
     relatedNewsUrl: state.relatedNewsUrl.trim(),
     externalSourceUrl: state.externalSourceUrl.trim(),
     thumbnailUrl,
@@ -290,14 +325,17 @@ function toPayload(state: EditorState, nextStatus: 'draft' | 'published'): Viral
     videoType: playbackFields.videoType,
     playbackMode: playbackFields.playbackMode,
     language: state.language,
+    duration: state.duration.trim(),
     tags,
     status: nextStatus,
+    uploadedBy: state.uploadedBy.trim() || 'News Pulse/Admin',
     isActive: state.isActive,
-    homepageVisible: nextStatus === 'published',
-    showOnHomepage: nextStatus === 'published' && state.featured,
+    homepageVisible: nextStatus === 'published' && state.showOnHomepage,
+    showOnHomepage: nextStatus === 'published' && state.showOnHomepage,
     homepageFeatured: nextStatus === 'published' && state.featured,
-    featured: state.featured,
+    featured: nextStatus === 'published' && state.featured,
     publishedAt,
+    scheduledAt,
     sortOrder: state.sortOrder.trim() ? Number(state.sortOrder) : null,
   };
 }
@@ -309,8 +347,8 @@ function fromRecord(record: ViralVideoRecord): EditorState {
     title: record.title || '',
     slug: record.slug || '',
     summary: record.summary || '',
-    category: record.category || '',
-    sourceName: record.sourceName || '',
+    category: record.category || 'Viral',
+    sourceName: record.sourceName || 'News Pulse',
     relatedNewsUrl: record.relatedNewsUrl || '',
     externalSourceUrl: record.externalSourceUrl || record.videoUrl || '',
     thumbnailUrl,
@@ -322,11 +360,15 @@ function fromRecord(record: ViralVideoRecord): EditorState {
     videoType: record.videoType || playbackFields.videoType,
     playbackMode: record.playbackMode || playbackFields.playbackMode,
     language: record.language || 'en',
+    duration: record.duration || '',
     tags: Array.isArray(record.tags) ? record.tags.join(', ') : '',
-    publish: record.status === 'published',
+    status: record.status || 'draft',
+    uploadedBy: record.uploadedBy || 'News Pulse/Admin',
     isActive: record.isActive !== false,
+    showOnHomepage: record.showOnHomepage === true || record.homepageVisible === true,
     featured: record.featured === true,
     publishedAt: toDateTimeLocal(record.publishedAt),
+    scheduledAt: toDateTimeLocal(record.scheduledAt),
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? String(record.sortOrder) : '',
   };
 }
@@ -340,7 +382,7 @@ export default function ViralVideosPage() {
   const editingId = params.id;
   const isCreateRoute = location.pathname.endsWith('/new');
   const isEditorOpen = isCreateRoute || Boolean(editingId);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const [quickFilter, setQuickFilter] = useState<ViralVideoQuickFilter>('today');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [featuredFilter, setFeaturedFilter] = useState<'all' | 'featured'>('all');
   const [search, setSearch] = useState('');
@@ -357,10 +399,16 @@ export default function ViralVideosPage() {
   const userRole = String(user?.role || '').trim().toLowerCase();
   const canManageFrontendVisibility = userRole === 'founder' || userRole === 'admin';
 
+  const dailyCountQuery = useQuery({
+    queryKey: ['viral-videos', 'daily-count'],
+    queryFn: () => getViralVideosDailyCount(),
+    staleTime: 30_000,
+  });
+
   const listQuery = useQuery({
-    queryKey: ['viral-videos', 'admin-list', statusFilter, languageFilter, featuredFilter, search],
+    queryKey: ['viral-videos', 'admin-list', quickFilter, languageFilter, featuredFilter, search],
     queryFn: () => listViralVideos({
-      status: statusFilter,
+      ...quickFilterParams(quickFilter),
       language: languageFilter === 'all' ? undefined : languageFilter,
       featured: featuredFilter === 'featured' ? true : undefined,
       q: search.trim() || undefined,
@@ -437,7 +485,7 @@ export default function ViralVideosPage() {
   }, [editingId, isCreateRoute, isEditorOpen, itemQuery.data]);
 
   const saveMutation = useMutation({
-    mutationFn: async ({ status }: { status: 'draft' | 'published' }) => {
+    mutationFn: async ({ status }: { status: ViralVideoStatus }) => {
       const payload = toPayload(editor, status);
       if (!payload.title) throw new Error('Title is required');
       if (!payload.slug) throw new Error('Slug is required');
@@ -453,6 +501,7 @@ export default function ViralVideosPage() {
     },
     onSuccess: (saved, vars) => {
       queryClient.invalidateQueries({ queryKey: ['viral-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['viral-videos', 'daily-count'] });
       queryClient.invalidateQueries({ queryKey: ['viral-videos', 'homepage-featured'] });
       const savedId = readSavedViralVideoId(saved);
       const savedHasFrontendCardFields = saved.status === 'published' && saved.isActive === true && Boolean(saved.thumbnailUrl);
@@ -469,7 +518,7 @@ export default function ViralVideosPage() {
       }
       toast.success(savedHasFrontendCardFields
         ? 'Viral video saved: Published, Active ON, thumbnail saved'
-        : (vars.status === 'published' ? 'Viral video published' : 'Draft saved'));
+        : (vars.status === 'published' ? 'Viral video published' : 'Viral video saved'));
       if (savedId) {
         queryClient.setQueryData(['viral-videos', 'admin-item', savedId], saved);
         navigate(`/admin/viral-videos/${savedId}/edit`, { replace: true });
@@ -479,19 +528,28 @@ export default function ViralVideosPage() {
       // Fallback: save succeeded but backend response did not include an ID.
       navigate('/admin/viral-videos');
     },
-    onError: (error: any) => {
+    onError: (error: any, vars) => {
+      if (vars.status === 'published' && isDailyLimitError(error)) {
+        toast(DAILY_LIMIT_WARNING, { icon: '⚠️' });
+        return;
+      }
       toast.error(readViralVideoErrorMessage(error, 'Failed to save viral video'));
     },
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status, featured, publishedAt }: { id: string; status: 'draft' | 'published'; featured?: boolean; publishedAt?: string | null }) => updateViralVideoStatus(id, status, { featured, homepageFeatured: featured, publishedAt }),
+    mutationFn: ({ id, status, featured, publishedAt }: { id: string; status: ViralVideoStatus; featured?: boolean; publishedAt?: string | null }) => updateViralVideoStatus(id, status, { featured, homepageFeatured: featured, publishedAt }),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['viral-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['viral-videos', 'daily-count'] });
       queryClient.invalidateQueries({ queryKey: ['viral-videos', 'homepage-featured'] });
-      toast.success(vars.status === 'published' ? 'Video published' : 'Video unpublished');
+      toast.success(vars.status === 'published' ? 'Video published' : (vars.status === 'archived' ? 'Video archived' : 'Video unpublished'));
     },
-    onError: (error: any) => {
+    onError: (error: any, vars) => {
+      if (vars.status === 'published' && isDailyLimitError(error)) {
+        toast(DAILY_LIMIT_WARNING, { icon: '⚠️' });
+        return;
+      }
       toast.error(readViralVideoErrorMessage(error, 'Failed to update status'));
     },
   });
@@ -500,6 +558,7 @@ export default function ViralVideosPage() {
     mutationFn: (id: string) => deleteViralVideo(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['viral-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['viral-videos', 'daily-count'] });
       queryClient.invalidateQueries({ queryKey: ['viral-videos', 'homepage-featured'] });
       toast.success('Viral video deleted');
       navigate('/admin/viral-videos');
@@ -510,6 +569,7 @@ export default function ViralVideosPage() {
   });
 
   const items = listQuery.data?.rows || [];
+  const hasActiveFilters = quickFilter !== 'all' || languageFilter !== 'all' || featuredFilter !== 'all' || search.trim().length > 0;
   const languages = useMemo(() => {
     const set = new Set(items.map((item) => String(item.language || 'en').trim()).filter(Boolean));
     return ['all', ...Array.from(set).sort()];
@@ -725,12 +785,44 @@ export default function ViralVideosPage() {
 
   const frontendStateLabel = (item: ViralVideoRecord) => {
     if (item.isActive === false) return 'Inactive in public API';
-    if (item.status !== 'published') return 'Draft only';
+    if (item.status === 'draft') return 'Draft only';
+    if (item.status === 'unpublished') return 'Unpublished, admin-only';
+    if (item.status === 'archived') return 'Archived, admin-only';
     if (item.featured) return 'Published and homepage featured';
     return 'Published in archive';
   };
 
+  const statusLabel = (status: ViralVideoStatus) => {
+    if (status === 'published') return 'Published';
+    if (status === 'unpublished') return 'Unpublished';
+    if (status === 'archived') return 'Archived';
+    return 'Draft';
+  };
+
+  const statusBadgeClass = (status: ViralVideoStatus) => {
+    if (status === 'published') return 'bg-emerald-100 text-emerald-700';
+    if (status === 'unpublished') return 'bg-amber-100 text-amber-800';
+    if (status === 'archived') return 'bg-slate-300 text-slate-800';
+    return 'bg-slate-200 text-slate-700';
+  };
+
+  const quickFilters: Array<{ key: ViralVideoQuickFilter; label: string }> = [
+    { key: 'today', label: 'Today' },
+    { key: 'yesterday', label: 'Yesterday' },
+    { key: 'this-week', label: 'This Week' },
+    { key: 'all', label: 'All' },
+    { key: 'draft', label: 'Drafts' },
+    { key: 'published', label: 'Published' },
+    { key: 'unpublished', label: 'Unpublished' },
+    { key: 'archived', label: 'Archived' },
+  ];
+
   const frontendEnabled = frontendSettingsQuery.data?.frontendEnabled ?? homepageFeatureQuery.data?.frontendEnabled ?? true;
+  const dailyCount = dailyCountQuery.data || { publishedToday: 0, limit: 15, remaining: 15 };
+  const todayPublishedCount = dailyCount.publishedToday;
+  const dailyLimit = dailyCount.limit;
+  const remainingToday = dailyCount.remaining;
+  const dailyLimitReached = remainingToday <= 0;
   const editLoadErrorStatus = (itemQuery.error as any)?.response?.status;
   const editItemUnavailable = Boolean(editingId && itemQuery.isError && (editLoadErrorStatus === 404 || editLoadErrorStatus == null));
   const frontendVisibilityLabel = frontendSettingsQuery.isLoading
@@ -757,8 +849,25 @@ export default function ViralVideosPage() {
               onClick={() => navigate('/admin/viral-videos/new')}
               className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
             >
-              Add viral video
+              Add Viral Video
             </button>
+          ) : null}
+        </div>
+
+        <div className={`mt-5 rounded-2xl border p-4 ${dailyLimitReached ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Today's Viral Videos: {todayPublishedCount} / {dailyLimit} Published</div>
+              <div className={`mt-1 text-sm font-semibold ${dailyLimitReached ? 'text-amber-800' : 'text-emerald-700'}`}>Remaining today: {remainingToday}</div>
+            </div>
+            <div className="text-sm text-slate-600">
+              {dailyCountQuery.isError ? 'Daily count is unavailable right now.' : 'Backend resets this count automatically for each IST day.'}
+            </div>
+          </div>
+          {dailyLimitReached ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-amber-900">
+              {DAILY_LIMIT_WARNING}
+            </div>
           ) : null}
         </div>
 
@@ -803,7 +912,24 @@ export default function ViralVideosPage() {
           {!canManageFrontendVisibility ? <div className="mt-3 text-xs text-slate-500">Only admins and the founder can change the global frontend visibility for Viral Videos.</div> : null}
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-5">
+        <div className="mt-5 space-y-4">
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</label>
+            <div className="flex flex-wrap gap-2">
+              {quickFilters.map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => setQuickFilter(filter.key)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${quickFilter === filter.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-4">
           <div className="md:col-span-2">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search</label>
             <input
@@ -812,14 +938,6 @@ export default function ViralVideosPage() {
               placeholder="Search title or summary"
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
             />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | 'published' | 'draft')} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-              <option value="all">All</option>
-              <option value="published">Published</option>
-              <option value="draft">Draft</option>
-            </select>
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Language</label>
@@ -836,6 +954,7 @@ export default function ViralVideosPage() {
               <option value="featured">Featured only</option>
             </select>
           </div>
+          </div>
         </div>
       </section>
 
@@ -846,13 +965,13 @@ export default function ViralVideosPage() {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold text-slate-600">Thumbnail</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-600">Title</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Duration</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Status</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-600">Language</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Publish status</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Active</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Global frontend</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Homepage feature</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Published at</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-600">Updated at</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Published date</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Created date</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Homepage</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Featured</th>
                 <th className="px-4 py-3 text-right font-semibold text-slate-600">Actions</th>
               </tr>
             </thead>
@@ -866,7 +985,7 @@ export default function ViralVideosPage() {
               {!listQuery.isLoading && items.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                    {listQuery.isError ? String((listQuery.error as Error | undefined)?.message || 'Failed to load viral videos.') : 'No viral videos found for the current filters.'}
+                    {listQuery.isError ? String((listQuery.error as Error | undefined)?.message || 'Failed to load viral videos.') : (hasActiveFilters ? 'No viral videos match the current filters.' : 'No viral videos uploaded yet. Add your first viral video.')}
                   </td>
                 </tr>
               ) : null}
@@ -882,39 +1001,48 @@ export default function ViralVideosPage() {
                     <div className="font-semibold text-slate-900">{item.title}</div>
                     <div className="mt-1 text-xs text-slate-500">/{item.slug}</div>
                   </td>
-                  <td className="px-4 py-3 text-slate-700">{String(item.language || 'en').toUpperCase()}</td>
+                  <td className="px-4 py-3 text-slate-700">{item.duration || '-'}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${item.status === 'published' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>
-                      {item.status === 'published' ? 'Published' : 'Draft'}
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(item.status)}`}>
+                      {statusLabel(item.status)}
                     </span>
                     <div className="mt-1 text-xs text-slate-500">{frontendStateLabel(item)}</div>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${item.isActive !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>
-                      {item.isActive !== false ? 'ON' : 'OFF'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${frontendEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>
-                      {frontendEnabled ? 'ON' : 'OFF'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {item.featured && item.status === 'published'
-                      ? <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">YES</span>
-                      : <span className="text-slate-400">NO</span>}
-                  </td>
+                  <td className="px-4 py-3 text-slate-700">{languageLabel(item.language)}</td>
                   <td className="px-4 py-3 text-slate-600">{formatDate(item.publishedAt)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDate(item.updatedAt)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatDate(item.createdAt)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
+                    {item.showOnHomepage || item.homepageVisible
+                      ? <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Yes</span>
+                      : <span className="text-slate-400">No</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {item.featured
+                      ? <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Yes</span>
+                      : <span className="text-slate-400">No</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap justify-end gap-2">
                       <button type="button" onClick={() => navigate(`/admin/viral-videos/${item._id}/edit`)} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
-                      <button type="button" onClick={() => window.open(publicViralVideoPath(item), '_blank', 'noopener,noreferrer')} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Preview</button>
+                      <button type="button" disabled={!item.slug} onClick={() => item.slug && window.open(publicViralVideoPath(item), '_blank', 'noopener,noreferrer')} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">Preview</button>
                       {item.status === 'published' ? (
-                        <button type="button" onClick={() => statusMutation.mutate({ id: item._id, status: 'draft' })} className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50">Unpublish</button>
+                        <button type="button" onClick={() => statusMutation.mutate({ id: item._id, status: 'unpublished' })} className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50">Unpublish</button>
                       ) : (
                         <button type="button" onClick={() => statusMutation.mutate({ id: item._id, status: 'published', featured: item.featured, publishedAt: item.publishedAt || null })} className="rounded-full border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Publish</button>
                       )}
+                      {item.status !== 'archived' ? (
+                        <button type="button" onClick={() => statusMutation.mutate({ id: item._id, status: 'archived' })} className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Archive</button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!window.confirm('Are you sure you want to delete this viral video?')) return;
+                          deleteMutation.mutate(item._id);
+                        }}
+                        className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -934,17 +1062,20 @@ export default function ViralVideosPage() {
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => navigate('/admin/viral-videos')} className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Close</button>
               <button type="button" onClick={() => setShowPreview((value) => !value)} className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Preview</button>
-              <button type="button" disabled={isBusy} onClick={() => saveMutation.mutate({ status: editor.publish ? 'published' : 'draft' })} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60">Save video</button>
+              <button type="button" disabled={isBusy} onClick={() => saveMutation.mutate({ status: editor.status })} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60">Save video</button>
               {editingId ? (
                 <>
-                  {editor.publish ? (
-                    <button type="button" disabled={isBusy} onClick={() => statusMutation.mutate({ id: editingId, status: 'draft' })} className="rounded-full border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60">Unpublish</button>
+                  {editor.status === 'published' ? (
+                    <button type="button" disabled={isBusy} onClick={() => statusMutation.mutate({ id: editingId, status: 'unpublished' })} className="rounded-full border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60">Unpublish</button>
+                  ) : null}
+                  {editor.status !== 'archived' ? (
+                    <button type="button" disabled={isBusy} onClick={() => statusMutation.mutate({ id: editingId, status: 'archived' })} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">Archive</button>
                   ) : null}
                   <button
                     type="button"
                     disabled={isBusy}
                     onClick={() => {
-                      if (!window.confirm('Delete this viral video?')) return;
+                      if (!window.confirm('Are you sure you want to delete this viral video?')) return;
                       deleteMutation.mutate(editingId);
                     }}
                     className="rounded-full border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -967,26 +1098,29 @@ export default function ViralVideosPage() {
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="text-sm font-semibold text-slate-900">Viral video publishing controls</div>
-                  <div className="mt-1 text-sm text-slate-600">The single Global frontend ON/OFF toggle at the top of this page controls the whole Viral Videos product. Per-video controls below manage Draft or Published, Active ON/OFF, and Homepage featured.</div>
+                  <div className="mt-1 text-sm text-slate-600">Only Published videos appear on public /viral-videos. Draft, unpublished, and archived videos stay admin-only.</div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <label className="rounded-xl border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Publish status</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
                     <select
-                      value={editor.publish ? 'published' : 'draft'}
+                      value={editor.status}
                       onChange={(event) => {
-                        const publish = event.target.value === 'published';
+                        const status = event.target.value as ViralVideoStatus;
                         setEditor((current) => ({
                           ...current,
-                          publish,
-                          featured: publish ? current.featured : false,
+                          status,
+                          showOnHomepage: status === 'published' ? current.showOnHomepage : false,
+                          featured: status === 'published' ? current.featured : false,
                         }));
                       }}
                       className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                     >
                       <option value="draft">Draft</option>
                       <option value="published">Published</option>
+                      <option value="unpublished">Unpublished</option>
+                      <option value="archived">Archived</option>
                     </select>
-                    <div className="mt-2 text-xs text-slate-500">Published records can render on the frontend only when the global frontend switch is ON.</div>
+                    <div className="mt-2 text-xs text-slate-500">Publishing is confirmed only after the backend accepts the update.</div>
                   </label>
                   <label className="rounded-xl border border-slate-200 bg-white p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active ON/OFF</div>
@@ -1003,16 +1137,30 @@ export default function ViralVideosPage() {
                   <label className="rounded-xl border border-slate-200 bg-white p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Show on homepage</div>
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-sm text-slate-700">{editor.publish && editor.featured ? 'Yes' : 'No'}</span>
+                      <span className="text-sm text-slate-700">{editor.status === 'published' && editor.showOnHomepage ? 'Yes' : 'No'}</span>
                       <input
                         type="checkbox"
-                        checked={editor.publish && editor.featured}
-                        disabled={!editor.publish}
+                        checked={editor.status === 'published' && editor.showOnHomepage}
+                        disabled={editor.status !== 'published'}
+                        onChange={(event) => setEditor((current) => ({ ...current, showOnHomepage: event.target.checked }))}
+                        className="h-4 w-4"
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">Controls homepage placement only for published videos.</div>
+                  </label>
+                  <label className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Featured</div>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-sm text-slate-700">{editor.status === 'published' && editor.featured ? 'Yes' : 'No'}</span>
+                      <input
+                        type="checkbox"
+                        checked={editor.status === 'published' && editor.featured}
+                        disabled={editor.status !== 'published'}
                         onChange={(event) => setEditor((current) => ({ ...current, featured: event.target.checked }))}
                         className="h-4 w-4"
                       />
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">Shows this published video in the homepage Viral Videos slot. It does not turn the full Viral Videos frontend ON or OFF.</div>
+                    <div className="mt-2 text-xs text-slate-500">Marks this published video as featured for editorial surfaces.</div>
                   </label>
                 </div>
               </div>
@@ -1044,6 +1192,11 @@ export default function ViralVideosPage() {
                   </select>
                 </div>
 
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Duration</label>
+                  <input value={editor.duration} onChange={(event) => setEditor((current) => ({ ...current, duration: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="00:45" />
+                </div>
+
                 <div className="md:col-span-2">
                   <label className="mb-1 block text-sm font-medium text-slate-700">Source name</label>
                   <input value={editor.sourceName} onChange={(event) => setEditor((current) => ({ ...current, sourceName: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" placeholder="News Pulse Desk, YouTube, Instagram, Public Source" />
@@ -1055,13 +1208,13 @@ export default function ViralVideosPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Summary</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
                   <textarea
                     value={editor.summary}
                     onChange={(event) => setEditor((current) => ({ ...current, summary: event.target.value }))}
                     rows={4}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                    placeholder="Short summary for archive cards and teaser blocks"
+                    placeholder="Short description for archive cards and teaser blocks"
                   />
                 </div>
 
@@ -1123,6 +1276,12 @@ export default function ViralVideosPage() {
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Published at</label>
                   <input type="datetime-local" value={editor.publishedAt} onChange={(event) => setEditor((current) => ({ ...current, publishedAt: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Schedule Publish date/time</label>
+                  <input type="datetime-local" value={editor.scheduledAt} onChange={(event) => setEditor((current) => ({ ...current, scheduledAt: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500" />
+                  <div className="mt-1 text-xs text-slate-500">Use this when today's daily publish limit is full.</div>
                 </div>
 
                 <div className="md:col-span-2">
@@ -1243,10 +1402,12 @@ export default function ViralVideosPage() {
                 <div className="text-sm font-semibold text-slate-900">Workflow summary</div>
                 <div className="mt-3 space-y-2 text-sm text-slate-600">
                   <div>Frontend Viral Videos visibility: <span className="font-semibold text-slate-900">{frontendEnabled ? 'ON' : 'OFF'}</span></div>
-                  <div>Status: <span className="font-semibold text-slate-900">{editor.publish ? 'Published' : 'Draft'}</span></div>
+                  <div>Status: <span className="font-semibold text-slate-900">{statusLabel(editor.status)}</span></div>
                   <div>Active: <span className="font-semibold text-slate-900">{editor.isActive ? 'ON' : 'OFF'}</span></div>
-                  <div>Homepage featured: <span className="font-semibold text-slate-900">{editor.publish && editor.featured ? 'Yes' : 'No'}</span></div>
-                  <div>Frontend result: <span className="font-semibold text-slate-900">{!frontendEnabled ? 'Hidden everywhere on the frontend while admin records remain saved' : (!editor.publish ? 'Draft only' : (!editor.isActive ? 'Inactive in public API' : (editor.featured ? 'Homepage feature candidate and archive item' : 'Published in archive')))}</span></div>
+                  <div>Show on Homepage: <span className="font-semibold text-slate-900">{editor.status === 'published' && editor.showOnHomepage ? 'Yes' : 'No'}</span></div>
+                  <div>Featured: <span className="font-semibold text-slate-900">{editor.status === 'published' && editor.featured ? 'Yes' : 'No'}</span></div>
+                  <div>Frontend result: <span className="font-semibold text-slate-900">{!frontendEnabled ? 'Hidden everywhere on the frontend while admin records remain saved' : (editor.status !== 'published' ? 'Admin-only' : (!editor.isActive ? 'Inactive in public API' : (editor.featured ? 'Homepage feature candidate and archive item' : 'Published in archive')))}</span></div>
+                  {editor.scheduledAt ? <div>Scheduled publish: <span className="font-semibold text-slate-900">{formatDate(editor.scheduledAt)}</span></div> : null}
                   {editor.sourceName ? <div>Source: <span className="font-semibold text-slate-900">{editor.sourceName}</span></div> : null}
                   {editor.category ? <div>Category: <span className="font-semibold text-slate-900">{editor.category}</span></div> : null}
                 </div>
@@ -1300,9 +1461,11 @@ export default function ViralVideosPage() {
                   <div className="space-y-3 p-4">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                       <span>{String(editor.language || 'en').toUpperCase()}</span>
+                      <span className={`rounded-full px-2 py-0.5 ${statusBadgeClass(editor.status)}`}>{statusLabel(editor.status)}</span>
                       <span className={`rounded-full px-2 py-0.5 ${frontendEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>Frontend {frontendEnabled ? 'ON' : 'OFF'}</span>
                       <span className={`rounded-full px-2 py-0.5 ${editor.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>Active {editor.isActive ? 'ON' : 'OFF'}</span>
-                      {editor.publish && editor.featured ? <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700">Featured</span> : null}
+                      {editor.status === 'published' && editor.showOnHomepage ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">Homepage</span> : null}
+                      {editor.status === 'published' && editor.featured ? <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700">Featured</span> : null}
                     </div>
                     <div className="text-xl font-semibold text-slate-900">{editor.title || 'Preview title'}</div>
                     {editor.sourceName ? <div className="text-sm font-medium text-slate-500">Source: {editor.sourceName}</div> : null}

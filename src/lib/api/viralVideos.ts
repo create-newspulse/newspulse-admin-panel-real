@@ -1,6 +1,6 @@
 import { adminApiClient } from '@/lib/adminApiClient';
 
-export type ViralVideoStatus = 'draft' | 'published';
+export type ViralVideoStatus = 'draft' | 'published' | 'unpublished' | 'archived';
 export type ViralVideoSourceType = 'video_url' | 'embed_url';
 export type ViralVideoType = 'uploaded' | 'youtube' | 'twitter' | 'external';
 export type ViralVideoPlaybackMode = 'internal' | 'youtube' | 'twitter' | 'external_link';
@@ -27,14 +27,17 @@ export interface ViralVideoRecord {
   videoType: ViralVideoType;
   playbackMode: ViralVideoPlaybackMode;
   language: 'en' | 'hi' | 'gu' | string;
+  duration?: string;
   tags: string[];
   status: ViralVideoStatus;
+  uploadedBy?: string;
   isActive: boolean;
   homepageVisible: boolean;
   showOnHomepage: boolean;
   homepageFeatured: boolean;
   featured: boolean;
   publishedAt?: string | null;
+  scheduledAt?: string | null;
   updatedAt?: string;
   createdAt?: string;
   sortOrder?: number | null;
@@ -57,19 +60,24 @@ export interface ViralVideoInput {
   videoType?: ViralVideoType;
   playbackMode?: ViralVideoPlaybackMode;
   language: string;
+  duration?: string;
   tags: string[];
   status: ViralVideoStatus;
+  uploadedBy?: string;
   isActive?: boolean;
   homepageVisible: boolean;
   showOnHomepage?: boolean;
   homepageFeatured: boolean;
   featured: boolean;
   publishedAt?: string | null;
+  scheduledAt?: string | null;
   sortOrder?: number | null;
 }
 
 export interface ViralVideoListParams {
   status?: 'all' | ViralVideoStatus;
+  date?: 'today' | 'yesterday';
+  period?: 'this-week' | 'all';
   language?: string;
   category?: string;
   featured?: boolean;
@@ -85,6 +93,12 @@ export interface ViralVideoListResponse {
   total: number;
   page: number;
   pages: number;
+}
+
+export interface ViralVideosDailyCount {
+  publishedToday: number;
+  limit: number;
+  remaining: number;
 }
 
 export interface HomepageViralVideoSelection {
@@ -106,6 +120,7 @@ export interface ViralVideosFrontendSettings {
 }
 
 const VIRAL_VIDEOS_PATH = 'admin/viral-videos';
+const PUBLIC_VIRAL_VIDEOS_LIST_PATH = '/admin-api/viral-videos';
 const PUBLIC_VIRAL_VIDEOS_PATH = '/admin-api/public/viral-videos';
 
 function adminViralVideoProxyUrl(path = '') {
@@ -213,7 +228,10 @@ function normalizeRecord(input: any): ViralVideoRecord {
     ? input.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
     : [];
   const sourceType = String(input?.sourceType || (input?.embedUrl ? 'embed_url' : 'video_url')).trim().toLowerCase();
-  const status = String(input?.status || '').trim().toLowerCase() === 'published' ? 'published' : 'draft';
+  const rawStatus = String(input?.status || '').trim().toLowerCase();
+  const status: ViralVideoStatus = rawStatus === 'published' || rawStatus === 'unpublished' || rawStatus === 'archived'
+    ? rawStatus
+    : 'draft';
   const isActive = input?.isActive === false || input?.active === false || input?.enabled === false ? false : true;
   const sortOrderRaw = input?.sortOrder;
   const sortOrder = Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : null;
@@ -238,14 +256,17 @@ function normalizeRecord(input: any): ViralVideoRecord {
     videoType,
     playbackMode,
     language: String(input?.language || input?.lang || 'en').trim() || 'en',
+    duration: String(input?.duration || input?.videoDuration || input?.length || '').trim() || undefined,
     tags,
     status,
+    uploadedBy: String(input?.uploadedBy || input?.createdByName || input?.authorName || '').trim() || undefined,
     isActive,
     homepageVisible: showOnHomepage,
     showOnHomepage,
     homepageFeatured: input?.homepageFeatured === true || input?.featured === true,
     featured: input?.homepageFeatured === true || input?.featured === true,
     publishedAt: input?.publishedAt ? String(input.publishedAt) : null,
+    scheduledAt: input?.scheduledAt ? String(input.scheduledAt) : null,
     updatedAt: input?.updatedAt ? String(input.updatedAt) : undefined,
     createdAt: input?.createdAt ? String(input.createdAt) : undefined,
     sortOrder,
@@ -310,8 +331,10 @@ function buildPayload(input: Partial<ViralVideoInput>) {
     videoType,
     playbackMode,
     language: String(input.language || 'en').trim() || 'en',
+    duration: String(input.duration || '').trim(),
     tags: Array.isArray(input.tags) ? input.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : [],
-    status: input.status === 'published' ? 'published' : 'draft',
+    status: input.status === 'published' || input.status === 'unpublished' || input.status === 'archived' ? input.status : 'draft',
+    uploadedBy: String(input.uploadedBy || 'News Pulse/Admin').trim(),
     isActive,
     active: isActive,
     homepageVisible: input.homepageVisible === true,
@@ -320,7 +343,20 @@ function buildPayload(input: Partial<ViralVideoInput>) {
     homepageFeatured: input.homepageFeatured === true || input.featured === true,
     featured: input.homepageFeatured === true || input.featured === true,
     publishedAt: input.publishedAt || null,
+    scheduledAt: input.scheduledAt || null,
     sortOrder: Number.isFinite(Number(input.sortOrder)) ? Number(input.sortOrder) : null,
+  };
+}
+
+function normalizeDailyCount(payload: any): ViralVideosDailyCount {
+  const root = unwrapPayload(payload);
+  const publishedToday = Number(root?.publishedToday ?? root?.todayPublished ?? root?.count ?? root?.publishedCount ?? 0);
+  const limit = Number(root?.limit ?? root?.dailyLimit ?? 15);
+  const remaining = Number(root?.remaining ?? root?.remainingToday ?? Math.max(0, limit - publishedToday));
+  return {
+    publishedToday: Number.isFinite(publishedToday) ? publishedToday : 0,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : 15,
+    remaining: Number.isFinite(remaining) ? Math.max(0, remaining) : 0,
   };
 }
 
@@ -368,6 +404,11 @@ export async function listViralVideos(params: ViralVideoListParams = {}): Promis
   return normalizeListResponse(res.data, requestedPage, limit);
 }
 
+export async function getViralVideosDailyCount(): Promise<ViralVideosDailyCount> {
+  const res = await adminApiClient.get(`${VIRAL_VIDEOS_PATH}/daily-count`);
+  return normalizeDailyCount(res.data);
+}
+
 export async function getViralVideo(id: string): Promise<ViralVideoRecord> {
   const encodedId = encodeURIComponent(id);
   const url = adminViralVideoProxyUrl(encodedId);
@@ -386,7 +427,7 @@ export async function updateViralVideo(id: string, input: Partial<ViralVideoInpu
   const encodedId = encodeURIComponent(id);
   const url = adminViralVideoProxyUrl(encodedId);
   try {
-    const res = await adminApiClient.patch(`${VIRAL_VIDEOS_PATH}/${encodedId}`, buildPayload(input));
+    const res = await adminApiClient.put(`${VIRAL_VIDEOS_PATH}/${encodedId}`, buildPayload(input));
     logEditRequest(id, url, res.status);
     const payload = unwrapPayload(res.data);
     return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
@@ -407,11 +448,13 @@ export async function updateViralVideoStatus(
   status: ViralVideoStatus,
   options: { publishedAt?: string | null; homepageFeatured?: boolean; featured?: boolean } = {}
 ): Promise<ViralVideoRecord> {
-  const res = await adminApiClient.patch(`${VIRAL_VIDEOS_PATH}/${encodeURIComponent(id)}/status`, {
+  const res = await adminApiClient.put(`${VIRAL_VIDEOS_PATH}/${encodeURIComponent(id)}`, {
     status,
     publishedAt: status === 'published' ? (options.publishedAt || new Date().toISOString()) : null,
     homepageFeatured: status === 'published' ? (options.homepageFeatured === true || options.featured === true) : false,
     featured: status === 'published' ? (options.featured === true || options.homepageFeatured === true) : false,
+    homepageVisible: status === 'published' && (options.homepageFeatured === true || options.featured === true),
+    showOnHomepage: status === 'published' && (options.homepageFeatured === true || options.featured === true),
   });
   const payload = unwrapPayload(res.data);
   return normalizeRecord(payload?.item || payload?.viralVideo || payload?.video || payload?.data || payload);
@@ -429,11 +472,11 @@ export async function listPublicViralVideos(params: { language?: string; categor
   if (params.fallbackLatest) query.set('fallbackLatest', 'true');
   if (params.limit) query.set('limit', String(params.limit));
   const suffix = query.toString() ? `?${query.toString()}` : '';
-  const payload = await readPublicJson<any>(`${PUBLIC_VIRAL_VIDEOS_PATH}${suffix}`);
+  const payload = await readPublicJson<any>(`${PUBLIC_VIRAL_VIDEOS_LIST_PATH}${suffix}`);
   const rows = Array.isArray(payload?.items)
     ? payload.items
     : (Array.isArray(payload?.rows) ? payload.rows : []);
-  return rows.map(normalizeRecord);
+  return rows.map(normalizeRecord).filter((item) => item.status === 'published' && item.isActive !== false);
 }
 
 export async function listHomepageFeaturedViralVideos(limit = 3): Promise<ViralVideoRecord[]> {

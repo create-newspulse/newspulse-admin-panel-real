@@ -34,7 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'ads', label:'Ads Manager', path:'/admin/ads-manager', roles:['editor','admin','founder'], icon:'📣', moduleKey:'ads_manager' },
   { key:'finance', label:'Finance Desk', path:'/admin/finance', roles:['admin','founder'], icon:'💼', moduleKey:'finance_desk' },
   { key:'media', label:'Media', path:'/admin/media', roles:['editor','admin','founder'], icon:'📸', moduleKey:'media' },
-  { key:'viral-videos', label:'Viral Videos', path:'/admin/viral-videos/new', roles:['editor','admin','founder'], icon:'🎬', moduleKey:'viral_videos' },
+  { key:'viral-videos', label:'Viral Videos', path:'/admin/viral-videos', roles:['editor','admin','founder'], icon:'🎬', moduleKey:'viral_videos' },
   { key:'aira', label:'AIRA', path:'/admin/aira', roles:['admin','founder'], icon:'🧍‍♀️', moduleKey:'aira' },
   { key:'livetv', label:'Live TV', path:'/admin/live-tv', roles:['editor','admin','founder'], icon:'🎥', moduleKey:'live_tv' },
   { key:'editorial', label:'Editorial', path:'/admin/editorial', roles:['editor','admin','founder'], icon:'✍️', moduleKey:'editorial' },
