@@ -112,6 +112,8 @@ const DEFAULT_AIRA_SLOTS: Array<{ time: string; title: string; durationMinutes: 
 
 const emptyLiveTv: LiveTvDraft = {
   ...DEFAULT_PUBLIC_SITE_SETTINGS.liveTv,
+  offlinePosterImageUrl: '',
+  offlineLoopVideoUrl: '',
   offlinePosterImage: '',
   offlineLoopVideo: '',
   offlineMessage: DEFAULT_OFFLINE_MESSAGE,
@@ -124,6 +126,8 @@ const emptyLiveTv: LiveTvDraft = {
 
 function normalizeForForm(value: unknown): LiveTvDraft {
   const raw = value && typeof value === 'object' ? (value as Record<string, any>) : {};
+  const offlinePosterImageUrl = typeof raw.offlinePosterImageUrl === 'string' ? raw.offlinePosterImageUrl : typeof raw.offlinePosterImage === 'string' ? raw.offlinePosterImage : '';
+  const offlineLoopVideoUrl = typeof raw.offlineLoopVideoUrl === 'string' ? raw.offlineLoopVideoUrl : typeof raw.offlineLoopVideo === 'string' ? raw.offlineLoopVideo : '';
   return {
     ...emptyLiveTv,
     ...raw,
@@ -132,8 +136,10 @@ function normalizeForForm(value: unknown): LiveTvDraft {
     endTime: typeof raw.endTime === 'string' ? raw.endTime : '',
     nextLiveTime: typeof raw.nextLiveTime === 'string' ? raw.nextLiveTime : '',
     countdownText: typeof raw.countdownText === 'string' ? raw.countdownText : '',
-    offlinePosterImage: typeof raw.offlinePosterImage === 'string' ? raw.offlinePosterImage : '',
-    offlineLoopVideo: typeof raw.offlineLoopVideo === 'string' ? raw.offlineLoopVideo : '',
+    offlinePosterImageUrl,
+    offlineLoopVideoUrl,
+    offlinePosterImage: offlinePosterImageUrl,
+    offlineLoopVideo: offlineLoopVideoUrl,
     offlineMessage: typeof raw.offlineMessage === 'string' && raw.offlineMessage.trim() ? raw.offlineMessage : DEFAULT_OFFLINE_MESSAGE,
     scheduleStatus: SCHEDULE_STATUSES.includes(raw.scheduleStatus) ? raw.scheduleStatus : 'Draft',
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : '',
@@ -143,6 +149,8 @@ function normalizeForForm(value: unknown): LiveTvDraft {
 
 function normalizeForSave(value: LiveTvDraft, action: ActivityAction): LiveTvDraft {
   const normalized = normalizeLiveTvSettingsValue(value) as LiveTvDraft;
+  const offlinePosterImageUrl = String(value.offlinePosterImageUrl || value.offlinePosterImage || '').trim();
+  const offlineLoopVideoUrl = String(value.offlineLoopVideoUrl || value.offlineLoopVideo || '').trim();
   return {
     ...value,
     ...normalized,
@@ -150,8 +158,10 @@ function normalizeForSave(value: LiveTvDraft, action: ActivityAction): LiveTvDra
     endTime: value.endTime || '',
     nextLiveTime: value.nextLiveTime || '',
     countdownText: value.countdownText || '',
-    offlinePosterImage: value.offlinePosterImage || '',
-    offlineLoopVideo: value.offlineLoopVideo || '',
+    offlinePosterImageUrl,
+    offlineLoopVideoUrl,
+    offlinePosterImage: offlinePosterImageUrl,
+    offlineLoopVideo: offlineLoopVideoUrl,
     offlineMessage: value.offlineMessage || DEFAULT_OFFLINE_MESSAGE,
     scheduleStatus: SCHEDULE_STATUSES.includes(value.scheduleStatus) ? value.scheduleStatus : 'Draft',
     updatedAt: new Date().toISOString(),
@@ -180,11 +190,11 @@ function isOfflinePlaybackMode(settings: LiveTvDraft): boolean {
 }
 
 function offlineLoopVideoFor(settings: LiveTvDraft): string {
-  return String(settings.offlineLoopVideo || '').trim();
+  return String(settings.offlineLoopVideoUrl || settings.offlineLoopVideo || '').trim();
 }
 
 function offlinePosterImageFor(settings: LiveTvDraft): string {
-  return String(settings.offlinePosterImage || '').trim();
+  return String(settings.offlinePosterImageUrl || settings.offlinePosterImage || '').trim();
 }
 
 function offlineMessageFor(settings: LiveTvDraft): string {
@@ -675,7 +685,7 @@ export default function LiveTVControl() {
     setOfflineUploadError('');
     try {
       const result = await uploadCoverImage(file);
-      updateLiveTv({ offlinePosterImage: result.url });
+      updateLiveTv({ offlinePosterImageUrl: result.url, offlinePosterImage: result.url });
       addActivity('URL changed', 'Offline poster image uploaded.');
       toast.success('Offline poster image uploaded.');
     } catch (error: any) {
@@ -701,7 +711,7 @@ export default function LiveTVControl() {
     setOfflineUploadError('');
     try {
       const result = await uploadVideoFile(file);
-      updateLiveTv({ offlineLoopVideo: result.url });
+      updateLiveTv({ offlineLoopVideoUrl: result.url, offlineLoopVideo: result.url });
       addActivity('URL changed', 'Offline loop video uploaded.');
       toast.success('Offline loop video uploaded.');
     } catch (error: any) {
@@ -1182,7 +1192,7 @@ export default function LiveTVControl() {
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <label className="block text-sm font-semibold text-slate-700">
                     Offline Poster Image URL
-                    <input className={fieldClass('mt-2')} value={formLiveTv.offlinePosterImage || ''} onChange={(event) => updateLiveTv({ offlinePosterImage: event.target.value })} placeholder="https://.../offline-poster.webp" />
+                    <input className={fieldClass('mt-2')} value={offlinePosterImageFor(formLiveTv)} onChange={(event) => updateLiveTv({ offlinePosterImageUrl: event.target.value, offlinePosterImage: event.target.value })} placeholder="https://.../offline-poster.webp" />
                   </label>
                   <label className="block text-sm font-semibold text-slate-700">
                     Upload Offline Poster Image
@@ -1200,16 +1210,16 @@ export default function LiveTVControl() {
                   </label>
 
                   <div className="md:col-span-2">
-                    {formLiveTv.offlinePosterImage ? (
+                    {offlinePosterImageFor(formLiveTv) ? (
                       <div className="aspect-video overflow-hidden rounded-xl border border-slate-200 bg-slate-950">
-                        <img src={formLiveTv.offlinePosterImage} alt="Offline poster preview" className="h-full w-full object-cover" />
+                        <img src={offlinePosterImageFor(formLiveTv)} alt="Offline poster preview" className="h-full w-full object-cover" />
                       </div>
                     ) : <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-500">No offline poster image selected.</div>}
                   </div>
 
                   <label className="block text-sm font-semibold text-slate-700">
                     Offline Loop Video URL
-                    <input className={fieldClass('mt-2')} value={formLiveTv.offlineLoopVideo || ''} onChange={(event) => updateLiveTv({ offlineLoopVideo: event.target.value })} placeholder="https://.../offline-loop.mp4" />
+                    <input className={fieldClass('mt-2')} value={offlineLoopVideoFor(formLiveTv)} onChange={(event) => updateLiveTv({ offlineLoopVideoUrl: event.target.value, offlineLoopVideo: event.target.value })} placeholder="https://.../offline-loop.mp4" />
                   </label>
                   <label className="block text-sm font-semibold text-slate-700">
                     Upload Offline Loop Video
@@ -1227,9 +1237,9 @@ export default function LiveTVControl() {
                   </label>
 
                   <div className="md:col-span-2">
-                    {formLiveTv.offlineLoopVideo ? (
+                    {offlineLoopVideoFor(formLiveTv) ? (
                       <div className="aspect-video overflow-hidden rounded-xl border border-slate-200 bg-slate-950">
-                        <video key={formLiveTv.offlineLoopVideo} controls muted loop playsInline src={formLiveTv.offlineLoopVideo} className="h-full w-full bg-slate-950 object-contain" />
+                        <video key={offlineLoopVideoFor(formLiveTv)} controls muted loop playsInline src={offlineLoopVideoFor(formLiveTv)} className="h-full w-full bg-slate-950 object-contain" />
                       </div>
                     ) : <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-500">No offline loop video selected.</div>}
                   </div>
@@ -1519,14 +1529,6 @@ export default function LiveTVControl() {
             <div className="p-5">
               {loadState === 'error' ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-10 text-center text-sm font-semibold text-amber-900">Could not load the current Live TV settings. Use Refresh Preview to try again.</div>
-              ) : previewOfflineLoopVideo ? (
-                <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
-                  <video key={previewOfflineLoopVideo} controls muted loop playsInline autoPlay src={previewOfflineLoopVideo} className="h-full w-full bg-slate-950 object-contain" />
-                </div>
-              ) : previewOfflinePosterImage ? (
-                <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
-                  <img src={previewOfflinePosterImage} alt="Offline poster preview" className="h-full w-full object-cover" />
-                </div>
               ) : validPreviewUrl ? (
                 <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
                   {previewIsVideo ? (
@@ -1534,6 +1536,14 @@ export default function LiveTVControl() {
                   ) : (
                     <iframe key={previewUrl} title={titleFor(previewLiveTv)} src={previewUrl} className="h-full w-full border-0" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" />
                   )}
+                </div>
+              ) : previewOfflineLoopVideo ? (
+                <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
+                  <video key={previewOfflineLoopVideo} controls muted loop playsInline autoPlay src={previewOfflineLoopVideo} className="h-full w-full bg-slate-950 object-contain" />
+                </div>
+              ) : previewOfflinePosterImage ? (
+                <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
+                  <img src={previewOfflinePosterImage} alt="Offline poster preview" className="h-full w-full object-cover" />
                 </div>
               ) : previewLiveTv.sourceType === 'AIRA_BULLETIN' ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-12 text-center text-sm font-semibold text-amber-900">Video preview unavailable. Check video URL.</div>
