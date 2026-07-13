@@ -209,6 +209,10 @@ function isPlayableVideoUrl(value: string): boolean {
   return /\.(mp4|webm)(\?|#|$)/i.test(value.trim());
 }
 
+function isPreviewImageUrl(value: string): boolean {
+  return /\.(jpe?g|png|webp)(\?|#|$)/i.test(value.trim());
+}
+
 function isYouTubeUrl(value: string): boolean {
   if (!value.trim()) return false;
   try {
@@ -610,9 +614,9 @@ export default function LiveTVControl() {
   const previewUrl = useMemo(() => previewUrlFor(previewLiveTv), [previewLiveTv]);
   const validPreviewUrl = isPreviewableUrl(previewUrl);
   const previewIsVideo = isPlayableVideoUrl(previewUrl);
-  const previewOfflineMode = isOfflinePlaybackMode(previewLiveTv);
-  const previewOfflineLoopVideoValue = previewOfflineMode ? offlineLoopVideoFor(previewLiveTv) : '';
-  const previewOfflinePosterImageValue = previewOfflineMode ? offlinePosterImageFor(previewLiveTv) : '';
+  const previewIsImage = isPreviewImageUrl(previewUrl);
+  const previewOfflineLoopVideoValue = offlineLoopVideoFor(previewLiveTv);
+  const previewOfflinePosterImageValue = offlinePosterImageFor(previewLiveTv);
   const previewOfflineLoopVideo = isPreviewableUrl(previewOfflineLoopVideoValue) ? previewOfflineLoopVideoValue : '';
   const previewOfflinePosterImage = isPreviewableUrl(previewOfflinePosterImageValue) ? previewOfflinePosterImageValue : '';
   const currentStatus = liveStatusFor(formLiveTv, previewUrlFor(formLiveTv));
@@ -1532,7 +1536,9 @@ export default function LiveTVControl() {
               ) : validPreviewUrl ? (
                 <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
                   {previewIsVideo ? (
-                    <video key={previewUrl} controls src={previewUrl} className="h-full w-full bg-slate-950" />
+                    <video key={previewUrl} controls muted loop playsInline src={previewUrl} className="h-full w-full bg-slate-950 object-contain" />
+                  ) : previewIsImage ? (
+                    <img key={previewUrl} src={previewUrl} alt="Offline poster preview" className="h-full w-full object-cover" />
                   ) : (
                     <iframe key={previewUrl} title={titleFor(previewLiveTv)} src={previewUrl} className="h-full w-full border-0" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" />
                   )}
