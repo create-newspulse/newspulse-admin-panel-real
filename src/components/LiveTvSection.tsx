@@ -7,12 +7,20 @@ import {
 } from '@/types/publicSiteSettings';
 
 type LiveTvSettingsValue = PublicSiteSettings['liveTv'];
+type LiveTvDisplaySettings = LiveTvSettingsValue & {
+  sourceType?: string;
+  offlinePosterImage?: string;
+  offlineLoopVideo?: string;
+  offlineMessage?: string;
+};
+
+const DEFAULT_OFFLINE_MESSAGE = 'News Pulse Live TV will return shortly.';
 
 function firstObject(...values: unknown[]) {
   return values.find((value) => value && typeof value === 'object') as Record<string, unknown> | undefined;
 }
 
-function extractLiveTvSettings(input: unknown): LiveTvSettingsValue {
+function extractLiveTvSettings(input: unknown): LiveTvDisplaySettings {
   const raw = input as any;
   const value = firstObject(
     raw?.settings?.published?.liveTv,
@@ -25,7 +33,7 @@ function extractLiveTvSettings(input: unknown): LiveTvSettingsValue {
   return normalizeLiveTvSettingsValue({
     ...DEFAULT_PUBLIC_SITE_SETTINGS.liveTv,
     ...value,
-  });
+  }) as LiveTvDisplaySettings;
 }
 
 function defaultTitleForMode(settings: LiveTvSettingsValue): string {
@@ -36,8 +44,35 @@ function defaultTitleForMode(settings: LiveTvSettingsValue): string {
   return 'News Pulse Live TV';
 }
 
+function isOfflineDisplayMode(settings: LiveTvDisplaySettings): boolean {
+  return settings.sourceType === 'MAINTENANCE' || settings.sourceType === 'OFFLINE_REPLAY' || settings.mode === 'Maintenance / Coming Soon' || settings.mode === 'Offline Replay';
+}
+
+function offlineLoopVideoFor(settings: LiveTvDisplaySettings): string {
+  return String(settings.offlineLoopVideo || '').trim();
+}
+
+function offlinePosterImageFor(settings: LiveTvDisplaySettings): string {
+  return String(settings.offlinePosterImage || '').trim();
+}
+
+function offlineMessageFor(settings: LiveTvDisplaySettings): string {
+  return String(settings.offlineMessage || '').trim() || DEFAULT_OFFLINE_MESSAGE;
+}
+
+function isRenderableMediaPath(value: string): boolean {
+  if (!value) return false;
+  if (value.startsWith('/')) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const LiveTvSection: React.FC = () => {
-  const [settings, setSettings] = useState<LiveTvSettingsValue>(DEFAULT_PUBLIC_SITE_SETTINGS.liveTv);
+  const [settings, setSettings] = useState<LiveTvDisplaySettings>(DEFAULT_PUBLIC_SITE_SETTINGS.liveTv as LiveTvDisplaySettings);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -68,7 +103,12 @@ const LiveTvSection: React.FC = () => {
 
   const title = defaultTitleForMode(settings);
   const subtitle = settings.subtitle.trim();
-  const comingSoon = settings.mode === 'Maintenance / Coming Soon' || !playerUrl;
+  const offlineDisplayMode = isOfflineDisplayMode(settings);
+  const offlineLoopVideoValue = offlineDisplayMode ? offlineLoopVideoFor(settings) : '';
+  const offlinePosterImageValue = offlineDisplayMode ? offlinePosterImageFor(settings) : '';
+  const offlineLoopVideo = isRenderableMediaPath(offlineLoopVideoValue) ? offlineLoopVideoValue : '';
+  const offlinePosterImage = isRenderableMediaPath(offlinePosterImageValue) ? offlinePosterImageValue : '';
+  const comingSoon = !offlineLoopVideo && !offlinePosterImage && (settings.mode === 'Maintenance / Coming Soon' || !playerUrl);
   const replayMode = settings.mode === 'Offline Replay' && !!settings.fallbackVideoUrl;
 
   if (loading) {
@@ -95,9 +135,36 @@ const LiveTvSection: React.FC = () => {
       </div>
 
       <div className="p-5">
-        {comingSoon ? (
+        {offlineLoopVideo ? (
+          <div className="space-y-3">
+            <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
+              <video
+                key={offlineLoopVideo}
+                src={offlineLoopVideo}
+                className="h-full w-full bg-slate-950 object-contain"
+                autoPlay
+                muted
+                loop
+                playsInline
+                controls
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">Offline Loop</span>
+            </div>
+          </div>
+        ) : offlinePosterImage ? (
+          <div className="space-y-3">
+            <div className="aspect-video overflow-hidden rounded-2xl bg-slate-950 shadow-inner">
+              <img src={offlinePosterImage} alt={title} className="h-full w-full object-cover" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">Offline Poster</span>
+            </div>
+          </div>
+        ) : comingSoon ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-10 text-center">
-            <div className="text-lg font-semibold text-slate-900">News Pulse Live TV is coming soon.</div>
+            <div className="text-lg font-semibold text-slate-900">{offlineMessageFor(settings)}</div>
             <p className="mt-2 text-sm text-slate-600">
               {settings.mode === 'Maintenance / Coming Soon'
                 ? 'The live section is currently in maintenance mode. Please check back shortly.'
