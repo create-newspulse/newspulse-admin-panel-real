@@ -444,6 +444,40 @@ export const DEFAULT_PUBLIC_SITE_SETTINGS: PublicSiteSettings = {
   languageTheme: { languages: ['en'], themePreset: 'system' },
 };
 
+const PUBLIC_SITE_LANGUAGE_ORDER = ['en', 'hi', 'gu'] as const;
+const PUBLIC_SITE_LANGUAGE_ALIASES: Record<string, (typeof PUBLIC_SITE_LANGUAGE_ORDER)[number]> = {
+  en: 'en',
+  english: 'en',
+  hi: 'hi',
+  hindi: 'hi',
+  gu: 'gu',
+  gujarati: 'gu',
+  'gu-in': 'gu',
+  gu_in: 'gu',
+  gj: 'gu',
+};
+
+export function normalizePublicSiteLanguageCode(input: unknown): 'en' | 'hi' | 'gu' | '' {
+  const key = String(input || '').trim().toLowerCase();
+  return PUBLIC_SITE_LANGUAGE_ALIASES[key] || '';
+}
+
+export function normalizePublicSiteLanguageCodes(input: unknown): Array<'en' | 'hi' | 'gu'> {
+  const raw = Array.isArray(input)
+    ? input
+    : String(input || '').split(',');
+
+  const seen = new Set<string>();
+  const out: Array<'en' | 'hi' | 'gu'> = [];
+  raw.forEach((value) => {
+    const code = normalizePublicSiteLanguageCode(value);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    out.push(code);
+  });
+  return out;
+}
+
 const LEGACY_HOMEPAGE_MODULE_KEY_MAP: Record<string, HomepageModuleKey> = {
   exploreCategories: 'explore',
   trendingStrip: 'trending',
@@ -470,6 +504,10 @@ function normalizeHomepageModulesRecord(input: unknown): Record<string, unknown>
 }
 
 export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSiteSettings {
+  const rawLanguageTheme = (input as any)?.languageTheme;
+  const rawLanguages = rawLanguageTheme && typeof rawLanguageTheme === 'object' && 'languages' in rawLanguageTheme
+    ? rawLanguageTheme.languages
+    : undefined;
   return {
     ...input,
     homepage: {
@@ -479,6 +517,10 @@ export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSi
     liveTv: normalizeLiveTvSettingsValue((input as any)?.liveTv) as any,
     inspirationHub: normalizeInspirationHubSettings((input as any)?.inspirationHub) as any,
     dailyWonders: normalizeDailyWondersSettings((input as any)?.dailyWonders) as any,
+    languageTheme: {
+      ...(rawLanguageTheme || {}),
+      ...(rawLanguages === undefined ? {} : { languages: normalizePublicSiteLanguageCodes(rawLanguages) }),
+    },
   };
 }
 
@@ -487,6 +529,7 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
   const rawLiveTv = (patch as any)?.liveTv;
   const rawInspirationHub = (patch as any)?.inspirationHub;
   const rawDailyWonders = (patch as any)?.dailyWonders;
+  const rawLanguageTheme = (patch as any)?.languageTheme;
   const next: any = {
     ...(patch as any),
   };
@@ -508,6 +551,14 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
 
   if (rawDailyWonders && typeof rawDailyWonders === 'object') {
     next.dailyWonders = normalizeDailyWondersSettings(rawDailyWonders);
+  }
+
+  if (rawLanguageTheme && typeof rawLanguageTheme === 'object') {
+    const hasLanguages = 'languages' in rawLanguageTheme;
+    next.languageTheme = {
+      ...rawLanguageTheme,
+      ...(hasLanguages ? { languages: normalizePublicSiteLanguageCodes(rawLanguageTheme.languages) } : {}),
+    };
   }
 
   return next;

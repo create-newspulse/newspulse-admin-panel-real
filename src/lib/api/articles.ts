@@ -30,6 +30,7 @@ export interface Article {
   // Back-compat: some environments store this as a plain string URL.
   coverImage?: string | { url: string; publicId?: string };
   category?: string;
+  editorialType?: 'editorial' | 'special_story' | string;
   status?: ArticleStatus;
   // Some backends use alternate fields instead of `status`.
   state?: string;

@@ -15,6 +15,7 @@ import {
   unscheduleArticle,
   hardDeleteArticle,
   bulkHardDeleteArticles,
+  requeueArticleTranslations,
   type Article,
   type ListResponse,
 } from '@/lib/api/articles';
@@ -92,25 +93,69 @@ function formatLangTag(code: any): string {
   return c.slice(0, 4).toUpperCase();
 }
 
-function getArticleLanguageBadge(a: Article): string {
-  const langs = new Set<string>();
-  const primary = String((a as any)?.lang ?? (a as any)?.language ?? '').trim().toLowerCase();
-  if (primary) langs.add(primary);
+type ArticleLanguageInfo = {
+  badge: string;
+};
 
+function normalizeArticleLang(input: any): 'en' | 'hi' | 'gu' | '' {
+  const c = String(input || '').trim().toLowerCase();
+  return c === 'en' || c === 'hi' || c === 'gu' ? c : '';
+}
+
+function addTranslationMetadataLanguages(a: Article, langs: Set<string>): void {
   const translations = (a as any)?.translations;
+  if (Array.isArray(translations)) {
+    for (const item of translations) {
+      const code = normalizeArticleLang((item as any)?.lang ?? (item as any)?.language ?? (item as any)?.code);
+      if (code) langs.add(code);
+    }
+    return;
+  }
+
   if (translations && typeof translations === 'object') {
     for (const k of Object.keys(translations)) {
-      const code = String(k || '').trim().toLowerCase();
+      const code = normalizeArticleLang(k);
       if (code) langs.add(code);
     }
   }
+}
+
+function getArticleLanguageCodes(a: Article, rows: Article[]): Set<string> {
+  const langs = new Set<string>();
+  const primary = normalizeArticleLang((a as any)?.lang ?? (a as any)?.language);
+  if (primary) langs.add(primary);
+
+  const groupId = String((a as any)?.translationGroupId || '').trim();
+  if (groupId) {
+    rows.forEach((candidate) => {
+      if (String((candidate as any)?.translationGroupId || '').trim() !== groupId) return;
+      const code = normalizeArticleLang((candidate as any)?.lang ?? (candidate as any)?.language);
+      if (code) langs.add(code);
+      addTranslationMetadataLanguages(candidate, langs);
+    });
+  } else {
+    addTranslationMetadataLanguages(a, langs);
+  }
+
+  return langs;
+}
+
+export function getArticleLanguageInfo(a: Article, rows: Article[]): ArticleLanguageInfo {
+  const langs = getArticleLanguageCodes(a, rows);
+  const primary = normalizeArticleLang((a as any)?.lang ?? (a as any)?.language);
 
   const ordered = ['en', 'hi', 'gu'];
   const picked = ordered.filter((x) => langs.has(x));
-  if (picked.length >= 2) return picked.map(formatLangTag).join('+');
+  const badge = picked.length >= 2
+    ? picked.map(formatLangTag).join('+')
+    : formatLangTag(picked[0] || primary);
 
-  const only = picked[0] || primary;
-  return formatLangTag(only);
+  return { badge };
+}
+
+function getEditorialTypeLabel(a: Article): string {
+  if (norm((a as any)?.category) !== 'editorial') return '';
+  return norm((a as any)?.editorialType) === 'special_story' ? 'Special Story' : 'Editorial';
 }
 
 function isAdminArticleDebugEnabled(): boolean {
@@ -340,6 +385,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   });
 
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
+  const [translationBackfillMode, setTranslationBackfillMode] = React.useState<'all' | 'hi' | 'gu' | 'en'>('all');
+  const [bulkTranslating, setBulkTranslating] = React.useState(false);
   const mutateDeleteHardBulk = useMutation({
     mutationFn: (ids: string[]) => bulkHardDeleteArticles(ids),
     onMutate: async (ids: string[]) => {
@@ -377,6 +424,29 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     onSettled: () => {
       setBulkDeleting(false);
       qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+  });
+
+  const mutateGenerateMissingTranslations = useMutation({
+    mutationFn: async (jobs: Array<{ id: string; languages: string[] }>) => {
+      for (const job of jobs) {
+        await requeueArticleTranslations(job.id, { languages: job.languages });
+      }
+      return { count: jobs.length };
+    },
+    onMutate: () => {
+      setBulkTranslating(true);
+    },
+    onSuccess: (_data, jobs) => {
+      const languageCount = jobs.reduce((sum, job) => sum + job.languages.length, 0);
+      toast.success(`Queued missing translations for ${jobs.length} article${jobs.length === 1 ? '' : 's'} (${languageCount} language${languageCount === 1 ? '' : 's'})`);
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+    onError: (err: any) => {
+      toast.error(normalizeError(err, 'Generate missing translations failed').message);
+    },
+    onSettled: () => {
+      setBulkTranslating(false);
     },
   });
 
@@ -565,6 +635,59 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     if (!selectAllRef.current) return;
     selectAllRef.current.indeterminate = !allVisibleSelected && someVisibleSelected;
   }, [allVisibleSelected, someVisibleSelected]);
+
+  const selectedArticles = React.useMemo(() => {
+    const selectedSet = new Set(selected);
+    return rawRows.filter((a) => selectedSet.has(String((a as any)?._id || '')));
+  }, [rawRows, selected]);
+
+  const runMissingTranslationBackfill = () => {
+    if (role !== 'founder') return;
+    const targetOrder = ['en', 'hi', 'gu'];
+    const forcedTarget = translationBackfillMode === 'all' ? '' : translationBackfillMode;
+    const jobs: Array<{ id: string; languages: string[] }> = [];
+    const sourceLanguages = new Set<string>();
+    const targetLanguages = new Set<string>();
+    let estimatedCharacters = 0;
+
+    for (const article of selectedArticles) {
+      const id = String((article as any)?._id || '').trim();
+      if (!id) continue;
+      const available = getArticleLanguageCodes(article, rawRows);
+      const primary = normalizeArticleLang((article as any)?.lang ?? (article as any)?.language) || Array.from(available)[0] || 'unknown';
+      sourceLanguages.add(primary.toUpperCase());
+      const missing = targetOrder.filter((code) => !available.has(code));
+      const languages = forcedTarget ? missing.filter((code) => code === forcedTarget) : missing;
+      if (!languages.length) continue;
+
+      const charCount = [article.title, article.summary, article.description, article.content]
+        .map((value) => String(value || ''))
+        .join(' ')
+        .length;
+      estimatedCharacters += charCount * languages.length;
+      languages.forEach((code) => targetLanguages.add(code.toUpperCase()));
+      jobs.push({ id, languages });
+    }
+
+    if (!jobs.length) {
+      toast('No selected articles are missing the requested language translations.');
+      return;
+    }
+
+    const ok = confirm([
+      'Generate Missing Translations',
+      '',
+      `Articles: ${selectedArticles.length}`,
+      `Jobs to queue: ${jobs.length}`,
+      `Source languages: ${Array.from(sourceLanguages).sort().join(', ') || '—'}`,
+      `Target languages: ${Array.from(targetLanguages).sort().join(', ') || '—'}`,
+      `Estimated character count: ${estimatedCharacters.toLocaleString()}`,
+      '',
+      'This queues translation jobs only for selected articles. It does not translate the full database automatically.',
+    ].join('\n'));
+    if (!ok) return;
+    mutateGenerateMissingTranslations.mutate(jobs);
+  };
 
   // Avoid a visible "gap" above the header when using a non-zero sticky top offset.
   // We only apply the offset after the header would collide with the sticky quick-views bar.
@@ -899,6 +1022,33 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             {bulkDeleting ? 'Deleting…' : `Delete Selected Forever (${selected.length})`}
           </button>
         ) : null}
+        {role === 'founder' && selected.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1">
+            <span className="text-[11px] font-semibold text-slate-700">Selected articles</span>
+            <select
+              value={translationBackfillMode}
+              onChange={(e) => setTranslationBackfillMode(e.target.value as any)}
+              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+              title="Missing translation target"
+            >
+              <option value="all">All missing languages</option>
+              <option value="hi">Missing Hindi only</option>
+              <option value="gu">Missing Gujarati only</option>
+              <option value="en">Missing English only</option>
+            </select>
+            <button
+              type="button"
+              disabled={bulkTranslating}
+              onClick={runMissingTranslationBackfill}
+              className={
+                'rounded-md px-3 py-1.5 text-xs font-semibold '
+                + (bulkTranslating ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800')
+              }
+            >
+              {bulkTranslating ? 'Queueing…' : 'Generate Missing Translations'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {showSkeleton ? (
@@ -1012,6 +1162,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     const st = (a.status ?? 'draft') as ArticleStatus;
                     const isSelected = selected.includes(a._id);
                     const author = getAuthorName(a);
+                    const languageInfo = getArticleLanguageInfo(a, rawRows);
                     return (
                       <tr
                         key={a._id}
@@ -1047,7 +1198,12 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                           </div>
                         </td>
                         <td className="px-3 py-3 align-top text-xs text-slate-700 whitespace-nowrap">{author || '—'}</td>
-                        <td className="px-3 py-3 align-top text-xs text-slate-700 truncate">{(a as any)?.category || '—'}</td>
+                        <td className="px-3 py-3 align-top text-xs text-slate-700">
+                          <div className="truncate">{(a as any)?.category || '—'}</div>
+                          {getEditorialTypeLabel(a) ? (
+                            <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">{getEditorialTypeLabel(a)}</div>
+                          ) : null}
+                        </td>
                         <td className="px-3 py-3 align-top">
                           <span className={
                             'px-2 py-0.5 rounded text-[11px] text-white '
@@ -1057,9 +1213,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                           </span>
                         </td>
                         <td className="px-3 py-3 align-top">
-                          {getArticleLanguageBadge(a) ? (
+                          {languageInfo.badge ? (
                             <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
-                              {getArticleLanguageBadge(a)}
+                              {languageInfo.badge}
                             </span>
                           ) : (
                             <span className="text-xs text-slate-700">—</span>
@@ -1091,6 +1247,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <div className="md:hidden space-y-2">
             {sortedRows.map((a) => {
               const st = (a.status ?? 'draft') as ArticleStatus;
+              const languageInfo = getArticleLanguageInfo(a, rawRows);
               return (
                 <div key={a._id} className="rounded border bg-white p-3" onClick={() => navigate(`/admin/articles/${a._id}/edit`)}>
                   <div className="flex items-start justify-between gap-2">
@@ -1108,6 +1265,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     <div>
                       <div className="text-[11px] text-slate-500">Category</div>
                       <div className="truncate">{(a as any)?.category || '—'}</div>
+                      {getEditorialTypeLabel(a) ? (
+                        <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">{getEditorialTypeLabel(a)}</div>
+                      ) : null}
                     </div>
                     <div>
                       <div className="text-[11px] text-slate-500">Status</div>
@@ -1121,9 +1281,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     <div>
                       <div className="text-[11px] text-slate-500">Language</div>
                       <div>
-                        {getArticleLanguageBadge(a) ? (
+                        {languageInfo.badge ? (
                           <span className="inline-flex px-2 py-0.5 rounded text-[11px] border bg-white text-slate-700">
-                            {getArticleLanguageBadge(a)}
+                            {languageInfo.badge}
                           </span>
                         ) : (
                           <span>—</span>

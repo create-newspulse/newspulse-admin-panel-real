@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { PublicSiteSettingsSchema, DEFAULT_PUBLIC_SITE_SETTINGS } from '../../src/types/publicSiteSettings';
+import { PublicSiteSettingsSchema, DEFAULT_PUBLIC_SITE_SETTINGS, normalizePublicSiteSettings } from '../../src/types/publicSiteSettings';
 
 function mergeDefaults(value: any) {
   return {
@@ -109,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })();
 
     const parsed = PublicSiteSettingsSchema.safeParse(picked);
-    const data = parsed.success ? mergeDefaults(parsed.data) : DEFAULT_PUBLIC_SITE_SETTINGS;
+    const data = parsed.success ? normalizePublicSiteSettings(mergeDefaults(parsed.data)) : DEFAULT_PUBLIC_SITE_SETTINGS;
 
     return res.status(200).json({
       ...data,

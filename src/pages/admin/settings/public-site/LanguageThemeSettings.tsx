@@ -1,5 +1,26 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
+import { normalizePublicSiteLanguageCode, normalizePublicSiteLanguageCodes } from '@/types/publicSiteSettings';
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  en: 'English',
+  hi: 'Hindi',
+  gu: 'Gujarati',
+};
+
+function unsupportedLanguageTokens(value: string): string[] {
+  const seen = new Set<string>();
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((token) => {
+      const unsupported = !normalizePublicSiteLanguageCode(token);
+      if (!unsupported || seen.has(token)) return false;
+      seen.add(token);
+      return true;
+    });
+}
 
 export default function LanguageThemeSettings() {
   const { draft, patchDraft } = usePublicSiteSettingsDraft();
@@ -8,8 +29,15 @@ export default function LanguageThemeSettings() {
 
   const languages = useMemo(() => {
     const arr = (draft as any)?.languageTheme?.languages;
-    return Array.isArray(arr) ? arr : ['en'];
+    return Array.isArray(arr) && arr.length > 0 ? arr : ['en'];
   }, [draft]);
+  const languageText = languages.join(',');
+  const [languageInput, setLanguageInput] = useState(languageText);
+  const unsupportedTokens = unsupportedLanguageTokens(languageInput);
+
+  useEffect(() => {
+    setLanguageInput(languageText);
+  }, [languageText]);
 
   return (
     <div className="space-y-4">
@@ -37,16 +65,30 @@ export default function LanguageThemeSettings() {
 
         <label className="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <div className="text-sm font-semibold">Languages</div>
-          <div className="mt-1 text-xs text-slate-600">Comma-separated codes (e.g., en,hi).</div>
+          <div className="mt-1 text-xs text-slate-600">Comma-separated canonical codes: en,hi,gu.</div>
           <input
             className="mt-2 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={languages.join(',')}
+            value={languageInput}
             onChange={(e) => {
-              const next = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+              const raw = e.target.value;
+              setLanguageInput(raw);
+              const next = normalizePublicSiteLanguageCodes(raw);
               patchDraft({ languageTheme: { languages: next } } as any);
             }}
-            placeholder="en,hi"
+            placeholder="en,hi,gu"
           />
+          <div className="mt-2 flex flex-wrap gap-2">
+            {languages.map((code) => (
+              <span key={code} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700">
+                {LANGUAGE_LABELS[code] || code} ({code})
+              </span>
+            ))}
+          </div>
+          {unsupportedTokens.length > 0 ? (
+            <div className="mt-2 text-xs text-amber-700">
+              Unsupported language codes ignored: {unsupportedTokens.join(', ')}. Use en, hi, or gu.
+            </div>
+          ) : null}
         </label>
       </div>
     </div>

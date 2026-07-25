@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 import {
@@ -93,6 +93,18 @@ function isCommunityDraft(a: Article): boolean {
   return false;
 }
 
+export function isEditorialCategoryDraft(a: Article): boolean {
+  const raw = a as any;
+  const status = normalizeSourceToken(raw?.status || raw?.state || raw?.publishStatus || 'draft');
+  const incomingCategory = raw?.category;
+  const category = normalizeSourceToken(
+    typeof incomingCategory === 'object' && incomingCategory
+      ? (incomingCategory.slug ?? incomingCategory._id ?? incomingCategory.key ?? '')
+      : incomingCategory,
+  );
+  return status === 'draft' && category === 'editorial';
+}
+
 // Rough classification just for filtering / badges
 function getSourceKind(
   a: Article,
@@ -142,6 +154,70 @@ export function formatLocation(value: unknown): string | null {
   return null;
 }
 
+const ARTICLE_LANGUAGE_CODES = ['en', 'hi', 'gu'] as const;
+type LangCode = typeof ARTICLE_LANGUAGE_CODES[number];
+
+type DraftGroup = {
+  key: string;
+  primary: Article;
+  variants: Partial<Record<LangCode, Article>>;
+  articles: Article[];
+};
+
+function getArticleId(a: Article): string {
+  return String((a as any)?._id || (a as any)?.id || '').trim();
+}
+
+function normalizeArticleLang(a: Article): LangCode | null {
+  const lang = String((a as any)?.language ?? (a as any)?.lang ?? '').trim().toLowerCase();
+  return ARTICLE_LANGUAGE_CODES.includes(lang as LangCode) ? (lang as LangCode) : null;
+}
+
+function getDraftGroupKey(a: Article): string {
+  return String((a as any)?.translationGroupId || '').trim() || getArticleId(a);
+}
+
+function getArticleStatusLabel(a: Article | undefined): string {
+  if (!a) return 'Missing';
+  const raw = normalizeSourceToken((a as any)?.status || (a as any)?.state || (a as any)?.publishStatus || 'draft');
+  if (raw === 'scheduled') return 'Scheduled';
+  if (raw === 'published' || raw === 'live') return 'Published';
+  if (raw === 'deleted') return 'Deleted';
+  return 'Draft';
+}
+
+function groupDraftTranslations(rows: Article[]): DraftGroup[] {
+  const groups = new Map<string, DraftGroup>();
+
+  for (const article of rows) {
+    const id = getArticleId(article);
+    if (!id) continue;
+    const key = getDraftGroupKey(article) || id;
+    const lang = normalizeArticleLang(article);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        key,
+        primary: article,
+        variants: lang ? { [lang]: article } : {},
+        articles: [article],
+      });
+      continue;
+    }
+
+    existing.articles.push(article);
+    if (lang) existing.variants[lang] = article;
+    if (lang === 'en' || (!normalizeArticleLang(existing.primary) && article.title)) {
+      existing.primary = article;
+    }
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    const primary = group.variants.en || group.primary || group.articles[0];
+    return { ...group, primary };
+  });
+}
+
 export default function DraftDeskPage() {
   const [items, setItems] = useState<Article[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,7 +226,7 @@ export default function DraftDeskPage() {
   // NEW: status + source filters
   const [statusFilter, setStatusFilter] = useState<'drafts' | 'deleted'>('drafts');
   const [sourceFilter, setSourceFilter] =
-    useState<'all' | 'community' | 'youth' | 'editor' | 'pro' | 'founder'>('all');
+    useState<'all' | 'community' | 'youth' | 'editor' | 'editorial' | 'pro' | 'founder'>('all');
 
   const [preview, setPreview] = useState<Article | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -158,6 +234,15 @@ export default function DraftDeskPage() {
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const categoryParam = useMemo(() => normalizeSourceToken(searchParams.get('category')), [searchParams]);
+
+  useEffect(() => {
+    if (categoryParam !== 'editorial') return;
+    setStatusFilter('drafts');
+    setSourceFilter('editorial');
+  }, [categoryParam]);
 
   // Load drafts OR deleted drafts whenever statusFilter changes
   useEffect(() => {
@@ -203,7 +288,9 @@ export default function DraftDeskPage() {
     let arr: Article[] = allDrafts;
 
     // Apply source filter
-    if (sourceFilter !== 'all') {
+    if (sourceFilter === 'editorial') {
+      arr = arr.filter(isEditorialCategoryDraft);
+    } else if (sourceFilter !== 'all') {
       arr = arr.filter((a) => getSourceKind(a) === sourceFilter);
     }
 
@@ -215,6 +302,8 @@ export default function DraftDeskPage() {
 
     return arr;
   }, [allDrafts, sourceFilter, query]);
+
+  const groupedDrafts = useMemo(() => groupDraftTranslations(filtered), [filtered]);
 
   const handleDelete = async (id: string) => {
     const draft = items.find((a) => a._id === id);
@@ -310,7 +399,10 @@ export default function DraftDeskPage() {
           {/* Status: drafts vs deleted */}
           <div className="inline-flex rounded border border-slate-300 overflow-hidden">
             <button
-              onClick={() => setStatusFilter('drafts')}
+              onClick={() => {
+                setStatusFilter('drafts');
+                setSourceFilter('all');
+              }}
               className={`px-3 py-1 text-sm ${
                 statusFilter === 'drafts'
                   ? 'bg-slate-900 text-white'
@@ -320,7 +412,10 @@ export default function DraftDeskPage() {
               All Drafts
             </button>
             <button
-              onClick={() => setStatusFilter('deleted')}
+              onClick={() => {
+                setStatusFilter('deleted');
+                setSourceFilter('all');
+              }}
               className={`px-3 py-1 text-sm border-l border-slate-300 ${
                 statusFilter === 'deleted'
                   ? 'bg-slate-900 text-white'
@@ -363,7 +458,21 @@ export default function DraftDeskPage() {
                   : 'bg-white text-slate-700 border-slate-300'
               }`}
             >
-              Editor drafts
+              Editor-created drafts
+            </button>
+
+            <button
+              onClick={() => {
+                setStatusFilter('drafts');
+                setSourceFilter('editorial');
+              }}
+              className={`px-3 py-1 rounded border text-sm ${
+                sourceFilter === 'editorial'
+                  ? 'bg-indigo-700 text-white border-indigo-700'
+                  : 'bg-white text-slate-700 border-slate-300'
+              }`}
+            >
+              Editorial category drafts
             </button>
 
             <button
@@ -392,19 +501,21 @@ export default function DraftDeskPage() {
       </div>
 
       {loading && <div>Loading…</div>}
-      {!loading && filtered.length === 0 && (
+      {!loading && groupedDrafts.length === 0 && (
         <div className="p-3 rounded border bg-amber-50 text-amber-800">
           No drafts match this filter. Try clearing search or switching filters.
         </div>
       )}
 
       <div className="space-y-3">
-        {filtered.map((a) => {
+        {groupedDrafts.map((group) => {
+          const a = group.primary;
           const sourceKind = getSourceKind(a);
           const isCommunity = sourceKind === 'community';
           const isYouth = sourceKind === 'youth';
           const isPro = sourceKind === 'pro';
           const isFounder = sourceKind === 'founder';
+          const primaryStatus = normalizeSourceToken((a as any)?.status || (a as any)?.state || (a as any)?.publishStatus || 'draft');
           const locationText =
             formatLocation(a.city)
             ?? formatLocation(a.location)
@@ -413,7 +524,7 @@ export default function DraftDeskPage() {
 
           return (
             <div
-              key={a._id}
+              key={group.key}
               className={`flex items-start justify-between gap-4 p-3 rounded border ${
                 isYouth
                   ? 'bg-white border-slate-200'
@@ -466,6 +577,22 @@ export default function DraftDeskPage() {
                   {a.status ? <span>· status: {a.status}</span> : null}
                 </div>
 
+                <div className="mb-2 flex flex-wrap gap-2 text-[11px]">
+                  {ARTICLE_LANGUAGE_CODES.map((code) => {
+                    const variant = group.variants[code];
+                    const statusLabel = getArticleStatusLabel(variant);
+                    const present = !!variant;
+                    return (
+                      <span
+                        key={`${group.key}-${code}`}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 ${present ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
+                      >
+                        {code.toUpperCase()}: {statusLabel}
+                      </span>
+                    );
+                  })}
+                </div>
+
                 <div className="font-semibold">{a.title || 'Untitled'}</div>
                 <div className="text-sm text-slate-600 mt-1">
                   {snippet(
@@ -488,7 +615,7 @@ export default function DraftDeskPage() {
                 </button>
 
                 {/* Actions for All Drafts */}
-                {statusFilter === 'drafts' && a.status === 'draft' && (
+                {statusFilter === 'drafts' && primaryStatus === 'draft' && (
                   <>
                     <button
                       type="button"
@@ -497,6 +624,24 @@ export default function DraftDeskPage() {
                     >
                       Edit draft
                     </button>
+                    <div className="grid grid-cols-3 gap-1">
+                      {ARTICLE_LANGUAGE_CODES.map((code) => {
+                        const variant = group.variants[code];
+                        const id = variant ? getArticleId(variant) : '';
+                        return (
+                          <button
+                            type="button"
+                            key={`${group.key}-edit-${code}`}
+                            className="rounded border bg-white px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50"
+                            disabled={!id}
+                            onClick={() => id && handleEdit(id)}
+                            title={id ? `Edit ${code.toUpperCase()} draft` : `${code.toUpperCase()} version missing`}
+                          >
+                            {code.toUpperCase()}
+                          </button>
+                        );
+                      })}
+                    </div>
                     <button
                       type="button"
                       className="px-3 py-1 rounded border text-center bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60"

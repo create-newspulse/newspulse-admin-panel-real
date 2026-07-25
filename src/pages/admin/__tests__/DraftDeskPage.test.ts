@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatLocation, isYouthPulseDraft } from '../DraftDeskPage';
+import { formatLocation, isEditorialCategoryDraft, isYouthPulseDraft } from '../DraftDeskPage';
 
 describe('DraftDeskPage helpers', () => {
   it('matches Youth Pulse drafts from explicit handoff fields', () => {
@@ -51,5 +51,35 @@ describe('DraftDeskPage helpers', () => {
       isUT: null,
       country: null,
     })).toBeNull();
+  });
+
+  it('matches only draft articles in the Editorial category', () => {
+    expect(isEditorialCategoryDraft({
+      _id: 'editorial-1',
+      title: 'Editorial draft',
+      status: 'draft',
+      category: 'editorial',
+    } as any)).toBe(true);
+
+    expect(isEditorialCategoryDraft({
+      _id: 'editorial-2',
+      title: 'Editorial draft object category',
+      status: 'draft',
+      category: { slug: 'editorial' },
+    } as any)).toBe(true);
+
+    expect(isEditorialCategoryDraft({
+      _id: 'published-editorial',
+      title: 'Published editorial',
+      status: 'published',
+      category: 'editorial',
+    } as any)).toBe(false);
+
+    expect(isEditorialCategoryDraft({
+      _id: 'regular-draft',
+      title: 'Regular draft',
+      status: 'draft',
+      category: 'business',
+    } as any)).toBe(false);
   });
 });

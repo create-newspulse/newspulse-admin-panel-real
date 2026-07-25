@@ -133,6 +133,20 @@ export default function ManageNews() {
     setParams({ page: 1, limit: 20, sort: '-updatedAt', status: 'all' });
   }, []);
 
+  const editorialCategorySelected = React.useMemo(() => {
+    return String(params.category || '').split(',').map((c) => c.trim()).filter(Boolean).includes('editorial');
+  }, [params.category]);
+
+  const toggleEditorialCategory = React.useCallback(() => {
+    setParams((p) => {
+      const selected = String(p.category || '').split(',').map((c) => c.trim()).filter(Boolean);
+      const next = selected.includes('editorial')
+        ? selected.filter((c) => c !== 'editorial')
+        : [...selected, 'editorial'];
+      return { ...p, category: next.length ? next.join(',') : undefined, page: 1 };
+    });
+  }, []);
+
   const handleQuickViewChange = React.useCallback((v: QuickViewKey) => {
     setQuickView(v);
     setParams((p) => ({ ...p, page: 1 }));
@@ -188,6 +202,14 @@ export default function ManageNews() {
         setParams(p => ({
           ...p,
           status: statusFromUrl as any,
+          page: 1,
+        }));
+      }
+      const categoryFromUrl = sp.get('category');
+      if (categoryFromUrl && isAllowedArticleCategoryKey(categoryFromUrl)) {
+        setParams(p => ({
+          ...p,
+          category: categoryFromUrl,
           page: 1,
         }));
       }
@@ -266,6 +288,18 @@ export default function ManageNews() {
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={toggleEditorialCategory}
+              className={
+                'px-4 py-2 rounded-md border text-sm whitespace-nowrap '
+                + (editorialCategorySelected
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50')
+              }
+            >
+              Editorial
+            </button>
           </div>
         </div>
       </div>

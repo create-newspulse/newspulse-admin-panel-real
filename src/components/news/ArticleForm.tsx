@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -27,7 +27,77 @@ import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
 
 type LangCode = 'en' | 'hi' | 'gu';
+type EditorialType = 'editorial' | 'special_story';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
+const ARTICLE_LANGUAGE_CODES = ['en', 'hi', 'gu'] as const;
+const ARTICLE_LANGUAGE_LABELS: Record<LangCode, string> = {
+  en: 'English',
+  hi: 'Hindi',
+  gu: 'Gujarati',
+};
+
+type ArticleLanguageDraft = {
+  title: string;
+  slug: string;
+  summary: string;
+  content: string;
+};
+
+type ArticleLanguageReviewFields = {
+  imageAltText: string;
+  seoTitle: string;
+  metaDescription: string;
+};
+
+const EMPTY_LANGUAGE_DRAFT: ArticleLanguageDraft = {
+  title: '',
+  slug: '',
+  summary: '',
+  content: '',
+};
+
+const EMPTY_LANGUAGE_REVIEW_FIELDS: ArticleLanguageReviewFields = {
+  imageAltText: '',
+  seoTitle: '',
+  metaDescription: '',
+};
+
+function hasAnyLanguageDraftContent(draft: ArticleLanguageDraft | null | undefined): boolean {
+  if (!draft) return false;
+  return !!(draft.title.trim() || draft.slug.trim() || draft.summary.trim() || draft.content.trim());
+}
+
+function isLanguageDraftComplete(draft: ArticleLanguageDraft | null | undefined): boolean {
+  if (!draft) return false;
+  return !!(draft.title.trim() && draft.summary.trim() && draft.content.trim());
+}
+
+function getArticleDraftFromRecord(record: any): ArticleLanguageDraft {
+  return {
+    title: String(record?.title || ''),
+    slug: String(record?.slug || ''),
+    summary: String(record?.summary || record?.description || ''),
+    content: String(record?.content ?? record?.body ?? ''),
+  };
+}
+
+function getArticleReviewFieldsFromRecord(record: any): ArticleLanguageReviewFields {
+  return {
+    imageAltText: String(record?.imageAltText ?? record?.imageAlt ?? record?.altText ?? record?.coverImageAlt ?? ''),
+    seoTitle: String(record?.seoTitle ?? record?.metaTitle ?? ''),
+    metaDescription: String(record?.metaDescription ?? record?.seoDescription ?? ''),
+  };
+}
+
+function createTranslationGroupId(seed: string): string {
+  const base = generateArticleSlug({ title: seed || 'article' }) || 'article';
+  return `${base}-${Date.now().toString(36)}`;
+}
+
+function normalizeEditorialType(input: any): EditorialType {
+  const v = String(input || '').trim().toLowerCase();
+  return v === 'special_story' ? 'special_story' : 'editorial';
+}
 
 function isArticleEditorDebugEnabled(): boolean {
   try {
@@ -107,12 +177,23 @@ function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCod
     if (!translations || typeof translations !== 'object') continue;
     for (const key of Object.keys(translations)) {
       const code = String(key || '').trim().toLowerCase();
-      if (!isLangCode(code) || code === 'status') continue;
+      if (code === 'status' || !isLangCode(code)) continue;
       const raw = (translations as any)[code];
       if (!raw) continue;
       const entity = (raw && typeof raw === 'object')
         ? (raw.article ?? raw.articleData ?? raw.item ?? raw.variant ?? raw)
         : {};
+      const entityId = String(
+        (entity as any)?._id
+        ?? (entity as any)?.id
+        ?? (entity as any)?.articleId
+        ?? (raw as any)?._id
+        ?? (raw as any)?.id
+        ?? (raw as any)?.articleId
+        ?? ''
+      ).trim();
+
+      if (!entityId) continue;
 
       map[code] = {
         ...(map[code] || {}),
@@ -128,8 +209,8 @@ function extractTranslationMetadataMap(...inputs: any[]): Partial<Record<LangCod
         title: (entity as any)?.title ?? (raw as any)?.title,
         content: (entity as any)?.content ?? (raw as any)?.content,
         body: (entity as any)?.body ?? (raw as any)?.body,
-        _id: (entity as any)?._id ?? (raw as any)?._id,
-        id: (entity as any)?.id ?? (raw as any)?.id,
+        _id: (entity as any)?._id ?? (raw as any)?._id ?? entityId,
+        id: (entity as any)?.id ?? (raw as any)?.id ?? entityId,
         __presenceFromMetadata: true,
       };
     }
@@ -158,66 +239,6 @@ function getTranslationBadges(v: any | null): Array<{ text: string; tone: Transl
   else badges.push({ text: 'Ready', tone: 'ok' });
 
   return badges;
-}
-
-function escapeRegExp(input: string): string {
-  return String(input || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function normalizeComparableUrl(input: string): string {
-  return String(input || '')
-    .trim()
-    .replace(/^https?:\/\/(www\.)?/i, '')
-    .replace(/[?#].*$/, '')
-    .replace(/\/+$/, '')
-    .toLowerCase();
-}
-
-function extractComparableUrls(input: string): string[] {
-  const raw = String(input || '');
-  if (!raw) return [];
-
-  const found = new Set<string>();
-  const matches = raw.match(/https?:\/\/[^\s"'<>]+/gi) || [];
-  for (const match of matches) {
-    const normalized = normalizeComparableUrl(match);
-    if (normalized) found.add(normalized);
-  }
-  return Array.from(found);
-}
-
-function removeSharedArtifactsFromContent(input: string, removedUrls: string[]): string {
-  let next = String(input || '');
-  if (!next || removedUrls.length === 0) return next;
-
-  for (const url of removedUrls) {
-    const escaped = escapeRegExp(url);
-    const blockPatterns = [
-      new RegExp(`<figure[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/figure>`, 'gi'),
-      new RegExp(`<blockquote[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/blockquote>`, 'gi'),
-      new RegExp(`<iframe[^>]*${escaped}[^>]*>[\\s\\S]*?<\\/iframe>`, 'gi'),
-      new RegExp(`<p[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/p>`, 'gi'),
-      new RegExp(`<div[^>]*>[\\s\\S]*?${escaped}[\\s\\S]*?<\\/div>`, 'gi'),
-      new RegExp(`<a[^>]*${escaped}[^>]*>[\\s\\S]*?<\\/a>`, 'gi'),
-      new RegExp(`^.*${escaped}.*(?:\\r?\\n|$)`, 'gim'),
-    ];
-
-    for (const pattern of blockPatterns) {
-      next = next.replace(pattern, '');
-    }
-  }
-
-  return next
-    .replace(/<p>\s*(?:&nbsp;|<br\s*\/?>)?\s*<\/p>/gi, '')
-    .replace(/(<br\s*\/?>\s*){3,}/gi, '<br /><br />')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function computeRemovedSharedUrls(previousContent: string, nextContent: string): string[] {
-  const previous = new Set(extractComparableUrls(previousContent));
-  const next = new Set(extractComparableUrls(nextContent));
-  return Array.from(previous).filter((url) => !next.has(url));
 }
 
 function getTranslationSyncTone(state: TranslationSyncState): TranslationBadgeTone {
@@ -405,6 +426,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   defaultSponsored = false,
 }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   // resolve edit id
   const initialEditId = id || articleId || null;
   const [effectiveId, setEffectiveId] = useState<string | null>(initialEditId);
@@ -429,9 +451,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [summary, setSummary] = useState('');
   const [autoSummary, setAutoSummary] = useState(true);
   const [content, setContent] = useState('');
+  const [languageDrafts, setLanguageDrafts] = useState<Record<LangCode, ArticleLanguageDraft>>({
+    en: { ...EMPTY_LANGUAGE_DRAFT },
+    hi: { ...EMPTY_LANGUAGE_DRAFT },
+    gu: { ...EMPTY_LANGUAGE_DRAFT },
+  });
+  const [languageReviewFields, setLanguageReviewFields] = useState<Record<LangCode, ArticleLanguageReviewFields>>({
+    en: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+    hi: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+    gu: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+  });
+  const [translationTargets, setTranslationTargets] = useState<LangCode[]>(() => ARTICLE_LANGUAGE_CODES.filter((code) => code !== DEFAULT_CREATE_LANGUAGE));
+  const [generateTranslationsAfterSave, setGenerateTranslationsAfterSave] = useState(true);
+  const [translationJobStatus, setTranslationJobStatus] = useState<'waiting' | 'translating' | 'ready' | 'partial' | 'failed' | 'outdated'>('waiting');
   const contentPlain = useMemo(() => stripHtmlToText(content), [content]);
   // Always store ONLY a string identifier for the category in state (slug preferred, else _id).
   const [category, setCategory] = useState<string>('');
+  const [editorialType, setEditorialType] = useState<EditorialType>('editorial');
   const [youthPulseTrack, setYouthPulseTrack] = useState<YouthPulseTrack | ''>('');
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
@@ -456,6 +492,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const suggestCacheRef = useRef<Map<string, AssistSuggestV2Response>>(new Map());
   const { publishEnabled } = usePublishFlag();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLanguage, setPreviewLanguage] = useState<LangCode>(DEFAULT_CREATE_LANGUAGE);
   const [qualityToolsCollapsed, setQualityToolsCollapsed] = useState(false);
   const [locationTagsCollapsed, setLocationTagsCollapsed] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState<null | {
@@ -594,6 +631,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     summary: string;
     content: string;
     category: string;
+    editorialType: EditorialType | '';
     youthPulseTrack: string;
     language: string;
     translationGroupId: string;
@@ -624,6 +662,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     summary: '',
     content: '',
     category: '',
+    editorialType: '',
     youthPulseTrack: '',
     language: DEFAULT_CREATE_LANGUAGE,
     translationGroupId: '',
@@ -657,7 +696,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setSummary('');
     setAutoSummary(true);
     setContent('');
+    setLanguageDrafts({
+      en: { ...EMPTY_LANGUAGE_DRAFT },
+      hi: { ...EMPTY_LANGUAGE_DRAFT },
+      gu: { ...EMPTY_LANGUAGE_DRAFT },
+    });
+    setLanguageReviewFields({
+      en: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+      hi: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+      gu: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+    });
+    setTranslationTargets(ARTICLE_LANGUAGE_CODES.filter((code) => code !== DEFAULT_CREATE_LANGUAGE));
+    setGenerateTranslationsAfterSave(true);
+    setTranslationJobStatus('waiting');
     setCategory('');
+    setEditorialType('editorial');
     setYouthPulseTrack('');
     setLanguage(DEFAULT_CREATE_LANGUAGE);
     setTranslationGroupId('');
@@ -709,6 +762,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       summary: (next?.summary ?? summary ?? '').toString(),
       content: (next?.content ?? content ?? '').toString(),
       category: (next?.category ?? category ?? '').toString(),
+      editorialType: (next?.editorialType ?? (category === 'editorial' ? editorialType : '') ?? '').toString() as Snapshot['editorialType'],
       youthPulseTrack: (next?.youthPulseTrack ?? youthPulseTrack ?? '').toString(),
       language: (next?.language ?? language ?? '').toString(),
       translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
@@ -733,6 +787,44 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     };
   }
 
+  function applyLanguageDraft(code: LangCode, draft: ArticleLanguageDraft) {
+    setLanguage(code);
+    setTitle(draft.title || '');
+    setSlug(draft.slug || '');
+    setSummary(draft.summary || '');
+    setContent(draft.content || '');
+    setAutoSlug(!draft.slug);
+    setAutoSummary(!draft.summary);
+  }
+
+  function selectLanguageWorkspace(code: LangCode) {
+    if (code === language) return;
+    const currentDraft = { title, slug, summary, content };
+    setLanguageDrafts((prev) => {
+      const next = { ...prev, [language]: currentDraft };
+      const existingVariant = translationVariants[code];
+      const nextDraft = hasAnyLanguageDraftContent(next[code])
+        ? next[code]
+        : (existingVariant ? getArticleDraftFromRecord(existingVariant) : { ...EMPTY_LANGUAGE_DRAFT });
+      window.setTimeout(() => applyLanguageDraft(code, nextDraft), 0);
+      return next;
+    });
+  }
+
+  function getDraftForLanguage(code: LangCode): ArticleLanguageDraft {
+    if (code === language) return { title, slug, summary, content };
+    const draft = languageDrafts[code];
+    if (hasAnyLanguageDraftContent(draft)) return draft;
+    const variant = translationVariants[code];
+    return variant ? getArticleDraftFromRecord(variant) : { ...EMPTY_LANGUAGE_DRAFT };
+  }
+
+  function openPreviewForLanguage(code: LangCode) {
+    setLanguageDrafts((prev) => ({ ...prev, [language]: { title, slug, summary, content } }));
+    setPreviewLanguage(code);
+    setPreviewOpen(true);
+  }
+
   function snapshotHash(s: Snapshot): string {
     // Stable JSON: fixed key order + normalized values.
     const normalized: Snapshot = {
@@ -741,6 +833,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       summary: (s.summary || ''),
       content: (s.content || ''),
       category: (s.category || ''),
+      editorialType: s.category === 'editorial' ? (s.editorialType || 'editorial') : '',
+      youthPulseTrack: (s.youthPulseTrack || ''),
       language: (s.language || ''),
       translationGroupId: (s.translationGroupId || ''),
       status: (s.status || 'draft'),
@@ -778,6 +872,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   // Categories are a fixed key/label list (ARTICLE_CATEGORY_OPTIONS)
   // to guarantee we send clean, filterable category keys to backend.
+  const createCategoryDefault = useMemo(() => {
+    return normalizeArticleCategoryKey(searchParams.get('category') || '');
+  }, [searchParams]);
+
+  const appliedCreateDefaultsRef = useRef(false);
+
+  useEffect(() => {
+    if (appliedCreateDefaultsRef.current) return;
+    if (computedMode !== 'create') return;
+    appliedCreateDefaultsRef.current = true;
+    if (createCategoryDefault === 'editorial') {
+      setCategory('editorial');
+      setEditorialType('editorial');
+    }
+  }, [computedMode, createCategoryDefault]);
 
   const languagesQuery = useQuery({
     queryKey: ['meta', 'languages'],
@@ -862,17 +971,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function hasTag(tag: string): boolean {
     const key = normalizeTagKey(tag);
     return (tags || []).some((t) => normalizeTagKey(t) === key);
-  }
-
-  function ensureTag(tag: string) {
-    const t = String(tag || '').trim();
-    if (!t) return;
-    setTags((prev) => dedupeTags([...(Array.isArray(prev) ? prev : []), t]));
-  }
-
-  function removeTag(tag: string) {
-    const key = normalizeTagKey(tag);
-    setTags((prev) => (Array.isArray(prev) ? prev : []).filter((t) => normalizeTagKey(t) !== key));
   }
 
   function setTagsSafe(next: string[]) {
@@ -1004,6 +1102,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       const normalizedCategory = normalizeArticleCategoryKey(categorySlug);
       setCategory(normalizedCategory || '');
+      setEditorialType(normalizedCategory === 'editorial' ? normalizeEditorialType((src as any).editorialType) : 'editorial');
       setYouthPulseTrack(normalizeYouthPulseTrack(
         String((src as any).track ?? (src as any).subCategory ?? (src as any).subcategory ?? (src as any).trackName ?? '')
       ));
@@ -1119,6 +1218,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           category: (typeof (src as any).category === 'object' && (src as any).category)
             ? String(((src as any).category.slug ?? (src as any).category._id ?? '') || '')
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
+          editorialType: normalizedCategory === 'editorial' ? normalizeEditorialType((src as any).editorialType) : '',
           language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
@@ -1177,6 +1277,49 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       toast.error(normalizeError(err, 'Retry translation failed').message);
     },
   });
+
+  const automaticTranslationMutation = useMutation({
+    mutationFn: async ({ id, languages }: { id: string; languages: LangCode[] }) => {
+      if (!id) throw new Error('Missing article id');
+      if (!languages.length) throw new Error('Select at least one translation target');
+      return requeueArticleTranslations(id, { languages });
+    },
+    onMutate: ({ languages }) => {
+      setTranslationJobStatus('translating');
+      setTranslationSyncOverrides((prev) => {
+        const next: Partial<Record<LangCode, TranslationSyncEntry>> = { ...prev };
+        for (const code of languages) next[code] = { state: 'regenerating', detail: 'Translation queued' };
+        return next;
+      });
+    },
+    onSuccess: (_res, vars) => {
+      setTranslationStatus('translating');
+      setTranslationJobStatus('translating');
+      toast.success(`Translation job queued for ${vars.languages.map((code) => code.toUpperCase()).join('+')}`);
+    },
+    onError: (err: any) => {
+      setTranslationJobStatus('failed');
+      toast.error(normalizeError(err, 'Translation job could not be queued').message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      if (translationGroupIdTrimmed) qc.invalidateQueries({ queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed] });
+    },
+  });
+
+  function triggerAutomaticTranslationJob(articleId: string | null | undefined, reason: 'generate' | 'regenerate' | 'save-draft') {
+    const idToTranslate = String(articleId || effectiveId || '').trim();
+    const languages = translationTargets.filter((code) => code !== language && languageOptions.includes(code));
+    if (!idToTranslate) {
+      if (reason !== 'save-draft') toast.error('Save the source article before generating translations.');
+      return;
+    }
+    if (!languages.length) {
+      if (reason !== 'save-draft') toast.error('Select at least one translation target.');
+      return;
+    }
+    automaticTranslationMutation.mutate({ id: idToTranslate, languages });
+  }
 
   const translationGroupIdTrimmed = useMemo(() => String(translationGroupId || '').trim(), [translationGroupId]);
   const currentArticleRecord = useMemo(() => {
@@ -1341,6 +1484,46 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return (['en', 'hi', 'gu'] as const).filter((code) => !!translationVariants[code]);
   }, [translationVariants]);
 
+  useEffect(() => {
+    setLanguageDrafts((prev) => {
+      const next = { ...prev };
+      for (const code of ARTICLE_LANGUAGE_CODES) {
+        const variant = translationVariants[code];
+        if (variant && !hasAnyLanguageDraftContent(next[code])) {
+          next[code] = getArticleDraftFromRecord(variant);
+        }
+      }
+      next[language] = { title, slug, summary, content };
+      return next;
+    });
+    setLanguageReviewFields((prev) => {
+      const next = { ...prev };
+      for (const code of ARTICLE_LANGUAGE_CODES) {
+        const variant = translationVariants[code];
+        if (!variant) continue;
+        const current = next[code] || { ...EMPTY_LANGUAGE_REVIEW_FIELDS };
+        if (!current.imageAltText && !current.seoTitle && !current.metaDescription) {
+          next[code] = getArticleReviewFieldsFromRecord(variant);
+        }
+      }
+      return next;
+    });
+  }, [translationVariants, language, title, slug, summary, content]);
+
+  const translationCompletion = useMemo<Record<LangCode, boolean>>(() => {
+    const result = {} as Record<LangCode, boolean>;
+    for (const code of ARTICLE_LANGUAGE_CODES) {
+      const draft = code === language ? { title, slug, summary, content } : languageDrafts[code];
+      const variant = translationVariants[code];
+      result[code] = isLanguageDraftComplete(draft) || isLanguageDraftComplete(variant ? getArticleDraftFromRecord(variant) : null);
+    }
+    return result;
+  }, [language, languageDrafts, translationVariants, title, slug, summary, content]);
+
+  const allTranslationsComplete = useMemo(() => {
+    return ARTICLE_LANGUAGE_CODES.every((code) => translationCompletion[code]);
+  }, [translationCompletion]);
+
   const isMasterArticle = useMemo(() => {
     return !!translationGroupIdTrimmed && !!translationSourceLanguage && translationSourceLanguage === currentArticleLanguage;
   }, [translationGroupIdTrimmed, translationSourceLanguage, currentArticleLanguage]);
@@ -1390,6 +1573,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // Hard rule for Option A+ multilingual publishing.
     return ['en', 'hi', 'gu'] as string[];
   }, []);
+
+  useEffect(() => {
+    setTranslationTargets(ARTICLE_LANGUAGE_CODES.filter((code) => code !== language && languageOptions.includes(code)));
+  }, [language, languageOptions]);
 
   const languageLabel = (code: string) => {
     const c = (code || '').toLowerCase();
@@ -1540,7 +1727,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '…')); }
 
   const lastSubmitRef = useRef<null | {
-    statusToSend: 'draft'|'published';
+    statusToSend: 'draft'|'scheduled'|'published';
     safeSlug: string;
     wasNew: boolean;
   }>(null);
@@ -1550,6 +1737,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
       // Ensure we never send an empty/invalid slug on publish/save.
       const safeSlug = ensureValidSlug(slug, title);
+      const currentLanguageDrafts: Record<LangCode, ArticleLanguageDraft> = {
+        ...languageDrafts,
+        [language]: { title, slug, summary, content },
+      };
+      const saveAllLanguageDrafts = saveKindRef.current === 'manual' && desiredStatusOverride !== 'published';
+      const translationGroupIdForSave = (translationGroupId || '').trim()
+        || (saveAllLanguageDrafts ? createTranslationGroupId(title || slug || summary || 'article') : '');
 
       type PublicArticleStatus = 'draft' | 'scheduled' | 'published';
       const trimOrUndef = (v: string) => {
@@ -1557,7 +1751,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return t ? t : undefined;
       };
 
-      const buildPublicPayload = (opts: { status: PublicArticleStatus; publishedAt?: string }): {
+      const buildPublicPayload = (opts: { status: PublicArticleStatus; publishedAt?: string; language?: LangCode; draft?: ArticleLanguageDraft }): {
         title: string;
         slug: string;
         summary: string;
@@ -1565,11 +1759,21 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         content: string;
         category?: string;
         postType?: string;
+        editorialType?: EditorialType;
+        track?: string;
+        trackName?: string;
+        subCategory?: string;
+        subcategory?: string;
         isFounder?: boolean;
         status: PublicArticleStatus;
         language: 'en'|'hi'|'gu';
         lang: 'en'|'hi'|'gu';
         translationGroupId?: string;
+        imageAltText?: string;
+        imageAlt?: string;
+        seoTitle?: string;
+        metaTitle?: string;
+        metaDescription?: string;
         publishedAt?: string;
         publishAt?: string;
         scheduledAt?: string;
@@ -1608,6 +1812,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           ctaUrl?: string;
         };
       } => {
+        const draft = opts.draft || { title, slug, summary, content };
+        const draftSlug = ensureValidSlug(draft.slug, draft.title);
+        const langToSend = opts.language || language;
+        const reviewFields = languageReviewFields[langToSend] || EMPTY_LANGUAGE_REVIEW_FIELDS;
+        const imageAltToSend = trimOrUndef(reviewFields.imageAltText);
+        const seoTitleToSend = trimOrUndef(reviewFields.seoTitle);
+        const metaDescriptionToSend = trimOrUndef(reviewFields.metaDescription);
         const categoryKeyRaw = (category || '').trim();
         const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
         const publishedAtToSend = opts.status === 'published'
@@ -1623,7 +1834,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           })()
           : undefined;
 
-        const isViralVideo = categoryKey === 'viral-videos';
+        const isViralVideo = String(categoryKey) === 'viral-videos';
         const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
 
         const coverUrl = trimOrUndef(coverImageUrl);
@@ -1658,12 +1869,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const sponsorCtaLabel = trimOrUndef(sponsorCtaText);
         const sponsorCtaLink = trimOrUndef(sponsorCtaUrl);
         return {
-          title,
-          slug: safeSlug,
-          summary,
-          description: summary,
-          content,
+          title: draft.title,
+          slug: draftSlug,
+          summary: draft.summary,
+          description: draft.summary,
+          content: draft.content,
           category: categoryKey || undefined,
+          editorialType: categoryKey === 'editorial' ? editorialType : undefined,
           track: youthTrack || undefined,
           trackName: youthTrack ? YOUTH_PULSE_TRACK_LABELS[youthTrack] : undefined,
           subCategory: youthTrack || undefined,
@@ -1671,9 +1883,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           postType: isViralVideo ? 'video' : undefined,
           isFounder: isFounderEditorial ? true : undefined,
           status: opts.status,
-          language: (language as any) as 'en'|'hi'|'gu',
-          lang: (language as any) as 'en'|'hi'|'gu',
-          translationGroupId: (translationGroupId || '').trim() ? (translationGroupId || '').trim() : undefined,
+          language: (langToSend as any) as 'en'|'hi'|'gu',
+          lang: (langToSend as any) as 'en'|'hi'|'gu',
+          translationGroupId: translationGroupIdForSave || undefined,
+          imageAltText: imageAltToSend,
+          imageAlt: imageAltToSend,
+          seoTitle: seoTitleToSend,
+          metaTitle: seoTitleToSend,
+          metaDescription: metaDescriptionToSend,
           publishedAt: publishedAtToSend,
           publishAt: scheduledAtToSend,
           scheduledAt: scheduledAtToSend,
@@ -1832,8 +2049,39 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         throw new Error('Category is not allowed');
       }
       if (onSubmit) return onSubmit(body);
-      if (computedMode === 'create') return createArticle(body as any);
-      return updateArticle(effectiveId!, body as any);
+
+      const savedResult = computedMode === 'create'
+        ? await createArticle(body as any)
+        : await updateArticle(effectiveId!, body as any);
+
+      if (!saveAllLanguageDrafts || !translationGroupIdForSave) return savedResult;
+
+      const savedRaw: any = savedResult as any;
+      const savedArticle = (savedRaw?.article) || (savedRaw?.data?.article) || (savedRaw?.data && typeof savedRaw.data === 'object' ? savedRaw.data : savedRaw);
+      const activeSavedId = savedArticle?._id || savedArticle?.id || savedRaw?._id || savedRaw?.id || effectiveId;
+      const linkedDraftIds: Partial<Record<LangCode, string>> = {};
+
+      for (const code of ARTICLE_LANGUAGE_CODES) {
+        const draft = currentLanguageDrafts[code];
+        if (!hasAnyLanguageDraftContent(draft) || !draft.title.trim()) continue;
+
+        const variant = translationVariants[code];
+        const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
+        const targetId = code === language ? String(activeSavedId || '').trim() : variantId;
+        const draftPayload = buildPublicPayload({ status: 'draft', language: code, draft });
+
+        if (targetId) {
+          await updateArticle(targetId, draftPayload as any);
+          linkedDraftIds[code] = targetId;
+        } else {
+          const created: any = await createArticle(draftPayload as any);
+          const createdArticle = created?.article || created?.data?.article || created?.data || created;
+          const createdId = String(createdArticle?._id || createdArticle?.id || '').trim();
+          if (createdId) linkedDraftIds[code] = createdId;
+        }
+      }
+
+      return { ...(savedResult as any), __npLinkedDraftIds: linkedDraftIds, translationGroupId: translationGroupIdForSave };
     },
     onSuccess: async (result: any) => {
       const raw = result as any;
@@ -1969,6 +2217,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         // - New: Draft saved
         // - Existing: Draft updated
         toast.success(wasNew ? 'Draft saved' : 'Draft updated');
+        if (generateTranslationsAfterSave) triggerAutomaticTranslationJob(savedId, 'save-draft');
       }
 
       // If user typed while saving, queue a single follow-up save (no rapid retries).
@@ -2107,6 +2356,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         summary,
         content,
         category: categoryKey,
+        editorialType: categoryKey === 'editorial' ? editorialType : undefined,
         track: categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) || undefined : undefined,
         trackName: categoryKey === 'youth-pulse' && normalizeYouthPulseTrack(youthPulseTrack)
           ? YOUTH_PULSE_TRACK_LABELS[normalizeYouthPulseTrack(youthPulseTrack) as YouthPulseTrack]
@@ -2145,7 +2395,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
@@ -2183,7 +2433,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2321,6 +2571,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   async function beginPublishFlow() {
     if (isSaving || isPublishing) return;
     if (!canPublish) return;
+    if (!allTranslationsComplete) {
+      toast.error('Complete the English, Hindi and Gujarati versions before publishing.');
+      return;
+    }
     // Guard: required fields
     if (publishMissing.length > 0) return;
 
@@ -2389,6 +2643,33 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     proceed();
   }
 
+  const previewDraft = getDraftForLanguage(previewLanguage);
+  const previewLanguageEnabled = (code: LangCode) => {
+    const draft = getDraftForLanguage(code);
+    return !!(draft.title.trim() && draft.content.trim());
+  };
+  const sourceLanguageForReview = translationSourceLanguage || language;
+  const translationStatusVisible = !!effectiveId || !!translationGroupIdTrimmed;
+  const automaticProgressLabel = (() => {
+    if (translationJobStatus === 'failed') return 'Failed';
+    if (translationJobStatus === 'outdated') return 'Outdated';
+    if (automaticTranslationMutation.isPending || translationJobStatus === 'translating') return 'Translating';
+    const targets = translationTargets.filter((code) => code !== language);
+    if (!targets.length) return 'Waiting';
+    const readyCount = targets.filter((code) => !!translationVariants[code]).length;
+    if (readyCount === targets.length && readyCount > 0) return 'Ready for review';
+    if (readyCount > 0) return 'Partially completed';
+    return 'Waiting';
+  })();
+  const getAutomaticTranslationStatusLabel = (code: LangCode): string => {
+    if (code === sourceLanguageForReview) return 'Source';
+    if (translationJobStatus === 'failed' && translationTargets.includes(code)) return 'Translation failed';
+    if (translationJobStatus === 'outdated' && translationTargets.includes(code)) return 'Outdated';
+    const syncEntry = translationSyncStatuses[code];
+    if (syncEntry?.state === 'regenerating') return automaticTranslationMutation.isPending ? 'Translating' : 'Queued';
+    if (translationVariants[code]) return 'Ready for review';
+    return translationStatusVisible ? 'Missing' : '';
+  };
   return (
     <form onSubmit={e=> { e.preventDefault(); void beginPublishFlow(); }} className="space-y-6 pb-28">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:h-[calc(100vh-10rem)] md:overflow-hidden md:items-start">
@@ -2533,6 +2814,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 )}
               </div>
 
+              {category === 'editorial' && (
+                <div>
+                  <label className="block text-xs font-medium">Editorial Type</label>
+                  <select value={editorialType} onChange={e=> setEditorialType(normalizeEditorialType(e.target.value))} className="w-full border px-2 py-2 rounded">
+                    <option value="editorial">Editorial</option>
+                    <option value="special_story">Special Story</option>
+                  </select>
+                </div>
+              )}
+
               {category === 'youth-pulse' && (
                 <div>
                   <label className="block text-xs font-medium">Youth Pulse Track</label>
@@ -2616,7 +2907,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               </div>
               <div>
                 <label className="block text-xs font-medium">Language</label>
-                <select value={language} onChange={e=> setLanguage(normalizeLang(e.target.value))} className="w-full border px-2 py-2 rounded" required>
+                <select value={language} onChange={e=> selectLanguageWorkspace(normalizeLang(e.target.value))} className="w-full border px-2 py-2 rounded" required>
                   <option value="en">English (en)</option>
                   <option value="hi">Hindi (hi)</option>
                   <option value="gu">Gujarati (gu)</option>
@@ -2631,6 +2922,113 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-900">Automatic Translation</div>
+                  {translationStatusVisible ? (
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">{automaticProgressLabel}</span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-700">Source Language</label>
+                    <div className="rounded border border-slate-200 bg-white px-2 py-2 text-sm text-slate-800">
+                      {ARTICLE_LANGUAGE_LABELS[language]} ({language})
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">Change this with the existing Language field above.</div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-medium text-slate-700">Translate into</div>
+                    <div className="mt-1 grid grid-cols-1 gap-1">
+                      {ARTICLE_LANGUAGE_CODES.map((code) => {
+                        const isSource = code === language;
+                        const checked = !isSource && translationTargets.includes(code);
+                        return (
+                          <label key={`translate-target-${code}`} className={`flex items-center gap-2 text-xs ${isSource ? 'text-slate-400' : 'text-slate-700'}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isSource}
+                              onChange={(e) => {
+                                setTranslationTargets((prev) => {
+                                  const next = new Set(prev.filter((item) => item !== language));
+                                  if (e.target.checked) next.add(code);
+                                  else next.delete(code);
+                                  return ARTICLE_LANGUAGE_CODES.filter((item) => next.has(item));
+                                });
+                              }}
+                            />
+                            {ARTICLE_LANGUAGE_LABELS[code]}{isSource ? ' (source)' : ''}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={automaticTranslationMutation.isPending || mutation.isPending}
+                      onClick={() => {
+                        if (!effectiveId) {
+                          toast('Save Draft will save the source and queue translations.');
+                          saveDraft();
+                          return;
+                        }
+                        triggerAutomaticTranslationJob(effectiveId, 'generate');
+                      }}
+                    >Generate Translations</button>
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      disabled={automaticTranslationMutation.isPending || mutation.isPending}
+                      onClick={() => triggerAutomaticTranslationJob(effectiveId, 'regenerate')}
+                    >Regenerate Translations</button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={generateTranslationsAfterSave}
+                      onChange={(e) => setGenerateTranslationsAfterSave(e.target.checked)}
+                    />
+                    Generate translations after Save Draft
+                  </label>
+
+                  {translationStatusVisible ? (
+                    <div className="rounded border border-slate-200 bg-white p-2">
+                      <div className="text-[11px] font-semibold text-slate-700">Translation Status</div>
+                      <div className="mt-2 space-y-1 text-[11px]">
+                        {ARTICLE_LANGUAGE_CODES.map((code) => {
+                          const variant = translationVariants[code];
+                          const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
+                          const statusLabel = getAutomaticTranslationStatusLabel(code);
+                          return (
+                            <div key={`auto-status-${code}`} className="flex items-center justify-between gap-2">
+                              <span className="text-slate-700">{ARTICLE_LANGUAGE_LABELS[code]}</span>
+                              <div className="flex items-center gap-2">
+                                <span className={statusLabel === 'Translation failed' ? 'text-red-700' : statusLabel === 'Missing' || statusLabel === 'Outdated' ? 'text-amber-700' : 'text-slate-700'}>
+                                  {statusLabel}
+                                </span>
+                                {variantId && code !== sourceLanguageForReview ? (
+                                  <button
+                                    type="button"
+                                    className="underline text-slate-700 hover:text-slate-900"
+                                    onClick={() => navigate(`/admin/articles/${encodeURIComponent(variantId)}/edit`)}
+                                  >Review {ARTICLE_LANGUAGE_LABELS[code]}</button>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium">Translation Group ID (optional)</label>
@@ -2978,13 +3376,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
         article={{
-          title,
-          slug,
-          summary,
-          content,
+          title: previewDraft.title,
+          slug: previewDraft.slug,
+          summary: previewDraft.summary,
+          content: previewDraft.content,
           coverImageUrl: coverImageUrl || undefined,
           category,
-          language,
+          editorialType: category === 'editorial' ? editorialType : undefined,
+          language: previewLanguage,
           status,
           scheduledAt,
           tags,
@@ -3117,7 +3516,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             <button type="button" onClick={saveDraft} className="btn-secondary" disabled={isSaving || isPublishing || mutation.isPending}>Save Draft</button>
             <button
               type="button"
-              onClick={() => setPreviewOpen(true)}
+              onClick={() => openPreviewForLanguage(language)}
               className="btn-secondary"
               disabled={!previewEnabled}
               title={!previewEnabled ? 'Add Title and Content to preview' : undefined}

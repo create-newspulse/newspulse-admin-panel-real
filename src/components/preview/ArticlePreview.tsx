@@ -11,6 +11,7 @@ export interface ArticlePreviewModel {
   // Optional cover image for preview (admin uses this as coverImageUrl).
   coverImageUrl?: string;
   category?: string;
+  editorialType?: 'editorial' | 'special_story';
   language?: PreviewLanguage;
   // Some backends/components provide language as `lang`.
   lang?: PreviewLanguage;
@@ -55,6 +56,9 @@ export default function ArticlePreview({
   const slug = (article.slug || '').trim();
   const summary = (article.summary || '').trim();
   const category = (article.category || '').trim();
+  const editorialLabel = category === 'editorial'
+    ? (article.editorialType === 'special_story' ? 'SPECIAL STORY' : 'EDITORIAL')
+    : '';
   const lang = (selectedLanguage || article.language || article.lang || 'en') as PreviewLanguage;
 
   const content = article.content || '';
@@ -81,6 +85,7 @@ export default function ArticlePreview({
   const languageSwitcherDisabled = !hasVariants || !onSelectLanguage;
 
   const metaLineParts: string[] = [];
+  if (editorialLabel) metaLineParts.push(editorialLabel);
   if (category) metaLineParts.push(category);
   metaLineParts.push(LANG_LABEL[lang] || lang.toUpperCase());
   if (article.status === 'scheduled' && article.scheduledAt) {
