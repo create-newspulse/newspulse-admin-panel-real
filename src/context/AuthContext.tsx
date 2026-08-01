@@ -105,6 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const tokenVal = data.token || data.accessToken || null;
+      const refreshTokenVal = data.refreshToken || data.data?.refreshToken || null;
       if (tokenVal) {
         const normalized = String(tokenVal).replace(/^Bearer\s+/i, '');
         setAuthToken(normalized);
@@ -115,6 +116,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthToken(null);
         setTokenState(null);
         try { localStorage.removeItem('admin_token'); } catch {}
+      }
+      if (refreshTokenVal) {
+        try { localStorage.setItem('admin_refresh_token', String(refreshTokenVal).replace(/^Bearer\s+/i, '')); } catch {}
+      } else {
+        try { localStorage.removeItem('admin_refresh_token'); } catch {}
       }
 
       const u = data.user || data.data?.user || {
@@ -128,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Persist minimal auth info
       try {
-        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: normalizedUser.role, ts: Date.now() };
+        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: normalizedUser.role, ts: Date.now() };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
         if (import.meta.env.DEV) console.debug('[Auth] persistence write', persistPayload);
       } catch { /* ignore quota errors */ }
@@ -148,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const refreshed = normalizeAuthUser(u2, normalizedUser);
           setUser(refreshed);
           try {
-            const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
+            const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
           } catch {}
         }
@@ -213,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     try { localStorage.removeItem('admin_token'); } catch {}
+    try { localStorage.removeItem('admin_refresh_token'); } catch {}
     // Cleanup legacy keys (migration/hygiene)
     try { localStorage.removeItem('np_admin_token'); } catch {}
     try { localStorage.removeItem('np_admin_access_token'); } catch {}
