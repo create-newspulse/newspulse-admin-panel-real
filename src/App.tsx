@@ -485,6 +485,9 @@ function App() {
               {/* Readership analytics (real backend /api/admin/analytics/*) */}
               <Route path="/admin/analytics/articles" element={<AdminModuleRoute moduleKey="analytics"><ArticlesAnalyticsPage /></AdminModuleRoute>} />
               <Route path="/admin/analytics/categories" element={<AdminModuleRoute moduleKey="analytics"><CategoriesAnalyticsPage /></AdminModuleRoute>} />
+              <Route path="/admin/analytics/ab-tests" element={<AdminModuleRoute moduleKey="analytics"><Navigate to="/admin/analytics" replace /></AdminModuleRoute>} />
+              <Route path="/admin/analytics/ab" element={<AdminModuleRoute moduleKey="analytics"><Navigate to="/admin/analytics" replace /></AdminModuleRoute>} />
+              <Route path="/admin/analytics/affiliate" element={<AdminModuleRoute moduleKey="analytics"><Navigate to="/admin/analytics" replace /></AdminModuleRoute>} />
               <Route path="/admin/analytics" element={<AdminModuleRoute moduleKey="analytics"><AnalyticsDashboard /></AdminModuleRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
               <Route path="/admin/web-stories" element={<ProtectedRoute><WebStoriesEditor /></ProtectedRoute>} />

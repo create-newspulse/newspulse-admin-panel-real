@@ -1,401 +1,557 @@
-import { useEffect, useState } from 'react';
-import apiClient from '../../lib/api';
-import { Line, Doughnut } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { getAuthToken } from '../../lib/api';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  ArcElement,
-  Title,
-  Tooltip,
-  Legend
-);
+type AnalyticsTab = 'overview' | 'ads';
+type DateFilter = 'today' | '7d' | '30d' | 'custom';
+type AnalyticsState = 'not_configured' | 'loading' | 'connected_empty' | 'connected_with_data' | 'error';
+type IntegrationStatus = 'connected' | 'not_connected' | 'configuration_required' | 'error';
 
-type RevenueData = {
-  total: number;
-  today: number;
-  week: number;
-  month: number;
-  rpm: number;
-  ctr: number;
+type IntegrationState = {
+  status: IntegrationStatus;
+  source?: string | null;
+  message?: string | null;
 };
 
-type TrafficData = {
-  labels: string[];
-  pageViews: number[];
-  uniqueVisitors: number[];
+type OverviewMetrics = {
+  pageViews: number | null;
+  uniqueVisitors: number | null;
+  adImpressions: number | null;
+  adClicks: number | null;
+  ctr: number | null;
+  estimatedAdRevenue: number | null;
+  confirmedRevenue: number | null;
 };
 
-type AdPerformance = {
-  impressions: number;
-  clicks: number;
-  revenue: number;
-  ctr: number;
-  rpm: number;
+type CampaignPerformance = {
+  id?: string;
+  campaignName: string;
+  advertiser: string;
+  placement: string;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  amountInvoiced: number | null;
+  amountReceived: number | null;
+  paymentStatus: string;
 };
 
-type ABTest = {
-  id: string;
-  name: string;
-  variantA: string;
-  variantB: string;
-  conversionsA: number;
-  conversionsB: number;
-  winner?: 'A' | 'B' | null;
+type PerformanceBreakdown = {
+  label: string;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
 };
+
+type AnalyticsReport = {
+  analyticsState?: AnalyticsState;
+  dataSourceName: string;
+  lastUpdatedAt: string | null;
+  integrations: {
+    trafficAnalytics: IntegrationState;
+    adTracking: IntegrationState;
+    financeData: IntegrationState;
+  };
+  permissions: {
+    viewTraffic: boolean;
+    viewAdPerformance: boolean;
+    viewRevenue: boolean;
+    refresh: boolean;
+    export: boolean;
+  };
+  overview: OverviewMetrics;
+  adPerformance: {
+    campaigns: CampaignPerformance[];
+    devicePerformance: PerformanceBreakdown[];
+    placementPerformance: PerformanceBreakdown[];
+    recommendations: string[];
+  };
+  message?: string;
+};
+
+const ACCESS_DENIED_MESSAGE = 'Access Denied. Founder permission is required.';
+const NOT_CONFIGURED_HEADING = 'Analytics is not configured';
+const NOT_CONFIGURED_MESSAGE = 'Connect an approved analytics provider to display real News Pulse traffic and performance data. No placeholder or sample information is being displayed.';
+const CONNECTED_EMPTY_MESSAGE = 'No analytics data is available for the selected date range.';
+const AD_TRACKING_EMPTY_HEADING = 'Ad tracking is not configured';
+const AD_TRACKING_EMPTY_MESSAGE = 'Advertisement performance will appear here after campaign impression and click tracking is configured. No sample data is being displayed.';
+const envAny = import.meta.env as Record<string, unknown>;
+
+function publicAnalyticsProviderConfigured(): boolean {
+  return [
+    envAny.VITE_ANALYTICS_PROVIDER_CONFIGURED,
+    envAny.VITE_ANALYTICS_TRAFFIC_ENABLED,
+    envAny.VITE_ANALYTICS_AD_TRACKING_ENABLED,
+    envAny.VITE_ANALYTICS_FINANCE_ENABLED,
+  ].some((value) => String(value || '').trim().toLowerCase() === 'true');
+}
+
+const analyticsTabs: ReadonlyArray<{ id: AnalyticsTab; label: string }> = [
+  { id: 'overview', label: '📊 Overview' },
+  { id: 'ads', label: '💰 Ad Performance' },
+];
+
+const dateFilters: ReadonlyArray<{ id: DateFilter; label: string }> = [
+  { id: 'today', label: 'Today' },
+  { id: '7d', label: 'Last 7 Days' },
+  { id: '30d', label: 'Last 30 Days' },
+  { id: 'custom', label: 'Custom Range' },
+];
+
+const defaultReport: AnalyticsReport = {
+  analyticsState: 'not_configured',
+  dataSourceName: 'Not configured',
+  lastUpdatedAt: null,
+  integrations: {
+    trafficAnalytics: { status: 'not_connected', source: null },
+    adTracking: { status: 'not_connected', source: null },
+    financeData: { status: 'not_connected', source: null },
+  },
+  permissions: {
+    viewTraffic: false,
+    viewAdPerformance: false,
+    viewRevenue: false,
+    refresh: false,
+    export: false,
+  },
+  overview: {
+    pageViews: null,
+    uniqueVisitors: null,
+    adImpressions: null,
+    adClicks: null,
+    ctr: null,
+    estimatedAdRevenue: null,
+    confirmedRevenue: null,
+  },
+  adPerformance: {
+    campaigns: [],
+    devicePerformance: [],
+    placementPerformance: [],
+    recommendations: [],
+  },
+  message: NOT_CONFIGURED_MESSAGE,
+};
+
+function isRemovedAnalyticsTab(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return ['ab', 'a-b', 'ab-tests', 'a-b-tests', 'abtests', 'ab_tests', 'a/b-tests', 'a/b', 'affiliate', 'affiliates'].includes(normalized);
+}
+
+function isRealNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function formatNumber(value: number | null): string {
+  return isRealNumber(value) ? value.toLocaleString('en-IN') : 'Not configured';
+}
+
+function formatPercent(value: number | null): string {
+  return isRealNumber(value) ? `${value.toFixed(2)}%` : 'Not configured';
+}
+
+function formatINR(value: number | null): string {
+  if (!isRealNumber(value)) return 'Not configured';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Never';
+  return date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function formatShortDate(value: string | null): string {
+  if (!value) return 'Not available';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not available';
+  return date.toLocaleDateString('en-IN', { dateStyle: 'medium' });
+}
+
+function statusLabel(status: IntegrationStatus): string {
+  if (status === 'connected') return 'Connected';
+  if (status === 'configuration_required') return 'Configuration Required';
+  if (status === 'error') return 'Error';
+  return 'Not Configured';
+}
+
+function statusClass(status: IntegrationStatus): string {
+  if (status === 'connected') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'configuration_required') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (status === 'error') return 'border-red-200 bg-red-50 text-red-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
+}
+
+function integrationDescription(label: 'Traffic Analytics' | 'Ad Tracking' | 'Revenue Data', integration: IntegrationState): string {
+  if (integration.status !== 'not_connected') return integration.source || integration.message || 'Configuration required';
+  if (label === 'Ad Tracking') return 'No advertisement tracking system configured';
+  if (label === 'Revenue Data') return 'No revenue data source configured';
+  return 'No analytics provider configured';
+}
+
+function normalizeReport(payload: Partial<AnalyticsReport> | null | undefined): AnalyticsReport {
+  return {
+    ...defaultReport,
+    ...(payload || {}),
+    integrations: {
+      ...defaultReport.integrations,
+      ...(payload?.integrations || {}),
+    },
+    permissions: {
+      ...defaultReport.permissions,
+      ...(payload?.permissions || {}),
+    },
+    overview: {
+      ...defaultReport.overview,
+      ...(payload?.overview || {}),
+    },
+    adPerformance: {
+      ...defaultReport.adPerformance,
+      ...(payload?.adPerformance || {}),
+    },
+  };
+}
 
 export default function AnalyticsDashboard(): JSX.Element {
-  const formatDateTime = (value?: string | number | Date | null): string => {
-    if (!value) return '—';
-    const d = value instanceof Date ? value : new Date(value as any);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
-  };
-
-  const formatNumber = (value?: number | null): string => {
-    if (typeof value !== 'number' || Number.isNaN(value)) return '0';
-    return value.toLocaleString('en-IN');
-  };
-  const safeNumber = (value: unknown, fallback = 0): number => {
-    if (typeof value === 'number' && !Number.isNaN(value)) return value;
-    const n = Number(value);
-    if (Number.isNaN(n)) return fallback;
-    return n;
-  };
-
-  const formatFixed = (
-    value: unknown,
-    digits = 1,
-    fallback = '0'
-  ): string => {
-    const n = safeNumber(value, 0);
-    try {
-      return n.toFixed(digits);
-    } catch {
-      return fallback;
-    }
-  };
-  const [loading, setLoading] = useState(true);
-  const [revenue, setRevenue] = useState<RevenueData | null>(null);
-  const [traffic, setTraffic] = useState<TrafficData | null>(null);
-  const [adPerf, setAdPerf] = useState<AdPerformance | null>(null);
-  const [abTests, setAbTests] = useState<ABTest[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'ads' | 'ab-tests' | 'affiliate'>('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const providerConfigured = publicAnalyticsProviderConfigured();
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>('overview');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [report, setReport] = useState<AnalyticsReport | null>(null);
+  const [analyticsState, setAnalyticsState] = useState<AnalyticsState>(providerConfigured ? 'loading' : 'not_configured');
+  const [loading, setLoading] = useState(providerConfigured);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchAnalytics();
-  }, []);
+    const params = new URLSearchParams(location.search);
+    if (isRemovedAnalyticsTab(params.get('tab')) || isRemovedAnalyticsTab(params.get('section'))) {
+      setActiveTab('overview');
+      navigate('/admin/analytics', { replace: true });
+    }
+  }, [location.search, navigate]);
 
-  async function fetchAnalytics() {
-    setLoading(true);
+  const dateValidationError = useMemo(() => {
+    if (dateFilter !== 'custom') return null;
+    if (!customStart || !customEnd) return 'Select both start and end dates to load a custom range.';
+    if (customEnd < customStart) return 'End date cannot be earlier than start date.';
+    return null;
+  }, [customEnd, customStart, dateFilter]);
+
+  const loadReport = useCallback(async (options?: { refresh?: boolean }) => {
+    const isRefresh = options?.refresh === true;
+    if (!providerConfigured) {
+      setReport(defaultReport);
+      setAnalyticsState('not_configured');
+      setLoading(false);
+      setRefreshing(false);
+      setError(null);
+      return;
+    }
+
+    if (dateValidationError) {
+      setLoading(false);
+      setRefreshing(false);
+      setError(null);
+      return;
+    }
+
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+    setAnalyticsState('loading');
+
     try {
-      const [revRes, traffRes, adRes, abRes] = await Promise.all([
-        apiClient.get('/api/analytics/revenue').catch(() => ({ data: null } as any)),
-        apiClient.get('/api/analytics/traffic').catch(() => ({ data: null } as any)),
-        apiClient.get('/api/analytics/ad-performance').catch(() => ({ data: null } as any)),
-        apiClient.get('/api/analytics/ab-tests').catch(() => ({ data: { tests: [] } } as any)),
-      ]);
-      setRevenue(revRes.data || mockRevenue());
-      setTraffic(traffRes.data || mockTraffic());
-      setAdPerf(adRes.data || mockAdPerf());
-      setAbTests(abRes.data?.tests || mockABTests());
+      const params = new URLSearchParams({ range: dateFilter });
+      if (dateFilter === 'custom') {
+        if (customStart) params.set('start', customStart);
+        if (customEnd) params.set('end', customEnd);
+      }
+      if (isRefresh) params.set('refresh', '1');
+
+      const token = getAuthToken();
+      const response = await fetch(`/api/admin/analytics/report?${params.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || (response.status === 403 ? ACCESS_DENIED_MESSAGE : 'Unable to load analytics data.'));
+      }
+
+      const nextReport = normalizeReport(payload);
+      const nextHasOverviewData = Object.values(nextReport.overview).some(isRealNumber);
+      const nextHasAdData = nextReport.adPerformance.campaigns.length > 0
+        || nextReport.adPerformance.devicePerformance.length > 0
+        || nextReport.adPerformance.placementPerformance.length > 0;
+      setReport(nextReport);
+      setAnalyticsState(nextHasOverviewData || nextHasAdData ? 'connected_with_data' : 'connected_empty');
     } catch (err) {
-      console.error('Analytics fetch failed:', err);
-      setRevenue(mockRevenue());
-      setTraffic(mockTraffic());
-      setAdPerf(mockAdPerf());
-      setAbTests(mockABTests());
+      setReport(null);
+      setAnalyticsState('error');
+      setError(err instanceof Error ? err.message : 'Unable to load analytics data.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  }, [customEnd, customStart, dateFilter, dateValidationError, providerConfigured]);
 
-  function mockRevenue(): RevenueData {
-    return { total: 48320.5, today: 1420.8, week: 9850.2, month: 48320.5, rpm: 12.4, ctr: 2.3 };
-  }
+  useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
 
-  function mockTraffic(): TrafficData {
-    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const pageViews = [12500, 14200, 13800, 15600, 17200, 19400, 18900];
-    const uniqueVisitors = [8200, 9100, 8900, 10200, 11500, 12800, 12400];
-    return { labels, pageViews, uniqueVisitors };
-  }
+  const currentReport = report || defaultReport;
+  const canViewRevenue = currentReport.permissions.viewRevenue;
+  const canViewAdPerformance = currentReport.permissions.viewAdPerformance;
+  const hasOverviewData = Object.values(currentReport.overview).some(isRealNumber);
+  const hasCampaignData = currentReport.adPerformance.campaigns.length > 0;
+  const hasDevicePerformance = currentReport.adPerformance.devicePerformance.length > 0;
+  const hasPlacementPerformance = currentReport.adPerformance.placementPerformance.length > 0;
+  const refreshLocked = !providerConfigured || Boolean(report && !currentReport.permissions.refresh) || Boolean(dateValidationError);
+  const refreshLabel = loading ? 'Loading data...' : refreshing ? 'Refreshing data...' : 'Refresh Data';
 
-  function mockAdPerf(): AdPerformance {
-    return { impressions: 1245000, clicks: 28635, revenue: 15420.8, ctr: 2.3, rpm: 12.38 };
-  }
-
-  function mockABTests(): ABTest[] {
-    return [
-      { id: 't1', name: 'Homepage Headline', variantA: 'Breaking News Today', variantB: 'Latest Updates', conversionsA: 340, conversionsB: 412, winner: 'B' },
-      { id: 't2', name: 'CTA Button Color', variantA: 'Blue', variantB: 'Orange', conversionsA: 280, conversionsB: 275, winner: null },
-    ];
-  }
-
-  const trafficChartData = traffic
-    ? {
-        labels: traffic.labels,
-        datasets: [
-          {
-            label: 'Page Views',
-            data: traffic.pageViews,
-            borderColor: 'rgb(59, 130, 246)',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            tension: 0.3,
-          },
-          {
-            label: 'Unique Visitors',
-            data: traffic.uniqueVisitors,
-            borderColor: 'rgb(16, 185, 129)',
-            backgroundColor: 'rgba(16, 185, 129, 0.1)',
-            tension: 0.3,
-          },
-        ],
-      }
-    : null;
-
-  const revenueBreakdown = revenue
-    ? {
-        labels: ['AdSense', 'Direct Ads', 'Affiliate', 'Sponsored'],
-        datasets: [
-          {
-            data: [revenue.total * 0.55, revenue.total * 0.25, revenue.total * 0.12, revenue.total * 0.08],
-            backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'],
-          },
-        ],
-      }
-    : null;
+  const overviewCards = useMemo(() => [
+    { label: 'Page Views', value: formatNumber(currentReport.overview.pageViews), visible: currentReport.permissions.viewTraffic },
+    { label: 'Unique Visitors', value: formatNumber(currentReport.overview.uniqueVisitors), visible: currentReport.permissions.viewTraffic },
+    { label: 'Ad Impressions', value: formatNumber(currentReport.overview.adImpressions), visible: canViewAdPerformance },
+    { label: 'Ad Clicks', value: formatNumber(currentReport.overview.adClicks), visible: canViewAdPerformance },
+    { label: 'CTR', value: formatPercent(currentReport.overview.ctr), visible: canViewAdPerformance },
+    { label: 'Estimated Ad Revenue', value: canViewRevenue ? formatINR(currentReport.overview.estimatedAdRevenue) : 'Restricted', visible: true },
+    { label: 'Confirmed Revenue', value: canViewRevenue ? formatINR(currentReport.overview.confirmedRevenue) : 'Restricted', visible: true },
+  ], [canViewAdPerformance, canViewRevenue, currentReport.overview, currentReport.permissions.viewTraffic]);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold">Analytics & Monetization</h2>
-        <button onClick={fetchAnalytics} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-          Refresh Data
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 className="text-3xl font-bold">Analytics & Revenue Insights</h2>
+          <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            <span>Data source: {currentReport.dataSourceName}</span>
+            <span className="mx-2">•</span>
+            <span>Last successfully updated: {formatDate(currentReport.lastUpdatedAt)}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => void loadReport({ refresh: true })}
+          disabled={loading || refreshing || refreshLocked}
+          className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+        >
+          {refreshLabel}
         </button>
+        {!providerConfigured ? <div className="text-sm text-slate-500 dark:text-slate-400">Connect an analytics provider before refreshing.</div> : null}
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-2 border-b border-gray-300 dark:border-gray-600">
-        {(['overview', 'ads', 'ab-tests', 'affiliate'] as const).map((tab) => (
+        {analyticsTabs.map((tab) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2 font-medium transition ${
-              activeTab === tab
+              activeTab === tab.id
                 ? 'border-b-2 border-blue-600 text-blue-600'
-                : 'text-gray-600 dark:text-gray-300 hover:text-blue-600'
+                : 'text-gray-600 hover:text-blue-600 dark:text-gray-300'
             }`}
           >
-            {tab === 'overview' && '📊 Overview'}
-            {tab === 'ads' && '💰 Ad Performance'}
-            {tab === 'ab-tests' && '🧪 A/B Tests'}
-            {tab === 'affiliate' && '🔗 Affiliate'}
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <div className="text-center py-12">Loading analytics...</div>
-      ) : (
-        <>
-          {/* Overview Tab */}
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
-              {/* Revenue Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Total Revenue</div>
-                  <div className="text-2xl font-bold text-green-600">${formatNumber(revenue?.total ?? null)}</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Today</div>
-                  <div className="text-2xl font-bold">${formatNumber(revenue?.today ?? null)}</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
-                  <div className="text-2xl font-bold">${formatFixed(revenue?.rpm, 2, '0.00')}</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
-                  <div className="text-2xl font-bold">{formatFixed(revenue?.ctr, 1, '0.0')}%</div>
-                </div>
-              </div>
+      <div className="flex flex-wrap gap-2">
+        {dateFilters.map((filter) => (
+          <button
+            key={filter.id}
+            onClick={() => setDateFilter(filter.id)}
+            className={`rounded border px-3 py-2 text-sm font-semibold ${
+              dateFilter === filter.id
+                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+            }`}
+          >
+            {filter.label}
+          </button>
+        ))}
+        {dateFilter === 'custom' ? (
+          <div className="flex flex-wrap gap-2">
+            <input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800" />
+            <input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800" />
+          </div>
+        ) : null}
+      </div>
 
-              {/* Traffic Chart */}
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                <h3 className="text-xl font-semibold mb-4">Weekly Traffic</h3>
-                {trafficChartData && <Line data={trafficChartData} options={{ responsive: true, maintainAspectRatio: true }} />}
-              </div>
+      {analyticsState === 'loading' ? <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-slate-600 shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">Loading analytics...</div> : null}
 
-              {/* Revenue Breakdown */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                  <h3 className="text-xl font-semibold mb-4">Revenue Sources</h3>
-                  {revenueBreakdown && <Doughnut data={revenueBreakdown} options={{ responsive: true, maintainAspectRatio: true }} />}
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                  <h3 className="text-xl font-semibold mb-4">Quick Stats</h3>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span>This Week</span>
-                      <span className="font-semibold">${formatNumber(revenue?.week ?? null)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>This Month</span>
-                      <span className="font-semibold">${formatNumber(revenue?.month ?? null)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Ad Impressions</span>
-                      <span className="font-semibold">{formatNumber(adPerf?.impressions ?? null)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Ad Clicks</span>
-                      <span className="font-semibold">{formatNumber(adPerf?.clicks ?? null)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+      {analyticsState === 'error' && error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-red-700">
+          <div className="font-semibold">Analytics unavailable</div>
+          <div className="mt-1 text-sm">{error}</div>
+        </div>
+      ) : null}
+
+      {dateValidationError ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {dateValidationError}
+        </div>
+      ) : null}
+
+      {analyticsState === 'connected_empty' && activeTab === 'overview' ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-5 text-slate-600 shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          {CONNECTED_EMPTY_MESSAGE}
+        </div>
+      ) : null}
+
+      {analyticsState !== 'loading' && analyticsState !== 'error' && activeTab === 'overview' ? (
+        <div className="space-y-6">
+          {analyticsState === 'not_configured' ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+              <div className="font-semibold">{NOT_CONFIGURED_HEADING}</div>
+              <div className="mt-1 text-sm">{currentReport.message || NOT_CONFIGURED_MESSAGE}</div>
             </div>
-          )}
+          ) : null}
 
-          {/* Ads Tab */}
-          {activeTab === 'ads' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Impressions</div>
-                  <div className="text-2xl font-bold">{formatNumber(adPerf?.impressions ?? null)}</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Clicks</div>
-                  <div className="text-2xl font-bold">{formatNumber(adPerf?.clicks ?? null)}</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">CTR</div>
-                  <div className="text-2xl font-bold text-blue-600">{formatFixed(adPerf?.ctr, 1, '0.0')}%</div>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">RPM</div>
-                  <div className="text-2xl font-bold text-green-600">${formatFixed(adPerf?.rpm, 2, '0.00')}</div>
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                <h3 className="text-xl font-semibold mb-4">Ad Optimization Suggestions</h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-start gap-2">
-                    <span className="text-green-600">✓</span>
-                    <span>Ad viewability is above 70% - excellent placement</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-yellow-600">⚠</span>
-                    <span>Consider reducing sidebar ads on mobile for better UX</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600">💡</span>
-                    <span>A/B test sticky header ad vs. in-article placement</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {/* A/B Tests Tab */}
-          {activeTab === 'ab-tests' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h3 className="text-xl font-semibold">Active A/B Tests</h3>
-                <button className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">+ New Test</button>
-              </div>
-
-              {abTests.map((test) => (
-                <div key={test.id} className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h4 className="text-lg font-semibold">{test.name}</h4>
-                      {test.winner && <span className="text-sm text-green-600">Winner: Variant {test.winner}</span>}
-                    </div>
-                    <button className="text-sm text-blue-600 hover:underline">View Details</button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="border border-gray-300 dark:border-gray-600 p-4 rounded">
-                      <div className="text-sm text-gray-500">Variant A</div>
-                      <div className="font-medium">{test.variantA}</div>
-                      <div className="text-2xl font-bold mt-2">{test.conversionsA}</div>
-                      <div className="text-xs text-gray-500">conversions</div>
-                    </div>
-                    <div className="border border-gray-300 dark:border-gray-600 p-4 rounded">
-                      <div className="text-sm text-gray-500">Variant B</div>
-                      <div className="font-medium">{test.variantB}</div>
-                      <div className="text-2xl font-bold mt-2">{test.conversionsB}</div>
-                      <div className="text-xs text-gray-500">conversions</div>
-                    </div>
-                  </div>
-
-                  {!test.winner && (
-                    <div className="mt-4 flex gap-2">
-                      <button className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Declare Winner</button>
-                      <button className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">Stop Test</button>
-                    </div>
-                  )}
+          {hasOverviewData ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {overviewCards.map((card) => (
+                <div key={card.label} className="rounded-lg bg-white p-4 shadow dark:bg-slate-800">
+                  <div className="text-sm text-gray-500 dark:text-gray-400">{card.label}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950 dark:text-white">{card.visible ? card.value : 'Restricted'}</div>
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
 
-          {/* Affiliate Tab */}
-          {activeTab === 'affiliate' && (
-            <div className="space-y-6">
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                <h3 className="text-xl font-semibold mb-4">Affiliate Performance</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center p-3 border border-gray-300 dark:border-gray-600 rounded">
-                    <div>
-                      <div className="font-medium">Amazon Associates</div>
-                      <div className="text-sm text-gray-500">245 clicks • 12 conversions</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold text-green-600">$1,240</div>
-                      <div className="text-xs text-gray-500">4.9% conversion</div>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border border-gray-300 dark:border-gray-600 rounded">
-                    <div>
-                      <div className="font-medium">Flipkart Affiliate</div>
-                      <div className="text-sm text-gray-500">189 clicks • 8 conversions</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold text-green-600">$890</div>
-                      <div className="text-xs text-gray-500">4.2% conversion</div>
-                    </div>
-                  </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {([
+              ['Traffic Analytics', currentReport.integrations.trafficAnalytics],
+              ['Ad Tracking', currentReport.integrations.adTracking],
+              ['Revenue Data', currentReport.integrations.financeData],
+            ] as const).map(([label, integration]) => (
+              <div key={label} className="rounded-lg bg-white p-4 shadow dark:bg-slate-800">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-semibold">{label}</div>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(integration.status)}`}>
+                    {statusLabel(integration.status)}
+                  </span>
                 </div>
+                <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">{integrationDescription(label, integration)}</div>
               </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow">
-                <h3 className="text-xl font-semibold mb-4">Broken Links Monitor</h3>
-                <div className="text-sm text-gray-500">No broken affiliate links detected ✓</div>
+      {analyticsState !== 'loading' && analyticsState !== 'error' && activeTab === 'ads' ? (
+        <div className="space-y-6">
+          {analyticsState !== 'not_configured' && !canViewAdPerformance ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-amber-900">{ACCESS_DENIED_MESSAGE}</div>
+          ) : null}
+
+          {(analyticsState === 'not_configured' || (canViewAdPerformance && !hasCampaignData && !hasDevicePerformance && !hasPlacementPerformance)) ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-6 text-slate-600 shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <div className="font-semibold text-slate-900 dark:text-white">{AD_TRACKING_EMPTY_HEADING}</div>
+              <div className="mt-1 text-sm">{AD_TRACKING_EMPTY_MESSAGE}</div>
+            </div>
+          ) : null}
+
+          {canViewAdPerformance && hasCampaignData ? (
+            <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-slate-800">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">Campaign</th>
+                      <th className="px-4 py-3">Advertiser/Sponsor</th>
+                      <th className="px-4 py-3">Placement</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Start</th>
+                      <th className="px-4 py-3">End</th>
+                      <th className="px-4 py-3">Impressions</th>
+                      <th className="px-4 py-3">Clicks</th>
+                      <th className="px-4 py-3">CTR</th>
+                      <th className="px-4 py-3">Amount Invoiced</th>
+                      <th className="px-4 py-3">Amount Received</th>
+                      <th className="px-4 py-3">Payment</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {currentReport.adPerformance.campaigns.map((campaign) => (
+                      <tr key={campaign.id || campaign.campaignName}>
+                        <td className="px-4 py-3 font-semibold">{campaign.campaignName}</td>
+                        <td className="px-4 py-3">{campaign.advertiser}</td>
+                        <td className="px-4 py-3">{campaign.placement}</td>
+                        <td className="px-4 py-3">{campaign.status}</td>
+                        <td className="px-4 py-3">{formatShortDate(campaign.startDate)}</td>
+                        <td className="px-4 py-3">{formatShortDate(campaign.endDate)}</td>
+                        <td className="px-4 py-3">{formatNumber(campaign.impressions)}</td>
+                        <td className="px-4 py-3">{formatNumber(campaign.clicks)}</td>
+                        <td className="px-4 py-3">{formatPercent(campaign.ctr)}</td>
+                        <td className="px-4 py-3">{canViewRevenue ? formatINR(campaign.amountInvoiced) : 'Restricted'}</td>
+                        <td className="px-4 py-3">{canViewRevenue ? formatINR(campaign.amountReceived) : 'Restricted'}</td>
+                        <td className="px-4 py-3">{canViewRevenue ? campaign.paymentStatus : 'Restricted'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-          )}
-        </>
+          ) : null}
+
+          {canViewAdPerformance && (hasDevicePerformance || hasPlacementPerformance) ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {hasDevicePerformance ? <BreakdownPanel title="Device Performance" rows={currentReport.adPerformance.devicePerformance} /> : null}
+              {hasPlacementPerformance ? <BreakdownPanel title="Placement Performance" rows={currentReport.adPerformance.placementPerformance} /> : null}
+            </div>
+          ) : null}
+
+          {canViewAdPerformance && currentReport.adPerformance.recommendations.length > 0 ? (
+            <div className="rounded-lg bg-white p-6 shadow dark:bg-slate-800">
+              <h3 className="text-xl font-semibold">Optimization Recommendations</h3>
+              <ul className="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-200">
+                {currentReport.adPerformance.recommendations.map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BreakdownPanel({ title, rows }: { title: string; rows: PerformanceBreakdown[] }): JSX.Element {
+  return (
+    <div className="rounded-lg bg-white p-6 shadow dark:bg-slate-800">
+      <h3 className="text-xl font-semibold">{title}</h3>
+      {rows.length === 0 ? (
+        <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">No tracked data is available yet.</div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {rows.map((row) => (
+            <div key={row.label} className="rounded border border-slate-200 p-3 text-sm dark:border-slate-700">
+              <div className="font-semibold">{row.label}</div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-slate-600 dark:text-slate-300">
+                <span>{formatNumber(row.impressions)} impressions</span>
+                <span>{formatNumber(row.clicks)} clicks</span>
+                <span>{formatPercent(row.ctr)} CTR</span>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

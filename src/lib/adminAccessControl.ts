@@ -51,6 +51,11 @@ export type SpecialRightKey =
   | 'can_manage_sponsor_leads'
   | 'can_manage_campaigns'
   | 'can_view_ad_analytics'
+  | 'analytics.view_traffic'
+  | 'analytics.view_ad_performance'
+  | 'analytics.view_revenue'
+  | 'analytics.refresh'
+  | 'analytics.export'
   | 'can_submit_sponsor_request_for_approval'
   | 'can_view_finance'
   | 'can_create_invoice'
@@ -177,6 +182,11 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'can_manage_sponsor_leads', label: 'Can manage sponsor leads' },
   { key: 'can_manage_campaigns', label: 'Can manage campaigns' },
   { key: 'can_view_ad_analytics', label: 'Can view ad analytics' },
+  { key: 'analytics.view_traffic', label: 'Analytics: view traffic' },
+  { key: 'analytics.view_ad_performance', label: 'Analytics: view ad performance' },
+  { key: 'analytics.view_revenue', label: 'Analytics: view revenue' },
+  { key: 'analytics.refresh', label: 'Analytics: refresh data' },
+  { key: 'analytics.export', label: 'Analytics: export data' },
   { key: 'can_submit_sponsor_request_for_approval', label: 'Can submit sponsor request for approval' },
   { key: 'can_view_finance', label: 'Can view finance' },
   { key: 'can_create_invoice', label: 'Can create invoice' },
@@ -236,8 +246,11 @@ const ALL_SPECIAL_RIGHT_KEYS = SPECIAL_RIGHTS.map((item) => item.key);
 
 const REVIEW_MODULES: AdminModuleKey[] = ['dashboard', 'manage_news', 'draft_desk', 'editorial', 'seo'];
 const LIVE_MODULES: AdminModuleKey[] = ['dashboard', 'broadcast_center', 'live_tv', 'media'];
-const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval'];
-const FINANCE_OPERATIONS_RIGHTS: SpecialRightKey[] = ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status'];
+const ANALYTICS_TRAFFIC_RIGHTS: SpecialRightKey[] = ['analytics.view_traffic'];
+const ANALYTICS_AD_PERFORMANCE_RIGHTS: SpecialRightKey[] = ['analytics.view_ad_performance'];
+const ANALYTICS_REVENUE_RIGHTS: SpecialRightKey[] = ['analytics.view_revenue'];
+const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval', ...ANALYTICS_TRAFFIC_RIGHTS, ...ANALYTICS_AD_PERFORMANCE_RIGHTS];
+const FINANCE_OPERATIONS_RIGHTS: SpecialRightKey[] = ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status', ...ANALYTICS_REVENUE_RIGHTS];
 const FOUNDER_ONLY_FINANCE_RIGHTS: SpecialRightKey[] = ['can_approve_payment', 'can_delete_finance_record', 'can_change_bank_details', 'can_change_payment_gateway', 'can_approve_withdrawal', 'can_approve_final_finance_report'];
 const FOUNDER_ONLY_DPDP_RIGHTS: SpecialRightKey[] = ['can_manage_dpdp_privacy_requests'];
 
@@ -273,15 +286,15 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
     description: 'Newsroom coordination role for assignments, queues, analytics review, and operational follow-up.',
     systemRole: true,
     modules: ['dashboard', 'manage_news', 'draft_desk', 'community_reporter_queue', 'reporter_portal_admin', 'editorial', 'analytics'],
-    specialRights: ['can_approve_news', 'can_reject_or_send_back_news'],
+    specialRights: ['can_approve_news', 'can_reject_or_send_back_news', ...ANALYTICS_TRAFFIC_RIGHTS],
   },
   {
     id: 'editor',
     label: 'Editor',
     description: 'Editorial review role for writing, editing, approving, rejecting, and sending stories back.',
     systemRole: true,
-    modules: REVIEW_MODULES,
-    specialRights: ['can_approve_news', 'can_reject_or_send_back_news', 'can_pin_breaking_news'],
+    modules: [...REVIEW_MODULES, 'analytics'],
+    specialRights: ['can_approve_news', 'can_reject_or_send_back_news', 'can_pin_breaking_news', ...ANALYTICS_TRAFFIC_RIGHTS],
   },
   {
     id: 'copy_editor',
@@ -337,14 +350,14 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
     description: 'Audience distribution role for social copy, public updates, short promos, and approved amplification.',
     systemRole: true,
     modules: ['dashboard', 'manage_news', 'media', 'viral_videos', 'analytics'],
-    specialRights: ['can_pin_breaking_news', 'can_view_ad_analytics'],
+    specialRights: ['can_pin_breaking_news', 'can_view_ad_analytics', ...ANALYTICS_TRAFFIC_RIGHTS],
   },
   {
     id: 'tech_support',
     label: 'Tech Support',
     description: 'Technical support role for diagnostics, login support, audit-assisted troubleshooting, and account help.',
     systemRole: true,
-    modules: ['dashboard', 'analytics', 'moderation', 'settings'],
+    modules: ['dashboard', 'moderation', 'settings'],
     specialRights: ['can_reset_staff_password'],
   },
   {

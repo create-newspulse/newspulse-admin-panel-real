@@ -5,6 +5,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/admin-api/analytics/:path*",
+      "destination": "/api/admin/analytics/report"
+    },
+    {
+      "source": "/admin-api/api/analytics/:path*",
+      "destination": "/api/admin/analytics/report"
+    },
+    {
       "source": "/admin-api/:path*",
       "destination": "https://newspulse-backend-real.onrender.com/api/:path*"
     },
