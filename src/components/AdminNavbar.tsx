@@ -2,6 +2,7 @@
 import { NavLink } from "react-router-dom";
 import { useState } from "react";
 import { toast } from "react-hot-toast";
+import { LockKeyhole } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { leftNavWithAccess, type Role } from "@/config/nav";
 import { useAdminFeatureVisibility } from "@/hooks/useAdminFeatureVisibility";
@@ -54,9 +55,9 @@ export default function AdminNavbar() {
             aria-disabled="true"
             title="Access Denied. Founder permission is required."
             onClick={() => toast.error('Access Denied. Founder permission is required.')}
-            className="cursor-not-allowed text-sm font-medium text-gray-400 transition hover:text-gray-300"
+            className="inline-flex cursor-not-allowed items-center gap-1 text-sm font-medium text-gray-400 transition hover:text-gray-300"
           >
-            {item.icon} {item.label} <span className="text-xs">Locked</span>
+            <span>{item.icon}</span><span>{item.label}</span><LockKeyhole aria-label="Locked module" title="Access restricted. Founder permission is required." className="ml-0.5 h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
           </button>
         ) : (
           <NavLink

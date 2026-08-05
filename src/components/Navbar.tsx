@@ -1,6 +1,7 @@
 
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { LockKeyhole } from 'lucide-react';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
 import { leftNavWithAccess, rightNavWithAccess } from '@/config/nav';
@@ -48,7 +49,7 @@ export default function Navbar() {
                 >
                   <span>{icon}</span>
                   <span>{label}</span>
-                  <span className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">Locked</span>
+                  <LockKeyhole aria-label="Locked module" title="Access restricted. Founder permission is required." className="ml-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
                 </button>
               ) : (
                 <NavLink
