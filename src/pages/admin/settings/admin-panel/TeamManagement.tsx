@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { toast } from 'react-hot-toast';
 import {
@@ -25,6 +25,7 @@ import {
   reactivateUser,
   resetPasswordUser,
   restoreUser,
+  saveFounderDelegation,
   saveStaffAccessOverride,
   suspendUser,
   TEAM_ROLE_API_UNAVAILABLE_MESSAGE,
@@ -45,13 +46,20 @@ import {
   getEffectiveModuleAccess,
   getEffectiveSpecialRights,
   normalizeRoleId,
+  resolveAdminModuleAccess,
   type AdminModuleKey,
   type SpecialRightKey,
 } from '@/lib/adminAccessControl';
+import { useFounderModulePolicy } from '@/hooks/useFounderModulePolicy';
+import {
+  type AdminModulePolicyMap,
+} from '@/lib/adminModulePolicy';
+import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
+import { localSpecialRightKey, localStaffModuleKey } from '@/lib/staffAccessSerializer';
 
 const FOUNDER_EMAIL = 'kiran@newspulse.co.in';
 const FOUNDER_RECOVERY_EMAIL = 'newspulse.team@gmail.com';
-const FOUNDER_NAME = 'Kiran Founder';
+const FOUNDER_NAME = 'Founder Admin';
 const FOUNDER_STAFF_ID = 'NP-FND-0001';
 const LEGACY_FOUNDER_EMAILS = new Set(['owner@newspulse.co.in', 'admin@newspulse.ai', 'founder@newspulse.ai', FOUNDER_RECOVERY_EMAIL]);
 const SHARED_NEWS_PULSE_SYSTEM_EMAILS = new Set(['newspulse.team@gmail.com', 'newspulse.admin@gmail.com', 'newspulse.ads@gmail.com']);
@@ -93,10 +101,28 @@ type CreateWizardStep = 'accountType' | 'details' | 'work' | 'review';
 type AccessStudioTab = 'modules' | 'newsroom' | 'liveTv' | 'staffAdmin' | 'security' | 'system' | 'temporary' | 'review';
 type AccessControlState = 'enabled' | 'disabled' | 'temporary' | 'founder_only' | 'locked';
 type TemporaryAccessGrant = { targetType: 'module' | 'right'; key: AdminModuleKey | SpecialRightKey; expiresAt: string; reason: string; grantedBy: string };
+type AccountAccessMode = 'extend' | 'reactivate' | 'reactivate-reset';
+type AccessDurationOption = 'no_expiry' | '30_days' | '90_days' | '6_months' | '1_year' | 'custom_date';
+type DelegationValidity = 'no_expiry' | 'until_date' | 'temporary';
+type DelegationRightKey =
+  | 'view_staff_registry'
+  | 'create_staff_account'
+  | 'edit_staff_details'
+  | 'extend_account_expiry'
+  | 'reactivate_expired_account'
+  | 'suspend_staff_account'
+  | 'lock_staff_account'
+  | 'unlock_staff_account'
+  | 'reset_temporary_password'
+  | 'force_password_change'
+  | 'logout_staff_sessions'
+  | 'archive_staff_account'
+  | 'assign_staff_access'
+  | 'assign_staff_tasks';
 export type StaffAccessSnapshot = { moduleAccess: string[]; specialRights: string[]; temporaryGrants: { targetType: 'module' | 'right'; key: string; expiresAt: string; reason: string }[] };
 type StaffActionModal =
   | { type: 'password'; mode: PasswordActionMode; user: TeamUser }
-  | { type: 'access'; user: TeamUser }
+  | { type: 'access'; mode: AccountAccessMode; user: TeamUser }
   | { type: 'archive'; user: TeamUser }
   | { type: 'delete-test'; user: TeamUser }
   | { type: 'mark-test'; user: TeamUser };
@@ -108,7 +134,7 @@ const STAFF_CONTROL_TABS: { key: StaffControlTab; label: string }[] = [
   { key: 'tasks', label: 'Staff Tasks' },
   { key: 'account', label: 'Account Control' },
   { key: 'security', label: 'Security & Sessions' },
-  { key: 'roles', label: 'Roles & Workflow' },
+  { key: 'roles', label: 'Role Presets' },
   { key: 'archived', label: 'Archived / Test Accounts' },
   { key: 'audit', label: 'Audit Logs' },
 ];
@@ -195,10 +221,10 @@ function normalizeAccessFlag(value: unknown): 'enabled' | 'disabled' | 'inherite
   return 'unknown';
 }
 
-function normalizePermissionSet(raw: unknown): string[] {
+function normalizePermissionSet(raw: unknown, normalizeKey?: (value: unknown) => string | undefined): string[] {
   const values = new Set<string>();
   const addKey = (key: unknown) => {
-    const text = String(key ?? '').trim();
+    const text = normalizeKey?.(key) || String(key ?? '').trim();
     if (text) values.add(text);
   };
   if (Array.isArray(raw)) {
@@ -220,13 +246,28 @@ function normalizePermissionSet(raw: unknown): string[] {
   return Array.from(values).sort();
 }
 
+function normalizeModulePermissionSet(raw: unknown): string[] {
+  return normalizePermissionSet(raw, (value) => localStaffModuleKey(value));
+}
+
+function normalizeSpecialRightPermissionSet(raw: unknown): string[] {
+  return normalizePermissionSet(raw, (value) => localSpecialRightKey(value));
+}
+
+function moduleAccessFromStates(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return normalizePermissionSet(raw, (value) => localStaffModuleKey(value));
+}
+
 function normalizeTemporaryGrants(raw: unknown): StaffAccessSnapshot['temporaryGrants'] {
   if (!Array.isArray(raw)) return [];
   return raw.map((grant: any) => {
-    const targetType: 'module' | 'right' = grant?.targetType === 'right' ? 'right' : 'module';
+    const targetType: 'module' | 'right' = grant?.targetType === 'right' || grant?.rightKey ? 'right' : 'module';
+    const rawKey = grant?.key ?? grant?.moduleKey ?? grant?.module ?? grant?.rightKey ?? grant?.right ?? grant?.permission ?? '';
+    const key = targetType === 'module' ? (localStaffModuleKey(rawKey) || String(rawKey).trim()) : (localSpecialRightKey(rawKey) || String(rawKey).trim());
     return {
       targetType,
-      key: String(grant?.key ?? grant?.module ?? grant?.right ?? grant?.permission ?? '').trim(),
+      key,
       expiresAt: String(grant?.expiresAt ?? grant?.accessExpiryDate ?? grant?.expiryDate ?? '').trim(),
       reason: String(grant?.reason ?? '').trim(),
     };
@@ -235,9 +276,12 @@ function normalizeTemporaryGrants(raw: unknown): StaffAccessSnapshot['temporaryG
 
 function normalizeStaffAccessSnapshot(raw: Record<string, any>): StaffAccessSnapshot {
   const accessOverrides = raw?.accessOverrides || {};
+  const moduleAccessStates = moduleAccessFromStates(raw?.moduleAccessStates ?? accessOverrides.moduleAccessStates);
+  const moduleOverride = normalizeModulePermissionSet(raw?.moduleAccessOverride ?? accessOverrides.moduleAccessOverride);
+  const specialRightsOverride = normalizeSpecialRightPermissionSet(raw?.specialRightsOverride ?? accessOverrides.specialRightsOverride);
   return {
-    moduleAccess: normalizePermissionSet(raw?.moduleAccess ?? raw?.modules ?? accessOverrides.modules ?? accessOverrides.moduleAccess),
-    specialRights: normalizePermissionSet(raw?.specialRights ?? raw?.rights ?? accessOverrides.specialRights ?? accessOverrides.rights),
+    moduleAccess: moduleAccessStates.length ? moduleAccessStates : moduleOverride.length ? moduleOverride : normalizeModulePermissionSet(raw?.moduleAccess ?? raw?.modules ?? accessOverrides.modules ?? accessOverrides.moduleAccess),
+    specialRights: specialRightsOverride.length ? specialRightsOverride : normalizeSpecialRightPermissionSet(raw?.specialRights ?? raw?.rights ?? accessOverrides.specialRights ?? accessOverrides.rights),
     temporaryGrants: normalizeTemporaryGrants(raw?.temporaryGrants ?? raw?.temporaryPermissions ?? raw?.temporaryAccess ?? accessOverrides.temporaryGrants),
   };
 }
@@ -249,9 +293,31 @@ export function createAccessSnapshot(moduleAccess: unknown, specialRights: unkno
 function accessSnapshotFromTeamUser(teamUser: TeamUser): StaffAccessSnapshot {
   const saved = normalizeStaffAccessSnapshot(teamUser as any);
   return {
-    moduleAccess: saved.moduleAccess.length ? saved.moduleAccess : normalizePermissionSet(getEffectiveModuleAccess(teamUser)),
-    specialRights: saved.specialRights.length ? saved.specialRights : normalizePermissionSet(getEffectiveSpecialRights(teamUser)),
+    moduleAccess: saved.moduleAccess.length ? saved.moduleAccess : normalizeModulePermissionSet(getEffectiveModuleAccess(teamUser)),
+    specialRights: saved.specialRights.length ? saved.specialRights : normalizeSpecialRightPermissionSet(getEffectiveSpecialRights(teamUser)),
     temporaryGrants: saved.temporaryGrants,
+  };
+}
+
+function accessSnapshotFromSaveResult(result: unknown, fallback: StaffAccessSnapshot): StaffAccessSnapshot {
+  const responses = Array.isArray(result) ? result : [result];
+  let mergedRaw: Record<string, any> = {};
+
+  responses.forEach((response: any) => {
+    const data = response?.data && typeof response.data === 'object' ? response.data : {};
+    const user = data.user || response?.user;
+    const record = data.record || response?.record;
+    if (user && typeof user === 'object') mergedRaw = { ...mergedRaw, ...user };
+    if (record && typeof record === 'object') mergedRaw = { ...mergedRaw, ...record };
+    if (Array.isArray(data.temporaryAccess)) mergedRaw.temporaryAccess = data.temporaryAccess;
+    if (Array.isArray(response?.temporaryAccess)) mergedRaw.temporaryAccess = response.temporaryAccess;
+  });
+
+  const normalized = normalizeStaffAccessSnapshot(mergedRaw);
+  return {
+    moduleAccess: normalized.moduleAccess.length ? normalized.moduleAccess : fallback.moduleAccess,
+    specialRights: normalized.specialRights.length ? normalized.specialRights : fallback.specialRights,
+    temporaryGrants: normalized.temporaryGrants.length ? normalized.temporaryGrants : fallback.temporaryGrants,
   };
 }
 
@@ -288,7 +354,53 @@ export function getStaffAccessSaveDisabledReason({
 }
 
 const FOUNDER_ONLY_MODULES = new Set<AdminModuleKey>(['safe_zone']);
+const FIXED_STAFF_MODULES = new Set<AdminModuleKey>(['dashboard']);
 const FOUNDER_ONLY_RIGHTS = new Set<SpecialRightKey>(['can_emergency_stop_live_tv', 'can_access_safe_zone', 'can_use_emergency_lock', 'can_change_bank_details', 'can_change_payment_gateway', 'can_approve_withdrawal', 'can_approve_final_finance_report', 'can_delete_staff_permanently', 'can_control_founder_account', 'can_grant_account_control_rights']);
+const PRESET_BLOCKED_MODULES = new Set<AdminModuleKey>(['safe_zone', 'settings', 'team_management', 'audit_logs']);
+const PRESET_BLOCKED_RIGHTS = new Set<SpecialRightKey>([
+  'can_emergency_stop_live_tv',
+  'can_access_safe_zone',
+  'can_use_emergency_lock',
+  'can_change_bank_details',
+  'can_change_payment_gateway',
+  'can_approve_withdrawal',
+  'can_approve_final_finance_report',
+  'can_approve_payment',
+  'can_delete_finance_record',
+  'can_view_staff_details',
+  'can_edit_staff_basic_details',
+  'can_change_staff_email',
+  'can_generate_temporary_password',
+  'can_reset_staff_password',
+  'can_force_password_change',
+  'can_logout_all_devices',
+  'can_extend_or_reactivate_staff',
+  'can_suspend_staff_account',
+  'can_lock_staff_account',
+  'can_archive_staff',
+  'can_delete_staff_permanently',
+  'can_control_founder_account',
+  'can_grant_account_control_rights',
+  'can_create_staff',
+  'can_suspend_staff',
+  'can_create_roles',
+  'can_edit_roles',
+  'can_delete_roles',
+  'can_change_settings',
+  'can_control_ai_engine',
+]);
+
+const ROLE_CATEGORY_OPTIONS = ['Editorial', 'Live TV', 'Ads', 'Analytics', 'Finance', 'Compliance', 'Tasks', 'Technical', 'Management', 'Training'];
+const PRESET_MODULE_OPTIONS = ADMIN_MODULES.filter((item) => !PRESET_BLOCKED_MODULES.has(item.key));
+const PRESET_ACTION_GROUPS: { title: string; rights: SpecialRightKey[] }[] = [
+  { title: 'Editorial', rights: ['can_create_news', 'can_edit_news', 'can_submit_news', 'can_publish_news', 'can_schedule_news', 'can_delete_news', 'can_approve_news', 'can_reject_or_send_back_news', 'can_pin_breaking_news', 'can_restore_news'] },
+  { title: 'Live TV', rights: ['can_prepare_live_tv', 'can_edit_live_tv_title', 'can_add_stream_link', 'can_update_ticker', 'can_schedule_live_tv', 'can_start_live_tv', 'can_stop_live_tv'] },
+  { title: 'Ads', rights: ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval'] },
+  { title: 'Analytics', rights: ['analytics.view_traffic', 'analytics.view_ad_performance', 'analytics.view_revenue', 'analytics.refresh', 'analytics.export'] },
+  { title: 'Finance', rights: ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status'] },
+  { title: 'Compliance', rights: ['can_view_compliance', 'can_manage_dpdp_privacy_requests'] },
+  { title: 'Tasks', rights: ['can_create_task', 'can_assign_task', 'can_edit_task', 'can_update_task_status', 'can_complete_task', 'can_close_task', 'can_delete_task', 'can_view_team_tasks', 'can_manage_department_tasks', 'can_comment_on_task', 'can_escalate_task'] },
+].map((group) => ({ ...group, rights: group.rights.filter((key) => !PRESET_BLOCKED_RIGHTS.has(key)) }));
 
 const ACCESS_STUDIO_TABS: { key: AccessStudioTab; label: string }[] = [
   { key: 'modules', label: 'Step 2: What can this staff open?' },
@@ -307,6 +419,13 @@ const ACCESS_STATE_LABEL: Record<AccessControlState, string> = {
   temporary: 'Temporary',
   founder_only: 'Founder Only',
   locked: 'Locked',
+};
+
+const GLOBAL_POLICY_LABEL: Record<string, string> = {
+  available: 'Available to Staff',
+  staff_locked: 'Locked for Staff',
+  hidden: 'Hidden from Staff',
+  founder_only: 'Founder Only',
 };
 
 const RIGHT_TAB_GROUPS: Record<Exclude<AccessStudioTab, 'modules' | 'temporary' | 'review'>, SpecialRightKey[]> = {
@@ -436,6 +555,34 @@ const ROLE_CONFIGS: RoleConfig[] = [
 ];
 
 const ACCOUNT_STATUS_OPTIONS = ['active', 'expired', 'suspended', 'locked', 'inactive', 'left', 'archived'];
+const EXPIRED_ACCOUNT_NOTICE = 'Account access has expired. Login is disabled. Staff identity, Staff ID, permissions and audit history are preserved.';
+const STAFF_ID_LIFECYCLE_NOTE = 'Staff ID identifies the person. It does not change when account expires, password resets, role changes, account is reactivated, or access changes.';
+const ACCESS_DURATION_OPTIONS: { key: AccessDurationOption; label: string }[] = [
+  { key: 'no_expiry', label: 'No Expiry' },
+  { key: '30_days', label: '30 Days' },
+  { key: '90_days', label: '90 Days' },
+  { key: '6_months', label: '6 Months' },
+  { key: '1_year', label: '1 Year' },
+  { key: 'custom_date', label: 'Custom Date' },
+];
+const DELEGABLE_ACCOUNT_CONTROL_RIGHTS: { key: DelegationRightKey; label: string; permissions: string[] }[] = [
+  { key: 'view_staff_registry', label: 'View Staff Registry', permissions: ['team.view', 'can_view_staff_details'] },
+  { key: 'create_staff_account', label: 'Create Staff Account', permissions: ['team.create', 'auth.create_user', 'can_create_staff'] },
+  { key: 'edit_staff_details', label: 'Edit Staff Details', permissions: ['team.edit', 'team.change_role', 'can_edit_staff_basic_details'] },
+  { key: 'extend_account_expiry', label: 'Extend Account Expiry', permissions: ['can_extend_account_expiry', 'can_extend_or_reactivate_staff'] },
+  { key: 'reactivate_expired_account', label: 'Reactivate Expired Account', permissions: ['can_reactivate_expired_account', 'can_extend_or_reactivate_staff'] },
+  { key: 'suspend_staff_account', label: 'Suspend Staff Account', permissions: ['team.suspend', 'auth.suspend_user', 'can_suspend_staff_account'] },
+  { key: 'lock_staff_account', label: 'Lock Staff Account', permissions: ['auth.lock_user', 'can_lock_staff_account'] },
+  { key: 'unlock_staff_account', label: 'Unlock Staff Account', permissions: ['auth.unlock_user', 'can_unlock_staff_account', 'can_lock_staff_account'] },
+  { key: 'reset_temporary_password', label: 'Reset Temporary Password', permissions: ['team.reset_password', 'auth.reset_password', 'can_reset_staff_password', 'can_generate_temporary_password'] },
+  { key: 'force_password_change', label: 'Force Password Change', permissions: ['auth.force_password_change', 'can_force_password_change'] },
+  { key: 'logout_staff_sessions', label: 'Logout Staff Sessions', permissions: ['auth.logout_user_sessions', 'can_logout_all_devices'] },
+  { key: 'archive_staff_account', label: 'Archive Staff Account', permissions: ['team.edit', 'can_archive_staff'] },
+  { key: 'assign_staff_access', label: 'Assign Staff Access', permissions: ['can_assign_staff_access', 'can_view_staff_details'] },
+  { key: 'assign_staff_tasks', label: 'Assign Staff Tasks', permissions: ['can_assign_staff_tasks', 'can_create_task', 'can_assign_task'] },
+];
+const FOUNDER_ONLY_LOCKED_RIGHTS = ['Modify Founder Account', 'Delete Founder', 'Suspend Founder', 'Demote Founder', 'Grant Founder Role', 'Founder Access Control', 'Safe Zone', 'Emergency Controls', 'Audit Log Modification/Deletion', 'Self-grant Additional Rights'];
+const MANAGEABLE_ACCOUNT_TYPES = ['Management Staff', 'Field Network Staff', 'Newsroom Staff', 'Intern'];
 const STAFF_LIST_FILTERS: { key: StaffListFilter; label: string }[] = [
   { key: 'active', label: 'Active Staff' },
   { key: 'expired', label: 'Expired' },
@@ -625,6 +772,36 @@ function defaultRightsForRole(role?: string): SpecialRightKey[] {
   return (getDefaultRoleAccess(role)?.specialRights || []) as SpecialRightKey[];
 }
 
+function createInitialStaffForm(role = 'editor') {
+  return {
+    name: '',
+    email: '',
+    recoveryEmail: '',
+    phone: '',
+    accountGroup: 'Staff Account / Newsroom Staff',
+    position: 'Reporter',
+    role,
+    officialTitle: '',
+    responsibility: '',
+    designation: '',
+    employmentType: 'Full Time',
+    reportingManager: '',
+    department: defaultDepartmentForRole(role),
+    assignedSections: [] as string[],
+    coverageArea: [] as string[],
+    accountStatus: 'active',
+    permissions: '',
+    expiresAt: '',
+    moduleAccess: defaultModulesForRole(role),
+    specialRights: defaultRightsForRole(role),
+    temporaryGrants: [] as TemporaryAccessGrant[],
+    accessReason: '',
+    temporaryExpiry: '',
+    generateTemporaryPassword: true,
+    mustChangePassword: true,
+  };
+}
+
 function roleLabel(role?: string): string {
   const normalized = normalizeRoleId(role);
   return DEFAULT_ROLE_ACCESS.find((item) => item.id === normalized)?.label || roleById(role)?.label || String(role || 'Staff');
@@ -632,6 +809,91 @@ function roleLabel(role?: string): string {
 
 function accessExpiryValue(teamUser: TeamUser): string {
   return String(teamUser?.accessExpiryDate || teamUser?.accessExpiresAt || (teamUser as any).expiresAt || '').trim();
+}
+
+function displayAccessExpiry(teamUser: TeamUser, founder = false): string {
+  if (founder || (teamUser as any).noExpiry === true || (teamUser as any).permanentAccess === true) return 'No Expiry';
+  const expiry = accessExpiryValue(teamUser);
+  return expiry ? formatDateTime(expiry) : 'No Expiry';
+}
+
+function accessStartValue(teamUser: TeamUser): string {
+  return String((teamUser as any).accessStartDate || (teamUser as any).accessStartsAt || teamUser.createdAt || '').trim();
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonths(date: Date, months: number): Date {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function dateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function expiryDateForDuration(duration: AccessDurationOption, customDate: string): string {
+  const now = new Date();
+  if (duration === 'no_expiry') return '';
+  if (duration === '30_days') return dateOnly(addDays(now, 30));
+  if (duration === '90_days') return dateOnly(addDays(now, 90));
+  if (duration === '6_months') return dateOnly(addMonths(now, 6));
+  if (duration === '1_year') return dateOnly(addMonths(now, 12));
+  return customDate;
+}
+
+function accountTypeFor(teamUser: TeamUser, founder = false): string {
+  if (founder) return 'Founder Account';
+  return String((teamUser as any).accountType || (teamUser as any).accountGroup || (teamUser as any).staffType || 'Staff Account').trim();
+}
+
+function displayPosition(teamUser: TeamUser, founder = false): string {
+  if (founder) return 'Founder';
+  return String((teamUser as any).position || teamUser.designation || roleLabel(teamUser.role)).trim();
+}
+
+function displayOfficialTitle(teamUser: TeamUser, founder = false): string {
+  if (founder) return 'Founder Admin';
+  return String((teamUser as any).officialTitle || teamUser.designation || displayPosition(teamUser, false) || '-').trim();
+}
+
+function activeSessionCount(teamUser: TeamUser, currentUser: any): string {
+  const sessions = (teamUser as any).sessions;
+  if (Array.isArray(sessions)) return String(sessions.filter((session) => ['active', 'authenticated', 'valid'].includes(normalizedIdentity(session?.status)) || session?.active === true).length);
+  const value = (teamUser as any).activeSessions ?? (teamUser as any).activeSessionCount;
+  if (typeof value === 'number') return String(value);
+  return getSessionStatusDisplay(teamUser, currentUser) === 'Active Session' ? '1' : '0';
+}
+
+function passwordStatus(teamUser: TeamUser): string {
+  if (staffMustChangePassword(teamUser)) return 'Password change required';
+  if ((teamUser as any).temporaryPasswordActive === true || (teamUser as any).hasTemporaryPassword === true) return 'Temporary password active';
+  return 'Normal';
+}
+
+function delegationExpiryFor(validity: DelegationValidity, untilDate: string, temporaryUntil: string): string | undefined {
+  if (validity === 'until_date') return untilDate || undefined;
+  if (validity === 'temporary') return temporaryUntil || undefined;
+  return undefined;
+}
+
+function isPastDate(value?: string | null): boolean {
+  if (!value) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.getTime() < Date.now();
+}
+
+function delegationStatusLabel(teamUser: TeamUser): string | null {
+  const delegation = (teamUser as any).accountControlDelegation || (teamUser as any).founderDelegation || (teamUser as any).delegation;
+  if (!delegation) return null;
+  const expiresAt = delegation.expiresAt || delegation.expiry || delegation.validUntil;
+  if (isPastDate(expiresAt)) return 'Expired delegation';
+  return delegation.active === false ? 'Delegation inactive' : 'Active delegation';
 }
 
 function dateInputValue(value?: string | null): string {
@@ -946,7 +1208,9 @@ function SectionCard({ title, subtitle, id, actions, children }: { title: string
 
 export default function TeamManagement() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
+  const isCreatePage = location.pathname.endsWith('/team/create');
   const role = String(user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
   const currentPermissions = useMemo(() => extractUserPermissions(user), [user]);
@@ -958,37 +1222,30 @@ export default function TeamManagement() {
   const canLockStaffAccounts = hasAnyStaffPermission(['auth.lock_user', 'can_lock_staff_account']);
   const canArchiveStaffAccounts = hasAnyStaffPermission(['team.suspend', 'team.edit', 'can_archive_staff']);
   const canDeleteTestAccounts = isFounder;
+  const hasDelegatedAccountRight = (rightKey: DelegationRightKey): boolean => {
+    if (isFounder) return true;
+    const definition = DELEGABLE_ACCOUNT_CONTROL_RIGHTS.find((item) => item.key === rightKey);
+    const delegatedValues = [
+      (user as any)?.accountControlRights,
+      (user as any)?.delegatedAccountControlRights,
+      (user as any)?.founderDelegation?.rights,
+      (user as any)?.accountControlDelegation?.rights,
+    ].flatMap((value) => Array.isArray(value) ? value : []);
+    return currentPermissions.has(rightKey) || delegatedValues.includes(rightKey) || !!definition?.permissions.some((permission) => currentPermissions.has(permission));
+  };
+  const canRunAccountControlAction = (rightKey: DelegationRightKey, targetUser?: TeamUser | null): boolean => {
+    if (!targetUser) return false;
+    if (isFounderUser(targetUser)) return false;
+    if (!isFounder && matchesCurrentUser(targetUser, user)) return false;
+    return hasDelegatedAccountRight(rightKey);
+  };
 
-  const [createForm, setCreateForm] = useState({
-    name: '',
-    email: '',
-    recoveryEmail: '',
-    phone: '',
-    accountGroup: 'Staff Account / Newsroom Staff',
-    position: 'Reporter',
-    role: 'editor',
-    officialTitle: '',
-    responsibility: '',
-    designation: '',
-    employmentType: 'Full Time',
-    reportingManager: '',
-    department: defaultDepartmentForRole('editor'),
-    assignedSections: [] as string[],
-    coverageArea: [] as string[],
-    accountStatus: 'active',
-    permissions: '',
-    expiresAt: '',
-    moduleAccess: defaultModulesForRole('editor'),
-    specialRights: defaultRightsForRole('editor'),
-    temporaryGrants: [] as TemporaryAccessGrant[],
-    accessReason: '',
-    temporaryExpiry: '',
-    generateTemporaryPassword: true,
-    mustChangePassword: true,
-  });
+  const createFormCleanRef = useRef(createInitialStaffForm('editor'));
+  const [createForm, setCreateForm] = useState(createFormCleanRef.current);
   const [createStep, setCreateStep] = useState<CreateWizardStep>('accountType');
   const [roleForm, setRoleForm] = useState({
     roleName: 'Custom Desk Role',
+    roleCategory: 'Editorial',
     description: '',
     sortOrder: 99,
     systemRole: false,
@@ -1023,14 +1280,17 @@ export default function TeamManagement() {
   const [editErr, setEditErr] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [staffActionModal, setStaffActionModal] = useState<StaffActionModal | null>(null);
-  const [accessForm, setAccessForm] = useState({ accessExpiryDate: '', reactivate: true, reason: '' });
+  const [accessForm, setAccessForm] = useState({ duration: 'no_expiry' as AccessDurationOption, customDate: '', reactivate: true, requirePasswordChange: false, reason: '', review: false });
   const [archiveReason, setArchiveReason] = useState('');
   const [deleteTestForm, setDeleteTestForm] = useState({ confirmation: '', reason: '', confirmed: false });
   const [markTestForm, setMarkTestForm] = useState({ reason: '', confirmed: false });
   const [staffActionErr, setStaffActionErr] = useState<string | null>(null);
   const [staffActionBusy, setStaffActionBusy] = useState(false);
-  const [staffListFilter, setStaffListFilter] = useState<StaffListFilter>('active');
-  const [activeTab, setActiveTab] = useState<StaffControlTab>('create');
+  const [delegationForm, setDelegationForm] = useState({ appointedStaffId: '', rights: [] as DelegationRightKey[], validity: 'no_expiry' as DelegationValidity, untilDate: '', temporaryUntil: '', manageableAccountTypes: [] as string[], auditReason: '', review: false });
+  const [delegationNotice, setDelegationNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [savingDelegation, setSavingDelegation] = useState(false);
+  const [staffListFilter, setStaffListFilter] = useState<StaffListFilter>('all');
+  const [activeTab, setActiveTab] = useState<StaffControlTab | null>(null);
   const [detailsUser, setDetailsUser] = useState<TeamUser | null>(null);
   const [detailsTab, setDetailsTab] = useState<StaffDetailsTab>('profile');
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
@@ -1045,6 +1305,7 @@ export default function TeamManagement() {
   const [staffAccessSearch, setStaffAccessSearch] = useState('');
   const [temporaryGrants, setTemporaryGrants] = useState<TemporaryAccessGrant[]>([]);
   const [temporaryGrantForm, setTemporaryGrantForm] = useState<{ targetType: 'module' | 'right'; key: string; expiresAt: string; reason: string }>({ targetType: 'module', key: 'dashboard', expiresAt: '', reason: '' });
+  const { policy: globalModulePolicy } = useFounderModulePolicy({ enabled: isFounder });
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [taskErr, setTaskErr] = useState<string | null>(null);
@@ -1057,6 +1318,7 @@ export default function TeamManagement() {
   const staffIdPreviewLabel = nextStaffIdPreview ? `Next Non-Founder Staff ID: ${nextStaffIdPreview}` : 'Next Non-Founder Staff ID';
   const staffIdPreviewText = nextStaffIdPreview || 'Auto-generated on create';
   const founderEmailTypedInCreate = isProtectedFounderCreateEmail(createForm.email);
+  const createFormDirty = useMemo(() => JSON.stringify(createForm) !== JSON.stringify(createFormCleanRef.current) || createStep !== 'accountType', [createForm, createStep]);
 
   const roleOptions = useMemo(() => {
     const customRoles = roles.slice().sort((a, b) => Number(a.sortOrder ?? 999) - Number(b.sortOrder ?? 999)).map((item) => {
@@ -1299,13 +1561,15 @@ export default function TeamManagement() {
     setStaffActionErr(null);
   };
 
-  const openAccessModal = (teamUser: TeamUser) => {
+  const openAccessModal = (teamUser: TeamUser, mode: AccountAccessMode = 'extend') => {
     if (isFounderUser(teamUser)) {
       toast.error('Founder account is protected. Manage from Founder My Account / Safe Zone.');
       return;
     }
-    setStaffActionModal({ type: 'access', user: teamUser });
-    setAccessForm({ accessExpiryDate: dateInputValue(accessExpiryValue(teamUser)), reactivate: true, reason: '' });
+    const status = displayAccountStatus(teamUser, isUserActive(teamUser)).toLowerCase();
+    const defaultDuration: AccessDurationOption = mode === 'extend' && status === 'active' ? '30_days' : 'no_expiry';
+    setStaffActionModal({ type: 'access', mode, user: teamUser });
+    setAccessForm({ duration: defaultDuration, customDate: dateInputValue(accessExpiryValue(teamUser)), reactivate: mode !== 'extend' || (status === 'expired' && hasDelegatedAccountRight('reactivate_expired_account')), requirePasswordChange: mode === 'reactivate-reset', reason: '', review: false });
     setStaffActionErr(null);
   };
 
@@ -1379,9 +1643,10 @@ export default function TeamManagement() {
       teamRows.forEach((teamUser) => {
         const id = userId(teamUser);
         if (!id || next[id]) return;
+        const savedSnapshot = accessSnapshotFromTeamUser(teamUser);
         next[id] = {
-          moduleAccess: getEffectiveModuleAccess(teamUser),
-          specialRights: getEffectiveSpecialRights(teamUser),
+          moduleAccess: savedSnapshot.moduleAccess as AdminModuleKey[],
+          specialRights: savedSnapshot.specialRights as SpecialRightKey[],
         };
       });
       return next;
@@ -1390,7 +1655,7 @@ export default function TeamManagement() {
       const next = { ...current };
       teamRows.forEach((teamUser) => {
         const id = userId(teamUser);
-        if (!id || next[id]) return;
+        if (!id) return;
         next[id] = accessSnapshotFromTeamUser(teamUser);
       });
       return next;
@@ -1464,7 +1729,9 @@ export default function TeamManagement() {
       setCreatedEmail(email);
       setCreatedStaffId(assignedStaffId);
       toast.success(assignedStaffId ? `Account created. Staff ID: ${assignedStaffId}` : 'Account created. Staff ID will be assigned by the backend.');
-      setCreateForm({ name: '', email: '', recoveryEmail: '', phone: '', accountGroup: 'Staff Account / Newsroom Staff', position: 'Reporter', role: 'reporter', officialTitle: '', responsibility: '', designation: '', employmentType: 'Full Time', reportingManager: '', department: defaultDepartmentForRole('reporter'), assignedSections: [], coverageArea: [], accountStatus: 'active', permissions: '', expiresAt: '', moduleAccess: defaultModulesForRole('reporter'), specialRights: defaultRightsForRole('reporter'), temporaryGrants: [], accessReason: '', temporaryExpiry: '', generateTemporaryPassword: true, mustChangePassword: true });
+      const nextCleanForm = createInitialStaffForm('reporter');
+      createFormCleanRef.current = nextCleanForm;
+      setCreateForm(nextCleanForm);
       setCreateStep('accountType');
       await Promise.all([fetchStaff(), refreshStaffIdPreview()]);
     } catch (err2: any) {
@@ -1499,10 +1766,10 @@ export default function TeamManagement() {
       const payload = {
         roleName,
         description: roleForm.description.trim() || undefined,
-        sortOrder: Number.isFinite(Number(roleForm.sortOrder)) ? Number(roleForm.sortOrder) : 99,
+        sortOrder: 99,
         systemRole: false,
-        moduleAccess: roleForm.moduleAccess,
-        specialRights: roleForm.specialRights,
+        moduleAccess: roleForm.moduleAccess.filter((key) => !PRESET_BLOCKED_MODULES.has(key as AdminModuleKey)),
+        specialRights: roleForm.specialRights.filter((key) => !PRESET_BLOCKED_RIGHTS.has(key as SpecialRightKey)),
       };
       if (existing?._id || existing?.id) {
         await updateTeamRole(String(existing._id || existing.id), payload);
@@ -1511,7 +1778,7 @@ export default function TeamManagement() {
         await createTeamRole(payload);
         toast.success('Role saved');
       }
-      setRoleForm({ roleName: 'Custom Desk Role', description: '', sortOrder: 99, systemRole: false, moduleAccess: defaultModulesForRole('editor'), specialRights: defaultRightsForRole('editor') });
+      setRoleForm({ roleName: 'Custom Desk Role', roleCategory: 'Editorial', description: '', sortOrder: 99, systemRole: false, moduleAccess: defaultModulesForRole('editor').filter((key) => !PRESET_BLOCKED_MODULES.has(key)), specialRights: defaultRightsForRole('editor').filter((key) => !PRESET_BLOCKED_RIGHTS.has(key)) });
       await fetchStaff();
     } catch (err2: any) {
       logTeamApiError('save role failed', err2);
@@ -1645,19 +1912,36 @@ export default function TeamManagement() {
   const submitAccessAction = async () => {
     if (!staffActionModal || staffActionModal.type !== 'access') return;
     const id = userId(staffActionModal.user);
-    if (!id || isFounderUser(staffActionModal.user) || !canSuspendStaffAccounts) return;
-    if (!accessForm.accessExpiryDate) {
-      setStaffActionErr('New Access Expiry Date is required.');
+    const durationExpiryDate = expiryDateForDuration(accessForm.duration, accessForm.customDate);
+    if (!id || isFounderUser(staffActionModal.user)) return;
+    if (staffActionModal.mode === 'extend' && !canRunAccountControlAction('extend_account_expiry', staffActionModal.user)) return;
+    if (staffActionModal.mode !== 'extend' && !canRunAccountControlAction('reactivate_expired_account', staffActionModal.user)) return;
+    if (staffActionModal.mode === 'extend' && accessForm.reactivate && !canRunAccountControlAction('reactivate_expired_account', staffActionModal.user)) {
+      setStaffActionErr('Reactivate Expired Account right is required.');
+      return;
+    }
+    if (accessForm.duration === 'custom_date' && !durationExpiryDate) {
+      setStaffActionErr('Custom Date is required.');
+      return;
+    }
+    if (accessForm.reason.trim().length < 5) {
+      setStaffActionErr('Audit Reason is required.');
       return;
     }
     setStaffActionBusy(true);
     setStaffActionErr(null);
     setRowBusyId(id);
     try {
-      const payload = { accessExpiryDate: accessForm.accessExpiryDate, reason: accessForm.reason.trim() || undefined };
-      if (accessForm.reactivate) await reactivateUser(id, payload);
+      const payload = { accessExpiryDate: durationExpiryDate || undefined, noExpiry: accessForm.duration === 'no_expiry', requirePasswordChange: accessForm.requirePasswordChange, reason: accessForm.reason.trim() };
+      if (staffActionModal.mode !== 'extend' || accessForm.reactivate) await reactivateUser(id, payload);
       else await extendAccessUser(id, payload);
-      toast.success(accessForm.reactivate ? 'Account reactivated' : 'Access extended');
+      if (staffActionModal.mode === 'reactivate-reset') {
+        const res = await resetPasswordUser(id);
+        captureTemporaryPassword(res, staffActionModal.user.email);
+      } else if (accessForm.requirePasswordChange) {
+        await forceChangePasswordUser(id);
+      }
+      toast.success(staffActionModal.mode === 'extend' && !accessForm.reactivate ? 'Access extended' : 'Account reactivated');
       setStaffActionModal(null);
       await fetchStaff();
     } catch (err2: any) {
@@ -1675,7 +1959,11 @@ export default function TeamManagement() {
   const submitArchiveAction = async () => {
     if (!staffActionModal || staffActionModal.type !== 'archive') return;
     const id = userId(staffActionModal.user);
-    if (!id || isFounderUser(staffActionModal.user) || isArchivedStaff(staffActionModal.user) || !canArchiveStaffAccounts) return;
+    if (!id || isFounderUser(staffActionModal.user) || isArchivedStaff(staffActionModal.user) || !canRunAccountControlAction('archive_staff_account', staffActionModal.user)) return;
+    if (archiveReason.trim().length < 5) {
+      setStaffActionErr('Audit Reason is required.');
+      return;
+    }
     setStaffActionBusy(true);
     setStaffActionErr(null);
     setRowBusyId(id);
@@ -1834,16 +2122,18 @@ export default function TeamManagement() {
       toast.error(message);
       return;
     }
-    const draft = overrideDrafts[id] || { moduleAccess: getEffectiveModuleAccess(teamUser), specialRights: getEffectiveSpecialRights(teamUser) };
-    const savedSnapshot = createAccessSnapshot(draft.moduleAccess, draft.specialRights, pendingTemporaryGrants);
+    const draft = overrideDrafts[id] || accessSnapshotFromTeamUser(teamUser);
+    const optimisticSnapshot = createAccessSnapshot(draft.moduleAccess, draft.specialRights, pendingTemporaryGrants);
     setSavingOverrideId(id);
     setAccessSaveNotice(null);
     try {
-      const result = await saveStaffAccessOverride(id, { ...draft, reason: auditReason.trim(), accessExpiryDate: temporaryAccessExpiry || undefined, temporaryGrants: pendingTemporaryGrants.map((grant) => ({ targetType: grant.targetType, key: grant.key, expiresAt: grant.expiresAt, reason: grant.reason })) });
+      const result = await saveStaffAccessOverride(id, { ...draft, reason: auditReason.trim(), auditReason: auditReason.trim(), accessExpiryDate: temporaryAccessExpiry || undefined, accessVersion: typeof teamUser.accessVersion === 'number' ? teamUser.accessVersion : undefined, temporaryGrants: pendingTemporaryGrants.map((grant) => ({ targetType: grant.targetType, key: grant.key, expiresAt: grant.expiresAt, reason: grant.reason })) });
       if (Array.isArray(result) && result.some((item: any) => item?.temporaryUnavailable)) toast.error('Temporary access API is not available yet.');
       else toast.success('Staff access updated successfully.');
+      const savedSnapshot = accessSnapshotFromSaveResult(result, optimisticSnapshot);
       setInitialAccessSnapshots((state) => ({ ...state, [id]: savedSnapshot }));
       setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess: savedSnapshot.moduleAccess as AdminModuleKey[], specialRights: savedSnapshot.specialRights as SpecialRightKey[] } }));
+      clearAdminEffectiveAccessCache();
       setAccessSaveNotice({ tone: 'success', message: 'Staff access updated successfully.' });
       setAuditReason('');
       setTemporaryAccessExpiry('');
@@ -1857,6 +2147,55 @@ export default function TeamManagement() {
       toast.error(message);
     } finally {
       setSavingOverrideId(null);
+    }
+  };
+
+  const submitFounderDelegation = async () => {
+    const appointedStaff = staffRows.find((item) => userId(item) === delegationForm.appointedStaffId);
+    const expiresAt = delegationExpiryFor(delegationForm.validity, delegationForm.untilDate, delegationForm.temporaryUntil);
+    if (!isFounder) return;
+    if (!appointedStaff || isFounderUser(appointedStaff)) {
+      setDelegationNotice({ tone: 'error', message: 'Select a non-Founder staff member.' });
+      return;
+    }
+    if (!delegationForm.rights.length) {
+      setDelegationNotice({ tone: 'error', message: 'Select at least one account-control right.' });
+      return;
+    }
+    if (!delegationForm.manageableAccountTypes.length) {
+      setDelegationNotice({ tone: 'error', message: 'Select at least one manageable account type.' });
+      return;
+    }
+    if (delegationForm.validity !== 'no_expiry' && !expiresAt) {
+      setDelegationNotice({ tone: 'error', message: 'Select delegation expiry.' });
+      return;
+    }
+    if (delegationForm.auditReason.trim().length < 5) {
+      setDelegationNotice({ tone: 'error', message: 'Audit Reason is required.' });
+      return;
+    }
+    setSavingDelegation(true);
+    setDelegationNotice(null);
+    try {
+      await saveFounderDelegation({
+        appointedStaffId: delegationForm.appointedStaffId,
+        rights: delegationForm.rights,
+        manageableAccountTypes: delegationForm.manageableAccountTypes,
+        validity: delegationForm.validity,
+        startDate: dateOnly(new Date()),
+        expiresAt,
+        reason: delegationForm.auditReason.trim(),
+      });
+      setDelegationNotice({ tone: 'success', message: 'Founder delegation saved.' });
+      setDelegationForm((state) => ({ ...state, review: false, auditReason: '' }));
+      await fetchStaff();
+    } catch (err2: any) {
+      logTeamApiError('save founder delegation failed', err2);
+      if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
+      setDelegationNotice({ tone: 'error', message: toTeamApiErrorMessage(err2, 'Save delegation failed') });
+      toast.error(toTeamApiErrorMessage(err2, 'Save delegation failed'));
+    } finally {
+      setSavingDelegation(false);
     }
   };
 
@@ -1910,7 +2249,7 @@ export default function TeamManagement() {
     const stepButtonClass = (step: CreateWizardStep) => `rounded-lg border px-3 py-2 text-sm font-semibold ${createStep === step ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`;
 
     return (
-      <SectionCard title="Create Staff Account" subtitle="Create new staff with simple account type, work details, default tasks, and password setup. Use Staff Access & Special Rights later for custom access.">
+      <SectionCard title="New Staff Account" subtitle="Create the staff identity, employment details and initial password. Configure individual module access separately under Staff Access & Special Rights.">
         <form className="space-y-5" onSubmit={handleCreate}>
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">Founder account cannot be created here. This form is only for staff accounts. Founder account is protected and already exists.</div>
           <div className="flex flex-wrap gap-2">{CREATE_STAFF_STEPS.map((step, index) => <button key={step.key} type="button" onClick={() => setCreateStep(step.key)} className={stepButtonClass(step.key)}><span className="mr-1 text-xs opacity-70">{index + 1}</span>{step.label}</button>)}</div>
@@ -1958,7 +2297,7 @@ export default function TeamManagement() {
                   <td className="py-3 pr-3 font-semibold text-slate-900">{founder ? 'Founder' : roleLabel(teamUser.role)}</td>
                   <td className="py-3 pr-3"><StatusPill label={accountStatus} /></td>
                   <td className="py-3 pr-3"><StatusPill label={getSessionStatusDisplay(teamUser, user)} /></td>
-                  <td className="py-3 pr-3 text-slate-700">{formatDateTime(accessExpiryValue(teamUser))}</td>
+                  <td className="py-3 pr-3 text-slate-700">{displayAccessExpiry(teamUser, founder)}</td>
                   <td className="py-3 pr-3 text-slate-700">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</td>
                   <td className="py-3 pr-3"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openStaffDetails(teamUser)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">View Details</button>{!founder ? <button type="button" onClick={() => selectStaffForAccess(teamUser)} className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100">Manage Access</button> : null}{!founder ? <button type="button" onClick={() => selectStaffForAccess(teamUser, 'security')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">Security</button> : null}{!founder && !isArchivedStaff(teamUser) ? <button type="button" disabled={!canArchiveStaffAccounts || !id || busy} onClick={() => openArchiveModal(teamUser)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Archive</button> : null}{permanentDeleteAllowed ? <button type="button" disabled={!canDeleteTestAccounts || !id || busy} onClick={() => openDeleteTestModal(teamUser)} className="rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Delete Permanently</button> : null}{founder ? <span className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-800">Founder protected</span> : null}</div></td>
                 </tr>
@@ -1973,8 +2312,13 @@ export default function TeamManagement() {
   const renderFounderAccessStudio = () => {
     const teamUser = selectedAccessUser;
     const id = teamUser ? userId(teamUser) : '';
-    const draft = teamUser && id ? overrideDrafts[id] || { moduleAccess: getEffectiveModuleAccess(teamUser), specialRights: getEffectiveSpecialRights(teamUser) } : { moduleAccess: [] as AdminModuleKey[], specialRights: [] as SpecialRightKey[] };
-    const initialAccessSnapshot = id ? initialAccessSnapshots[id] || (teamUser ? accessSnapshotFromTeamUser(teamUser) : EMPTY_ACCESS_SNAPSHOT) : EMPTY_ACCESS_SNAPSHOT;
+    const savedFallback = teamUser ? accessSnapshotFromTeamUser(teamUser) : EMPTY_ACCESS_SNAPSHOT;
+    const draft = teamUser && id ? overrideDrafts[id] || { moduleAccess: savedFallback.moduleAccess as AdminModuleKey[], specialRights: savedFallback.specialRights as SpecialRightKey[] } : { moduleAccess: [] as AdminModuleKey[], specialRights: [] as SpecialRightKey[] };
+    const matchingPreset = teamUser ? [
+      ...DEFAULT_ROLE_ACCESS.map((preset) => ({ roleName: preset.label, id: preset.id, moduleAccess: preset.modules, specialRights: preset.specialRights })),
+      ...roles,
+    ].find((preset) => normalizeRoleId(preset.roleName || preset.id) === normalizeRoleId(teamUser.role)) : null;
+    const initialAccessSnapshot = id ? initialAccessSnapshots[id] || savedFallback : EMPTY_ACCESS_SNAPSHOT;
     const currentAccessState = createAccessSnapshot(draft.moduleAccess, draft.specialRights, temporaryGrants);
     const hasAccessChanges = hasStaffAccessChanges(initialAccessSnapshot, currentAccessState);
     const isSaving = !!id && savingOverrideId === id;
@@ -1989,6 +2333,12 @@ export default function TeamManagement() {
     });
     const enabledModules = draft.moduleAccess.length;
     const enabledRights = draft.specialRights.length;
+    const savedStaffForEffectiveAccess = { ...teamUser, moduleAccess: baselineModules, specialRights: baselineRights, temporaryGrants: initialAccessSnapshot.temporaryGrants, accessOverrides: { modules: baselineModules, specialRights: baselineRights, temporaryGrants: initialAccessSnapshot.temporaryGrants } };
+    const draftStaffForEffectiveAccess = { ...teamUser, moduleAccess: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants, accessOverrides: { modules: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants } };
+    const effectiveModuleRows = ADMIN_MODULES.map((moduleItem) => ({ moduleItem, access: resolveAdminModuleAccess(savedStaffForEffectiveAccess, moduleItem.key, { modulePolicy: globalModulePolicy }), pendingAccess: resolveAdminModuleAccess(draftStaffForEffectiveAccess, moduleItem.key, { modulePolicy: globalModulePolicy }) }));
+    const effectivelyAvailableCount = effectiveModuleRows.filter((item) => item.access.allowed).length;
+    const globallyLockedCount = effectiveModuleRows.filter((item) => item.access.reasonCode === 'GLOBAL_STAFF_LOCK' || item.access.policyState === 'hidden').length;
+    const founderOnlyCount = effectiveModuleRows.filter((item) => item.access.reasonCode === 'FOUNDER_ONLY').length;
     const selectedStatus = teamUser ? displayAccountStatus(teamUser, isUserActive(teamUser)) : '-';
     const addedModules = draft.moduleAccess.filter((key) => !baselineModules.includes(key));
     const removedModules = baselineModules.filter((key) => !draft.moduleAccess.includes(key));
@@ -1996,6 +2346,15 @@ export default function TeamManagement() {
     const removedRights = baselineRights.filter((key) => !draft.specialRights.includes(key));
     const setModules = (moduleAccess: AdminModuleKey[]) => id && setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, moduleAccess } }));
     const setRights = (specialRights: SpecialRightKey[]) => id && setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, specialRights } }));
+    const loadPresetSuggestions = () => {
+      if (!id || !matchingPreset) return;
+      const moduleAccess = (matchingPreset.moduleAccess || []).filter((key) => !PRESET_BLOCKED_MODULES.has(key as AdminModuleKey)) as AdminModuleKey[];
+      const specialRights = (matchingPreset.specialRights || []).filter((key) => !PRESET_BLOCKED_RIGHTS.has(key as SpecialRightKey)) as SpecialRightKey[];
+      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess, specialRights } }));
+      setTemporaryGrants([]);
+      setAccessSaveNotice({ tone: 'success', message: 'Suggestions loaded. Review the permissions below and save when ready.' });
+      toast.success('Suggestions loaded. Review the permissions below and save when ready.');
+    };
     const selectedByKey = (targetType: 'module' | 'right', key: AdminModuleKey | SpecialRightKey) => temporaryGrants.find((grant) => grant.targetType === targetType && grant.key === key);
     const labelForModule = (key: AdminModuleKey) => ADMIN_MODULES.find((item) => item.key === key)?.label || key;
     const labelForRight = (key: SpecialRightKey) => SPECIAL_RIGHTS.find((item) => item.key === key)?.label || key;
@@ -2024,9 +2383,16 @@ export default function TeamManagement() {
     const removeTemporaryGrant = (targetType: 'module' | 'right', key: AdminModuleKey | SpecialRightKey) => setTemporaryGrants((current) => current.filter((grant) => grant.targetType !== targetType || grant.key !== key));
     const moduleState = (key: AdminModuleKey): AccessControlState => {
       if (!isFounder) return 'locked';
+      if (FIXED_STAFF_MODULES.has(key)) return 'enabled';
       if (FOUNDER_ONLY_MODULES.has(key)) return 'founder_only';
       if (selectedByKey('module', key)) return 'temporary';
       return draft.moduleAccess.includes(key) ? 'enabled' : 'disabled';
+    };
+    const savedModuleState = (key: AdminModuleKey): AccessControlState => {
+      if (FIXED_STAFF_MODULES.has(key)) return 'enabled';
+      if (FOUNDER_ONLY_MODULES.has(key)) return 'founder_only';
+      if (initialAccessSnapshot.temporaryGrants.some((grant) => grant.targetType === 'module' && grant.key === key)) return 'temporary';
+      return baselineModules.includes(key) ? 'enabled' : 'disabled';
     };
     const rightState = (key: SpecialRightKey): AccessControlState => {
       if (!isFounder) return 'locked';
@@ -2035,7 +2401,7 @@ export default function TeamManagement() {
       return draft.specialRights.includes(key) ? 'enabled' : 'disabled';
     };
     const updateModuleState = (key: AdminModuleKey, nextState: AccessControlState) => {
-      if (FOUNDER_ONLY_MODULES.has(key) || nextState === 'founder_only' || nextState === 'locked') return;
+      if (FIXED_STAFF_MODULES.has(key) || FOUNDER_ONLY_MODULES.has(key) || nextState === 'founder_only' || nextState === 'locked') return;
       if (nextState === 'enabled') {
         setModules(toggleValue(draft.moduleAccess, key, true));
         removeTemporaryGrant('module', key);
@@ -2110,7 +2476,7 @@ export default function TeamManagement() {
     return (
       <SectionCard title="Staff Access & Special Rights" subtitle="Step 1: Choose Staff. Step 2: What can this staff open? Step 3: What can this staff do? Step 4: Review & Save.">
         {!teamUser ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No staff accounts loaded yet.</div> : <div className="space-y-4">
-          {!isFounder ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Access Denied. Founder permission is required.</div> : null}
+          {!isFounder ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Only the Founder can save Staff Access and Special Rights changes.</div> : null}
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">Staff Access opens modules. Special Rights allow actions inside modules. Role/Position only suggests defaults; Founder makes the final decision here.</div>
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
             <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -2126,16 +2492,49 @@ export default function TeamManagement() {
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-4 xl:grid-cols-8">
                   <div className="md:col-span-2"><div className="text-xs font-semibold uppercase text-slate-500">Selected staff</div><div className="mt-1 font-semibold text-slate-950">{displayFullName(teamUser, false)}</div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Role</div><div className="mt-1 font-semibold text-slate-950">{roleLabel(teamUser.role)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Role Preset</div><div className="mt-1 font-semibold text-slate-950">{matchingPreset ? `${matchingPreset.roleName || matchingPreset.id} Preset` : 'No matching preset'}</div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Staff ID</div><div className="mt-1 font-semibold text-slate-950">{displayStaffId(teamUser.staffId)}</div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Account</div><div className="mt-1"><StatusPill label={selectedStatus} /></div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Session</div><div className="mt-1"><StatusPill label={getSessionStatusDisplay(teamUser, user)} /></div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Access Expiry</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(accessExpiryValue(teamUser))}</div></div>
-                  <div><div className="text-xs font-semibold uppercase text-slate-500">Enabled</div><div className="mt-1 font-semibold text-slate-950">{enabledModules} modules · {enabledRights} rights</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Individual modules enabled</div><div className="mt-1 font-semibold text-slate-950">{enabledModules}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Effectively available</div><div className="mt-1 font-semibold text-slate-950">{effectivelyAvailableCount}</div></div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-600"><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800">Enabled</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">Disabled</span><span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">Temporary</span><span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800">Founder Only</span><span className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1">Locked</span><span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-blue-800">{temporaryGrants.length} temporary</span></div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600"><button type="button" disabled={!matchingPreset || !isFounder || !id} onClick={loadPresetSuggestions} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Load Suggestions</button><span className="text-slate-600">Loads suggestions only. Nothing is saved yet.</span><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800">Individual modules enabled: {enabledModules}</span><span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-blue-800">Effectively available: {effectivelyAvailableCount}</span><span className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1">Globally locked: {globallyLockedCount}</span><span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800">Founder-only: {founderOnlyCount}</span><span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">Temporary: {temporaryGrants.length}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">Rights enabled: {enabledRights}</span></div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-2"><div className="flex flex-wrap gap-2">{ACCESS_STUDIO_TABS.map((tab) => <button key={tab.key} type="button" onClick={() => setAccessStudioTab(tab.key)} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${accessStudioTab === tab.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}>{tab.label}</button>)}</div></div>
-              {accessStudioTab === 'modules' ? <div className="space-y-3"><div className="text-base font-semibold text-slate-950">What can this staff open?</div><div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="min-w-full text-sm"><thead><tr className="bg-slate-50 text-left text-slate-600"><th className="px-4 py-3">Module</th><th className="px-4 py-3">Access</th><th className="px-4 py-3">Control</th><th className="px-4 py-3">Notes</th></tr></thead><tbody>{ADMIN_MODULES.map((moduleItem) => { const state = moduleState(moduleItem.key); return <tr key={moduleItem.key} className="border-t border-slate-200"><td className="px-4 py-3 font-semibold text-slate-900">{moduleItem.label}</td><td className="px-4 py-3"><StatusPill label={state === 'enabled' ? 'Allowed' : state === 'disabled' ? 'Not Allowed' : ACCESS_STATE_LABEL[state]} tone={stateTone(state)} /></td><td className="px-4 py-3">{renderStateControl(state, (nextState) => updateModuleState(moduleItem.key, nextState))}</td><td className="px-4 py-3 text-slate-600">{state === 'founder_only' ? 'Founder-protected module. No normal staff edit control.' : state === 'temporary' ? `Temporary until ${selectedByKey('module', moduleItem.key)?.expiresAt || 'expiry not set'}` : moduleItem.key === 'finance_desk' ? 'Finance Desk kept in its current access state.' : 'Visible in admin structure; backend remains final security.'}</td></tr>; })}</tbody></table></div></div> : null}
+              {accessStudioTab === 'modules' ? <div className="space-y-3">
+                <div className="text-base font-semibold text-slate-950">What can this staff open?</div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-left text-slate-600">
+                        <th className="px-4 py-3">Module</th>
+                        <th className="px-4 py-3">Saved Individual Access</th>
+                        <th className="px-4 py-3">Draft Control</th>
+                        <th className="px-4 py-3">Global Policy</th>
+                        <th className="px-4 py-3">Final Access</th>
+                        <th className="px-4 py-3">Pending Result</th>
+                        <th className="px-4 py-3">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>{effectiveModuleRows.map(({ moduleItem, access, pendingAccess }) => {
+                      const state = moduleState(moduleItem.key);
+                      const savedState = savedModuleState(moduleItem.key);
+                      const pendingChanged = access.allowed !== pendingAccess.allowed || access.reasonCode !== pendingAccess.reasonCode || savedState !== state;
+                      return <tr key={moduleItem.key} className="border-t border-slate-200">
+                        <td className="px-4 py-3 font-semibold text-slate-900">{moduleItem.label}</td>
+                        <td className="px-4 py-3"><StatusPill label={moduleItem.key === 'safe_zone' ? 'Not configurable' : savedState === 'enabled' ? 'Enabled' : savedState === 'temporary' ? 'Temporary' : 'Disabled'} tone={stateTone(moduleItem.key === 'safe_zone' ? 'founder_only' : savedState)} /></td>
+                        <td className="px-4 py-3">{renderStateControl(state, (nextState) => updateModuleState(moduleItem.key, nextState), FIXED_STAFF_MODULES.has(moduleItem.key) || access.policyState === 'founder_only')}</td>
+                        <td className="px-4 py-3 text-slate-700">{GLOBAL_POLICY_LABEL[access.policyState] || access.policyState}</td>
+                        <td className="px-4 py-3"><StatusPill label={access.allowed ? 'Allowed' : access.reasonCode === 'FOUNDER_ONLY' ? 'Founder Only' : 'Locked'} tone={access.allowed ? 'emerald' : access.reasonCode === 'FOUNDER_ONLY' ? 'rose' : 'slate'} /></td>
+                        <td className="px-4 py-3"><StatusPill label={!pendingChanged ? 'No change' : pendingAccess.allowed ? 'Would become Allowed' : pendingAccess.reasonCode === 'FOUNDER_ONLY' ? 'Would remain Founder Only' : 'Would become Locked'} tone={!pendingChanged ? 'slate' : pendingAccess.allowed ? 'emerald' : pendingAccess.reasonCode === 'FOUNDER_ONLY' ? 'rose' : 'amber'} /></td>
+                        <td className="px-4 py-3 text-slate-600">{access.allowed ? 'Saved access is allowed under the current global policy.' : access.reason}</td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </div>
+              </div> : null}
               {accessStudioTab === 'newsroom' ? renderRightsRows(RIGHT_TAB_GROUPS.newsroom) : null}
               {accessStudioTab === 'liveTv' ? renderRightsRows(RIGHT_TAB_GROUPS.liveTv) : null}
               {accessStudioTab === 'staffAdmin' ? renderRightsRows(RIGHT_TAB_GROUPS.staffAdmin) : null}
@@ -2221,17 +2620,142 @@ export default function TeamManagement() {
     );
   };
 
+  void renderAccountControl;
+
+  const renderAccountControlV2 = () => {
+    const accountControlRows = teamRows;
+    const selectedAccountControlUser = accountControlRows.find((item) => {
+      const key = userId(item) || displayStaffId(item.staffId, isFounderUser(item));
+      return key === selectedStaffId;
+    }) || selectedAccessUser || founderRow;
+    const teamUser = selectedAccountControlUser;
+    const id = userId(teamUser);
+    const selectedKey = userId(teamUser) || displayStaffId(teamUser.staffId, isFounderUser(teamUser));
+    const founder = isFounderUser(teamUser);
+    const accountStatus = founder ? 'Protected' : displayAccountStatus(teamUser, isUserActive(teamUser));
+    const accountStatusLower = accountStatus.toLowerCase();
+    const expired = accountStatusLower === 'expired';
+    const suspended = accountStatusLower === 'suspended';
+    const locked = accountStatusLower === 'locked';
+    const archived = !founder && isArchivedStaff(teamUser);
+    const sessionStatus = getSessionStatusDisplay(teamUser, user);
+    const busy = !!id && rowBusyId === id;
+    const canExtendAccess = canRunAccountControlAction('extend_account_expiry', teamUser) && !suspended && !archived;
+    const canReactivateAccount = canRunAccountControlAction('reactivate_expired_account', teamUser) && (expired || locked);
+    const canSuspendAccount = canRunAccountControlAction('suspend_staff_account', teamUser) && accountStatusLower === 'active';
+    const canLockAccount = canRunAccountControlAction('lock_staff_account', teamUser) && (accountStatusLower === 'active' || rawAccountStatus(teamUser) === 'suspicious');
+    const canUnlockAccount = canRunAccountControlAction('unlock_staff_account', teamUser) && locked;
+    const canResetTemporaryPassword = canRunAccountControlAction('reset_temporary_password', teamUser);
+    const canForcePassword = canRunAccountControlAction('force_password_change', teamUser) && !staffMustChangePassword(teamUser);
+    const canLogoutSessions = canRunAccountControlAction('logout_staff_sessions', teamUser);
+    const canArchiveAccount = canRunAccountControlAction('archive_staff_account', teamUser) && !archived;
+    const selectedDelegationStaff = staffRows.find((item) => userId(item) === delegationForm.appointedStaffId) || null;
+    const delegationExpiresAt = delegationExpiryFor(delegationForm.validity, delegationForm.untilDate, delegationForm.temporaryUntil);
+    const delegationReviewReady = !!delegationForm.appointedStaffId && delegationForm.rights.length > 0 && delegationForm.manageableAccountTypes.length > 0 && delegationForm.auditReason.trim().length >= 5 && (delegationForm.validity === 'no_expiry' || !!delegationExpiresAt);
+    const accountControlAction = (rightKey: DelegationRightKey, node: ReactNode) => hasDelegatedAccountRight(rightKey) ? node : null;
+
+    return (
+      <SectionCard title="Account Control" subtitle="Founder and Founder-appointed account managers can run allowed staff account actions. Appointed managers can never touch Founder account.">
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+            <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-sm font-semibold text-slate-950">Select Staff</div>
+              <div className="mt-3 max-h-[520px] space-y-2 overflow-y-auto pr-1">
+                {accountControlRows.map((item) => {
+                  const itemFounder = isFounderUser(item);
+                  const itemKey = userId(item) || displayStaffId(item.staffId, itemFounder);
+                  const itemStatus = itemFounder ? 'Protected' : displayAccountStatus(item, isUserActive(item));
+                  return <button key={itemKey || item.email} type="button" onClick={() => setSelectedAccessUserId(itemKey)} className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${itemKey === selectedKey ? 'border-slate-900 bg-white text-slate-950 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}><span className="block truncate font-semibold">{displayFullName(item, itemFounder)}</span><span className="block truncate text-xs text-slate-500">{displayStaffId(item.staffId, itemFounder)} · {roleLabel(item.role)} · {itemStatus}</span></button>;
+                })}
+              </div>
+            </aside>
+
+            <div className="space-y-4">
+              {founder ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-900"><div className="font-semibold">Protected Founder Account</div><div className="mt-2">Permanent · No Expiry · Cannot be deleted · Cannot be suspended · Cannot be archived · Cannot be demoted · Cannot be restricted</div></div> : null}
+              {expired ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-950">{EXPIRED_ACCOUNT_NOTICE}</div> : null}
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold leading-6 text-blue-950">{STAFF_ID_LIFECYCLE_NOTE}</div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="font-semibold text-slate-950">STAFF IDENTITY</div>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Full Name</div><div className="mt-1 font-semibold text-slate-950">{displayFullName(teamUser, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Staff ID</div><div className="mt-1 font-semibold text-slate-950">{displayStaffId(teamUser.staffId, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Account Type</div><div className="mt-1 font-semibold text-slate-950">{accountTypeFor(teamUser, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Position</div><div className="mt-1 font-semibold text-slate-950">{displayPosition(teamUser, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Department</div><div className="mt-1 font-semibold text-slate-950">{displayDepartment(teamUser, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Official Title</div><div className="mt-1 font-semibold text-slate-950">{displayOfficialTitle(teamUser, founder)}</div></div>
+                  <div className="md:col-span-2"><div className="text-xs font-semibold uppercase text-slate-500">Official Email</div><div className="mt-1 font-semibold text-slate-950">{teamUser.email || (founder ? FOUNDER_EMAIL : '-')}</div></div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="font-semibold text-slate-950">ACCOUNT ACCESS</div>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Login Status</div><div className="mt-1"><StatusPill label={founder ? 'Protected' : expired ? 'Login Disabled' : accountStatusLower === 'active' ? 'Login Enabled' : 'Login Disabled'} tone={founder ? 'rose' : expired ? 'amber' : accountStatusLower === 'active' ? 'emerald' : 'rose'} /></div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Account Status</div><div className="mt-1"><StatusPill label={founder ? 'Protected' : accountStatus} /></div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Access Start</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(accessStartValue(teamUser))}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Access Expiry</div><div className="mt-1 font-semibold text-slate-950">{displayAccessExpiry(teamUser, founder)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">No Expiry</div><div className="mt-1 font-semibold text-slate-950">{displayAccessExpiry(teamUser, founder) === 'No Expiry' ? 'Yes' : 'No'}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Last Login</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(teamUser.lastLogin || teamUser.lastLoginAt || teamUser.loginAt)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Active Sessions</div><div className="mt-1 font-semibold text-slate-950">{activeSessionCount(teamUser, user)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Password Status</div><div className="mt-1 font-semibold text-slate-950">{passwordStatus(teamUser)}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Force Password Change</div><div className="mt-1 font-semibold text-slate-950">{staffMustChangePassword(teamUser) ? 'Enabled' : 'Disabled'}</div></div>
+                  <div><div className="text-xs font-semibold uppercase text-slate-500">Session Status</div><div className="mt-1"><StatusPill label={sessionStatus} /></div></div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="font-semibold text-slate-950">FOUNDER ACTIONS</div>
+                {founder ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-900">Invalid Founder-account actions are unavailable here.</div> : null}
+                {!founder ? <div className="mt-3 flex flex-wrap gap-2">
+                  {accountControlAction('extend_account_expiry', <button type="button" disabled={!canExtendAccess || busy} onClick={() => openAccessModal(teamUser, 'extend')} className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-900 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">{expired && hasDelegatedAccountRight('reactivate_expired_account') ? 'Extend + Reactivate' : 'Extend Access'}</button>)}
+                  {accountControlAction('reactivate_expired_account', <button type="button" disabled={!canReactivateAccount || busy} onClick={() => openAccessModal(teamUser, 'reactivate')} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">Reactivate</button>)}
+                  {accountControlAction('reactivate_expired_account', <button type="button" disabled={!canReactivateAccount || busy} onClick={() => openAccessModal(teamUser, 'reactivate-reset')} className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">Reactivate + Reset Password</button>)}
+                  {accountControlAction('suspend_staff_account', <button type="button" disabled={!canSuspendAccount || busy} onClick={() => runRowAction(id, () => suspendUser(id), 'Account suspended')} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Suspend</button>)}
+                  {accountControlAction('lock_staff_account', <button type="button" disabled={!canLockAccount || busy} onClick={() => runRowAction(id, () => lockUser(id), 'Account locked')} className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50">Lock</button>)}
+                  {accountControlAction('unlock_staff_account', <button type="button" disabled={!canUnlockAccount || busy} onClick={() => runRowAction(id, () => reactivateUser(id, { reason: 'Unlocked from Account Control.' }), 'Account unlocked')} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">Unlock</button>)}
+                  {accountControlAction('reset_temporary_password', <button type="button" disabled={!canResetTemporaryPassword || busy} onClick={() => openPasswordModal(teamUser, 'reset')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Reset Password</button>)}
+                  {accountControlAction('force_password_change', <button type="button" disabled={!canForcePassword || busy} onClick={() => runForceChangePassword(teamUser)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Force Password Change</button>)}
+                  {accountControlAction('logout_staff_sessions', <button type="button" disabled={!canLogoutSessions || busy} onClick={() => runLogoutAllDevices(teamUser)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Logout Devices</button>)}
+                  {accountControlAction('archive_staff_account', <button type="button" disabled={!canArchiveAccount || busy} onClick={() => openArchiveModal(teamUser)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Archive</button>)}
+                  {expired && accountControlAction('reactivate_expired_account', <button type="button" disabled={busy} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Keep Expired</button>)}
+                </div> : null}
+              </div>
+            </div>
+          </div>
+
+          {isFounder ? <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="font-semibold text-slate-950">Founder Delegation</div><p className="mt-1 text-sm leading-6 text-slate-600">Appoint a trusted staff member to manage selected staff-account functions without granting Founder status.</p><div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)]"><div className="space-y-4"><label className={fieldLabelClass}>Appointed Staff<select value={delegationForm.appointedStaffId} onChange={(event) => setDelegationForm((state) => ({ ...state, appointedStaffId: event.target.value, review: false }))} className={inputClass}><option value="">Select Staff</option>{staffRows.filter((item) => !isFounderUser(item)).map((item) => <option key={userId(item) || item.email} value={userId(item)}>{displayFullName(item, false)} · {displayStaffId(item.staffId)}</option>)}</select></label>{selectedDelegationStaff ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700"><div className="font-semibold text-slate-950">{displayFullName(selectedDelegationStaff, false)}</div><div>{displayStaffId(selectedDelegationStaff.staffId)} · {roleLabel(selectedDelegationStaff.role)}</div><div>{displayPosition(selectedDelegationStaff)} · {displayAccountStatus(selectedDelegationStaff, isUserActive(selectedDelegationStaff))}</div>{delegationStatusLabel(selectedDelegationStaff) ? <div className="mt-2"><StatusPill label={delegationStatusLabel(selectedDelegationStaff) || ''} tone={delegationStatusLabel(selectedDelegationStaff) === 'Active delegation' ? 'emerald' : 'amber'} /></div> : null}</div> : null}<label className={fieldLabelClass}>Validity<select value={delegationForm.validity} onChange={(event) => setDelegationForm((state) => ({ ...state, validity: event.target.value as DelegationValidity, review: false }))} className={inputClass}><option value="no_expiry">No Expiry</option><option value="until_date">Until Date</option><option value="temporary">Temporary</option></select></label>{delegationForm.validity === 'until_date' ? <label className={fieldLabelClass}>Until Date<input type="date" value={delegationForm.untilDate} onChange={(event) => setDelegationForm((state) => ({ ...state, untilDate: event.target.value, review: false }))} className={inputClass} /></label> : null}{delegationForm.validity === 'temporary' ? <label className={fieldLabelClass}>Temporary Until<input type="datetime-local" value={delegationForm.temporaryUntil} onChange={(event) => setDelegationForm((state) => ({ ...state, temporaryUntil: event.target.value, review: false }))} className={inputClass} /></label> : null}<label className={fieldLabelClass}>Audit Reason<textarea value={delegationForm.auditReason} onChange={(event) => setDelegationForm((state) => ({ ...state, auditReason: event.target.value, review: false }))} className={`${inputClass} min-h-24`} /></label></div><div className="space-y-4"><div><div className="mb-2 text-sm font-semibold text-slate-950">Account Control Rights</div><div className={checkboxGridClass}>{DELEGABLE_ACCOUNT_CONTROL_RIGHTS.map((right) => <label key={right.key} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"><input type="checkbox" checked={delegationForm.rights.includes(right.key)} onChange={(event) => setDelegationForm((state) => ({ ...state, rights: toggleValue(state.rights, right.key, event.target.checked), review: false }))} />{right.label}</label>)}</div></div><div><div className="mb-2 text-sm font-semibold text-slate-950">Manageable Account Types</div><div className={checkboxGridClass}>{MANAGEABLE_ACCOUNT_TYPES.map((accountType) => <label key={accountType} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"><input type="checkbox" checked={delegationForm.manageableAccountTypes.includes(accountType)} onChange={(event) => setDelegationForm((state) => ({ ...state, manageableAccountTypes: toggleValue(state.manageableAccountTypes, accountType, event.target.checked), review: false }))} />{accountType}</label>)}</div><div className="mt-2 text-xs font-semibold text-slate-600">Founder account always excluded.</div></div><div className="rounded-xl border border-rose-200 bg-rose-50 p-4"><div className="font-semibold text-rose-900">Founder Only — Cannot Be Delegated</div><div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">{FOUNDER_ONLY_LOCKED_RIGHTS.map((right) => <div key={right} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-900">🔒 {right}</div>)}</div></div>{delegationForm.review ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950"><div className="font-semibold">Review Delegation</div><div>Appointed Staff: {selectedDelegationStaff ? `${displayFullName(selectedDelegationStaff, false)} · ${displayStaffId(selectedDelegationStaff.staffId)}` : '-'}</div><div>Granted Rights: {delegationForm.rights.map((key) => DELEGABLE_ACCOUNT_CONTROL_RIGHTS.find((right) => right.key === key)?.label || key).join(', ') || '-'}</div><div>Manageable Account Types: {delegationForm.manageableAccountTypes.join(', ') || '-'}</div><div>Start Date: {dateOnly(new Date())}</div><div>Expiry: {delegationExpiresAt ? formatDateTime(delegationExpiresAt) : 'No Expiry'}</div><div>Audit Reason: {delegationForm.auditReason || '-'}</div></div> : null}{delegationNotice ? <div className={`rounded-xl border p-3 text-sm font-semibold ${delegationNotice.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>{delegationNotice.message}</div> : null}<div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={!delegationReviewReady} onClick={() => setDelegationForm((state) => ({ ...state, review: true }))} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Review Delegation</button><button type="button" disabled={!delegationForm.review || savingDelegation} onClick={submitFounderDelegation} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{savingDelegation ? 'Saving...' : 'Save Delegation'}</button></div></div></div></div> : null}
+        </div>
+      </SectionCard>
+    );
+  };
+
   const renderRolesAndWorkflow = () => (
     <div className="space-y-4">
-      <SectionCard title="Roles & Workflow" subtitle="Role gives default access only. Staff Access Control gives final access.">
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{ROLE_CONFIGS.filter((roleItem) => roleItem.id !== 'finance_accounts_manager' || DEFAULT_ROLE_ACCESS.some((item) => item.id === 'finance_accounts_manager')).map((roleItem) => <div key={roleItem.id} className={`rounded-xl border p-4 ${roleItem.protected ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="font-semibold text-slate-950">{roleItem.label}</div><div className="flex flex-wrap gap-1.5">{roleItem.badges.map((roleBadge) => <BadgePill key={roleBadge.label} badge={roleBadge} />)}</div></div><p className="mt-3 text-sm leading-6 text-slate-700">{roleItem.description}</p></div>)}</div>
+      <SectionCard title="Role Presets" subtitle="Save common permission suggestions for different staff jobs. A preset does not give access automatically. You review and approve each staff member's actual access separately.">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">Preset = suggestion only. Staff Access &amp; Special Rights = actual permission.</div>
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">{ROLE_CONFIGS.filter((roleItem) => roleItem.id !== 'finance_accounts_manager' || DEFAULT_ROLE_ACCESS.some((item) => item.id === 'finance_accounts_manager')).map((roleItem) => { const category = roleItem.protected ? 'Protected system role' : roleItem.badges[0]?.label || 'Staff role'; return <div key={roleItem.id} className={`rounded-xl border p-4 ${roleItem.protected ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="font-semibold text-slate-950">{roleItem.label}</div>{roleItem.protected ? <span className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-800">Not editable</span> : null}</div><div className="mt-2 text-xs font-semibold uppercase text-slate-500">{category}</div><p className="mt-3 text-sm leading-6 text-slate-700">{roleItem.description}</p></div>; })}</div>
       </SectionCard>
-      <SectionCard title="Role Templates" subtitle="Create or update custom default templates. Founder role remains protected.">
+      <SectionCard title="Create Role Preset" subtitle="Save reusable suggestions. Final access is still reviewed and saved under Staff Access & Special Rights.">
         {roleErr ? <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">{roleErr}</div> : null}
-        <form className="space-y-4" onSubmit={handleSaveRole}><div className="grid grid-cols-1 gap-4 lg:grid-cols-4"><label className={fieldLabelClass}>Role Name<input value={roleForm.roleName} onChange={(event) => setRoleForm((state) => ({ ...state, roleName: event.target.value }))} className={inputClass} /></label><label className={fieldLabelClass}>Sort Order<input type="number" min={1} value={roleForm.sortOrder} onChange={(event) => setRoleForm((state) => ({ ...state, sortOrder: Number(event.target.value) }))} className={inputClass} /></label><label className={`${fieldLabelClass} lg:col-span-2`}>Description<input value={roleForm.description} onChange={(event) => setRoleForm((state) => ({ ...state, description: event.target.value }))} className={inputClass} /></label></div><div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><div><div className="mb-2 text-sm font-semibold text-slate-950">Default Module Access</div><CheckboxList items={ADMIN_MODULES} values={roleForm.moduleAccess} disabled={!isFounder} onChange={(moduleAccess) => setRoleForm((state) => ({ ...state, moduleAccess }))} /></div><div><div className="mb-2 text-sm font-semibold text-slate-950">Default Special Rights</div><CheckboxList items={SPECIAL_RIGHTS} values={roleForm.specialRights} disabled={!isFounder} onChange={(specialRights) => setRoleForm((state) => ({ ...state, specialRights }))} /></div></div><button type="submit" disabled={!isFounder || savingRole} className={`rounded-lg px-4 py-2 text-sm font-semibold ${isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700'}`}>{savingRole ? 'Saving...' : 'Save Role Template'}</button></form>
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Changes to a preset affect future use only. Existing staff permissions remain unchanged.</div>
+        <form className="space-y-4" onSubmit={handleSaveRole}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <label className={fieldLabelClass}>Preset Name<input value={roleForm.roleName} onChange={(event) => setRoleForm((state) => ({ ...state, roleName: event.target.value }))} className={inputClass} /></label>
+            <label className={fieldLabelClass}>Role Category<select value={roleForm.roleCategory} onChange={(event) => setRoleForm((state) => ({ ...state, roleCategory: event.target.value }))} className={inputClass}>{ROLE_CATEGORY_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+            <label className={fieldLabelClass}>Description<input value={roleForm.description} onChange={(event) => setRoleForm((state) => ({ ...state, description: event.target.value }))} className={inputClass} /></label>
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-semibold text-slate-950">Suggested Modules</div>
+            <CheckboxList items={PRESET_MODULE_OPTIONS} values={roleForm.moduleAccess.filter((key) => !PRESET_BLOCKED_MODULES.has(key as AdminModuleKey))} disabled={!isFounder} onChange={(moduleAccess) => setRoleForm((state) => ({ ...state, moduleAccess }))} />
+          </div>
+          <div>
+            <div className="mb-2 text-sm font-semibold text-slate-950">Suggested Actions</div>
+            <div className="space-y-3">{PRESET_ACTION_GROUPS.map((group) => <details key={group.title} className="rounded-xl border border-slate-200 bg-white p-3" open={group.title === 'Editorial'}><summary className="cursor-pointer text-sm font-semibold text-slate-950">{group.title}</summary><div className="mt-3"><CheckboxList items={SPECIAL_RIGHTS.filter((item) => group.rights.includes(item.key))} values={roleForm.specialRights.filter((key) => group.rights.includes(key as SpecialRightKey))} disabled={!isFounder} onChange={(groupValues) => setRoleForm((state) => ({ ...state, specialRights: [...state.specialRights.filter((key) => !group.rights.includes(key as SpecialRightKey)), ...groupValues] }))} /></div></details>)}</div>
+          </div>
+          <button type="submit" disabled={!isFounder || savingRole} className={`rounded-lg px-4 py-2 text-sm font-semibold ${isFounder ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-300 text-slate-700'}`}>{savingRole ? 'Saving...' : 'Save Role Preset'}</button>
+        </form>
       </SectionCard>
-      <SectionCard title="Access Matrix" subtitle="Read-only default modules and special rights by role. Daily control belongs in Staff Access Control."><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr className="text-left text-slate-600"><th className="py-2 pr-4">Role</th><th className="py-2 pr-4">Modules</th><th className="py-2 pr-4">Special Rights</th></tr></thead><tbody>{DEFAULT_ROLE_ACCESS.map((roleItem) => <tr key={roleItem.id} className="border-t border-slate-200 align-top"><td className="py-3 pr-4 font-semibold text-slate-950">{roleItem.label}</td><td className="py-3 pr-4 text-xs leading-6 text-slate-700">{roleItem.modules.map((key) => ADMIN_MODULES.find((item) => item.key === key)?.label || key).join(', ')}</td><td className="py-3 pr-4 text-xs leading-6 text-slate-700">{roleItem.specialRights.length ? roleItem.specialRights.map((key) => SPECIAL_RIGHTS.find((item) => item.key === key)?.label || key).join(', ') : 'No special rights'}</td></tr>)}</tbody></table></div></SectionCard>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2"><SectionCard title="Editorial Workflow"><div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-800">Reporter {'->'} Copy Editor {'->'} Editor {'->'} Founder/Admin Publish</div></SectionCard><SectionCard title="Broadcast Workflow"><div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm font-semibold text-sky-950">Live TV Controller prepares {'->'} Admin/Founder approves {'->'} Live goes active {'->'} Founder can stop anytime</div></SectionCard></div>
     </div>
   );
 
@@ -2251,32 +2775,126 @@ export default function TeamManagement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!isCreatePage || !createFormDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [createFormDirty, isCreatePage]);
+
+  const goToStaffCenter = () => {
+    if (isCreatePage && createFormDirty && !window.confirm('Leave New Staff Account? Unsaved form information will be lost.')) return;
+    navigate('/admin/settings/admin-panel/team');
+  };
+
+  const createdStaff = createdStaffId ? staffRows.find((item) => userId(item) === createdStaffId) : null;
+  const clearCreateSuccess = () => {
+    setCreatedTempPassword(null);
+    setCreatedEmail(null);
+    setCreatedStaffId(null);
+  };
+  const viewCreatedProfile = () => {
+    if (createdStaff) setDetailsUser(createdStaff);
+    setActiveTab('registry');
+    clearCreateSuccess();
+    navigate('/admin/settings/admin-panel/team');
+  };
+  const configureCreatedAccess = () => {
+    if (createdStaffId) setSelectedStaffId(createdStaffId);
+    setActiveTab('access');
+    clearCreateSuccess();
+    navigate('/admin/settings/admin-panel/team');
+  };
+  const returnToStaffCenter = () => {
+    clearCreateSuccess();
+    navigate('/admin/settings/admin-panel/team');
+  };
+
+  const summaryCards = useMemo(() => {
+    const activeStaff = staffRows.filter((item) => displayAccountStatus(item, isUserActive(item)).toLowerCase() === 'active').length;
+    const loggedInStaff = staffRows.filter((item) => getSessionStatusDisplay(item, user) === 'Active Session').length;
+    const now = Date.now();
+    const soon = now + 30 * 24 * 60 * 60 * 1000;
+    const expiringSoon = staffRows.filter((item) => {
+      const raw = accessExpiryValue(item);
+      if (!raw) return false;
+      const time = new Date(raw).getTime();
+      return Number.isFinite(time) && time >= now && time <= soon;
+    }).length;
+    const suspendedLocked = staffRows.filter((item) => {
+      const status = displayAccountStatus(item, isUserActive(item)).toLowerCase();
+      return status.includes('suspended') || status.includes('locked');
+    }).length;
+    const pendingTasks = teamTasks.filter((task) => !['completed', 'closed', 'cancelled', 'canceled'].includes(String(task.status || '').trim().toLowerCase())).length;
+    return [
+      { label: 'Active Staff', value: loading ? 'Loading...' : String(activeStaff) },
+      { label: 'Logged-in Staff', value: loading ? 'Loading...' : String(loggedInStaff) },
+      { label: 'Accounts Expiring Soon', value: loading ? 'Loading...' : String(expiringSoon) },
+      { label: 'Suspended/Locked Accounts', value: loading ? 'Loading...' : String(suspendedLocked) },
+      { label: 'Pending Tasks', value: tasksLoading ? 'Loading...' : taskErr ? 'Unavailable' : String(pendingTasks) },
+    ];
+  }, [loading, staffRows, taskErr, tasksLoading, teamTasks, user]);
+
+  const managementOptions: { key: StaffControlTab; label: string; description: string }[] = [
+    { key: 'create', label: 'Create Staff Account', description: 'Open the dedicated New Staff Account page.' },
+    { key: 'registry', label: 'Staff Registry', description: 'Review staff identities, status, sessions, and account actions.' },
+    { key: 'access', label: 'Staff Access & Special Rights', description: 'Configure individual module access and special rights.' },
+    { key: 'tasks', label: 'Staff Tasks', description: 'Create, assign, review, and close staff tasks.' },
+    { key: 'account', label: 'Account Control', description: 'Extend, reactivate, suspend, lock, or archive staff accounts.' },
+    { key: 'security', label: 'Security & Sessions', description: 'Manage passwords, forced changes, and session controls.' },
+    { key: 'roles', label: 'Role Presets', description: 'Manage reusable permission suggestions for staff jobs.' },
+    { key: 'archived', label: 'Archived / Test Accounts', description: 'Review archived, test, duplicate, or cleanup accounts.' },
+    { key: 'audit', label: 'Audit Logs', description: 'Review staff-control audit history.' },
+  ];
+
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="text-lg font-semibold text-slate-950">Staff Control Center</div>
-            <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Create staff, assign tasks, control staff access, manage special rights, passwords, sessions, and staff roles — all under Founder control.</div>
-            {!isFounder && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Access denied: founder-only controls are disabled.</div>}
-          </div>
-          <button type="button" onClick={() => { void fetchStaff(); void refreshStaffIdPreview(); }} disabled={loading || sessionBlocked} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
-            {sessionBlocked ? 'Login required' : loading ? 'Refreshing...' : 'Refresh'}
+      {isCreatePage ? (
+        <div className="mx-auto max-w-5xl space-y-4">
+          <button type="button" onClick={goToStaffCenter} className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">
+            &larr; Back to Staff Control Center
           </button>
+          {renderCreateStaffAccount()}
         </div>
-        <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-          {STAFF_CONTROL_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`rounded-lg border px-3 py-2 text-sm font-semibold ${activeTab === tab.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
-            >
-              {tab.label}
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Staff Control Center</h1>
+              <div className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">Create staff, assign tasks, control staff access, manage special rights, passwords, sessions and staff roles — all under Founder control.</div>
+              {!isFounder && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Access denied: founder-only controls are disabled.</div>}
+            </div>
+            <button type="button" onClick={() => { void fetchStaff(); void refreshStaffIdPreview(); }} disabled={loading || sessionBlocked} className="w-fit rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60">
+              {sessionBlocked ? 'Login required' : loading ? 'Refreshing...' : 'Refresh'}
             </button>
-          ))}
+          </div>
+          <div className="mt-5 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 xl:grid-cols-5">
+            {summaryCards.map((item) => (
+              <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xl font-semibold text-slate-950">{item.value}</div>
+                <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 grid gap-3 border-t border-slate-100 pt-4 md:grid-cols-2 xl:grid-cols-3">
+            {managementOptions.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                aria-label={tab.label}
+                onClick={() => tab.key === 'create' ? navigate('/admin/settings/admin-panel/team/create') : setActiveTab(tab.key)}
+                className={`rounded-xl border p-4 text-left transition ${activeTab === tab.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                <span className="block text-sm font-semibold">{tab.label}</span>
+                <span className="mt-2 block text-xs font-normal leading-5 opacity-80">{tab.description}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {createdEmail && createdTempPassword && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="temporary-password-title">
@@ -2286,7 +2904,7 @@ export default function TeamManagement() {
             <div className="mt-3 text-sm">For: <span className="font-semibold">{createdEmail}</span></div>
             {createdStaffId ? <div className="mt-2 text-sm">Staff ID: <span className="font-semibold">{createdStaffId}</span></div> : null}
             <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-sm">{createdTempPassword}</div>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
@@ -2302,7 +2920,10 @@ export default function TeamManagement() {
               >
                 Copy
               </button>
-              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={() => { setCreatedTempPassword(null); setCreatedEmail(null); setCreatedStaffId(null); }}>Close</button>
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={viewCreatedProfile}>View Staff Profile</button>
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={configureCreatedAccess}>Configure Staff Access</button>
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100" onClick={clearCreateSuccess}>Create Another Staff Account</button>
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 sm:col-span-2" onClick={returnToStaffCenter}>Return to Staff Control Center</button>
             </div>
           </div>
         </div>
@@ -2377,7 +2998,7 @@ export default function TeamManagement() {
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="staff-action-title">
           <div className="my-8 w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl">
             <div id="staff-action-title" className="text-lg font-semibold">
-              {staffActionModal.type === 'password' ? (staffActionModal.mode === 'generate' ? 'Generate Temporary Password' : 'Reset Password') : staffActionModal.type === 'access' ? 'Extend Access / Reactivate' : staffActionModal.type === 'archive' ? 'Archive Account' : staffActionModal.type === 'mark-test' ? 'Mark as Test / Unwanted' : 'Delete Test Account'}
+              {staffActionModal.type === 'password' ? (staffActionModal.mode === 'generate' ? 'Generate Temporary Password' : 'Reset Password') : staffActionModal.type === 'access' ? staffActionModal.mode === 'extend' ? 'Extend Access' : 'Reactivate Staff Account' : staffActionModal.type === 'archive' ? 'Archive Account' : staffActionModal.type === 'mark-test' ? 'Mark as Test / Unwanted' : 'Delete Test Account'}
             </div>
             <div className="mt-2 text-sm text-slate-600">{displayFullName(staffActionModal.user, false)} · {staffActionModal.user.email || '-'}</div>
 
@@ -2390,9 +3011,13 @@ export default function TeamManagement() {
 
             {staffActionModal.type === 'access' ? (
               <div className="mt-4 grid grid-cols-1 gap-4">
-                <label className={fieldLabelClass}>New Access Expiry Date<input type="date" value={accessForm.accessExpiryDate} onChange={(event) => setAccessForm((state) => ({ ...state, accessExpiryDate: event.target.value }))} className={inputClass} required /></label>
-                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={accessForm.reactivate} onChange={(event) => setAccessForm((state) => ({ ...state, reactivate: event.target.checked }))} />Reactivate account</label>
-                <label className={fieldLabelClass}>Reason<textarea value={accessForm.reason} onChange={(event) => setAccessForm((state) => ({ ...state, reason: event.target.value }))} className={`${inputClass} min-h-24`} /></label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700"><div><span className="font-semibold">Staff:</span> {displayFullName(staffActionModal.user, false)}</div><div><span className="font-semibold">Staff ID:</span> {displayStaffId(staffActionModal.user.staffId)}</div><div><span className="font-semibold">Current state:</span> {displayAccountStatus(staffActionModal.user, isUserActive(staffActionModal.user))}</div></div>
+                <label className={fieldLabelClass}>Access Duration<select value={accessForm.duration} onChange={(event) => setAccessForm((state) => ({ ...state, duration: event.target.value as AccessDurationOption, review: false }))} className={inputClass}>{ACCESS_DURATION_OPTIONS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select></label>
+                {accessForm.duration === 'custom_date' ? <label className={fieldLabelClass}>Custom Date<input type="date" value={accessForm.customDate} onChange={(event) => setAccessForm((state) => ({ ...state, customDate: event.target.value, review: false }))} className={inputClass} /></label> : null}
+                {staffActionModal.mode === 'extend' && displayAccountStatus(staffActionModal.user, isUserActive(staffActionModal.user)) === 'Expired' && hasDelegatedAccountRight('reactivate_expired_account') ? <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={accessForm.reactivate} onChange={(event) => setAccessForm((state) => ({ ...state, reactivate: event.target.checked, review: false }))} />Extend + Reactivate</label> : null}
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={accessForm.requirePasswordChange} onChange={(event) => setAccessForm((state) => ({ ...state, requirePasswordChange: event.target.checked, review: false }))} />Require password change on next login</label>
+                <label className={fieldLabelClass}>Audit Reason<textarea value={accessForm.reason} onChange={(event) => setAccessForm((state) => ({ ...state, reason: event.target.value, review: false }))} className={`${inputClass} min-h-24`} /></label>
+                {accessForm.review ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold leading-6 text-blue-950"><div>Staff ID remains unchanged.</div><div>Existing Staff Access remains stored.</div><div>Existing Special Rights remain stored.</div><div>Existing audit history remains stored.</div></div> : null}
               </div>
             ) : null}
 
@@ -2424,7 +3049,8 @@ export default function TeamManagement() {
             <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
               <button type="button" onClick={closeStaffActionModal} disabled={staffActionBusy} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Cancel</button>
               {staffActionModal.type === 'password' ? <button type="button" onClick={submitPasswordAction} disabled={staffActionBusy} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Working...' : staffActionModal.mode === 'generate' ? 'Generate' : 'Reset Password'}</button> : null}
-              {staffActionModal.type === 'access' ? <button type="button" onClick={submitAccessAction} disabled={staffActionBusy || !accessForm.accessExpiryDate} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Saving...' : accessForm.reactivate ? 'Reactivate' : 'Extend Access'}</button> : null}
+              {staffActionModal.type === 'access' ? <button type="button" onClick={() => setAccessForm((state) => ({ ...state, review: true }))} disabled={staffActionBusy || accessForm.reason.trim().length < 5 || (accessForm.duration === 'custom_date' && !accessForm.customDate)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">Review Reactivation</button> : null}
+              {staffActionModal.type === 'access' ? <button type="button" onClick={submitAccessAction} disabled={staffActionBusy || !accessForm.review} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Saving...' : staffActionModal.mode === 'extend' && !accessForm.reactivate ? 'Extend Access' : 'Reactivate Account'}</button> : null}
               {staffActionModal.type === 'archive' ? <button type="button" onClick={submitArchiveAction} disabled={staffActionBusy} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Archiving...' : 'Archive Account'}</button> : null}
               {staffActionModal.type === 'delete-test' ? <button type="button" onClick={submitDeleteTestAction} disabled={staffActionBusy || deleteTestForm.confirmation !== 'DELETE PERMANENTLY' || !deleteTestForm.confirmed || !deleteTestForm.reason.trim()} className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Deleting...' : 'Delete Permanently'}</button> : null}
               {staffActionModal.type === 'mark-test' ? <button type="button" onClick={submitMarkTestAction} disabled={staffActionBusy || !markTestForm.reason.trim() || !markTestForm.confirmed} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">{staffActionBusy ? 'Saving...' : 'Mark as Test / Unwanted'}</button> : null}
@@ -2433,15 +3059,15 @@ export default function TeamManagement() {
         </div>
       )}
 
-      {activeTab === 'create' ? renderCreateStaffAccount() : null}
-      {activeTab === 'registry' ? renderStaffRegistry() : null}
-      {activeTab === 'access' ? renderFounderAccessStudio() : null}
-      {activeTab === 'tasks' ? renderStaffTasks() : null}
-      {activeTab === 'account' ? renderAccountControl() : null}
-      {activeTab === 'security' ? renderSecurityAndSessions() : null}
-      {activeTab === 'roles' ? renderRolesAndWorkflow() : null}
-      {activeTab === 'archived' ? renderArchivedAccounts() : null}
-      {activeTab === 'audit' ? <AuditLogsView /> : null}
+      {!isCreatePage && activeTab === 'create' ? renderCreateStaffAccount() : null}
+      {!isCreatePage && activeTab === 'registry' ? renderStaffRegistry() : null}
+      {!isCreatePage && activeTab === 'access' ? renderFounderAccessStudio() : null}
+      {!isCreatePage && activeTab === 'tasks' ? renderStaffTasks() : null}
+      {!isCreatePage && activeTab === 'account' ? renderAccountControlV2() : null}
+      {!isCreatePage && activeTab === 'security' ? renderSecurityAndSessions() : null}
+      {!isCreatePage && activeTab === 'roles' ? renderRolesAndWorkflow() : null}
+      {!isCreatePage && activeTab === 'archived' ? renderArchivedAccounts() : null}
+      {!isCreatePage && activeTab === 'audit' ? <AuditLogsView /> : null}
 
       {detailsUser ? (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50" role="dialog" aria-modal="true" aria-labelledby="staff-details-title">

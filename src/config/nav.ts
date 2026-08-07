@@ -3,7 +3,8 @@ import {
   filterNavItemsByOwnerVisibility,
   type AdminFeatureVisibilityState,
 } from '@/lib/adminFeatureVisibility';
-import { canAccessAdminModule, type AdminModuleKey } from '@/lib/adminAccessControl';
+import { resolveAdminModuleAccess, type AdminModuleKey } from '@/lib/adminAccessControl';
+import type { AdminEffectiveModuleAccess, AdminModulePolicyMap } from '@/lib/adminModulePolicy';
 
 export type Role = string;
 export type NavItem = {
@@ -16,6 +17,7 @@ export type NavItem = {
   rightSide?: boolean;
   hidden?: boolean;
   locked?: boolean;
+  lockedReason?: string;
 };
 
 // Central navigation definition
@@ -75,17 +77,30 @@ export function rightNavWithOwnerVisibility(role: Role, visibility: AdminFeature
   return filterNavItemsByOwnerVisibility(rightNav(role), role, visibility);
 }
 
-export function leftNavWithAccess(user: any, visibility: AdminFeatureVisibilityState) {
+type NavAccessInput = AdminFeatureVisibilityState | { modulePolicy?: AdminModulePolicyMap; backendAccess?: Partial<Record<AdminModuleKey, AdminEffectiveModuleAccess>>; legacyVisibility?: AdminFeatureVisibilityState };
+
+function navAccessOptions(input: NavAccessInput) {
+  if ('modulePolicy' in input || 'backendAccess' in input || 'legacyVisibility' in input) return input;
+  return { legacyVisibility: input };
+}
+
+export function leftNavWithAccess(user: any, accessInput: NavAccessInput) {
+  const access = navAccessOptions(accessInput);
   const role = String(user?.role || 'viewer').toLowerCase();
   return NAV_ITEMS.filter((item) => !item.hidden && !item.rightSide).flatMap((item) => {
-    if (item.moduleKey) return [{ ...item, locked: !canAccessAdminModule(user, item.moduleKey, visibility) }];
+    if (item.moduleKey) {
+      const result = resolveAdminModuleAccess(user, item.moduleKey, access);
+      if (!result.visible) return [];
+      return [{ ...item, locked: !result.allowed, lockedReason: result.reason }];
+    }
     return item.roles.includes(role) ? [item] : [];
   });
 }
 
-export function rightNavWithAccess(user: any, visibility: AdminFeatureVisibilityState) {
+export function rightNavWithAccess(user: any, accessInput: NavAccessInput) {
+  const access = navAccessOptions(accessInput);
   return NAV_ITEMS.filter((item) => !item.hidden && item.rightSide).filter((item) => {
-    if (item.moduleKey) return canAccessAdminModule(user, item.moduleKey, visibility);
+    if (item.moduleKey) return resolveAdminModuleAccess(user, item.moduleKey, access).allowed;
     return item.roles.includes(String(user?.role || 'viewer').toLowerCase());
   });
 }

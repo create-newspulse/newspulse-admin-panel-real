@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
+import AdminBootstrapLoader from '@components/AdminBootstrapLoader';
 
 type FounderRouteProps = {
   children: React.ReactNode;
@@ -71,10 +72,10 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
   }
   
   if (!isReady || isRestoring) {
-    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+    return <AdminBootstrapLoader />;
   }
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Checking founder access…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   // Don't redirect while we are still trying to fetch role/profile.
@@ -82,7 +83,7 @@ const FounderRoute: React.FC<FounderRouteProps> = ({ children }) => {
     if (requestedRoleRestoreRef.current) {
       return <Navigate to="/login" replace state={{ from: location }} />;
     }
-    return <div className="text-center mt-10">🔐 Loading profile…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   // ✅ Proper authentication check OR controlled demo access

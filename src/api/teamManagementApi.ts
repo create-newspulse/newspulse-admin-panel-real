@@ -1,4 +1,5 @@
 import { adminJson, AdminApiError } from '@/lib/http/adminFetch';
+import { StaffAccessPayloadValidationError, serializeStaffAccessPayload, type StaffAccessTemporaryGrant } from '@/lib/staffAccessSerializer';
 
 export const TEAM_AUTH_ERROR_MESSAGE = 'Session expired. Please login again.';
 export const TEAM_ROLE_API_UNAVAILABLE_MESSAGE = 'Team role API is not available yet.';
@@ -85,7 +86,18 @@ export type StaffReasonPayload = {
 };
 
 export type StaffAccessPayload = StaffReasonPayload & {
-  accessExpiryDate: string;
+  accessExpiryDate?: string;
+  noExpiry?: boolean;
+  requirePasswordChange?: boolean;
+};
+
+export type FounderDelegationPayload = StaffReasonPayload & {
+  appointedStaffId: string;
+  rights: string[];
+  manageableAccountTypes: string[];
+  validity: 'no_expiry' | 'until_date' | 'temporary';
+  startDate: string;
+  expiresAt?: string;
 };
 
 export type MarkTestAccountPayload = StaffReasonPayload & {
@@ -168,6 +180,7 @@ const TEAM_API_PATHS = {
   accessTaskRights: (id: string) => `/admin-api/admin/team/access/staff/${encodeURIComponent(id)}/task-rights`,
   accessAccountControlRights: (id: string) => `/admin-api/admin/team/access/staff/${encodeURIComponent(id)}/account-control-rights`,
   accessTemporary: (id: string) => `/admin-api/admin/team/access/staff/${encodeURIComponent(id)}/temporary`,
+  founderDelegation: '/admin-api/admin/team/account-control/delegations',
   effectiveAccess: (id: string) => `/admin-api/admin/team/access/staff/${encodeURIComponent(id)}/effective-access`,
   generateTemporaryPassword: (id: string) => `/admin-api/admin/team/staff/${encodeURIComponent(id)}/generate-temporary-password`,
   resetPassword: (id: string) => `/admin-api/admin/team/staff/${encodeURIComponent(id)}/reset-password`,
@@ -192,8 +205,20 @@ const TEAM_API_PATHS = {
   taskComplete: (id: string) => `/admin-api/admin/team/tasks/${encodeURIComponent(id)}/complete`,
 } as const;
 
-const TASK_RIGHT_KEYS = new Set(['can_create_task', 'can_assign_task', 'can_edit_task', 'can_update_task_status', 'can_complete_task', 'can_close_task', 'can_delete_task', 'can_view_team_tasks', 'can_manage_department_tasks', 'can_comment_on_task', 'can_escalate_task']);
-const ACCOUNT_CONTROL_RIGHT_KEYS = new Set(['can_view_staff_details', 'can_edit_staff_basic_details', 'can_change_staff_email', 'can_generate_temporary_password', 'can_reset_staff_password', 'can_force_password_change', 'can_logout_all_devices', 'can_extend_or_reactivate_staff', 'can_suspend_staff', 'can_suspend_staff_account', 'can_lock_staff_account', 'can_archive_staff', 'can_delete_staff_permanently', 'can_control_founder_account', 'can_grant_account_control_rights']);
+const TASK_RIGHT_KEYS = new Set(['task_create', 'task_assign', 'task_edit', 'task_update_status', 'task_complete', 'task_close', 'task_delete', 'task_view_team', 'task_manage_department', 'task_comment', 'task_escalate']);
+const ACCOUNT_CONTROL_RIGHT_KEYS = new Set(['staff_view_details', 'staff_edit_basic', 'staff_change_email', 'staff_generate_temp_password', 'staff_reset_password', 'staff_force_password_change', 'staff_logout_devices', 'staff_extend_access', 'staff_reactivate', 'staff_suspend', 'staff_lock', 'staff_archive', 'staff_delete_permanently', 'founder_account_control', 'grant_account_control_rights', 'revoke_account_control_rights']);
+
+export type StaffAccessOverridePayload = {
+  moduleAccess?: string[];
+  moduleStates?: Record<string, string | boolean | null | undefined>;
+  specialRights?: string[];
+  reason?: string;
+  auditReason?: string;
+  accessExpiryDate?: string;
+  accessVersion?: number;
+  expectedVersion?: number;
+  temporaryGrants?: StaffAccessTemporaryGrant[];
+};
 
 function normalizeList<T = any>(raw: any): T[] {
   if (!raw) return [];
@@ -229,7 +254,14 @@ export function toTeamApiErrorMessage(err: unknown, fallback: string): string {
   if (status === 404) return 'Staff not found.';
   if (status === 409) return 'Duplicate email.';
   if (!err) return fallback;
-  if (err instanceof AdminApiError) return err.message || fallback;
+  if (err instanceof StaffAccessPayloadValidationError) return err.message || fallback;
+  if (err instanceof AdminApiError) {
+    const body: any = err.body;
+    const field = body?.field || body?.invalidField || body?.invalidFields?.[0]?.field;
+    const reason = body?.reason || body?.invalidFields?.[0]?.reason;
+    if (body?.code === 'INVALID_MODULE_ACCESS_PAYLOAD' && field && reason) return `${err.message || fallback} (${field}: ${reason})`;
+    return err.message || fallback;
+  }
   const e: any = err as any;
   return e?.message || e?.response?.data?.message || e?.response?.data?.error || e?.response?.data?.details || fallback;
 }
@@ -343,43 +375,50 @@ export async function updateTeamRole(id: string, payload: Partial<TeamRolePayloa
   });
 }
 
-export async function saveStaffAccessOverride(id: string, payload: { moduleAccess?: string[]; specialRights?: string[]; reason?: string; accessExpiryDate?: string; temporaryGrants?: { targetType: 'module' | 'right'; key: string; expiresAt: string; reason?: string }[] }): Promise<any> {
+export async function saveStaffAccessOverride(id: string, payload: StaffAccessOverridePayload): Promise<any> {
+  const serialized = serializeStaffAccessPayload(payload);
   const requests: Promise<any>[] = [];
-  if (payload.moduleAccess) {
+  if (payload.moduleAccess || payload.moduleStates) {
     requests.push(adminJson(TEAM_API_PATHS.accessModules(id), {
       method: 'PATCH',
-      json: { moduleAccess: payload.moduleAccess, modules: payload.moduleAccess, reason: payload.reason },
+      json: {
+        moduleAccessStates: serialized.moduleAccessStates,
+        auditReason: serialized.auditReason,
+        reason: serialized.reason,
+        accessVersion: serialized.accessVersion,
+        expectedVersion: serialized.expectedVersion,
+      },
     }));
   }
   if (payload.specialRights) {
-    const taskRights = payload.specialRights.filter((right) => TASK_RIGHT_KEYS.has(right));
-    const accountControlRights = payload.specialRights.filter((right) => ACCOUNT_CONTROL_RIGHT_KEYS.has(right));
+    const taskRights = serialized.specialRights.filter((right) => TASK_RIGHT_KEYS.has(right));
+    const accountControlRights = serialized.specialRights.filter((right) => ACCOUNT_CONTROL_RIGHT_KEYS.has(right));
     requests.push(adminJson(TEAM_API_PATHS.accessRights(id), {
       method: 'PATCH',
-      json: { specialRights: payload.specialRights, rights: payload.specialRights, reason: payload.reason },
+      json: { specialRights: serialized.specialRights, rights: serialized.rights, specialRightsOverride: serialized.specialRightsOverride, auditReason: serialized.auditReason, reason: serialized.reason },
     }));
     requests.push(adminJson(TEAM_API_PATHS.accessTaskRights(id), {
       method: 'PATCH',
-      json: { taskRights, rights: taskRights, reason: payload.reason },
+      json: { taskRights, rights: taskRights, auditReason: serialized.auditReason, reason: serialized.reason },
     }));
     requests.push(adminJson(TEAM_API_PATHS.accessAccountControlRights(id), {
       method: 'PATCH',
-      json: { accountControlRights, rights: accountControlRights, appointedAccountManager: accountControlRights.length > 0, reason: payload.reason },
+      json: { accountControlRights, rights: accountControlRights, appointedAccountManager: accountControlRights.length > 0, auditReason: serialized.auditReason, reason: serialized.reason },
     }));
   }
-  if (payload.accessExpiryDate) {
+  if (serialized.accessExpiryDate) {
     requests.push(adminJson(TEAM_API_PATHS.accessTemporary(id), {
       method: 'POST',
-      json: { accessExpiryDate: payload.accessExpiryDate, reason: payload.reason },
+      json: { accessExpiryDate: serialized.accessExpiryDate, expiresAt: serialized.accessExpiryDate, auditReason: serialized.auditReason, reason: serialized.reason },
     }).catch((err) => {
       if ([404, 405, 501].includes(statusOf(err))) return { temporaryUnavailable: true };
       throw err;
     }));
   }
-  payload.temporaryGrants?.forEach((grant) => {
+  serialized.temporaryAccess.forEach((grant) => {
     requests.push(adminJson(TEAM_API_PATHS.accessTemporary(id), {
       method: 'POST',
-      json: { targetType: grant.targetType, key: grant.key, expiresAt: grant.expiresAt, accessExpiryDate: grant.expiresAt, reason: grant.reason || payload.reason },
+      json: { ...grant, auditReason: grant.reason || serialized.auditReason, reason: grant.reason || serialized.reason },
     }).catch((err) => {
       if ([404, 405, 501].includes(statusOf(err))) return { temporaryUnavailable: true };
       throw err;
@@ -418,6 +457,13 @@ export async function reactivateUser(id: string, payload?: Partial<StaffAccessPa
   return adminJson(TEAM_API_PATHS.reactivate(id), {
     method: 'POST',
     json: payload || {},
+  });
+}
+
+export async function saveFounderDelegation(payload: FounderDelegationPayload): Promise<any> {
+  return adminJson(TEAM_API_PATHS.founderDelegation, {
+    method: 'POST',
+    json: payload,
   });
 }
 

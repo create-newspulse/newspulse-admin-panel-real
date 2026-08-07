@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
 import { SettingsDraftProvider } from '@/features/settings/SettingsDraftContext';
+import { isOwnerRole } from '@/lib/adminFeatureVisibility';
 
 const linkCls = ({ isActive }: { isActive: boolean }) =>
   `block w-full rounded-xl border px-3 py-2.5 text-left text-sm font-semibold transition ` +
@@ -16,7 +17,7 @@ export default function AdminPanelSettingsLayout() {
 
 function AdminPanelSettingsLayoutInner() {
   const { user } = useAuth();
-  const canPublish = String(user?.role || '').toLowerCase() === 'founder';
+  const canPublish = isOwnerRole(user?.role);
 
   return (
     <div className="grid grid-cols-1 gap-6 pb-6 lg:grid-cols-12">
@@ -25,7 +26,15 @@ function AdminPanelSettingsLayoutInner() {
           <div className="text-sm font-semibold text-slate-950">Admin Panel Settings</div>
           <div className="mt-1 text-xs leading-5 text-slate-500">Team, security, translation, audit, and preview controls.</div>
         </div>
-        <NavLink to="team" className={linkCls}>Team Management</NavLink>
+        {canPublish ? (
+          <NavLink to="founder-access-control" className={linkCls}>
+            <span className="block">Founder Access Control</span>
+            <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">
+              Globally control whether Admin Panel modules are available to staff, locked for all staff, hidden from staff, or restricted to the Founder.
+            </span>
+          </NavLink>
+        ) : null}
+        <NavLink to="team" className={linkCls}>Staff Control Center</NavLink>
         <NavLink to="staff-activity-attendance" className={linkCls}>Staff Activity &amp; Attendance</NavLink>
         <NavLink to="security" className={linkCls}>Security</NavLink>
         {canPublish ? <NavLink to="translation" className={linkCls}>Translation</NavLink> : null}

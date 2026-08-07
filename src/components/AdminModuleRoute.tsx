@@ -1,10 +1,11 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth } from '@context/AuthContext';
-import { useAdminFeatureVisibility } from '@/hooks/useAdminFeatureVisibility';
-import { DEFAULT_ADMIN_FEATURE_VISIBILITY, isOwnerRole } from '@/lib/adminFeatureVisibility';
-import { canAccessAnyAdminModule, type AdminModuleKey } from '@/lib/adminAccessControl';
+import { isOwnerRole } from '@/lib/adminFeatureVisibility';
+import { resolveAnyAdminModuleAccess, type AdminModuleKey } from '@/lib/adminAccessControl';
+import { useAdminEffectiveAccess } from '@/hooks/useAdminEffectiveAccess';
 import Denied from '@pages/Denied';
+import AdminBootstrapLoader from '@components/AdminBootstrapLoader';
 
 type AdminModuleRouteProps = {
   moduleKey: AdminModuleKey | AdminModuleKey[];
@@ -14,22 +15,27 @@ type AdminModuleRouteProps = {
 export default function AdminModuleRoute({ moduleKey, children }: AdminModuleRouteProps) {
   const location = useLocation();
   const { isAuthenticated, user, isLoading, isReady, isRestoring } = useAuth();
+  const hasUserProfile = !!user && !!String(user?.role || '').trim();
   const ownerRole = isOwnerRole(user?.role);
-  const { visibility, isLoading: visibilityLoading } = useAdminFeatureVisibility({ enabled: isAuthenticated && !ownerRole });
+  const { modulePolicy, backendAccess, isLoading: accessLoading } = useAdminEffectiveAccess({ user, enabled: isAuthenticated && hasUserProfile && !ownerRole });
   const moduleKeys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
 
   if (!isReady || isRestoring) {
-    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+    return <AdminBootstrapLoader />;
   }
 
-  if (isLoading || (isAuthenticated && !ownerRole && visibilityLoading)) {
-    return <div className="text-center mt-10">🔐 Checking access…</div>;
+  if (isLoading || (isAuthenticated && !ownerRole && accessLoading)) {
+    return <AdminBootstrapLoader />;
   }
 
   if (!isAuthenticated || !user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  const effectiveVisibility = ownerRole ? DEFAULT_ADMIN_FEATURE_VISIBILITY : visibility;
-  return canAccessAnyAdminModule(user, moduleKeys, effectiveVisibility) ? <>{children}</> : <Denied />;
+  if (!hasUserProfile) {
+    return <AdminBootstrapLoader />;
+  }
+
+  const access = resolveAnyAdminModuleAccess(user, moduleKeys, { modulePolicy, backendAccess });
+  return access.allowed ? <>{children}</> : <Denied message={access.reason} />;
 }

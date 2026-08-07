@@ -5,8 +5,8 @@ import { LockKeyhole } from 'lucide-react';
 import { useDarkMode } from '../context/DarkModeContext';
 import { useAuth } from '../context/AuthContext';
 import { leftNavWithAccess, rightNavWithAccess } from '@/config/nav';
-import { DEFAULT_ADMIN_FEATURE_VISIBILITY, isOwnerRole } from '@/lib/adminFeatureVisibility';
-import { useAdminFeatureVisibility } from '@/hooks/useAdminFeatureVisibility';
+import { isOwnerRole } from '@/lib/adminFeatureVisibility';
+import { useAdminEffectiveAccess } from '@/hooks/useAdminEffectiveAccess';
 
 export default function Navbar() {
   const { isDark, toggleDark } = useDarkMode();
@@ -14,14 +14,16 @@ export default function Navbar() {
   const location = useLocation();
   const role = (user?.role ?? 'viewer') as any;
   const isAuthPage = location.pathname === '/login' || location.pathname === '/admin/login';
+  const hasUserProfile = !!user && !!String(user?.role || '').trim();
   const ownerRole = isOwnerRole(role);
-  const { visibility } = useAdminFeatureVisibility({ enabled: isAuthenticated && !isAuthPage && !ownerRole });
+  const { modulePolicy, backendAccess, isLoading: accessLoading } = useAdminEffectiveAccess({ user, enabled: isAuthenticated && !isAuthPage && hasUserProfile && !ownerRole });
 
   // remove unused handleLogout closure (we use inline handler)
 
-  const effectiveVisibility = ownerRole ? DEFAULT_ADMIN_FEATURE_VISIBILITY : visibility;
-  const left = leftNavWithAccess(user, effectiveVisibility).filter((item) => item.key !== 'community-hub');
-  const right = rightNavWithAccess(user, effectiveVisibility);
+  const access = { modulePolicy, backendAccess };
+  const navAccessReady = hasUserProfile && !accessLoading;
+  const left = navAccessReady ? leftNavWithAccess(user, access).filter((item) => item.key !== 'community-hub') : [];
+  const right = navAccessReady ? rightNavWithAccess(user, access) : [];
 
   return (
     <header className="bg-slate-900 text-white px-6 py-4 shadow-md border-b border-slate-700">
@@ -34,22 +36,23 @@ export default function Navbar() {
         </Link>
 
         {isAuthenticated && !isAuthPage && (
-          <nav className="flex flex-wrap items-center gap-4 text-sm font-medium">
+          <nav className="flex flex-wrap items-center gap-4 text-sm font-medium" aria-busy={!navAccessReady ? 'true' : undefined}>
 
             {/* 🔗 Main Menu */}
-            {left.map(({ path, icon, label, key, locked }) => {
+            {left.map(({ path, icon, label, key, locked, lockedReason }) => {
+              const reason = lockedReason || 'Access denied.';
               return locked ? (
                 <button
                   key={key}
                   type="button"
                   aria-disabled="true"
-                  title="Access Denied. Founder permission is required."
-                  onClick={() => toast.error('Access Denied. Founder permission is required.')}
+                  title={reason}
+                  onClick={() => toast.error(reason)}
                   className="flex cursor-not-allowed items-center gap-1 rounded px-2 py-1 text-slate-400 transition-colors hover:text-slate-300"
                 >
                   <span>{icon}</span>
                   <span>{label}</span>
-                  <LockKeyhole aria-label="Locked module" title="Access restricted. Founder permission is required." className="ml-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                  <LockKeyhole aria-label="Locked module" title={reason} className="ml-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
                 </button>
               ) : (
                 <NavLink

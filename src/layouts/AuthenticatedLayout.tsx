@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AdminBootstrapLoader from '@/components/AdminBootstrapLoader';
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
@@ -45,11 +46,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
   }, []);
 
   if (!isReady || isRestoring || isLoading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen bg-gray-100 dark:bg-gray-900">
-        <p className="text-gray-600 dark:text-gray-300 text-lg">Checking access and loading...</p>
-      </div>
-    );
+    return <AdminBootstrapLoader />;
   }
 
   const role = String(user?.role || '').toLowerCase();

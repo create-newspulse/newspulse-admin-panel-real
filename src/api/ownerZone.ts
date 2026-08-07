@@ -4,6 +4,21 @@ import {
   normalizeAdminFeatureVisibility,
   type AdminFeatureVisibilityState,
 } from '@/lib/adminFeatureVisibility';
+import {
+  normalizeAdminModulePolicy,
+  serializeModulePolicyPayload,
+  type AdminModulePolicyMap,
+  type SerializedModulePolicyPayload,
+} from '@/lib/adminModulePolicy';
+
+export const FOUNDER_MODULE_POLICY_VERSION_ERROR = 'Founder policy version could not be loaded. Refresh the latest policy.';
+
+export const FOUNDER_MODULE_POLICY_API = {
+  load: '/admin/safe-owner-zone/module-policy',
+  preview: '/admin/safe-owner-zone/module-policy/preview',
+  save: '/admin/safe-owner-zone/module-policy',
+  audit: '/admin/safe-owner-zone/module-policy/audit',
+} as const;
 
 export type OwnerStatus = {
   mode?: 'NORMAL' | 'READ_ONLY' | 'LOCKDOWN' | string;
@@ -31,6 +46,11 @@ export type SystemState = {
   externalFetch?: boolean;
   aiAutoPublish?: boolean;
   [key: string]: any;
+};
+
+export type FounderModulePolicySnapshot = {
+  policy: AdminModulePolicyMap;
+  version: number;
 };
 
 // Owner key
@@ -179,24 +199,6 @@ function normalizeSnapshot(raw: any): SnapshotItem {
   };
 }
 
-function normalizeDeploy(raw: any): DeployEventItem {
-  return {
-    id: normalizeId(raw),
-    happenedAt: raw?.happenedAt ?? raw?.createdAt,
-    provider: raw?.provider,
-    service: raw?.service,
-    environment: raw?.environment,
-    status: raw?.status,
-    deployId: raw?.deployId,
-    url: raw?.url,
-    commitSha: raw?.commitSha,
-    branch: raw?.branch,
-    message: raw?.message,
-    author: raw?.author,
-    ...raw,
-  };
-}
-
 export async function createSnapshot(payload: { label?: string; reason?: string }): Promise<SnapshotItem> {
   const raw: any = await api('/admin/system/snapshots', {
     method: 'POST',
@@ -231,4 +233,134 @@ export async function putAdminFeatureVisibility(visibility: AdminFeatureVisibili
     json: createVisibilityPayload(visibility),
   });
   return normalizeAdminFeatureVisibility((response as any)?.visibility);
+}
+
+let founderModulePolicyCache: FounderModulePolicySnapshot | null = null;
+let founderModulePolicyInflight: Promise<FounderModulePolicySnapshot> | null = null;
+let founderModulePolicyLoadError: any = null;
+
+function normalizeModulePolicyResponse(response: unknown): AdminModulePolicyMap {
+  return normalizeAdminModulePolicy(response, (response as any)?.visibility);
+}
+
+export function isValidFounderModulePolicyVersion(version: unknown): version is number {
+  return Number.isInteger(version) && Number(version) >= 1;
+}
+
+function readFounderModulePolicySnapshot(response: unknown): FounderModulePolicySnapshot {
+  const version = (response as any)?.version;
+  if (!isValidFounderModulePolicyVersion(version)) {
+    throw new Error(FOUNDER_MODULE_POLICY_VERSION_ERROR);
+  }
+  return {
+    policy: normalizeModulePolicyResponse(response),
+    version,
+  };
+}
+
+export function isModulePolicyVersionConflict(err: unknown): boolean {
+  const anyErr = err as any;
+  return Number(anyErr?.status ?? anyErr?.response?.status ?? 0) === 409
+    || anyErr?.body?.code === 'MODULE_POLICY_VERSION_CONFLICT'
+    || anyErr?.response?.data?.code === 'MODULE_POLICY_VERSION_CONFLICT';
+}
+
+export function modulePolicyErrorMessage(err: unknown): string {
+  const anyErr = err as any;
+  const status = Number(anyErr?.status ?? anyErr?.response?.status ?? 0);
+  const body = anyErr?.body ?? anyErr?.response?.data ?? {};
+  const code = String(body?.code || '').trim();
+  const message = String(anyErr?.message || body?.message || '').trim();
+
+  if (isModulePolicyVersionConflict(err)) return 'Founder Access Control changed since this page was loaded. Refresh the latest policy.';
+  if ((status === 400 || status === 422) && (code === 'INVALID_MODULE_POLICY_PAYLOAD' || code === 'MODULE_POLICY_VALIDATION_FAILED' || /invalid module policy payload/i.test(message))) {
+    return 'The Founder policy data did not match the backend contract.';
+  }
+  if (status === 401) return 'Authentication required.';
+  if (status === 403) return 'Founder authorization required.';
+  return message || 'Failed to save Founder access policy.';
+}
+
+function assertModulePolicyPayloadVersion(payload: SerializedModulePolicyPayload) {
+  if (!isValidFounderModulePolicyVersion(payload.expectedVersion)) throw new Error(FOUNDER_MODULE_POLICY_VERSION_ERROR);
+}
+
+function logModulePolicyRequest(endpoint: string, method: 'POST' | 'PUT', payload: SerializedModulePolicyPayload) {
+  if (!import.meta.env.DEV) return;
+  try {
+    console.info('[FounderModulePolicy]', {
+      endpoint,
+      method,
+      expectedVersion: payload.expectedVersion,
+      moduleKeys: Object.keys(payload.modulePolicies),
+      policyStates: payload.modulePolicies,
+    });
+  } catch {
+    // ignore local debug logging failures
+  }
+}
+
+export function clearFounderModulePolicyCache() {
+  founderModulePolicyCache = null;
+  founderModulePolicyInflight = null;
+  founderModulePolicyLoadError = null;
+}
+
+export async function getFounderModulePolicySnapshot(options: { force?: boolean } = {}): Promise<FounderModulePolicySnapshot> {
+  if (options.force) clearFounderModulePolicyCache();
+  if (founderModulePolicyCache) return founderModulePolicyCache;
+  if (Number(founderModulePolicyLoadError?.status ?? founderModulePolicyLoadError?.response?.status ?? 0) === 404) throw founderModulePolicyLoadError;
+  if (!founderModulePolicyInflight) {
+    founderModulePolicyInflight = api(FOUNDER_MODULE_POLICY_API.load)
+      .then((response) => {
+        const snapshot = readFounderModulePolicySnapshot(response);
+        founderModulePolicyCache = snapshot;
+        founderModulePolicyLoadError = null;
+        return snapshot;
+      })
+      .catch((err) => {
+        founderModulePolicyLoadError = err;
+        throw err;
+      })
+      .finally(() => {
+        founderModulePolicyInflight = null;
+      });
+  }
+  return founderModulePolicyInflight;
+}
+
+export async function getFounderModulePolicy(): Promise<AdminModulePolicyMap> {
+  const snapshot = await getFounderModulePolicySnapshot();
+  return snapshot.policy;
+}
+
+export function createFounderModulePolicyPayload(policy: AdminModulePolicyMap, auditReason: string, expectedVersion: number, basePolicy?: AdminModulePolicyMap): SerializedModulePolicyPayload {
+  if (!isValidFounderModulePolicyVersion(expectedVersion)) throw new Error(FOUNDER_MODULE_POLICY_VERSION_ERROR);
+  return serializeModulePolicyPayload(policy, auditReason, expectedVersion, { basePolicy });
+}
+
+export async function previewFounderModulePolicy(payload: SerializedModulePolicyPayload): Promise<any> {
+  assertModulePolicyPayloadVersion(payload);
+  logModulePolicyRequest(FOUNDER_MODULE_POLICY_API.preview, 'POST', payload);
+  return api(FOUNDER_MODULE_POLICY_API.preview, {
+    method: 'POST',
+    json: payload,
+  });
+}
+
+export async function putFounderModulePolicy(payload: SerializedModulePolicyPayload): Promise<FounderModulePolicySnapshot> {
+  assertModulePolicyPayloadVersion(payload);
+  logModulePolicyRequest(FOUNDER_MODULE_POLICY_API.save, 'PUT', payload);
+  const response = await api(FOUNDER_MODULE_POLICY_API.save, {
+    method: 'PUT',
+    json: payload,
+  });
+  const next = readFounderModulePolicySnapshot(response);
+  founderModulePolicyCache = next;
+  founderModulePolicyLoadError = null;
+  return next;
+}
+
+export async function getFounderModulePolicyAudit(limit = 50): Promise<any> {
+  return api(`${FOUNDER_MODULE_POLICY_API.audit}?limit=${encodeURIComponent(String(limit))}`);
 }

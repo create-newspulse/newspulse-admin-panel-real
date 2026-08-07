@@ -4,6 +4,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { ReactNode } from 'react';
 import { useAuth } from '@context/AuthContext';
 import { useEffect, useRef } from 'react';
+import AdminBootstrapLoader from '@components/AdminBootstrapLoader';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -49,10 +50,10 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
   }
 
   if (!isReady || isRestoring) {
-    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+    return <AdminBootstrapLoader />;
   }
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Signing in…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   if (!isAuthenticated || !user) {
@@ -66,7 +67,7 @@ export default function ProtectedRoute({ children, role }: ProtectedRouteProps) 
     if (requestedRoleRestoreRef.current) {
       return <Navigate to="/unauthorized" state={{ from: location }} replace />;
     }
-    return <div className="text-center mt-10">🔐 Loading profile…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   if (role) {

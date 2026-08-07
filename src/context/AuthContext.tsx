@@ -4,6 +4,8 @@ import { setAuthToken } from '@/lib/api';
 import { adminApi } from '@/lib/adminApi';
 import { hasLikelyAdminSession } from '@/lib/api';
 import { ADMIN_API_BASE } from '@/lib/http/adminFetch';
+import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
+import { clearAdminFeatureVisibilityCache } from '@/hooks/useAdminFeatureVisibility';
 
 type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string; [key: string]: any };
 
@@ -17,6 +19,13 @@ function normalizeAuthUser(raw: any, fallback?: Partial<User>): User {
     name: String(source.name || fallback?.name || ''),
     role: String(source.role || fallback?.role || ''),
   };
+}
+
+function authUserFromResponse(raw: any, fallback?: Partial<User>): User | null {
+  const source = raw?.user || raw?.admin || raw?.data?.user || raw?.data?.admin || raw?.data || raw;
+  if (!source || typeof source !== 'object') return null;
+  if (!source.email && !source.role && !source.id && !source._id) return null;
+  return normalizeAuthUser(source, fallback);
 }
 
 export interface AuthContextValue {
@@ -60,6 +69,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return location.pathname === p || location.pathname.startsWith(`${p}/`);
   });
 
+  const clearAuthSession = useCallback(() => {
+    clearAdminEffectiveAccessCache();
+    clearAdminFeatureVisibilityCache();
+    setAuthToken(null);
+    setTokenState(null);
+    setUser(null);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem('admin_token'); } catch {}
+    try { localStorage.removeItem('admin_refresh_token'); } catch {}
+    try { localStorage.removeItem('np_admin_token'); } catch {}
+    try { localStorage.removeItem('np_admin_access_token'); } catch {}
+    try { localStorage.removeItem('np_token'); } catch {}
+    try { localStorage.removeItem('adminToken'); } catch {}
+  }, []);
+
   // Dev-only logging to debug role-gating issues
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -74,6 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);
+    clearAuthSession();
     const trimmedEmail = email.trim();
     if (import.meta.env.DEV) {
       console.log('[Auth] login request', {
@@ -123,18 +148,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try { localStorage.removeItem('admin_refresh_token'); } catch {}
       }
 
-      const u = data.user || data.data?.user || {
+      const u = authUserFromResponse(data) || {
         id: data.id,
         email: data.email,
         role: data.role,
         name: data.name,
       };
       const normalizedUser = normalizeAuthUser(u);
-      setUser(normalizedUser);
+      clearAdminEffectiveAccessCache();
+      clearAdminFeatureVisibilityCache();
+      setUser({ ...normalizedUser, role: '' });
 
       // Persist minimal auth info
       try {
-        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: normalizedUser.role, ts: Date.now() };
+        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: '', ts: Date.now() };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
         if (import.meta.env.DEV) console.debug('[Auth] persistence write', persistPayload);
       } catch { /* ignore quota errors */ }
@@ -149,17 +176,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           skipErrorLog: true,
         });
         const rawMe = me.data || {};
-        const u2 = rawMe.user || rawMe.data?.user || rawMe.data || rawMe;
-        if (u2 && (u2.email || u2.role)) {
-          const refreshed = normalizeAuthUser(u2, normalizedUser);
+        const refreshed = authUserFromResponse(rawMe, normalizedUser);
+        if (refreshed && refreshed.role) {
+          clearAdminEffectiveAccessCache();
+          clearAdminFeatureVisibilityCache();
           setUser(refreshed);
           try {
             const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
           } catch {}
+        } else {
+          clearAuthSession();
+          return false;
         }
       } catch {
-        // Ignore: some backends may not expose /me or may require different auth.
+        clearAuthSession();
+        return false;
       }
 
       return true;
@@ -211,26 +243,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [clearAuthSession]);
 
   const logout = useCallback((reason?: string) => {
-    setAuthToken(null);
-    setTokenState(null);
-    setUser(null);
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
-    try { localStorage.removeItem('admin_token'); } catch {}
-    try { localStorage.removeItem('admin_refresh_token'); } catch {}
-    // Cleanup legacy keys (migration/hygiene)
-    try { localStorage.removeItem('np_admin_token'); } catch {}
-    try { localStorage.removeItem('np_admin_access_token'); } catch {}
-    try { localStorage.removeItem('np_token'); } catch {}
-    try { localStorage.removeItem('adminToken'); } catch {}
+    clearAuthSession();
     if (import.meta.env.DEV) console.debug('[Auth] logout cleared storage', { reason: reason || 'manual' });
     // Per spec: no hard reload redirects; keep /login public and don't redirect to itself.
     if (location.pathname !== '/login') {
       try { navigate('/login', { replace: true }); } catch {}
     }
-  }, [location.pathname, navigate]);
+  }, [clearAuthSession, location.pathname, navigate]);
 
   // Hydrate from localStorage once on mount
   useEffect(() => {
@@ -279,7 +301,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const hasTokenNow = !!localStorage.getItem('admin_token');
           const canRestore = hasTokenNow || hasLikelyAdminSession();
           if (canRestore && (parsed.email || parsed.role)) {
-            setUser(prev => prev || { id: '', email: String(parsed.email || ''), name: '', role: String(parsed.role || '') });
+            setUser(prev => prev || { id: '', email: String(parsed.email || ''), name: '', role: '' });
           }
         }
       }
@@ -356,9 +378,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         skipErrorLog: true,
       });
       const raw = res.data || {};
-      const u = raw.user || raw.data?.user || raw.data || raw;
-      if (u && (u.email || u.role)) {
-        const restored = normalizeAuthUser(u);
+      const restored = authUserFromResponse(raw);
+      if (restored && restored.role) {
+        clearAdminEffectiveAccessCache();
+        clearAdminFeatureVisibilityCache();
         setUser(restored);
         try {
           const persistPayload = { token: token, email: restored.email, role: restored.role, ts: Date.now() };
@@ -366,24 +389,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (import.meta.env.DEV) console.debug('[Auth] restore persistence write', persistPayload);
         } catch {}
         if (import.meta.env.DEV) console.debug('[Auth] session restore success');
-      } else if (import.meta.env.DEV) {
-        console.debug('[Auth] session restore no user returned');
+      } else {
+        clearAuthSession();
+        if (import.meta.env.DEV) console.debug('[Auth] session restore no verified user returned');
       }
     } catch (e:any) {
       const st = e?.response?.status;
       const offline = e?.isOffline === true || e?.code === 'BACKEND_OFFLINE' || e?.code === 'NP_BACKEND_OFFLINE';
       // Treat 404 as non-fatal (no profile) and avoid noisy warning
       if (st === 401) {
-        // 401 should redirect to login via interceptors (no scary logs)
+        clearAuthSession();
       } else if (offline) {
-        // Backend offline: stay unauthenticated and avoid noisy logs.
+        clearAuthSession();
       } else if (import.meta.env.DEV && st !== 404) {
+        clearAuthSession();
         console.warn('[Auth] session restore failed', st, e?.message);
+      } else {
+        clearAuthSession();
       }
     } finally {
       setIsRestoring(false);
     }
-  }, [token, user, isRestoring, isAuthPage]);
+  }, [clearAuthSession, token, user, isRestoring, isAuthPage]);
 
   // Trigger restore after hydration if we are missing profile/role (token alone is not enough for role-gated routes)
   useEffect(() => {

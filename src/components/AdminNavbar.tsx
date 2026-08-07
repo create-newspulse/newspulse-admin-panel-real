@@ -5,18 +5,19 @@ import { toast } from "react-hot-toast";
 import { LockKeyhole } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { leftNavWithAccess, type Role } from "@/config/nav";
-import { useAdminFeatureVisibility } from "@/hooks/useAdminFeatureVisibility";
-import { DEFAULT_ADMIN_FEATURE_VISIBILITY, isOwnerRole } from "@/lib/adminFeatureVisibility";
+import { isOwnerRole } from "@/lib/adminFeatureVisibility";
+import { useAdminEffectiveAccess } from "@/hooks/useAdminEffectiveAccess";
 
 export default function AdminNavbar() {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const { logout, user } = useAuth();
   const role = ((user?.role || "viewer").toLowerCase() as Role);
   const isFounder = String(user?.role || '').toLowerCase() === 'founder';
+  const hasUserProfile = !!user && !!String(user?.role || '').trim();
   const ownerRole = isOwnerRole(role);
-  const { visibility } = useAdminFeatureVisibility({ enabled: !ownerRole });
-  const effectiveVisibility = ownerRole ? DEFAULT_ADMIN_FEATURE_VISIBILITY : visibility;
-  const left = leftNavWithAccess(user, effectiveVisibility).filter((item) => item.key !== 'community-hub');
+  const { modulePolicy, backendAccess, isLoading: accessLoading } = useAdminEffectiveAccess({ user, enabled: hasUserProfile && !ownerRole });
+  const navAccessReady = hasUserProfile && !accessLoading;
+  const left = navAccessReady ? leftNavWithAccess(user, { modulePolicy, backendAccess }).filter((item) => item.key !== 'community-hub') : [];
   const accountPath = isFounder ? '/admin/founder/my-account' : '/admin/my-account';
   const accountLabel = isFounder ? 'Founder My Account' : 'My Account';
 
@@ -53,11 +54,11 @@ export default function AdminNavbar() {
             key={item.key}
             type="button"
             aria-disabled="true"
-            title="Access Denied. Founder permission is required."
-            onClick={() => toast.error('Access Denied. Founder permission is required.')}
+            title={item.lockedReason || 'Access denied.'}
+            onClick={() => toast.error(item.lockedReason || 'Access denied.')}
             className="inline-flex cursor-not-allowed items-center gap-1 text-sm font-medium text-gray-400 transition hover:text-gray-300"
           >
-            <span>{item.icon}</span><span>{item.label}</span><LockKeyhole aria-label="Locked module" title="Access restricted. Founder permission is required." className="ml-0.5 h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+            <span>{item.icon}</span><span>{item.label}</span><LockKeyhole aria-label="Locked module" title={item.lockedReason || 'Access denied.'} className="ml-0.5 h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
           </button>
         ) : (
           <NavLink

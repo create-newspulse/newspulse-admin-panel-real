@@ -23,6 +23,13 @@ function updateCache(state: AdminFeatureVisibilityState) {
   return cachedVisibility;
 }
 
+export function clearAdminFeatureVisibilityCache() {
+  cachedVisibility = { ...DEFAULT_ADMIN_FEATURE_VISIBILITY };
+  hasFetchedVisibility = false;
+  inflightVisibilityRequest = null;
+  emitVisibility(cachedVisibility);
+}
+
 async function loadVisibility(): Promise<AdminFeatureVisibilityState> {
   if (hasFetchedVisibility) return cachedVisibility;
   if (!inflightVisibilityRequest) {

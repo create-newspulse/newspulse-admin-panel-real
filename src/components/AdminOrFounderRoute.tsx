@@ -3,6 +3,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@context/AuthContext';
+import AdminBootstrapLoader from '@components/AdminBootstrapLoader';
 
 interface Props {
   children: React.ReactNode;
@@ -18,7 +19,7 @@ const AdminOrFounderRoute: React.FC<Props> = ({ children }) => {
   }
 
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Checking access…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   if (!isAuthenticated || !user) {

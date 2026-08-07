@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { PropsWithChildren, useEffect, useRef } from 'react';
 import { useAuth } from '@context/AuthContext';
 import type { Role } from '@/store/auth';
+import AdminBootstrapLoader from '@components/AdminBootstrapLoader';
 
 export function RequireAuth({ children }: PropsWithChildren) {
   const location = useLocation();
@@ -13,7 +14,7 @@ export function RequireAuth({ children }: PropsWithChildren) {
   }
 
   if (!isReady || isRestoring) {
-    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   return isAuthenticated && user
@@ -46,11 +47,11 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
   }
 
   if (!isReady || isRestoring) {
-    return <div className="text-center mt-10">🔐 Restoring session…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   if (isLoading) {
-    return <div className="text-center mt-10">🔐 Checking access…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   // Don't redirect while we are still trying to fetch the user's role.
@@ -59,7 +60,7 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
     if (requestedRestoreRef.current) {
       return <Navigate to="/unauthorized" replace state={{ from: location }} />;
     }
-    return <div className="text-center mt-10">🔐 Loading profile…</div>;
+    return <AdminBootstrapLoader />;
   }
 
   if (!isAuthenticated || !user) {

@@ -1,4 +1,12 @@
 import type { AdminFeatureVisibilityState } from '@/lib/adminFeatureVisibility';
+import {
+  DEFAULT_ADMIN_MODULE_POLICY,
+  denialMessageForReason,
+  type AdminAccessReasonCode,
+  type AdminEffectiveModuleAccess,
+  type AdminModulePolicyState,
+  type AdminModulePolicyMap,
+} from '@/lib/adminModulePolicy';
 
 export type AdminModuleKey =
   | 'dashboard'
@@ -430,14 +438,14 @@ function firstArray(...values: unknown[]): unknown[] | undefined {
 }
 
 function getExplicitModules(user: any): AdminModuleKey[] {
-  return normalizeModuleKeys(firstArray(
+  const raw = firstArray(
     user?.moduleAccess,
     user?.moduleAccessKeys,
     user?.modules,
     user?.access?.modules,
     user?.accessControl?.modules,
-    user?.roleAccess?.modules,
-  ));
+  );
+  return normalizeModuleKeys(raw);
 }
 
 function getOverrideModules(user: any): { allow: AdminModuleKey[]; deny: AdminModuleKey[] } {
@@ -452,42 +460,150 @@ export function getEffectiveModuleAccess(user: any): AdminModuleKey[] {
   const roleId = normalizeRoleId(user?.role);
   if (roleId === 'founder') return ALL_MODULE_KEYS;
   const explicit = getExplicitModules(user);
-  const roleDefault = getDefaultRoleAccess(roleId)?.modules || ['dashboard'];
-  const base = explicit.length ? explicit : roleDefault;
   const overrides = getOverrideModules(user);
   const denied = new Set(overrides.deny);
-  return Array.from(new Set([...base, ...overrides.allow])).filter((key) => !denied.has(key));
+  return Array.from(new Set([...explicit, ...overrides.allow])).filter((key) => !denied.has(key));
 }
 
 export function getEffectiveSpecialRights(user: any): SpecialRightKey[] {
   const roleId = normalizeRoleId(user?.role);
   if (roleId === 'founder') return ALL_SPECIAL_RIGHT_KEYS;
-  const explicit = normalizeSpecialRightKeys(firstArray(
+  const explicitRaw = firstArray(
     user?.specialRights,
     user?.rights,
     user?.access?.specialRights,
     user?.accessControl?.specialRights,
-    user?.roleAccess?.specialRights,
-  ));
-  const roleDefault = getDefaultRoleAccess(roleId)?.specialRights || [];
+  );
+  const explicit = normalizeSpecialRightKeys(explicitRaw);
   const overrides = user?.accessOverrides || user?.individualOverrides || user?.overrides || {};
   const allow = normalizeSpecialRightKeys(firstArray(overrides?.specialRights, overrides?.allowSpecialRights, overrides?.rightsAllow));
   const deny = new Set(normalizeSpecialRightKeys(firstArray(overrides?.denySpecialRights, overrides?.rightsDeny, overrides?.blockedSpecialRights)));
-  const base = explicit.length ? explicit : roleDefault;
-  return Array.from(new Set([...base, ...allow])).filter((key) => !deny.has(key));
+  return Array.from(new Set([...explicit, ...allow])).filter((key) => !deny.has(key));
 }
 
 export function canAccessAdminModule(user: any, moduleKey: AdminModuleKey, visibility?: AdminFeatureVisibilityState): boolean {
-  const roleId = normalizeRoleId(user?.role);
-  if (roleId === 'founder') return true;
-  if (moduleKey === 'dpdp_privacy_requests') return false;
-  const hasModuleAccess = getEffectiveModuleAccess(user).includes(moduleKey);
-  if (!hasModuleAccess) return false;
-  const definition = ADMIN_MODULES.find((item) => item.key === moduleKey);
-  if (definition?.ownerVisibilityKey && visibility?.[definition.ownerVisibilityKey] === false) return false;
-  return true;
+  return resolveAdminModuleAccess(user, moduleKey, { legacyVisibility: visibility }).allowed;
 }
 
 export function canAccessAnyAdminModule(user: any, moduleKeys: AdminModuleKey[], visibility?: AdminFeatureVisibilityState): boolean {
   return moduleKeys.some((moduleKey) => canAccessAdminModule(user, moduleKey, visibility));
+}
+
+type RuntimeIndividualAccess = AdminEffectiveModuleAccess['individualAccess'];
+
+function expiredDate(value: unknown): boolean {
+  const raw = String(value ?? '').trim();
+  if (!raw) return false;
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) && timestamp < Date.now();
+}
+
+function accountStatusReasonCode(accountStatus: unknown, accountExpiry: unknown): AdminAccessReasonCode | null {
+  const normalized = String(accountStatus ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'suspended') return 'ACCOUNT_SUSPENDED';
+  if (normalized === 'locked') return 'ACCOUNT_LOCKED';
+  if (normalized === 'expired' || expiredDate(accountExpiry)) return 'ACCOUNT_EXPIRED';
+  return null;
+}
+
+function normalizeRuntimeIndividualAccess(value: unknown): RuntimeIndividualAccess {
+  if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
+  const normalized = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'enabled' || normalized === 'temporary' || normalized === 'not_configurable') return normalized;
+  return 'disabled';
+}
+
+function findTemporaryModuleGrant(user: any, moduleKey: AdminModuleKey): any | undefined {
+  const raw = firstArray(user?.temporaryGrants, user?.temporaryPermissions, user?.temporaryAccess, user?.accessOverrides?.temporaryGrants);
+  return raw?.find((grant: any) => {
+    const targetType = String(grant?.targetType ?? grant?.type ?? 'module').trim().toLowerCase();
+    const key = String(grant?.key ?? grant?.module ?? grant?.moduleKey ?? '').trim();
+    return targetType === 'module' && key === moduleKey;
+  });
+}
+
+export function resolveModuleAccess(input: {
+  moduleKey: AdminModuleKey;
+  isFounder: boolean;
+  accountStatus?: unknown;
+  accountExpiry?: unknown;
+  globalPolicy?: AdminModulePolicyState;
+  individualAccess?: RuntimeIndividualAccess | boolean;
+  temporaryExpiry?: unknown;
+}): AdminEffectiveModuleAccess {
+  const moduleKey = input.moduleKey;
+  const policyState = input.globalPolicy || DEFAULT_ADMIN_MODULE_POLICY[moduleKey]?.state || 'founder_only';
+  const individualAccess = moduleKey === 'safe_zone' && !input.isFounder ? 'not_configurable' : normalizeRuntimeIndividualAccess(input.individualAccess);
+
+  let reasonCode: AdminAccessReasonCode = 'ALLOWED';
+  if (!input.isFounder) {
+    reasonCode = accountStatusReasonCode(input.accountStatus, input.accountExpiry) || 'ALLOWED';
+    if (reasonCode === 'ALLOWED') {
+      if (policyState === 'hidden') reasonCode = 'HIDDEN';
+      else if (policyState === 'founder_only') reasonCode = 'FOUNDER_ONLY';
+      else if (policyState === 'staff_locked') reasonCode = 'GLOBAL_STAFF_LOCK';
+      else if (individualAccess === 'temporary' && expiredDate(input.temporaryExpiry)) reasonCode = 'TEMPORARY_ACCESS_EXPIRED';
+      else if (individualAccess !== 'enabled' && individualAccess !== 'temporary') reasonCode = 'STAFF_ACCESS_DISABLED';
+    }
+  }
+
+  const allowed = input.isFounder || reasonCode === 'ALLOWED';
+  const visible = input.isFounder || policyState !== 'hidden';
+  return {
+    moduleKey,
+    visible,
+    allowed,
+    locked: !allowed && visible,
+    policyState: input.isFounder ? 'available' : policyState,
+    reasonCode: allowed ? 'ALLOWED' : reasonCode,
+    reason: allowed ? 'Allowed' : denialMessageForReason(reasonCode),
+    individualAccess: input.isFounder ? 'enabled' : individualAccess,
+    temporary: individualAccess === 'temporary',
+  };
+}
+
+export function resolveAdminModuleAccess(
+  user: any,
+  moduleKey: AdminModuleKey,
+  options?: { modulePolicy?: AdminModulePolicyMap; legacyVisibility?: AdminFeatureVisibilityState; backendAccess?: Partial<Record<AdminModuleKey, AdminEffectiveModuleAccess>> },
+): AdminEffectiveModuleAccess {
+  const roleId = normalizeRoleId(user?.role);
+  const isFounder = roleId === 'founder';
+  const backend = options?.backendAccess?.[moduleKey];
+  const isFixedStaffControl = moduleKey === 'dashboard';
+
+  if (backend && !isFixedStaffControl) {
+    return {
+      ...backend,
+      locked: !backend.allowed && backend.visible,
+      reason: backend.allowed ? 'Allowed' : backend.reason || denialMessageForReason(backend.reasonCode),
+    };
+  }
+
+  const policy = options?.modulePolicy || DEFAULT_ADMIN_MODULE_POLICY;
+  const definition = ADMIN_MODULES.find((item) => item.key === moduleKey);
+  const legacyHidden = definition?.ownerVisibilityKey && options?.legacyVisibility?.[definition.ownerVisibilityKey] === false;
+  const policyState = legacyHidden ? 'hidden' : (policy[moduleKey]?.state || backend?.policyState || DEFAULT_ADMIN_MODULE_POLICY[moduleKey]?.state || 'founder_only');
+  const temporaryGrant = findTemporaryModuleGrant(user, moduleKey);
+  const savedAccess = getEffectiveModuleAccess(user).includes(moduleKey);
+  const individualAccess = isFixedStaffControl ? 'enabled' : backend?.individualAccess || (temporaryGrant ? 'temporary' : savedAccess ? 'enabled' : 'disabled');
+
+  return resolveModuleAccess({
+    moduleKey,
+    isFounder,
+    accountStatus: user?.accountStatus ?? user?.status,
+    accountExpiry: user?.accessExpiresAt ?? user?.accessExpiryDate ?? user?.accessEndDate,
+    globalPolicy: policyState,
+    individualAccess,
+    temporaryExpiry: (backend as any)?.expiresAt ?? temporaryGrant?.expiresAt ?? temporaryGrant?.accessExpiryDate ?? temporaryGrant?.expiryDate,
+  });
+}
+
+export function resolveAnyAdminModuleAccess(
+  user: any,
+  moduleKeys: AdminModuleKey[],
+  options?: { modulePolicy?: AdminModulePolicyMap; legacyVisibility?: AdminFeatureVisibilityState; backendAccess?: Partial<Record<AdminModuleKey, AdminEffectiveModuleAccess>> },
+): AdminEffectiveModuleAccess {
+  const results = moduleKeys.map((moduleKey) => resolveAdminModuleAccess(user, moduleKey, options));
+  return results.find((item) => item.allowed) || results.find((item) => item.visible) || results[0];
 }

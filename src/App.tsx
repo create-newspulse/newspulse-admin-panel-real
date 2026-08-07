@@ -14,6 +14,7 @@ import { PublishFlagProvider } from '@/context/PublishFlagContext';
 
 import Navbar from '@components/Navbar';
 import Breadcrumbs from '@components/Breadcrumbs';
+import { AdminShellBootstrapGate } from '@components/AdminBootstrapLoader';
 import LockCheckWrapper from '@components/LockCheckWrapper';
 import OwnerBar from '@/components/OwnerBar';
 import ProtectedRoute from '@components/ProtectedRoute';
@@ -102,6 +103,7 @@ import ViralVideosArchivePage from '@pages/ViralVideosArchivePage';
 import SettingsCenterLayout from '@pages/admin/settings/SettingsCenterLayout';
 import AdminPanelSettingsLayout from '@pages/admin/settings/AdminPanelSettingsLayout';
 import PublicSiteSettingsLayout from '@pages/admin/settings/PublicSiteSettingsLayout';
+import FounderAccessControl from '@pages/admin/settings/admin-panel/FounderAccessControl';
 import TeamManagement from '@pages/admin/settings/admin-panel/TeamManagement';
 import StaffActivityAttendance from '@pages/admin/settings/admin-panel/StaffActivityAttendance';
 import SecurityAdmin from '@pages/admin/settings/admin-panel/SecurityAdmin';
@@ -179,14 +181,21 @@ function mustChangePasswordFor(user: any): boolean {
   return user?.mustChangePassword === true || user?.passwordChangeRequired === true || user?.forcePasswordChange === true;
 }
 
+function isAdminPanelPath(pathname: string): boolean {
+  const path = pathname || '/';
+  return path === '/' || path.startsWith('/admin') || path.startsWith('/safe-owner') || path.startsWith('/safeownerzone') || path === '/add' || path.startsWith('/add/') || path.startsWith('/draft-desk') || path.startsWith('/community/reporter');
+}
+
 function App() {
   if (import.meta.env.DEV) console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading, isReady, isRestoring } = useAuth();
   const location = useLocation();
   const isAuthPage = ['/login', '/admin/login', '/employee/login'].includes(location.pathname);
   const showTranslationUi = translationUiEnabled();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const hasVerifiedUserRole = !!user && !!String(user?.role || '').trim();
+  const adminBootstrapPending = isAdminPanelPath(location.pathname) && !isAuthPage && (!isReady || isRestoring || isLoading || (isAuthenticated && !hasVerifiedUserRole));
   const mustChangePassword = isAuthenticated && mustChangePasswordFor(user);
   const accountPasswordPath = String(user?.role || '').toLowerCase() === 'founder' ? '/admin/founder/my-account' : '/admin/my-account';
   const mustChangePasswordBlocked = mustChangePassword && location.pathname.startsWith('/admin') && location.pathname !== accountPasswordPath;
@@ -214,19 +223,20 @@ function App() {
       <PublishFlagProvider>
       <I18nextProvider i18n={i18n}>
         <div className={`min-h-screen transition-colors duration-300 ${isDark ? 'bg-slate-900 text-white' : 'bg-white text-black'}`}>
-          <Navbar />
-          {isAuthenticated && !isAuthPage ? <OwnerBar /> : null}
-          {/* Optional: lightweight env overlay for debugging prod vs local differences */}
-          {import.meta.env.VITE_SHOW_ENV_TEST === 'true' && <EnvTest />}
-          {isAuthenticated && !isAuthPage && <Breadcrumbs />}
+          <AdminShellBootstrapGate pending={adminBootstrapPending}>
+            <Navbar />
+            {isAuthenticated && !isAuthPage ? <OwnerBar /> : null}
+            {/* Optional: lightweight env overlay for debugging prod vs local differences */}
+            {import.meta.env.VITE_SHOW_ENV_TEST === 'true' && <EnvTest />}
+            {isAuthenticated && !isAuthPage && <Breadcrumbs />}
 
-          {/* Host allow-list guard prevents preview lockouts. Empty allow-list = allow all. */}
-          {!isAllowedHost() ? (
-            <div className="p-10 text-center text-red-600 text-2xl font-bold">❌ Access Denied — Host not allowed</div>
-          ) : null}
+            {/* Host allow-list guard prevents preview lockouts. Empty allow-list = allow all. */}
+            {!isAllowedHost() ? (
+              <div className="p-10 text-center text-red-600 text-2xl font-bold">❌ Access Denied — Host not allowed</div>
+            ) : null}
 
-          <main className="p-4 md:p-6 max-w-7xl mx-auto">
-            {mustChangePasswordBlocked ? <Navigate to={`${accountPasswordPath}#change-password`} replace /> : <Routes>
+            <main className="p-4 md:p-6 max-w-7xl mx-auto">
+              {mustChangePasswordBlocked ? <Navigate to={`${accountPasswordPath}#change-password`} replace /> : <Routes>
               {/* 🧭 Default Redirect to Admin Dashboard */}
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="/media-kit" element={<MediaKitPublic />} />
@@ -372,7 +382,9 @@ function App() {
 
                 <Route path="admin-panel" element={<AdminPanelSettingsLayout />}>
                   <Route index element={<Navigate to="team" replace />} />
+                  <Route path="founder-access-control" element={<FounderRoute><FounderAccessControl /></FounderRoute>} />
                   <Route path="team" element={<AdminModuleRoute moduleKey="team_management"><TeamManagement /></AdminModuleRoute>} />
+                  <Route path="team/create" element={<AdminModuleRoute moduleKey="team_management"><TeamManagement /></AdminModuleRoute>} />
                   <Route path="staff-activity-attendance" element={<AdminModuleRoute moduleKey="team_management"><StaffActivityAttendance /></AdminModuleRoute>} />
                   <Route path="security" element={<SecurityAdmin />} />
                   <Route path="translation" element={<TranslationSettings />} />
@@ -512,11 +524,12 @@ function App() {
               <Route path="/denied" element={<Denied />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="*" element={<NotFound />} />
-            </Routes>}
-          </main>
+              </Routes>}
+            </main>
 
-          {/* 🔎 Global Command Palette (Ctrl/Cmd+K) */}
-          <GlobalCommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+            {/* 🔎 Global Command Palette (Ctrl/Cmd+K) */}
+            <GlobalCommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+          </AdminShellBootstrapGate>
 
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
         </div>
