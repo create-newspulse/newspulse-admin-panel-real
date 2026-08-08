@@ -36,6 +36,7 @@ export interface AuthContextValue {
   isLoading: boolean; // network/loading state for login actions
   isReady: boolean; // localStorage hydration complete
   isRestoring: boolean; // true while calling session restore endpoint
+  isSessionResolved: boolean; // initial session restore has completed or no session exists
   restoreSession: (opts?: { force?: boolean; allowOnAuthPage?: boolean }) => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
   logout: (reason?: string) => void;
@@ -51,6 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(false);
   const [isReady, setIsReady] = useState(false); // hydration flag
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isSessionResolved, setIsSessionResolved] = useState(false);
 
   const STORAGE_KEY = 'newsPulseAdminAuth';
   const AUTH_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
@@ -70,6 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const clearAuthSession = useCallback(() => {
+    setIsSessionResolved(false);
     clearAdminEffectiveAccessCache();
     clearAdminFeatureVisibilityCache();
     setAuthToken(null);
@@ -365,10 +368,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const allowOnAuthPage = opts?.allowOnAuthPage === true;
     if (isAuthPage && !allowOnAuthPage) return;
     // Don't probe /me unless we have some reason to believe a session exists.
-    if (!token && !hasLikelyAdminSession()) return;
+    if (!token && !hasLikelyAdminSession()) {
+      setIsSessionResolved(true);
+      return;
+    }
     if (isRestoring) return;
-    if (!opts?.force && (restoreAttemptedRef.current || hasFullAuth)) return;
+    if (!opts?.force && (restoreAttemptedRef.current || hasFullAuth)) {
+      setIsSessionResolved(true);
+      return;
+    }
     restoreAttemptedRef.current = true;
+    setIsSessionResolved(false);
     setIsRestoring(true);
     if (import.meta.env.DEV) console.debug('[Auth] attempting session restore (no full auth)');
     try {
@@ -409,6 +419,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } finally {
       setIsRestoring(false);
+      setIsSessionResolved(true);
     }
   }, [clearAuthSession, token, user, isRestoring, isAuthPage]);
 
@@ -430,6 +441,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLoading,
     isReady,
     isRestoring,
+    isSessionResolved,
     restoreSession,
     login,
     logout,

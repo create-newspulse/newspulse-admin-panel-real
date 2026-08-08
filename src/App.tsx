@@ -26,6 +26,7 @@ import LockedPage from '@pages/LockedPage.tsx';
 // Legacy AdminLogin kept for reference; not used now that /admin/login uses SimpleLogin
 import Unauthorized from '@pages/Unauthorized';
 import { isAllowedHost } from './lib/hostGuard';
+import { shouldBlockAdminShell, shouldRedirectUnauthenticatedAdmin } from './lib/adminShellBootstrap';
 
 // Admin Pages
 import Dashboard from '@pages/admin/Dashboard';
@@ -189,13 +190,29 @@ function isAdminPanelPath(pathname: string): boolean {
 function App() {
   if (import.meta.env.DEV) console.log('Router loaded: main admin router');
   const { isDark } = useDarkMode();
-  const { isAuthenticated, user, isLoading, isReady, isRestoring } = useAuth();
+  const { isAuthenticated, user, isLoading, isReady, isRestoring, isSessionResolved } = useAuth();
   const location = useLocation();
   const isAuthPage = ['/login', '/admin/login', '/employee/login'].includes(location.pathname);
   const showTranslationUi = translationUiEnabled();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const hasVerifiedUserRole = !!user && !!String(user?.role || '').trim();
-  const adminBootstrapPending = isAdminPanelPath(location.pathname) && !isAuthPage && (!isReady || isRestoring || isLoading || (isAuthenticated && !hasVerifiedUserRole));
+  const adminBootstrapPending = shouldBlockAdminShell({
+    isAdminPanelPath: isAdminPanelPath(location.pathname),
+    isAuthPage,
+    isReady,
+    isSessionResolved,
+    isRestoring,
+    isLoading,
+    isAuthenticated,
+    hasVerifiedUserRole,
+  });
+  const redirectUnauthenticatedAdmin = shouldRedirectUnauthenticatedAdmin({
+    isAdminPanelPath: isAdminPanelPath(location.pathname),
+    isAuthPage,
+    isReady,
+    isSessionResolved,
+    isAuthenticated,
+  });
   const mustChangePassword = isAuthenticated && mustChangePasswordFor(user);
   const accountPasswordPath = String(user?.role || '').toLowerCase() === 'founder' ? '/admin/founder/my-account' : '/admin/my-account';
   const mustChangePasswordBlocked = mustChangePassword && location.pathname.startsWith('/admin') && location.pathname !== accountPasswordPath;
@@ -217,6 +234,10 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  if (redirectUnauthenticatedAdmin) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
 
   return (
     <AITrainingInfoProvider>
