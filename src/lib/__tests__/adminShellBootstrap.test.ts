@@ -39,15 +39,28 @@ describe('shouldBlockAdminShell', () => {
     })).toBe(false);
   });
 
+  it('redirects a resolved unauthenticated dashboard visit before the shell renders', () => {
+    expect(shouldRedirectUnauthenticatedAdmin({
+      ...readyFounder,
+      isAuthenticated: false,
+    })).toBe(true);
+  });
+
   it('keeps role-less authenticated sessions hidden while effective identity is loading', () => {
     expect(shouldBlockAdminShell({ ...readyFounder, hasVerifiedUserRole: false })).toBe(true);
   });
 
-  it('does not block the public login page after session resolution', () => {
+  it('holds a staff shell only until its minimum access map resolves', () => {
+    expect(shouldBlockAdminShell({ ...readyFounder, isMinimumAccessLoading: true })).toBe(true);
+    expect(shouldBlockAdminShell({ ...readyFounder, isMinimumAccessLoading: false })).toBe(false);
+  });
+
+  it('does not block the public login page while session resolution is pending', () => {
     expect(shouldBlockAdminShell({
       ...readyFounder,
       isAdminPanelPath: false,
       isAuthPage: true,
+      isSessionResolved: false,
       isAuthenticated: false,
       hasVerifiedUserRole: false,
     })).toBe(false);

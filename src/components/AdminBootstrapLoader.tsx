@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 
 export default function AdminBootstrapLoader() {
@@ -13,6 +14,21 @@ export default function AdminBootstrapLoader() {
 }
 
 export function AdminShellBootstrapGate({ pending, children }: { pending: boolean; children: ReactNode }) {
+  const startedAtRef = useRef<number | null>(pending && typeof performance !== 'undefined' ? performance.now() : null);
+
+  useEffect(() => {
+    if (pending) {
+      startedAtRef.current ??= typeof performance !== 'undefined' ? performance.now() : 0;
+      return;
+    }
+    if (import.meta.env.DEV && startedAtRef.current != null) {
+      console.debug('[Auth] admin shell bootstrap released', {
+        durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - startedAtRef.current),
+      });
+    }
+    startedAtRef.current = null;
+  }, [pending]);
+
   if (pending) return <AdminBootstrapLoader />;
   return <>{children}</>;
 }

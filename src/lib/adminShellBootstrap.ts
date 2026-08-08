@@ -7,6 +7,7 @@ export interface AdminShellBootstrapState {
   isLoading: boolean;
   isAuthenticated: boolean;
   hasVerifiedUserRole: boolean;
+  isMinimumAccessLoading?: boolean;
 }
 
 export function shouldBlockAdminShell({
@@ -18,10 +19,11 @@ export function shouldBlockAdminShell({
   isLoading,
   isAuthenticated,
   hasVerifiedUserRole,
+  isMinimumAccessLoading = false,
 }: AdminShellBootstrapState): boolean {
   return isAdminPanelPath
     && !isAuthPage
-    && (!isReady || !isSessionResolved || isRestoring || isLoading || (isAuthenticated && !hasVerifiedUserRole));
+    && (!isReady || !isSessionResolved || isRestoring || isLoading || (isAuthenticated && !hasVerifiedUserRole) || isMinimumAccessLoading);
 }
 
 export function shouldRedirectUnauthenticatedAdmin({

@@ -53,9 +53,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isReady, setIsReady] = useState(false); // hydration flag
   const [isRestoring, setIsRestoring] = useState(false);
   const [isSessionResolved, setIsSessionResolved] = useState(false);
+  const [isSessionRejected, setIsSessionRejected] = useState(false);
 
   const STORAGE_KEY = 'newsPulseAdminAuth';
   const AUTH_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
+  const SESSION_RESTORE_TIMEOUT_MS = 10_000;
+  const bootstrapStartedAtRef = useRef(typeof performance !== 'undefined' ? performance.now() : 0);
   // Resolve relative to admin base; avoid double /api/admin
   const SESSION_ENDPOINT = '/me';
 
@@ -63,7 +66,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Auth considered valid if we have a token OR a likely restorable cookie-session.
   // Do NOT treat a cached localStorage user stub as authenticated by itself.
   const likelySession = hasLikelyAdminSession();
-  const isAuthenticated = !!token || likelySession;
+  // A /me rejection is authoritative. A stale cookie may remain browser-visible
+  // after the backend has rejected it, so it must not keep the shell pending.
+  const isAuthenticated = !isSessionRejected && (!!token || likelySession || !!user?.role);
   const role = (user?.role || '').toLowerCase();
   const isFounder = role === 'founder';
 
@@ -72,12 +77,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const clearAuthSession = useCallback(() => {
-    setIsSessionResolved(false);
     clearAdminEffectiveAccessCache();
     clearAdminFeatureVisibilityCache();
     setAuthToken(null);
     setTokenState(null);
     setUser(null);
+    setIsSessionRejected(true);
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
     try { localStorage.removeItem('admin_token'); } catch {}
     try { localStorage.removeItem('admin_refresh_token'); } catch {}
@@ -101,6 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);
+    setIsSessionResolved(false);
     clearAuthSession();
     const trimmedEmail = email.trim();
     if (import.meta.env.DEV) {
@@ -183,6 +189,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (refreshed && refreshed.role) {
           clearAdminEffectiveAccessCache();
           clearAdminFeatureVisibilityCache();
+          setIsSessionRejected(false);
           setUser(refreshed);
           try {
             const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
@@ -312,7 +319,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed', e);
     } finally {
       setIsReady(true);
-      if (import.meta.env.DEV) console.debug('[Auth] hydration complete');
+      if (import.meta.env.DEV) console.debug('[Auth] hydration complete', {
+        durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - bootstrapStartedAtRef.current),
+      });
     }
   }, []);
 
@@ -380,28 +389,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     restoreAttemptedRef.current = true;
     setIsSessionResolved(false);
     setIsRestoring(true);
-    if (import.meta.env.DEV) console.debug('[Auth] attempting session restore (no full auth)');
+    const restoreStartedAt = typeof performance !== 'undefined' ? performance.now() : 0;
+    let outcome = 'unknown';
+    if (import.meta.env.DEV) console.debug('[Auth] session restore start');
     try {
       const res = await adminApi.get(SESSION_ENDPOINT, {
         withCredentials: true,
+        timeout: SESSION_RESTORE_TIMEOUT_MS,
         // @ts-expect-error custom flag (suppresses noisy DEV logging)
         skipErrorLog: true,
+      });
+      if (import.meta.env.DEV) console.debug('[Auth] session restore response', {
+        status: res.status,
+        durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - restoreStartedAt),
       });
       const raw = res.data || {};
       const restored = authUserFromResponse(raw);
       if (restored && restored.role) {
         clearAdminEffectiveAccessCache();
         clearAdminFeatureVisibilityCache();
+        setIsSessionRejected(false);
         setUser(restored);
         try {
           const persistPayload = { token: token, email: restored.email, role: restored.role, ts: Date.now() };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
-          if (import.meta.env.DEV) console.debug('[Auth] restore persistence write', persistPayload);
+          if (import.meta.env.DEV) console.debug('[Auth] restore persistence write', {
+            tokenPresent: Boolean(token),
+            email: restored.email,
+            role: restored.role,
+          });
         } catch {}
-        if (import.meta.env.DEV) console.debug('[Auth] session restore success');
+        outcome = 'authenticated';
       } else {
         clearAuthSession();
-        if (import.meta.env.DEV) console.debug('[Auth] session restore no verified user returned');
+        outcome = 'invalid-response';
       }
     } catch (e:any) {
       const st = e?.response?.status;
@@ -409,19 +430,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Treat 404 as non-fatal (no profile) and avoid noisy warning
       if (st === 401) {
         clearAuthSession();
+        outcome = 'unauthenticated';
       } else if (offline) {
         clearAuthSession();
+        outcome = 'network-failure';
       } else if (import.meta.env.DEV && st !== 404) {
         clearAuthSession();
+        outcome = st === 500 ? 'server-error' : 'request-failure';
         console.warn('[Auth] session restore failed', st, e?.message);
       } else {
         clearAuthSession();
+        outcome = 'request-failure';
       }
     } finally {
       setIsRestoring(false);
       setIsSessionResolved(true);
+      if (import.meta.env.DEV) console.debug('[Auth] session resolved', {
+        outcome,
+        durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - restoreStartedAt),
+        bootstrapElapsedMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - bootstrapStartedAtRef.current),
+      });
     }
-  }, [clearAuthSession, token, user, isRestoring, isAuthPage]);
+  }, [clearAuthSession, token, user, isRestoring, isAuthPage, SESSION_RESTORE_TIMEOUT_MS]);
 
   // Trigger restore after hydration if we are missing profile/role (token alone is not enough for role-gated routes)
   useEffect(() => {

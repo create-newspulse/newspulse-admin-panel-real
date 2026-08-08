@@ -33,6 +33,7 @@ const EMPTY_STATE: EffectiveAccessState = {
 
 let cachedAccountKey = '';
 let cachedState: EffectiveAccessState = EMPTY_STATE;
+let settledAccountKey = '';
 let inflightRequest: { accountKey: string; promise: Promise<EffectiveAccessState> } | null = null;
 
 const LOCAL_MODULE_KEY_BY_BACKEND = Object.entries(BACKEND_MODULE_POLICY_KEY_BY_LOCAL).reduce((acc, [localKey, backendKey]) => {
@@ -52,6 +53,7 @@ function emitAccess(state: EffectiveAccessState) {
 export function clearAdminEffectiveAccessCache() {
   cachedAccountKey = '';
   cachedState = EMPTY_STATE;
+  settledAccountKey = '';
   inflightRequest = null;
   emitAccess(cachedState);
 }
@@ -166,8 +168,13 @@ async function loadEffectiveAccess(user: any): Promise<EffectiveAccessState> {
       .then((state) => {
         cachedAccountKey = key;
         cachedState = state;
+        settledAccountKey = key;
         emitAccess(state);
         return state;
+      })
+      .catch((error) => {
+        settledAccountKey = key;
+        throw error;
       })
       .finally(() => {
         inflightRequest = null;
@@ -191,7 +198,14 @@ export function useAdminEffectiveAccess(options: { user: any; enabled?: boolean 
       setIsLoading(false);
       return EMPTY_STATE;
     }
+    if ((cachedAccountKey === currentAccountKey && cachedState !== EMPTY_STATE) || settledAccountKey === currentAccountKey) {
+      setState(cachedState);
+      setError(null);
+      setIsLoading(false);
+      return cachedState;
+    }
     setIsLoading(true);
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
     try {
       const next = await loadEffectiveAccess(user);
       setState(next);
@@ -203,8 +217,12 @@ export function useAdminEffectiveAccess(options: { user: any; enabled?: boolean 
       throw err;
     } finally {
       setIsLoading(false);
+      if (import.meta.env.DEV) console.debug('[Auth] effective access resolved', {
+        role: normalizeRoleId(user?.role),
+        durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - startedAt),
+      });
     }
-  }, [enabled, user]);
+  }, [currentAccountKey, enabled, user]);
 
   useEffect(() => {
     if (!enabled || !user) {
@@ -231,6 +249,7 @@ export function useAdminEffectiveAccess(options: { user: any; enabled?: boolean 
       if (!policy) return;
       cachedState = { modulePolicy: policy, backendAccess: {} };
       cachedAccountKey = '';
+      settledAccountKey = '';
       inflightRequest = null;
       setState(cachedState);
       void refresh().catch(() => undefined);
@@ -243,5 +262,13 @@ export function useAdminEffectiveAccess(options: { user: any; enabled?: boolean 
     };
   }, [refresh]);
 
-  return useMemo(() => ({ ...state, isLoading, error, refresh }), [state, isLoading, error, refresh]);
+  const accountAccessPending = Boolean(
+    enabled
+    && user
+    && normalizeRoleId(user?.role) !== 'founder'
+    && cachedAccountKey !== currentAccountKey
+    && settledAccountKey !== currentAccountKey,
+  );
+
+  return useMemo(() => ({ ...state, isLoading: isLoading || accountAccessPending, error, refresh }), [state, isLoading, accountAccessPending, error, refresh]);
 }

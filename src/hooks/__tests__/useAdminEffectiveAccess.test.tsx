@@ -22,6 +22,10 @@ function AccessProbe({ user }: { user: any }) {
   );
 }
 
+function MultipleAccessProbes({ user }: { user: any }) {
+  return <><AccessProbe user={user} /><AccessProbe user={user} /></>;
+}
+
 function accessPayload(allowed: boolean, reasonCode = allowed ? 'ALLOWED' : 'STAFF_ACCESS_DISABLED') {
   return {
     success: true,
@@ -70,6 +74,31 @@ describe('useAdminEffectiveAccess', () => {
 
     await waitFor(() => expect(screen.getByTestId('add-news')).toHaveTextContent('locked:STAFF_ACCESS_DISABLED'));
     expect(mocks.api).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares one startup request across simultaneous access consumers', async () => {
+    mocks.api.mockResolvedValueOnce(accessPayload(true));
+
+    render(<MultipleAccessProbes user={{ id: 'staff-1', email: 'one@example.com', role: 'editor' }} />);
+
+    await waitFor(() => expect(screen.getAllByTestId('add-news')[0]).toHaveTextContent('allowed:ALLOWED'));
+    expect(mocks.api).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips effective-access loading for a founder', async () => {
+    render(<AccessProbe user={{ id: 'founder-1', email: 'founder@example.com', role: 'founder' }} />);
+
+    expect(screen.getByTestId('loading')).toHaveTextContent('idle');
+    expect(mocks.api).not.toHaveBeenCalled();
+  });
+
+  it('settles access loading when the optional access request fails', async () => {
+    mocks.api.mockRejectedValueOnce(new Error('Network Error'));
+
+    render(<AccessProbe user={{ id: 'staff-1', email: 'one@example.com', role: 'editor' }} />);
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('idle'));
+    expect(mocks.api).toHaveBeenCalledTimes(1);
   });
 
   it('refetches effective access when Founder module policy changes', async () => {

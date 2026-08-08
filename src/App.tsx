@@ -27,6 +27,8 @@ import LockedPage from '@pages/LockedPage.tsx';
 import Unauthorized from '@pages/Unauthorized';
 import { isAllowedHost } from './lib/hostGuard';
 import { shouldBlockAdminShell, shouldRedirectUnauthenticatedAdmin } from './lib/adminShellBootstrap';
+import { isOwnerRole } from '@/lib/adminFeatureVisibility';
+import { useAdminEffectiveAccess } from '@/hooks/useAdminEffectiveAccess';
 
 // Admin Pages
 import Dashboard from '@pages/admin/Dashboard';
@@ -196,6 +198,11 @@ function App() {
   const showTranslationUi = translationUiEnabled();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const hasVerifiedUserRole = !!user && !!String(user?.role || '').trim();
+  const ownerRole = isOwnerRole(user?.role);
+  const { isLoading: isMinimumAccessLoading } = useAdminEffectiveAccess({
+    user,
+    enabled: isAuthenticated && hasVerifiedUserRole && !isAuthPage && !ownerRole,
+  });
   const adminBootstrapPending = shouldBlockAdminShell({
     isAdminPanelPath: isAdminPanelPath(location.pathname),
     isAuthPage,
@@ -205,6 +212,7 @@ function App() {
     isLoading,
     isAuthenticated,
     hasVerifiedUserRole,
+    isMinimumAccessLoading,
   });
   const redirectUnauthenticatedAdmin = shouldRedirectUnauthenticatedAdmin({
     isAdminPanelPath: isAdminPanelPath(location.pathname),
