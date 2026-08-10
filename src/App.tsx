@@ -78,9 +78,9 @@ import ComplianceReportsPage from '@/pages/admin/ComplianceReportsPage';
 import DpdpPrivacyRequestsPage from '@/pages/admin/DpdpPrivacyRequestsPage';
 import FinanceDesk from '@pages/admin/FinanceDesk';
 import WebStoriesEditor from '@components/advanced/WebStoriesEditor';
-import CommentModerationDashboard from '@components/advanced/CommentModerationDashboard';
 import SEOToolsDashboard from '@components/advanced/SEOToolsDashboard';
 import AIEngine from '@pages/admin/AIEngine';
+import Marketing from '@pages/admin/Marketing';
 import ChangePassword from '@pages/admin/ChangePassword';
 import { ChangePasswordSettingsRedirect, FounderMyAccount, StaffMyAccount } from '@pages/admin/account/MyAccountPages';
 import Aira from '@pages/admin/Aira';
@@ -136,6 +136,7 @@ import AdminUsersPage from '@pages/AdminUsersPage';
 import AiLogsPage from '@pages/AiLogsPage';
 import ViralVideosPage from '@pages/admin/ViralVideosPage';
 import { translationUiEnabled } from '@/config/featureFlags';
+import { ADMIN_MARKETING_ROUTE, ADMIN_MODERATION_LEGACY_ROUTE } from '@/config/adminRoutes';
 
 function LegacySafeOwnerZoneRedirect() {
   const { module } = useParams();
@@ -532,7 +533,8 @@ function App() {
               <Route path="/admin/analytics" element={<AdminModuleRoute moduleKey="analytics"><AnalyticsDashboard /></AdminModuleRoute>} />
               <Route path="/admin/security" element={<FounderRoute><EnhancedSecurityDashboard /></FounderRoute>} />
               <Route path="/admin/web-stories" element={<ProtectedRoute><WebStoriesEditor /></ProtectedRoute>} />
-              <Route path="/admin/moderation" element={<AdminModuleRoute moduleKey="moderation"><CommentModerationDashboard /></AdminModuleRoute>} />
+              <Route path={ADMIN_MODERATION_LEGACY_ROUTE} element={<Navigate to={ADMIN_MARKETING_ROUTE} replace />} />
+              <Route path={ADMIN_MARKETING_ROUTE} element={<AdminModuleRoute moduleKey="marketing"><Marketing /></AdminModuleRoute>} />
               <Route path="/admin/seo" element={<AdminModuleRoute moduleKey="seo"><SEOToolsDashboard /></AdminModuleRoute>} />
               <Route path="/admin/founder-control" element={<FounderRoute><FounderControlCenter /></FounderRoute>} />
               {/* New Founder Control route alias */}

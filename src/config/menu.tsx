@@ -2,7 +2,7 @@ import { Role } from '@/store/auth';
 import {
   HomeIcon, ShieldCheckIcon, KeyIcon, CpuChipIcon, PresentationChartLineIcon,
   DocumentChartBarIcon, ClipboardDocumentCheckIcon, WrenchIcon, BoltIcon,
-  InboxStackIcon, BellAlertIcon, FolderOpenIcon, GlobeAltIcon
+  InboxStackIcon, MegaphoneIcon, FolderOpenIcon, GlobeAltIcon
 } from '@heroicons/react/24/outline';
 
 export type Item = {
@@ -33,7 +33,7 @@ export const MENU: Item[] = [
   // Admin Operations
   { key:'newsAdd', label:'Add News', path:'/panel/admin/news/new', icon:BoltIcon, roles:['founder','admin'], section:'admin' },
   { key:'newsManage', label:'Manage News', path:'/panel/admin/news', icon:InboxStackIcon, roles:['founder','admin'], section:'admin', badgeKey:'pendingArticles' },
-  { key:'moderation', label:'Moderation', path:'/panel/admin/moderation', icon:BellAlertIcon, roles:['founder','admin'], section:'admin', badgeKey:'flags' },
+  { key:'marketing', label:'Marketing', path:'/panel/admin/marketing', icon:MegaphoneIcon, roles:['founder','admin'], section:'admin' },
   { key:'compliance', label:'Compliance', path:'/panel/admin/compliance', icon:ShieldCheckIcon, roles:['founder','admin'], section:'admin', badgeKey:'complianceIssues' },
   { key:'operations', label:'Operations', path:'/panel/admin/operations', icon:WrenchIcon, roles:['founder','admin'], section:'admin' },
   { key:'editorialMedia', label:'Editorial & Media', path:'/panel/admin/editorial-media', icon:GlobeAltIcon, roles:['founder','admin'], section:'admin' },

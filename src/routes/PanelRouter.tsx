@@ -10,6 +10,7 @@ import SiteControls from '@/pages/SiteControls';
 import EditorialWorkflowEngine from '@/components/advanced/EditorialWorkflowEngine';
 import LegacyArticleEditRedirect from '@/routes/LegacyArticleEditRedirect';
 import { translationUiEnabled } from '@/config/featureFlags';
+import { PANEL_MARKETING_ROUTE } from '@/config/adminRoutes';
 
 // Placeholder pages
 function Page({ title }: { title: string }) { return <div className="space-y-4"><h1 className="text-2xl font-semibold">{title}</h1><p className="opacity-70 text-sm">TODO: implement "{title}"</p></div>; }
@@ -44,7 +45,8 @@ export default function PanelRouter() {
           <Route path="admin/news/:id/edit" element={<RequireRole allow={['founder','admin','editor']}><LegacyArticleEditRedirect /></RequireRole>} />
           <Route path="admin/manage-news/:id/edit" element={<RequireRole allow={['founder','admin','editor']}><LegacyArticleEditRedirect /></RequireRole>} />
           <Route path="admin/drafts" element={<RequireRole allow={['founder','admin','editor']}><Navigate to="/draft-desk" replace /></RequireRole>} />
-          <Route path="admin/moderation" element={<RequireRole allow={['founder','admin']}><Page title="Moderation" /></RequireRole>} />
+          <Route path="admin/moderation" element={<Navigate to={PANEL_MARKETING_ROUTE} replace />} />
+          <Route path="admin/marketing" element={<RequireRole allow={['founder','admin']}><Page title="Marketing" /></RequireRole>} />
           <Route path="admin/compliance" element={<RequireRole allow={['founder','admin']}><Page title="Compliance" /></RequireRole>} />
           <Route path="admin/operations" element={<RequireRole allow={['founder','admin']}><Page title="Operations" /></RequireRole>} />
           <Route path="admin/editorial-media" element={<RequireRole allow={['founder','admin']}><Page title="Editorial & Media" /></RequireRole>} />

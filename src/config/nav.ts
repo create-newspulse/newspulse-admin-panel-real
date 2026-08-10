@@ -5,6 +5,7 @@ import {
 } from '@/lib/adminFeatureVisibility';
 import { resolveAdminModuleAccess, type AdminModuleKey } from '@/lib/adminAccessControl';
 import type { AdminEffectiveModuleAccess, AdminModulePolicyMap } from '@/lib/adminModulePolicy';
+import { ADMIN_MARKETING_ROUTE } from '@/config/adminRoutes';
 
 export type Role = string;
 export type NavItem = {
@@ -42,7 +43,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'editorial', label:'Editorial', path:'/admin/editorial', roles:['editor','admin','founder'], icon:'✍️', moduleKey:'editorial' },
   { key:'seo', label:'SEO', path:'/admin/seo', roles:['admin','founder'], icon:'🔍', moduleKey:'seo' },
   { key:'analytics', label:'Analytics', path:'/admin/analytics', roles:['admin','founder'], icon:'📊', moduleKey:'analytics' },
-  { key:'moderation', label:'Moderation', path:'/admin/moderation', roles:['moderator','admin','founder'], icon:'💬', moduleKey:'moderation' },
+  { key:'marketing', label:'Marketing', path:ADMIN_MARKETING_ROUTE, roles:['admin','founder'], icon:'📣', moduleKey:'marketing' },
   { key:'compliance-reports', label:'Compliance Reports', path:'/admin/compliance-reports', roles:['admin','founder'], icon:'🧾', moduleKey:'compliance_reports' },
   { key:'dpdp-compliance', label:'DPDP Compliance', path:'/admin/dpdp/privacy-requests', roles:['founder','admin'], icon:'🛡️', moduleKey:'dpdp_privacy_requests' },
   { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠', moduleKey:'ai_engine' },

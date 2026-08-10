@@ -40,7 +40,7 @@ const MODULE_GROUPS: ModuleGroup[] = [
       { key: 'reporter_portal_admin', description: 'Manage reporter portal administration workflows.' },
       { key: 'editorial', description: 'Open editorial workspaces and review tools.' },
       { key: 'seo', description: 'Manage SEO checks, metadata, and newsroom optimization.' },
-      { key: 'moderation', description: 'Review comments and moderation queues.' },
+      { key: 'marketing', description: 'Grow the audience, manage advertiser leads, and coordinate marketing campaigns.' },
     ],
   },
   {

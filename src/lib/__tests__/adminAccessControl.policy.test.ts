@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { leftNavWithAccess } from '@/config/nav';
-import { getEffectiveModuleAccess, resolveAdminModuleAccess, resolveAnyAdminModuleAccess } from '@/lib/adminAccessControl';
+import { getDefaultRoleAccess, getEffectiveModuleAccess, resolveAdminModuleAccess, resolveAnyAdminModuleAccess } from '@/lib/adminAccessControl';
 import { DEFAULT_ADMIN_MODULE_POLICY, createFounderOnlyModulePolicy, normalizeAdminModulePolicy, serializeModulePolicyPayload } from '@/lib/adminModulePolicy';
 
 const staff = { role: 'editor', moduleAccess: ['add_news'] };
@@ -267,6 +267,29 @@ describe('admin module policy resolver', () => {
     expect(navItem?.locked).toBe(true);
     expect(navItem?.lockedReason).toBe(staffAccessResult.reason);
     expect(routeResult.reason).toBe(staffAccessResult.reason);
+  });
+
+  it('keeps Marketing Founder-accessible and restricted for staff until explicitly granted', () => {
+    const modulePolicy = normalizeAdminModulePolicy({ modulePolicy: {} });
+    const founderResult = resolveAdminModuleAccess({ role: 'founder', moduleAccess: [] }, 'marketing', { modulePolicy });
+    const staffResult = resolveAdminModuleAccess({ role: 'admin', moduleAccess: ['marketing'] }, 'marketing', { modulePolicy });
+    const navItem = leftNavWithAccess({ role: 'admin', moduleAccess: ['marketing'] }, { modulePolicy }).find((item) => item.moduleKey === 'marketing');
+
+    expect(founderResult.allowed).toBe(true);
+    expect(staffResult.allowed).toBe(false);
+    expect(staffResult.reasonCode).toBe('FOUNDER_ONLY');
+    expect(navItem?.locked).toBe(true);
+    expect(navItem?.lockedReason).toBe('This module is restricted to the Founder.');
+  });
+
+  it('keeps sensitive Marketing performance rights Founder-only by default', () => {
+    const founder = getDefaultRoleAccess('founder')!;
+    const admin = getDefaultRoleAccess('admin')!;
+    const sensitiveRights = ['view_marketing_deal_values', 'approve_campaign_report', 'export_marketing_performance', 'manage_renewal_settings', 'delete_campaign_report', 'delete_renewal_record'];
+
+    expect(founder.specialRights).toEqual(expect.arrayContaining(sensitiveRights));
+    sensitiveRights.forEach((right) => expect(admin.specialRights).not.toContain(right));
+    expect(admin.specialRights).toEqual(expect.arrayContaining(['view_marketing_performance', 'view_campaign_performance', 'view_promotion_performance', 'view_renewals', 'manage_renewals', 'create_campaign_report', 'view_growth_performance']));
   });
 
   it('denies suspended and expired staff accounts with simple final reasons', () => {

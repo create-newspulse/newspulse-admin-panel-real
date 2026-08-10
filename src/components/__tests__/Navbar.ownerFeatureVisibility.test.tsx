@@ -68,6 +68,8 @@ describe('Navbar owner feature visibility', () => {
     );
 
     expect(screen.getByRole('link', { name: /add news/i })).toHaveAttribute('href', '/admin/add-news');
+    expect(screen.getByRole('link', { name: /marketing/i })).toHaveAttribute('href', '/admin/marketing');
+    expect(screen.queryByRole('link', { name: /moderation/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /safe zone/i })).toHaveAttribute('href', '/admin/safe-owner-zone');
     expect(screen.getByRole('link', { name: /founder my account/i })).toBeInTheDocument();
     expect(screen.queryByLabelText('Locked module')).not.toBeInTheDocument();

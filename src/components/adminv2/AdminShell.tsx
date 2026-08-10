@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { ADMIN_MARKETING_ROUTE } from '@/config/adminRoutes';
 
 type NavItem = { label: string; href: string; icon?: React.ReactNode };
 
@@ -10,7 +11,7 @@ const nav: NavItem[] = [
   { label: 'Manage News', href: '/admin/manage-news' },
   { label: 'AI Engine', href: '/admin/ai-engine' },
   { label: 'Embeds', href: '/admin/EmbedManager' },
-  { label: 'Moderation', href: '/admin/Moderation' },
+  { label: 'Marketing', href: ADMIN_MARKETING_ROUTE },
   { label: 'Analytics', href: '/AnalyticsDashboard' },
   { label: 'Settings', href: '/admin/Settings' },
 ];

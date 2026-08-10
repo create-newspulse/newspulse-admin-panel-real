@@ -23,7 +23,7 @@ describe('adminFeatureVisibility contract', () => {
         editorial: true,
         seo: false,
         analytics: true,
-        moderation: false,
+        marketing: false,
         complianceReports: true,
         aiEngine: true,
         settings: false,
@@ -46,7 +46,7 @@ describe('adminFeatureVisibility contract', () => {
     expect(normalized.editorial).toBe(true);
     expect(normalized.seo).toBe(false);
     expect(normalized.analytics).toBe(true);
-    expect(normalized.moderation).toBe(false);
+    expect(normalized.marketing).toBe(false);
     expect(normalized['compliance-reports']).toBe(true);
     expect(normalized['ai-engine']).toBe(true);
     expect(normalized.settings).toBe(false);
@@ -61,6 +61,7 @@ describe('adminFeatureVisibility contract', () => {
       'reporter-portal': false,
       'broadcast-center': true,
       ads: false,
+      finance: false,
       media: true,
       'viral-videos': false,
       aira: true,
@@ -68,7 +69,7 @@ describe('adminFeatureVisibility contract', () => {
       editorial: true,
       seo: false,
       analytics: true,
-      moderation: false,
+      marketing: false,
       'compliance-reports': true,
       'ai-engine': true,
       settings: false,
@@ -83,6 +84,7 @@ describe('adminFeatureVisibility contract', () => {
         reporterPortalAdmin: false,
         broadcastCenter: true,
         adsManager: false,
+        financeDesk: false,
         media: true,
         viralVideos: false,
         aira: true,
@@ -90,7 +92,7 @@ describe('adminFeatureVisibility contract', () => {
         editorial: true,
         seo: false,
         analytics: true,
-        moderation: false,
+        marketing: false,
         complianceReports: true,
         aiEngine: true,
         settings: false,

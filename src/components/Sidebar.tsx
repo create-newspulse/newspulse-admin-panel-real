@@ -3,6 +3,7 @@ import { FaBars, FaSignOutAlt } from "react-icons/fa";
 
 import { useSidebar } from "../context/SidebarContext";
 import { useAuth } from "../context/AuthContext";
+import { ADMIN_MARKETING_ROUTE } from "@/config/adminRoutes";
 // ...existing code...
 
 export default function Sidebar() {
@@ -74,8 +75,8 @@ export default function Sidebar() {
         <NavLink to="/admin/web-stories" className={({ isActive }) => linkClass(isActive)}>
           � {isOpen && <span className="font-bold">Web Stories</span>}
         </NavLink>
-        <NavLink to="/admin/moderation" className={({ isActive }) => linkClass(isActive)}>
-          � {isOpen && <span className="font-bold">Moderation</span>}
+        <NavLink to={ADMIN_MARKETING_ROUTE} className={({ isActive }) => linkClass(isActive)}>
+          📣 {isOpen && <span className="font-bold">Marketing</span>}
         </NavLink>
         <NavLink to="/admin/seo" className={({ isActive }) => linkClass(isActive)}>
           🔍 {isOpen && <span className="font-bold">SEO Tools</span>}

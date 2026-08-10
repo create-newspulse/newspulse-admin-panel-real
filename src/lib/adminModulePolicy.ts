@@ -17,7 +17,7 @@ export type BackendAdminModulePolicyKey =
   | 'editorial'
   | 'seo'
   | 'analytics'
-  | 'moderation'
+  | 'marketing'
   | 'complianceReports'
   | 'dpdpCompliance'
   | 'aiEngine'
@@ -70,7 +70,7 @@ export const ADMIN_POLICY_MODULE_KEYS = [
   'reporter_portal_admin',
   'editorial',
   'seo',
-  'moderation',
+  'marketing',
   'broadcast_center',
   'media',
   'viral_videos',
@@ -101,7 +101,7 @@ export const BACKEND_MODULE_POLICY_KEY_BY_LOCAL = {
   editorial: 'editorial',
   seo: 'seo',
   analytics: 'analytics',
-  moderation: 'moderation',
+  marketing: 'marketing',
   compliance_reports: 'complianceReports',
   dpdp_privacy_requests: 'dpdpCompliance',
   ai_engine: 'aiEngine',
@@ -157,7 +157,7 @@ const LEGACY_VISIBILITY_TO_MODULE: Record<string, AdminModuleKey> = {
   editorial: 'editorial',
   seo: 'seo',
   analytics: 'analytics',
-  moderation: 'moderation',
+  marketing: 'marketing',
   'compliance-reports': 'compliance_reports',
   complianceReports: 'compliance_reports',
   'ai-engine': 'ai_engine',

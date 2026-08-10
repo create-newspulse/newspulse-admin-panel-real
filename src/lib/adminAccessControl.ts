@@ -25,7 +25,7 @@ export type AdminModuleKey =
   | 'editorial'
   | 'seo'
   | 'analytics'
-  | 'moderation'
+  | 'marketing'
   | 'compliance_reports'
   | 'dpdp_privacy_requests'
   | 'ai_engine'
@@ -65,6 +65,53 @@ export type SpecialRightKey =
   | 'analytics.refresh'
   | 'analytics.export'
   | 'can_submit_sponsor_request_for_approval'
+  | 'view_marketing'
+  | 'view_advertisers'
+  | 'create_advertiser'
+  | 'edit_advertiser'
+  | 'manage_contacts'
+  | 'log_sales_activity'
+  | 'manage_followups'
+  | 'view_proposals'
+  | 'create_proposal'
+  | 'edit_proposal'
+  | 'view_partnerships'
+  | 'manage_partnerships'
+  | 'assign_sales_owner'
+  | 'approve_proposal'
+  | 'approve_marketing_discount'
+  | 'mark_deal_won'
+  | 'mark_deal_lost'
+  | 'send_to_ads_manager'
+  | 'manage_internal_rate_card'
+  | 'delete_marketing_record'
+  | 'view_audience_growth'
+  | 'view_promotions'
+  | 'create_promotion'
+  | 'edit_promotion'
+  | 'manage_promotion_calendar'
+  | 'create_utm_links'
+  | 'log_promotion_activity'
+  | 'view_growth_goals'
+  | 'manage_growth_goals'
+  | 'manage_utm_presets'
+  | 'manage_channel_settings'
+  | 'archive_promotion'
+  | 'delete_promotion'
+  | 'manage_marketing_settings'
+  | 'view_marketing_performance'
+  | 'view_campaign_performance'
+  | 'view_promotion_performance'
+  | 'view_renewals'
+  | 'manage_renewals'
+  | 'create_campaign_report'
+  | 'view_growth_performance'
+  | 'view_marketing_deal_values'
+  | 'approve_campaign_report'
+  | 'export_marketing_performance'
+  | 'manage_renewal_settings'
+  | 'delete_campaign_report'
+  | 'delete_renewal_record'
   | 'can_view_finance'
   | 'can_create_invoice'
   | 'can_update_invoice_status'
@@ -155,7 +202,7 @@ export const ADMIN_MODULES: AdminModuleDefinition[] = [
   { key: 'editorial', label: 'Editorial', ownerVisibilityKey: 'editorial' },
   { key: 'seo', label: 'SEO', ownerVisibilityKey: 'seo' },
   { key: 'analytics', label: 'Analytics', ownerVisibilityKey: 'analytics' },
-  { key: 'moderation', label: 'Moderation', ownerVisibilityKey: 'moderation' },
+  { key: 'marketing', label: 'Marketing', ownerVisibilityKey: 'marketing' },
   { key: 'compliance_reports', label: 'Compliance Reports', ownerVisibilityKey: 'compliance-reports' },
   { key: 'dpdp_privacy_requests', label: 'DPDP Privacy Requests' },
   { key: 'ai_engine', label: 'AI Engine', ownerVisibilityKey: 'ai-engine' },
@@ -196,6 +243,53 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'analytics.refresh', label: 'Analytics: refresh data' },
   { key: 'analytics.export', label: 'Analytics: export data' },
   { key: 'can_submit_sponsor_request_for_approval', label: 'Can submit sponsor request for approval' },
+  { key: 'view_marketing', label: 'Marketing: view workspace' },
+  { key: 'view_advertisers', label: 'Marketing: view advertisers' },
+  { key: 'create_advertiser', label: 'Marketing: create advertiser' },
+  { key: 'edit_advertiser', label: 'Marketing: edit advertiser' },
+  { key: 'manage_contacts', label: 'Marketing: manage contacts' },
+  { key: 'log_sales_activity', label: 'Marketing: log sales activity' },
+  { key: 'manage_followups', label: 'Marketing: manage follow-ups' },
+  { key: 'view_proposals', label: 'Marketing: view proposals' },
+  { key: 'create_proposal', label: 'Marketing: create proposal' },
+  { key: 'edit_proposal', label: 'Marketing: edit proposal' },
+  { key: 'view_partnerships', label: 'Marketing: view partnerships' },
+  { key: 'manage_partnerships', label: 'Marketing: manage partnerships' },
+  { key: 'assign_sales_owner', label: 'Marketing: assign sales owner' },
+  { key: 'approve_proposal', label: 'Marketing: approve proposal' },
+  { key: 'approve_marketing_discount', label: 'Marketing: approve discount' },
+  { key: 'mark_deal_won', label: 'Marketing: mark deal won' },
+  { key: 'mark_deal_lost', label: 'Marketing: mark deal lost' },
+  { key: 'send_to_ads_manager', label: 'Marketing: send handoff to Ads Manager' },
+  { key: 'manage_internal_rate_card', label: 'Marketing: manage internal rate card' },
+  { key: 'delete_marketing_record', label: 'Marketing: delete record' },
+  { key: 'view_audience_growth', label: 'Marketing: view audience growth' },
+  { key: 'view_promotions', label: 'Marketing: view promotions' },
+  { key: 'create_promotion', label: 'Marketing: create promotion' },
+  { key: 'edit_promotion', label: 'Marketing: edit promotion' },
+  { key: 'manage_promotion_calendar', label: 'Marketing: manage promotion calendar' },
+  { key: 'create_utm_links', label: 'Marketing: create UTM links' },
+  { key: 'log_promotion_activity', label: 'Marketing: log promotion activity' },
+  { key: 'view_growth_goals', label: 'Marketing: view growth goals' },
+  { key: 'manage_growth_goals', label: 'Marketing: manage growth goals' },
+  { key: 'manage_utm_presets', label: 'Marketing: manage UTM presets' },
+  { key: 'manage_channel_settings', label: 'Marketing: manage channel settings' },
+  { key: 'archive_promotion', label: 'Marketing: archive promotion' },
+  { key: 'delete_promotion', label: 'Marketing: delete promotion' },
+  { key: 'manage_marketing_settings', label: 'Marketing: manage settings' },
+  { key: 'view_marketing_performance', label: 'Marketing: view performance' },
+  { key: 'view_campaign_performance', label: 'Marketing: view campaign performance' },
+  { key: 'view_promotion_performance', label: 'Marketing: view promotion performance' },
+  { key: 'view_renewals', label: 'Marketing: view renewals' },
+  { key: 'manage_renewals', label: 'Marketing: manage renewals' },
+  { key: 'create_campaign_report', label: 'Marketing: create campaign report' },
+  { key: 'view_growth_performance', label: 'Marketing: view growth performance' },
+  { key: 'view_marketing_deal_values', label: 'Marketing: view deal values' },
+  { key: 'approve_campaign_report', label: 'Marketing: approve campaign report' },
+  { key: 'export_marketing_performance', label: 'Marketing: export performance' },
+  { key: 'manage_renewal_settings', label: 'Marketing: manage renewal settings' },
+  { key: 'delete_campaign_report', label: 'Marketing: delete campaign report' },
+  { key: 'delete_renewal_record', label: 'Marketing: delete renewal record' },
   { key: 'can_view_finance', label: 'Can view finance' },
   { key: 'can_create_invoice', label: 'Can create invoice' },
   { key: 'can_update_invoice_status', label: 'Can update invoice status' },
@@ -261,6 +355,7 @@ const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slo
 const FINANCE_OPERATIONS_RIGHTS: SpecialRightKey[] = ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status', ...ANALYTICS_REVENUE_RIGHTS];
 const FOUNDER_ONLY_FINANCE_RIGHTS: SpecialRightKey[] = ['can_approve_payment', 'can_delete_finance_record', 'can_change_bank_details', 'can_change_payment_gateway', 'can_approve_withdrawal', 'can_approve_final_finance_report'];
 const FOUNDER_ONLY_DPDP_RIGHTS: SpecialRightKey[] = ['can_manage_dpdp_privacy_requests'];
+const FOUNDER_ONLY_MARKETING_RIGHTS: SpecialRightKey[] = ['view_marketing_deal_values', 'approve_campaign_report', 'export_marketing_performance', 'manage_renewal_settings', 'delete_campaign_report', 'delete_renewal_record'];
 
 export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
   {
@@ -275,10 +370,10 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
   {
     id: 'admin',
     label: 'Admin',
-    description: 'Senior admin for newsroom operations, publishing support, analytics, and moderation. Safe Zone and Team Management require explicit Founder grant.',
+    description: 'Senior admin for newsroom operations, publishing support, analytics, and staff coordination. Safe Zone and Team Management require explicit Founder grant.',
     systemRole: true,
     modules: ALL_MODULE_KEYS.filter((key) => key !== 'safe_zone' && key !== 'team_management' && key !== 'dpdp_privacy_requests'),
-    specialRights: ALL_SPECIAL_RIGHT_KEYS.filter((key) => !['can_access_safe_zone', 'can_use_emergency_lock', 'can_delete_roles', ...FOUNDER_ONLY_FINANCE_RIGHTS, ...FOUNDER_ONLY_DPDP_RIGHTS].includes(key)),
+    specialRights: ALL_SPECIAL_RIGHT_KEYS.filter((key) => !['can_access_safe_zone', 'can_use_emergency_lock', 'can_delete_roles', ...FOUNDER_ONLY_FINANCE_RIGHTS, ...FOUNDER_ONLY_DPDP_RIGHTS, ...FOUNDER_ONLY_MARKETING_RIGHTS].includes(key)),
   },
   {
     id: 'finance_accounts_manager',
@@ -365,7 +460,7 @@ export const DEFAULT_ROLE_ACCESS: RoleAccessPreset[] = [
     label: 'Tech Support',
     description: 'Technical support role for diagnostics, login support, audit-assisted troubleshooting, and account help.',
     systemRole: true,
-    modules: ['dashboard', 'moderation', 'settings'],
+    modules: ['dashboard', 'settings'],
     specialRights: ['can_reset_staff_password'],
   },
   {

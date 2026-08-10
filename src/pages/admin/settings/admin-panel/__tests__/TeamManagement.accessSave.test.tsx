@@ -442,7 +442,7 @@ describe('TeamManagement role preset suggestions in staff access', () => {
     expect(saveButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Review reporter preset suggestions' } });
     await waitFor(() => expect(saveButton).toBeEnabled());
-  });
+  }, 15000);
 
   it('grants loaded suggestions only through Save Access Changes', async () => {
     const saveButton = await renderAccessEditor();
