@@ -67,6 +67,7 @@ function PublicSiteSettingsLayoutInner() {
         <NavLink to="daily-wonders" className={linkCls}>Daily Wonders</NavLink>
         <NavLink to="footer" className={linkCls}>Footer</NavLink>
         <NavLink to="language-theme" className={linkCls}>Language & Theme</NavLink>
+        <NavLink to="push-notifications" className={linkCls}>Push Notifications</NavLink>
       </aside>
 
       <section className="min-w-0 space-y-5 lg:col-span-9">

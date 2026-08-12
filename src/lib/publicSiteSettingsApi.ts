@@ -109,6 +109,14 @@ function mergeDefaults(value: PublicSiteSettings): PublicSiteSettings {
       ...DEFAULT_PUBLIC_SITE_SETTINGS.dailyWonders,
       ...(value.dailyWonders || {}),
     },
+    pushNotifications: {
+      ...DEFAULT_PUBLIC_SITE_SETTINGS.pushNotifications,
+      ...(value.pushNotifications || {}),
+      types: {
+        ...DEFAULT_PUBLIC_SITE_SETTINGS.pushNotifications.types,
+        ...(value.pushNotifications?.types || {}),
+      },
+    },
     languageTheme: {
       ...DEFAULT_PUBLIC_SITE_SETTINGS.languageTheme,
       ...(value.languageTheme || {}),

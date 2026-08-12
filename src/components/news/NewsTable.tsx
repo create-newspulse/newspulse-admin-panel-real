@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 
 import type { ManageNewsParams } from '@/types/api';
 import type { ArticleStatus } from '@/types/articles';
+import { adminJson } from '@/lib/http/adminFetch';
 import {
   listArticles,
   archiveArticle,
@@ -29,6 +30,81 @@ import { formatDurationShort, formatNumberCompact, formatPercent } from '@/lib/f
 
 function norm(s: any): string {
   return String(s || '').trim().toLowerCase();
+}
+
+function safePushErrorMessage(input: unknown): string {
+  const raw = String((input as any)?.message || input || '').trim();
+  return raw
+    .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/gi, '[redacted]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
+    .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s*[:=]\s*["']?[^"',\s}]+/gi, '[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{64,}\b/g, '[redacted]')
+    .slice(0, 160)
+    .trim();
+}
+
+const ARTICLE_PUSH_FALLBACK_BODY = 'Tap to read the full story on News Pulse.';
+
+function extractSlugFromPublicUrl(input: unknown): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, 'https://www.newspulse.co.in');
+    const parts = url.pathname.split('/').map((part) => part.trim()).filter(Boolean);
+    const newsIndex = parts.findIndex((part) => part.toLowerCase() === 'news');
+    const candidate = newsIndex >= 0 ? parts[newsIndex + 1] : parts[parts.length - 1];
+    return decodeURIComponent(String(candidate || '')).trim();
+  } catch {
+    const parts = raw.split(/[/?#]/).map((part) => part.trim()).filter(Boolean);
+    return parts[parts.length - 1] || '';
+  }
+}
+
+export type ArticlePushBuildResult =
+  | {
+      ok: true;
+      payload: {
+        articleId: string;
+        slug: string;
+        title: string;
+        body: string;
+        url: string;
+        category: string;
+        language: string;
+        confirmSend: true;
+      };
+    }
+  | { ok: false; reason: string };
+
+export function buildArticlePushPayload(article: Article): ArticlePushBuildResult {
+  const status = norm((article as any)?.status ?? (article as any)?.state ?? (article as any)?.publishStatus);
+  if (status !== 'published') return { ok: false, reason: 'Article push is available only for published articles.' };
+
+  const articleId = String((article as any)?._id || (article as any)?.id || '').trim();
+  const publicUrl = (article as any)?.publicUrl ?? (article as any)?.publicURL ?? (article as any)?.public_url ?? (article as any)?.canonicalUrl ?? (article as any)?.canonical_url ?? (article as any)?.liveUrl ?? (article as any)?.live_url;
+  const slug = String((article as any)?.slug || extractSlugFromPublicUrl(publicUrl)).trim();
+  const title = String((article as any)?.title || '').trim();
+  const body = String((article as any)?.summary || '').trim() || ARTICLE_PUSH_FALLBACK_BODY;
+  const category = norm((article as any)?.category);
+  const language = norm((article as any)?.language ?? (article as any)?.lang) || 'en';
+
+  if (!articleId) return { ok: false, reason: 'Article push unavailable: missing article id.' };
+  if (!title) return { ok: false, reason: 'Article push unavailable: missing article title.' };
+  if (!slug) return { ok: false, reason: 'Article push unavailable: missing public URL.' };
+
+  return {
+    ok: true,
+    payload: {
+      articleId,
+      slug,
+      title,
+      body,
+      url: `https://www.newspulse.co.in/news/${slug}`,
+      category,
+      language,
+      confirmSend: true,
+    },
+  };
 }
 
 function getTags(a: Article): string[] {
@@ -453,6 +529,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   // Schedule dialog
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const [scheduleTarget, setScheduleTarget] = React.useState<Article | null>(null);
+  const [articlePushTarget, setArticlePushTarget] = React.useState<Article | null>(null);
+  const [articlePushSending, setArticlePushSending] = React.useState(false);
   const mutateSchedule = useMutation({
     mutationFn: ({ id, at }: { id: string; at: string }) => scheduleArticle(id, at),
     onSuccess: (_data, vars) => toast.success(`Scheduled for local time ${new Date(vars.at).toLocaleString()}`),
@@ -760,6 +838,30 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     );
   };
 
+  const confirmArticlePush = async () => {
+    if (!articlePushTarget || articlePushSending) return;
+    const built = buildArticlePushPayload(articlePushTarget);
+    if (!built.ok) {
+      toast.error(built.reason);
+      return;
+    }
+
+    setArticlePushSending(true);
+    try {
+      await adminJson('/admin/push/article', {
+        method: 'POST',
+        json: built.payload,
+      });
+      toast.success('Article push sent successfully.');
+      setArticlePushTarget(null);
+    } catch (e: any) {
+      const detail = safePushErrorMessage(e);
+      toast.error(detail ? `Article push failed. ${detail}` : 'Article push failed.');
+    } finally {
+      setArticlePushSending(false);
+    }
+  };
+
   const showSkeleton = isLoading;
 
   if (error) {
@@ -907,18 +1009,38 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
         )}
 
         {st === 'published' && (
-          <ActionLink
-            label="Unpublish"
-            tone="slate"
-            onClick={() => {
-              logNewsTableAction('unpublish click', {
-                ...baseLogPayload,
-                route: `/admin-api/articles/${encodeURIComponent(id)}`,
-                payload: { status: 'draft' },
-              });
-              mutateUnpublish.mutate(id);
-            }}
-          />
+          <>
+            {(() => {
+              const push = buildArticlePushPayload(a);
+              return (
+                <ActionLink
+                  label="Push"
+                  title={push.ok ? 'Send Push' : push.reason}
+                  tone="green"
+                  disabled={!push.ok}
+                  onClick={() => {
+                    if (!push.ok) {
+                      toast.error(push.reason);
+                      return;
+                    }
+                    setArticlePushTarget(a);
+                  }}
+                />
+              );
+            })()}
+            <ActionLink
+              label="Unpublish"
+              tone="slate"
+              onClick={() => {
+                logNewsTableAction('unpublish click', {
+                  ...baseLogPayload,
+                  route: `/admin-api/articles/${encodeURIComponent(id)}`,
+                  payload: { status: 'draft' },
+                });
+                mutateUnpublish.mutate(id);
+              }}
+            />
+          </>
         )}
 
         {st !== 'archived' && canArchive && (
@@ -1358,6 +1480,49 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           setScheduleTarget(null);
         }}
       />
+
+      {articlePushTarget ? (() => {
+        const built = buildArticlePushPayload(articlePushTarget);
+        const previewBody = built.ok ? built.payload.body : (String((articlePushTarget as any)?.summary || '').trim() || ARTICLE_PUSH_FALLBACK_BODY);
+        const previewUrl = built.ok ? built.payload.url : '';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+              <div className="text-lg font-semibold text-slate-950">Send Article Push?</div>
+              <div className="mt-2 text-sm text-slate-600">This will notify visitors who enabled article alerts.</div>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-950">News Pulse</div>
+                <div className="mt-2 whitespace-pre-wrap text-sm font-semibold text-slate-900">{String((articlePushTarget as any)?.title || '')}</div>
+                <div className="mt-3 whitespace-pre-wrap text-sm text-slate-700">{previewBody}</div>
+                {previewUrl ? (
+                  <div className="mt-3 text-xs text-slate-600">
+                    <span className="font-semibold text-slate-700">URL:</span> {previewUrl}
+                  </div>
+                ) : null}
+              </div>
+              {!built.ok ? <div className="mt-3 text-sm font-semibold text-red-700">{built.reason}</div> : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  disabled={articlePushSending}
+                  onClick={() => setArticlePushTarget(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                  disabled={articlePushSending || !built.ok}
+                  onClick={confirmArticlePush}
+                >
+                  {articlePushSending ? 'Sending...' : 'Send Push'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })() : null}
     </div>
   );
 }

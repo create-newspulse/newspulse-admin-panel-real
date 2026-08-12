@@ -121,6 +121,8 @@ import InspirationHubSettings from '@pages/admin/settings/public-site/Inspiratio
 import DailyWondersSettings from '@pages/admin/settings/public-site/DailyWondersSettings';
 import FooterSettings from '@pages/admin/settings/public-site/FooterSettings';
 import LanguageThemeSettings from '@pages/admin/settings/public-site/LanguageThemeSettings';
+import PushNotificationsSettings from '@pages/admin/settings/public-site/PushNotificationsSettings';
+import PushNotificationsHistory from '@pages/admin/settings/public-site/PushNotificationsHistory';
 import PublicPreview from '@pages/admin/settings/public-site/PublicPreview';
 import PanelRouter from '@/routes/PanelRouter';
 import LegacyArticleEditRedirect from '@/routes/LegacyArticleEditRedirect';
@@ -433,6 +435,8 @@ function App() {
                   <Route path="daily-wonders" element={<DailyWondersSettings />} />
                   <Route path="footer" element={<FooterSettings />} />
                   <Route path="language-theme" element={<LanguageThemeSettings />} />
+                  <Route path="push-notifications" element={<PushNotificationsSettings />} />
+                  <Route path="push-notifications/history" element={<PushNotificationsHistory />} />
                   <Route path="preview" element={<PublicPreview />} />
                 </Route>
               </Route>

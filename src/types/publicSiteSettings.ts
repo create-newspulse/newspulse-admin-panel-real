@@ -105,6 +105,21 @@ const DailyWondersSchema = z
   })
   .passthrough();
 
+const PushNotificationsSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    types: z
+      .object({
+        breakingNewsAlerts: z.boolean().default(true),
+        topStories: z.boolean().default(true),
+        newArticleAlerts: z.boolean().default(true),
+        categoryAlerts: z.boolean().default(true),
+        allArticles: z.boolean().default(false),
+      })
+      .default({}),
+  })
+  .passthrough();
+
 function normalizeLocalizedText(input: unknown, fallback = ''): Record<(typeof SUPPORTED_INSPIRATION_LANGUAGES)[number], string> {
   const value = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
   return {
@@ -253,6 +268,24 @@ function normalizeDailyWondersSettings(input: unknown): Record<string, unknown> 
   };
 }
 
+function normalizePushNotificationsSettings(input: unknown): Record<string, unknown> {
+  const value = input && typeof input === 'object' ? { ...(input as Record<string, unknown>) } : {};
+  const rawTypes = value.types && typeof value.types === 'object' ? (value.types as Record<string, unknown>) : {};
+
+  return {
+    ...value,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+    types: {
+      ...rawTypes,
+      breakingNewsAlerts: typeof rawTypes.breakingNewsAlerts === 'boolean' ? rawTypes.breakingNewsAlerts : true,
+      topStories: typeof rawTypes.topStories === 'boolean' ? rawTypes.topStories : true,
+      newArticleAlerts: typeof rawTypes.newArticleAlerts === 'boolean' ? rawTypes.newArticleAlerts : true,
+      categoryAlerts: typeof rawTypes.categoryAlerts === 'boolean' ? rawTypes.categoryAlerts : true,
+      allArticles: typeof rawTypes.allArticles === 'boolean' ? rawTypes.allArticles : false,
+    },
+  };
+}
+
 function normalizeLiveTvMode(value: unknown): (typeof LIVE_TV_MODES)[number] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (!raw) return 'News Pulse Live';
@@ -365,6 +398,8 @@ export const PublicSiteSettingsSchema = z
 
     dailyWonders: DailyWondersSchema.default({}),
 
+    pushNotifications: PushNotificationsSchema.default({}),
+
     languageTheme: z
       .object({
         languages: z.array(z.string()).default(['en']),
@@ -440,6 +475,16 @@ export const DEFAULT_PUBLIC_SITE_SETTINGS: PublicSiteSettings = {
     reminderText: 'You do not need to solve the whole day at once. One honest step is enough.',
     footerText: 'A small daily pause for calm, clarity, and inspiration.',
     publishDate: '',
+  },
+  pushNotifications: {
+    enabled: true,
+    types: {
+      breakingNewsAlerts: true,
+      topStories: true,
+      newArticleAlerts: true,
+      categoryAlerts: true,
+      allArticles: false,
+    },
   },
   languageTheme: { languages: ['en'], themePreset: 'system' },
 };
@@ -517,6 +562,7 @@ export function normalizePublicSiteSettings(input: PublicSiteSettings): PublicSi
     liveTv: normalizeLiveTvSettingsValue((input as any)?.liveTv) as any,
     inspirationHub: normalizeInspirationHubSettings((input as any)?.inspirationHub) as any,
     dailyWonders: normalizeDailyWondersSettings((input as any)?.dailyWonders) as any,
+    pushNotifications: normalizePushNotificationsSettings((input as any)?.pushNotifications) as any,
     languageTheme: {
       ...(rawLanguageTheme || {}),
       ...(rawLanguages === undefined ? {} : { languages: normalizePublicSiteLanguageCodes(rawLanguages) }),
@@ -529,6 +575,7 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
   const rawLiveTv = (patch as any)?.liveTv;
   const rawInspirationHub = (patch as any)?.inspirationHub;
   const rawDailyWonders = (patch as any)?.dailyWonders;
+  const rawPushNotifications = (patch as any)?.pushNotifications;
   const rawLanguageTheme = (patch as any)?.languageTheme;
   const next: any = {
     ...(patch as any),
@@ -551,6 +598,10 @@ export function normalizePublicSiteSettingsPatch<T extends Partial<PublicSiteSet
 
   if (rawDailyWonders && typeof rawDailyWonders === 'object') {
     next.dailyWonders = normalizeDailyWondersSettings(rawDailyWonders);
+  }
+
+  if (rawPushNotifications && typeof rawPushNotifications === 'object') {
+    next.pushNotifications = normalizePushNotificationsSettings(rawPushNotifications);
   }
 
   if (rawLanguageTheme && typeof rawLanguageTheme === 'object') {

@@ -65,6 +65,7 @@ const Breadcrumbs = () => {
     "/admin/settings/public-site/daily-wonders": "Daily Wonders / Thought of the Day",
     "/admin/settings/public-site/footer": "Footer",
     "/admin/settings/public-site/language-theme": "Language & Theme",
+    "/admin/settings/public-site/push-notifications": "Push Notifications",
     "/admin/settings/public-site/preview": "Preview",
   };
 

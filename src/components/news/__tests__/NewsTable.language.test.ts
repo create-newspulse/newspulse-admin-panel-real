@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getArticleLanguageInfo } from '../NewsTable';
+import { buildArticlePushPayload, getArticleLanguageInfo } from '../NewsTable';
 import type { Article } from '@/lib/api/articles';
 
 function article(input: Partial<Article>): Article {
@@ -38,5 +38,76 @@ describe('Manage News compact language badge', () => {
     });
 
     expect(getArticleLanguageInfo(row, [row]).badge).toBe('EN+HI+GU');
+  });
+});
+
+describe('Manage News article push payload', () => {
+  it('builds a confirmed push payload for a published article', () => {
+    const result = buildArticlePushPayload(article({
+      _id: 'article-1',
+      status: 'published',
+      slug: 'published-story',
+      title: 'Published story',
+      summary: 'A concise summary',
+      category: 'World',
+      language: 'hi',
+    }));
+
+    expect(result).toEqual({
+      ok: true,
+      payload: {
+        articleId: 'article-1',
+        slug: 'published-story',
+        title: 'Published story',
+        body: 'A concise summary',
+        url: 'https://www.newspulse.co.in/news/published-story',
+        category: 'world',
+        language: 'hi',
+        confirmSend: true,
+      },
+    });
+  });
+
+  it('does not build a push payload for drafts', () => {
+    const result = buildArticlePushPayload(article({ status: 'draft', slug: 'draft-story', summary: 'Summary' }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/published articles/i);
+  });
+
+  it('uses a fallback body when a published article has no summary', () => {
+    const result = buildArticlePushPayload(article({
+      _id: 'article-2',
+      status: 'published',
+      slug: 'no-summary-story',
+      title: 'Published story without summary',
+      summary: '',
+    }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.payload.body).toBe('Tap to read the full story on News Pulse.');
+  });
+
+  it('uses a public URL when slug is missing', () => {
+    const result = buildArticlePushPayload(article({
+      _id: 'article-3',
+      status: 'published',
+      title: 'Public URL story',
+      summary: 'Summary',
+      publicUrl: 'https://www.newspulse.co.in/news/public-url-story',
+    } as any));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.slug).toBe('public-url-story');
+      expect(result.payload.url).toBe('https://www.newspulse.co.in/news/public-url-story');
+    }
+  });
+
+  it('requires existing title and public URL data', () => {
+    const result = buildArticlePushPayload(article({ status: 'published', title: 'Published story', summary: '' }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('Article push unavailable: missing public URL.');
   });
 });

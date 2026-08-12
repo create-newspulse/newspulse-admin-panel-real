@@ -5,7 +5,7 @@ import {
   type BroadcastSettings,
   type BroadcastType,
 } from '@/lib/broadcastApi';
-import { AdminApiError } from '@/lib/http/adminFetch';
+import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 import {
   addItem as apiAddBroadcastItem,
   deleteItem as apiDeleteBroadcastItem,
@@ -54,6 +54,18 @@ function detectLangFromText(input: string): SourceLang {
   // Devanagari block (Hindi): U+0900..U+097F
   if (/[\u0900-\u097F]/.test(s)) return 'hi';
   return 'en';
+}
+
+function safePushErrorMessage(input: unknown): string {
+  const raw = String((input as any)?.message || input || '').trim();
+  const text = raw
+    .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/gi, '[redacted]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
+    .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s*[:=]\s*["']?[^"',\s}]+/gi, '[redacted]')
+    .replace(/\b[A-Za-z0-9_-]{64,}\b/g, '[redacted]')
+    .slice(0, 160)
+    .trim();
+  return text;
 }
 
 type GlossaryEntry = { id: string; term: string; hi: string; gu: string };
@@ -363,6 +375,9 @@ function SectionCard(props: {
   preview: { en?: string; hi?: string; gu?: string; loading?: boolean; error?: string | null };
   onAdd: () => void;
   addDisabled: boolean;
+  sendPushEnabled?: boolean;
+  onSendPushEnabledChange?: (next: boolean) => void;
+  sendPushDisabled?: boolean;
   items: BroadcastItem[];
   workingIdMap: Record<string, boolean>;
   onDelete: (item: BroadcastItem) => void;
@@ -483,6 +498,19 @@ function SectionCard(props: {
             placeholder="Add story (max 160 chars)"
             className="w-full flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
           />
+
+          {typeof props.onSendPushEnabledChange === 'function' ? (
+            <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={!!props.sendPushEnabled}
+                onChange={(e) => props.onSendPushEnabledChange?.(e.target.checked)}
+                disabled={!!props.disabled || !!props.sendPushDisabled}
+              />
+              Send Breaking Push
+            </label>
+          ) : null}
 
           <select
             value={props.langChoice}
@@ -658,6 +686,9 @@ export default function BroadcastCenter() {
 
   const [breakingText, setBreakingText] = useState('');
   const [liveText, setLiveText] = useState('');
+  const [sendBreakingPush, setSendBreakingPush] = useState(false);
+  const [pendingBreakingPush, setPendingBreakingPush] = useState<{ text: string; language: SourceLang } | null>(null);
+  const [breakingPushSending, setBreakingPushSending] = useState(false);
 
   const [breakingItems, setBreakingItems] = useState<BroadcastItem[]>([]);
   const [liveItems, setLiveItems] = useState<BroadcastItem[]>([]);
@@ -1097,21 +1128,21 @@ export default function BroadcastCenter() {
     };
   }, [refreshAll]);
 
-  const addItem = useCallback(async (type: BroadcastType) => {
-    const text = (type === 'breaking' ? breakingText : liveText).trim();
+  const addItem = useCallback(async (type: BroadcastType, confirmed?: { text?: string; sourceLang?: SourceLang }): Promise<boolean> => {
+    const text = String(confirmed?.text ?? (type === 'breaking' ? breakingText : liveText)).trim();
     if (!text) {
       notifyRef.current.err('Cannot add empty story');
-      return;
+      return false;
     }
     if (text.length > 160) {
       notifyRef.current.err('Story is too long', 'Max 160 characters');
-      return;
+      return false;
     }
     setAddingType(type);
     try {
-      const choice: LangChoice = type === 'breaking' ? breakingLangChoice : liveLangChoice;
+      const choice: LangChoice = confirmed?.sourceLang || (type === 'breaking' ? breakingLangChoice : liveLangChoice);
       const detected: SourceLang = type === 'breaking' ? detectLangFromText(breakingText) : detectLangFromText(liveText);
-      const sourceLang: SourceLang = choice === 'auto' ? detected : choice;
+      const sourceLang: SourceLang = confirmed?.sourceLang || (choice === 'auto' ? detected : choice);
       const createdItem = await apiAddBroadcastItem(type, text, { sourceLang });
       if (type === 'breaking') setBreakingText('');
       else setLiveText('');
@@ -1124,6 +1155,7 @@ export default function BroadcastCenter() {
 
       // Keep an optimistic feel if we did get an item back (it should already be included after refresh).
       void createdItem;
+      return true;
     } catch (e: any) {
       try {
         console.error('[BroadcastCenter] Add failed', {
@@ -1135,17 +1167,63 @@ export default function BroadcastCenter() {
       } catch {}
       if (isUnauthorized(e)) {
         notifyRef.current.err('Session expired — please login again');
-        return;
+        return false;
       }
       if (isMethodNotAllowed(e)) {
         notifyRef.current.err('Add failed', 'Backend route missing or method not allowed (POST). Check backend /broadcast/items POST route.');
-        return;
+        return false;
       }
       notifyRef.current.err('Add failed', apiErrorDetails(e, 'API error'));
+      return false;
     } finally {
       setAddingType(null);
     }
   }, [breakingText, liveText, breakingLangChoice, liveLangChoice]);
+
+  const requestBreakingAdd = useCallback(() => {
+    if (!sendBreakingPush) {
+      void addItem('breaking');
+      return;
+    }
+    const text = breakingText.trim();
+    if (!text) {
+      notifyRef.current.err('Cannot add empty story');
+      return;
+    }
+    if (text.length > 160) {
+      notifyRef.current.err('Story is too long', 'Max 160 characters');
+      return;
+    }
+    const sourceLang: SourceLang = breakingLangChoice === 'auto' ? breakingDetectedLang : breakingLangChoice;
+    setPendingBreakingPush({ text, language: sourceLang });
+  }, [addItem, breakingDetectedLang, breakingLangChoice, breakingText, sendBreakingPush]);
+
+  const confirmBreakingPush = useCallback(async () => {
+    const pending = pendingBreakingPush;
+    if (!pending || breakingPushSending) return;
+    setBreakingPushSending(true);
+    try {
+      const added = await addItem('breaking', { text: pending.text, sourceLang: pending.language });
+      if (!added) return;
+      await adminJson('/admin/push/breaking', {
+        method: 'POST',
+        json: {
+          title: '🔴 Breaking News',
+          body: pending.text,
+          url: 'https://www.newspulse.co.in/',
+          language: pending.language,
+          confirmSend: true,
+        },
+      });
+      notifyRef.current.ok('Breaking push sent successfully.');
+      setPendingBreakingPush(null);
+    } catch (e: any) {
+      const detail = safePushErrorMessage(e);
+      notifyRef.current.err('Breaking push failed.', detail || undefined);
+    } finally {
+      setBreakingPushSending(false);
+    }
+  }, [addItem, breakingPushSending, pendingBreakingPush]);
 
   const deleteItem = useCallback(async (type: BroadcastType, item: BroadcastItem) => {
     const itemId = (item as any)?.id ?? (item as any)?._id;
@@ -1383,8 +1461,11 @@ export default function BroadcastCenter() {
           previewEnabled={breakingPreviewEnabled}
           onPreviewEnabledChange={setBreakingPreviewEnabled}
           preview={breakingPreview}
-          addDisabled={loading || addingType === 'breaking'}
-          onAdd={() => addItem('breaking')}
+          addDisabled={loading || addingType === 'breaking' || breakingPushSending}
+          onAdd={requestBreakingAdd}
+          sendPushEnabled={sendBreakingPush}
+          onSendPushEnabledChange={setSendBreakingPush}
+          sendPushDisabled={loading || addingType === 'breaking' || breakingPushSending}
           items={breakingItems}
           workingIdMap={workingIdMap}
           onDelete={(item) => deleteItem('breaking', item)}
@@ -1429,6 +1510,39 @@ export default function BroadcastCenter() {
       ) : null}
 
       {activeTab === 'ticker-ads' ? <BroadcastCenterTickerAds /> : null}
+
+      {pendingBreakingPush ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900">
+            <div className="text-lg font-semibold text-slate-950 dark:text-white">Send Breaking Push?</div>
+            <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              This will send a breaking news notification to visitors who enabled Breaking News alerts.
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
+              <div className="text-sm font-semibold text-slate-950 dark:text-white">🔴 Breaking News</div>
+              <div className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{pendingBreakingPush.text}</div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={breakingPushSending}
+                onClick={() => setPendingBreakingPush(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                disabled={breakingPushSending}
+                onClick={confirmBreakingPush}
+              >
+                {breakingPushSending ? 'Sending...' : 'Add & Send Push'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
