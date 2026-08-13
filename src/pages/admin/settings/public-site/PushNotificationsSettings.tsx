@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
-import { loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
+import { formatPushIstTimestamp, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
 
@@ -63,11 +63,8 @@ function readNumber(...values: unknown[]): number | null {
 
 function readTimestamp(...values: unknown[]): string | null {
   for (const value of values) {
-    if (typeof value !== 'string') continue;
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    const time = Date.parse(trimmed);
-    return Number.isNaN(time) ? trimmed : new Date(time).toLocaleString();
+    const timestamp = formatPushIstTimestamp(value);
+    if (timestamp !== 'None') return timestamp;
   }
   return null;
 }
@@ -135,7 +132,7 @@ function normalizePushDiagnostics(input: unknown, backendReachable: boolean): Pu
     disabledDevices: readNumber(raw.disabledDevices, raw.disabledCount, registrations.disabled, registrations.disabledCount),
     lastRegistration: readTimestamp(raw.lastRegistration, raw.lastRegistrationAt, registrations.lastRegistration, registrations.lastRegistrationAt),
     lastSuccessfulSend: readTimestamp(raw.lastSuccessfulSend, raw.lastSuccessfulSendAt, sends.lastSuccessfulSend, sends.lastSuccessfulSendAt),
-    lastFailure: readSafeFailure(raw.lastFailure || raw.lastFailureAt || sends.lastFailure || sends.lastError || raw.error),
+    lastFailure: readTimestamp(raw.lastFailureAt, raw.lastFailure, sends.lastFailureAt, sends.lastFailure) || readSafeFailure(raw.lastFailure || sends.lastFailure || sends.lastError || raw.error),
   };
 }
 
@@ -312,7 +309,12 @@ export default function PushNotificationsSettings() {
                     <td className="px-4 py-3 font-medium text-slate-900">{item.type}</td>
                     <td className="px-4 py-3 text-slate-700">{item.title}</td>
                     <td className="px-4 py-3 text-slate-700">{item.sentAt}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.status}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <div>{item.status}</div>
+                      {item.status === 'Failed' && item.failureCode ? (
+                        <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{item.failureCode}</div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

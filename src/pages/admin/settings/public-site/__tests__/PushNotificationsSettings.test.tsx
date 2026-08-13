@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PushNotificationsSettings from '../PushNotificationsSettings';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
+import { formatPushIstTimestamp } from '@/lib/pushHistory';
 
 vi.mock('@/features/settings/PublicSiteSettingsDraftContext', () => ({
   usePublicSiteSettingsDraft: vi.fn(),
@@ -17,6 +18,13 @@ const renderSettings = () => render(<PushNotificationsSettings />, { wrapper: Me
 
 describe('PushNotificationsSettings', () => {
   const patchDraft = vi.fn();
+
+  it('formats push timestamps in IST and returns None for missing values', () => {
+    expect(formatPushIstTimestamp('2026-08-13T18:46:23.528Z')).toBe('14-08-2026:00:16:23.528 IST');
+    expect(formatPushIstTimestamp('2026-08-13T07:50:40.637Z')).toBe('13-08-2026:13:20:40.637 IST');
+    expect(formatPushIstTimestamp(null)).toBe('None');
+    expect(formatPushIstTimestamp(undefined)).toBe('None');
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,7 +45,17 @@ describe('PushNotificationsSettings', () => {
               registrationId: 'secret-registration',
             },
             { id: 'push-2', type: 'article', title: 'Article push', sentAt: '2026-08-13T01:10:00.000Z', targeted: 0, success: 0, failed: 0 },
-            { id: 'push-3', type: 'breaking', title: 'Failed push', sentAt: '2026-08-13T01:00:00.000Z', targeted: 4, success: 3, failed: 1 },
+            {
+              id: 'push-3',
+              type: 'breaking',
+              title: 'Failed push',
+              sentAt: '2026-08-13T01:00:00.000Z',
+              targeted: 4,
+              success: 3,
+              failed: 1,
+              failureCode: 'messaging/registration-token-not-registered',
+              failureMessage: 'Registration expired token=secret-token fid=secret-fid registrationId=secret-registration',
+            },
             { id: 'push-4', type: 'article', title: 'Older article push', sentAt: '2026-08-13T00:50:00.000Z', targeted: 2, success: 2, failed: 0 },
             { id: 'push-5', type: 'breaking', title: 'Older breaking push', sentAt: '2026-08-13T00:40:00.000Z', targeted: 3, success: 3, failed: 0 },
             { id: 'push-6', type: 'article', title: 'Hidden sixth push', sentAt: '2026-08-13T00:30:00.000Z', targeted: 1, success: 1, failed: 0 },
@@ -51,10 +69,11 @@ describe('PushNotificationsSettings', () => {
           count: 18,
           enabled: 15,
           disabled: 3,
-          lastRegistrationAt: '2026-08-12T10:30:00.000Z',
+          lastRegistrationAt: '2026-08-13T18:46:23.528Z',
         },
         sends: {
-          lastSuccessfulSendAt: '2026-08-12T11:00:00.000Z',
+          lastSuccessfulSendAt: '2026-08-12T11:00:00.456Z',
+          lastFailureAt: '2026-08-13T07:50:40.637Z',
           lastFailure: { code: 'messaging/invalid-argument', safeMessage: 'Invalid payload' },
         },
       });
@@ -96,7 +115,9 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getByText('18')).toBeInTheDocument();
     expect(screen.getByText('15')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText(/Invalid payload/i)).toBeInTheDocument();
+    expect(screen.getByText('14-08-2026:00:16:23.528 IST')).toBeInTheDocument();
+    expect(screen.getByText('12-08-2026:16:30:00.456 IST')).toBeInTheDocument();
+    expect(screen.getByText('13-08-2026:13:20:40.637 IST')).toBeInTheDocument();
     expect(adminJson).toHaveBeenCalledWith('/admin/push/status', { cache: 'no-store' });
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history?limit=5', { cache: 'no-store' });
     expect(screen.getByText('Recent Push History')).toBeInTheDocument();
@@ -104,9 +125,14 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getByRole('link', { name: 'View All History' })).toHaveAttribute('href', '/history');
     expect(screen.getAllByText('Breaking').length).toBeGreaterThan(0);
     expect(screen.getByText('Heavy rain alert')).toBeInTheDocument();
+    expect(screen.getByText('13-08-2026:06:50:00.000 IST')).toBeInTheDocument();
     expect(screen.getByText('No recipients')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getAllByText('Sent').length).toBeGreaterThan(0);
+    expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
+    expect(screen.queryByText('2026-08-13T01:20:00.000Z')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
   });
@@ -142,6 +168,7 @@ describe('PushNotificationsSettings', () => {
     await waitFor(() => expect(screen.getByText('Error')).toBeInTheDocument());
     expect(screen.getAllByText('No')).toHaveLength(2);
     expect(screen.getAllByText('Unknown')).toHaveLength(3);
+    expect(screen.getAllByText('None')).toHaveLength(3);
   });
 
   it('reads safe nested Firebase status shapes without exposing credentials', async () => {

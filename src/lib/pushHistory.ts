@@ -14,6 +14,8 @@ export type PushHistoryRecord = {
   targeted: number | null;
   success: number | null;
   failed: number | null;
+  failureCode: string | null;
+  failureMessage: string | null;
   status: PushHistoryStatus;
 };
 
@@ -25,11 +27,39 @@ export type PushHistoryFilters = {
 
 export const PUSH_HISTORY_PAGE_SIZE = 20;
 
+function padPushTimestamp(value: number, size = 2): string {
+  return String(value).padStart(size, '0');
+}
+
+export function formatPushIstTimestamp(value: unknown): string {
+  if (value === null || value === undefined) return 'None';
+
+  const time = (() => {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string') return Number.NaN;
+
+    const trimmed = value.trim();
+    return trimmed ? Date.parse(trimmed) : Number.NaN;
+  })();
+
+  if (!Number.isFinite(time)) return 'None';
+
+  const date = new Date(time + 5.5 * 60 * 60 * 1000);
+  return [
+    padPushTimestamp(date.getUTCDate()),
+    padPushTimestamp(date.getUTCMonth() + 1),
+    date.getUTCFullYear(),
+  ].join('-') + `:${padPushTimestamp(date.getUTCHours())}:${padPushTimestamp(date.getUTCMinutes())}:${padPushTimestamp(date.getUTCSeconds())}.${padPushTimestamp(date.getUTCMilliseconds(), 3)} IST`;
+}
+
 export function sanitizePushHistoryText(value: string): string | null {
   const text = value
+    .replace(/(?:\r?\n|\r)\s*(?:at\s+|caused by:|error:\s*)[\s\S]*$/i, '')
     .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/gi, '[redacted]')
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
     .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s*[:=]\s*["']?[^"',\s}]+/gi, '[redacted]')
+    .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s+["']?[^"',\s}]+/gi, '[redacted]')
     .replace(/\b[A-Za-z0-9_-]{64,}\b/g, '[redacted]')
     .trim();
   return text ? text.slice(0, 160) : null;
@@ -50,10 +80,10 @@ export function readPushHistoryTimestamp(...values: unknown[]): { label: string;
     if (!trimmed) continue;
     const time = Date.parse(trimmed);
     return Number.isNaN(time)
-      ? { label: sanitizePushHistoryText(trimmed) || 'Unknown', ms: null }
-      : { label: new Date(time).toLocaleString(), ms: time };
+      ? { label: 'None', ms: null }
+      : { label: formatPushIstTimestamp(time), ms: time };
   }
-  return { label: 'Unknown', ms: null };
+  return { label: 'None', ms: null };
 }
 
 function readText(...values: unknown[]): string {
@@ -63,6 +93,25 @@ function readText(...values: unknown[]): string {
     if (safe) return safe;
   }
   return '';
+}
+
+function readOptionalText(...values: unknown[]): string | null {
+  const text = readText(...values);
+  return text || null;
+}
+
+function readFirstFailureObject(raw: any): any {
+  const candidates = [
+    raw?.failure,
+    raw?.lastFailure,
+    raw?.error,
+    raw?.firebaseError,
+    raw?.fcmError,
+    raw?.result,
+    Array.isArray(raw?.failures) ? raw.failures[0] : raw?.failures,
+    Array.isArray(raw?.errors) ? raw.errors[0] : raw?.errors,
+  ];
+  return candidates.find((candidate) => candidate && typeof candidate === 'object') || {};
 }
 
 function formatType(value: string): string {
@@ -86,8 +135,11 @@ function readHistoryArray(input: any): any[] {
 
 export function getPushHistoryStatus(raw: any, targeted: number | null, success: number | null, failed: number | null): PushHistoryStatus {
   const statusText = readText(raw?.status, raw?.state, raw?.result).toLowerCase();
-  if (targeted === 0 || statusText.includes('no recipient') || statusText.includes('no-recipient')) return 'No recipients';
-  if ((typeof failed === 'number' && failed > 0) || statusText.includes('fail') || statusText.includes('error')) return 'Failed';
+  if (targeted === 0) return 'No recipients';
+  if (typeof failed === 'number' && failed > 0) return 'Failed';
+  if (typeof success === 'number' && success > 0) return 'Sent';
+  if (statusText.includes('no recipient') || statusText.includes('no-recipient')) return 'No recipients';
+  if (statusText.includes('fail') || statusText.includes('error')) return 'Failed';
   return 'Sent';
 }
 
@@ -99,6 +151,7 @@ export function normalizePushHistory(input: unknown, limit?: number): PushHistor
     const success = readPushHistoryNumber(raw?.success, raw?.successCount, raw?.sent, raw?.stats?.success);
     const failed = readPushHistoryNumber(raw?.failed, raw?.failureCount, raw?.failures, raw?.stats?.failed);
     const sentAt = readPushHistoryTimestamp(raw?.sentAt, raw?.createdAt, raw?.updatedAt, raw?.timestamp);
+    const failure = readFirstFailureObject(raw);
     return {
       id: readText(raw?.id, raw?._id) || `push-history-${index}`,
       type: formatType(readText(raw?.type, raw?.kind, raw?.category)),
@@ -108,6 +161,18 @@ export function normalizePushHistory(input: unknown, limit?: number): PushHistor
       targeted,
       success,
       failed,
+      failureCode: readOptionalText(raw?.failureCode, raw?.code, raw?.errorCode, raw?.firebaseCode, raw?.fcmCode, failure?.code, failure?.errorCode),
+      failureMessage: readOptionalText(
+        raw?.failureMessage,
+        raw?.safeFailureMessage,
+        raw?.safeMessage,
+        raw?.message,
+        raw?.errorMessage,
+        failure?.failureMessage,
+        failure?.safeMessage,
+        failure?.message,
+        failure?.errorMessage,
+      ),
       status: getPushHistoryStatus(raw, targeted, success, failed),
     };
   });

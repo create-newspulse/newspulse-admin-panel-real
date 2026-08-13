@@ -31,7 +31,7 @@ describe('PushNotificationsHistory', () => {
           id: 'breaking-sent',
           type: 'breaking',
           title: 'Breaking sent',
-          sentAt: new Date().toISOString(),
+          sentAt: '2026-08-13T07:50:40.637Z',
           targeted: 10,
           success: 10,
           failed: 0,
@@ -43,10 +43,12 @@ describe('PushNotificationsHistory', () => {
           id: 'article-failed',
           type: 'article',
           title: 'Article failed',
-          sentAt: new Date().toISOString(),
+          sentAt: '2026-08-13T08:00:01.002Z',
           targeted: 3,
           success: 2,
           failed: 1,
+          failureCode: 'messaging/registration-token-not-registered',
+          failureMessage: 'Registration is no longer active. token=secret-token fid=secret-fid registrationId=secret-registration\n    at sendPush (server.js:10:2)',
         },
         {
           id: 'article-empty',
@@ -67,7 +69,16 @@ describe('PushNotificationsHistory', () => {
     await waitFor(() => expect(screen.getByText('Breaking sent')).toBeInTheDocument());
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history', { cache: 'no-store' });
     expect(screen.getByRole('link', { name: 'Back to Push Notifications' })).toHaveAttribute('href', '/admin/settings/public-site/push-notifications');
+    expect(screen.getByText('13-08-2026:13:20:40.637 IST')).toBeInTheDocument();
+    expect(screen.getByText('13-08-2026:13:30:01.002 IST')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Failure Code' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Failure Message' })).toBeInTheDocument();
+    expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
+    expect(screen.getByText(/Registration is no longer active/i)).toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sendPush|server\.js/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('2026-08-13T07:50:40.637Z')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'failed' } });
     expect(screen.getByText('Article failed')).toBeInTheDocument();

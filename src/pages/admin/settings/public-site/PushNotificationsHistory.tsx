@@ -125,6 +125,8 @@ export default function PushNotificationsHistory() {
                   <th className="px-4 py-3 text-right">Success</th>
                   <th className="px-4 py-3 text-right">Failed</th>
                   <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Failure Code</th>
+                  <th className="px-4 py-3 text-left">Failure Message</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
@@ -137,6 +139,12 @@ export default function PushNotificationsHistory() {
                     <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.success)}</td>
                     <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.failed)}</td>
                     <td className="px-4 py-3 text-slate-700">{item.status}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <span className="block max-w-56 break-words">{item.status === 'Failed' && item.failureCode ? item.failureCode : '-'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <span className="block max-w-xs break-words">{item.status === 'Failed' && item.failureMessage ? item.failureMessage : '-'}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
