@@ -101,19 +101,12 @@ export function formatPushDeliveryProof(record: PushHistoryRecord): string {
   const targeted = record.targeted ?? 0;
   if (record.status === 'No recipients') return `Targeted ${targeted.toLocaleString()}`;
 
-  const parts = [
+  return [
     `Targeted ${targeted.toLocaleString()}`,
     `FCM accepted ${(record.success ?? 0).toLocaleString()}`,
-  ];
-
-  if (record.status === 'Failed') {
-    parts.push(`Failed ${(record.failed ?? 0).toLocaleString()}`);
-  } else {
-    parts.push(`Browser received ${(record.browserReceived ?? 0).toLocaleString()}`);
-    parts.push(`Clicked ${(record.clicked ?? 0).toLocaleString()}`);
-  }
-
-  return parts.join(' · ');
+    `Browser received ${(record.browserReceived ?? 0).toLocaleString()}`,
+    `Clicked ${(record.clicked ?? 0).toLocaleString()}`,
+  ].join(' · ');
 }
 
 function readText(...values: unknown[]): string {

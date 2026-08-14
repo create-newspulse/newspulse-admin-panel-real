@@ -11,24 +11,32 @@ type PushDiagnostics = {
   fcmStatus: FcmStatusLabel;
   messagingAvailable: boolean;
   backendReachable: boolean;
-  mongoRegistrations: number | null;
-  enabledDevices: number | null;
+  totalRegistrations: number | null;
+  deliverablePushDevices: number | null;
+  fidOnlyNonDeliverableRecords: number | null;
+  breakingNewsSubscribers: number | null;
+  articleAlertSubscribers: number | null;
   disabledDevices: number | null;
   lastRegistration: string | null;
   lastSuccessfulSend: string | null;
-  lastFailure: string | null;
+  lastFailedAttempt: string | null;
+  lastFailureCode: string | null;
 };
 
 const EMPTY_DIAGNOSTICS: PushDiagnostics = {
   fcmStatus: 'Not Configured',
   messagingAvailable: false,
   backendReachable: false,
-  mongoRegistrations: null,
-  enabledDevices: null,
+  totalRegistrations: null,
+  deliverablePushDevices: null,
+  fidOnlyNonDeliverableRecords: null,
+  breakingNewsSubscribers: null,
+  articleAlertSubscribers: null,
   disabledDevices: null,
   lastRegistration: null,
   lastSuccessfulSend: null,
-  lastFailure: null,
+  lastFailedAttempt: null,
+  lastFailureCode: null,
 };
 
 const NOTIFICATION_TYPES = [
@@ -79,20 +87,19 @@ function sanitizeDiagnosticText(value: string): string | null {
   return text ? text.slice(0, 160) : null;
 }
 
-function readSafeFailure(input: unknown): string | null {
-  if (!input || typeof input !== 'object') return typeof input === 'string' ? sanitizeDiagnosticText(input) : null;
-
-  const raw = input as any;
-  const code = typeof raw.code === 'string' || typeof raw.code === 'number' ? String(raw.code).trim() : '';
-  const message = typeof raw.safeMessage === 'string'
-    ? raw.safeMessage.trim()
-    : typeof raw.message === 'string'
-      ? raw.message.trim()
-      : typeof raw.error === 'string'
-        ? raw.error.trim()
-        : '';
-  const parts = [code, message].map((part) => sanitizeDiagnosticText(part)).filter(Boolean);
-  return parts.length ? parts.join(' - ') : null;
+function readSafeFailureCode(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' || typeof value === 'number') {
+      const safe = sanitizeDiagnosticText(String(value));
+      if (safe) return safe;
+    }
+    if (value && typeof value === 'object') {
+      const raw = value as any;
+      const safe = sanitizeDiagnosticText(String(raw.code || raw.errorCode || raw.firebaseCode || raw.fcmCode || raw.status || ''));
+      if (safe) return safe;
+    }
+  }
+  return null;
 }
 
 function normalizeFcmStatus(input: unknown): Pick<PushDiagnostics, 'fcmStatus' | 'messagingAvailable'> {
@@ -127,12 +134,16 @@ function normalizePushDiagnostics(input: unknown, backendReachable: boolean): Pu
     ...EMPTY_DIAGNOSTICS,
     ...fcm,
     backendReachable: typeof raw.backendReachable === 'boolean' ? raw.backendReachable : backendReachable,
-    mongoRegistrations: readNumber(raw.mongoRegistrations, raw.mongodbRegistrations, raw.registrationCount, registrations.total, registrations.count),
-    enabledDevices: readNumber(raw.enabledDevices, raw.enabledCount, registrations.enabled, registrations.enabledCount),
-    disabledDevices: readNumber(raw.disabledDevices, raw.disabledCount, registrations.disabled, registrations.disabledCount),
+    totalRegistrations: readNumber(raw.totalRegistrations, raw.mongoRegistrations, raw.mongodbRegistrations, raw.registrationCount, registrations.totalRegistrations, registrations.total, registrations.count),
+    deliverablePushDevices: readNumber(raw.enabledFcmTokenRegistrations, raw.deliverablePushDevices, raw.enabledDevices, raw.enabledCount, registrations.enabledFcmTokenRegistrations, registrations.deliverablePushDevices, registrations.enabled, registrations.enabledCount),
+    fidOnlyNonDeliverableRecords: readNumber(raw.enabledFidOnlyRegistrations, raw.fidOnlyRegistrations, raw.fidOnlyNonDeliverableRecords, registrations.enabledFidOnlyRegistrations, registrations.fidOnlyRegistrations, registrations.fidOnlyCount),
+    breakingNewsSubscribers: readNumber(raw.breakingNewsSubscribers, registrations.breakingNewsSubscribers, raw.subscribers?.breakingNewsSubscribers, raw.subscribers?.breakingNews),
+    articleAlertSubscribers: readNumber(raw.articleAlertSubscribers, registrations.articleAlertSubscribers, raw.subscribers?.articleAlertSubscribers, raw.subscribers?.articleAlerts),
+    disabledDevices: readNumber(raw.disabledRegistrations, raw.disabledDevices, raw.disabledCount, registrations.disabledRegistrations, registrations.disabled, registrations.disabledCount),
     lastRegistration: readTimestamp(raw.lastRegistration, raw.lastRegistrationAt, registrations.lastRegistration, registrations.lastRegistrationAt),
     lastSuccessfulSend: readTimestamp(raw.lastSuccessfulSend, raw.lastSuccessfulSendAt, sends.lastSuccessfulSend, sends.lastSuccessfulSendAt),
-    lastFailure: readTimestamp(raw.lastFailureAt, raw.lastFailure, sends.lastFailureAt, sends.lastFailure) || readSafeFailure(raw.lastFailure || sends.lastFailure || sends.lastError || raw.error),
+    lastFailedAttempt: readTimestamp(raw.lastFailureAt, raw.lastFailedAttemptAt, sends.lastFailureAt, sends.lastFailedAttemptAt),
+    lastFailureCode: readSafeFailureCode(raw.lastFailureCode, sends.lastFailureCode, raw.lastFailure, sends.lastFailure, sends.lastError, raw.error),
   };
 }
 
@@ -251,12 +262,24 @@ export default function PushNotificationsSettings() {
             <div className="mt-1 text-sm font-semibold text-slate-900">{diagnostics.backendReachable ? 'Yes' : 'No'}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-xs font-semibold uppercase text-slate-500">MongoDB Registrations</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.mongoRegistrations)}</div>
+            <div className="text-xs font-semibold uppercase text-slate-500">Total Registrations</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.totalRegistrations)}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-xs font-semibold uppercase text-slate-500">Enabled Devices</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.enabledDevices)}</div>
+            <div className="text-xs font-semibold uppercase text-slate-500">Deliverable Push Devices</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.deliverablePushDevices)}</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-semibold uppercase text-slate-500">FID-only / Non-deliverable Records</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.fidOnlyNonDeliverableRecords)}</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-semibold uppercase text-slate-500">Breaking News Subscribers</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.breakingNewsSubscribers)}</div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-semibold uppercase text-slate-500">Article Alert Subscribers</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatCount(diagnostics.articleAlertSubscribers)}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-xs font-semibold uppercase text-slate-500">Disabled Devices</div>
@@ -271,8 +294,9 @@ export default function PushNotificationsSettings() {
             <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(diagnostics.lastSuccessfulSend)}</div>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-xs font-semibold uppercase text-slate-500">Last Failure</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(diagnostics.lastFailure)}</div>
+            <div className="text-xs font-semibold uppercase text-slate-500">Last Failed Attempt</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(diagnostics.lastFailedAttempt)}</div>
+            {diagnostics.lastFailureCode ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">Code: {diagnostics.lastFailureCode}</div> : null}
           </div>
         </div>
       </div>

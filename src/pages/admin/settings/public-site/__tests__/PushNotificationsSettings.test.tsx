@@ -99,17 +99,16 @@ describe('PushNotificationsSettings', () => {
       return Promise.resolve({
         status: 'configured',
         messagingAvailable: true,
-        registrations: {
-          count: 18,
-          enabled: 15,
-          disabled: 3,
-          lastRegistrationAt: '2026-08-13T18:46:23.528Z',
-        },
-        sends: {
-          lastSuccessfulSendAt: '2026-08-12T11:00:00.456Z',
-          lastFailureAt: '2026-08-13T07:50:40.637Z',
-          lastFailure: { code: 'messaging/invalid-argument', safeMessage: 'Invalid payload' },
-        },
+        totalRegistrations: 18,
+        enabledFcmTokenRegistrations: 12,
+        enabledFidOnlyRegistrations: 3,
+        breakingNewsSubscribers: 9,
+        articleAlertSubscribers: 7,
+        disabledRegistrations: 3,
+        lastRegistrationAt: '2026-08-13T18:46:23.528Z',
+        lastSuccessfulSendAt: '2026-08-12T11:00:00.456Z',
+        lastFailureAt: '2026-08-13T07:50:40.637Z',
+        lastFailureCode: 'messaging/invalid-argument',
       });
     });
     vi.mocked(usePublicSiteSettingsDraft).mockReturnValue({
@@ -146,12 +145,26 @@ describe('PushNotificationsSettings', () => {
     await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
     expect(screen.getByText('Push System Health')).toBeInTheDocument();
     expect(screen.getAllByText('Yes')).toHaveLength(2);
+    expect(screen.getByText('Total Registrations')).toBeInTheDocument();
+    expect(screen.getByText('Deliverable Push Devices')).toBeInTheDocument();
+    expect(screen.getByText('FID-only / Non-deliverable Records')).toBeInTheDocument();
+    expect(screen.getByText('Breaking News Subscribers')).toBeInTheDocument();
+    expect(screen.getByText('Article Alert Subscribers')).toBeInTheDocument();
+    expect(screen.getByText('Disabled Devices')).toBeInTheDocument();
+    expect(screen.getByText('Last Registration')).toBeInTheDocument();
+    expect(screen.getByText('Last Successful Send')).toBeInTheDocument();
+    expect(screen.getByText('Last Failed Attempt')).toBeInTheDocument();
     expect(screen.getByText('18')).toBeInTheDocument();
-    expect(screen.getByText('15')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getAllByText('3').length).toBeGreaterThan(1);
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
     expect(screen.getAllByText('14-08-2026:00:16:23.528 IST').length).toBeGreaterThan(0);
     expect(screen.getAllByText('12-08-2026:16:30:00.456 IST').length).toBeGreaterThan(0);
     expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Code: messaging\/invalid-argument/i)).toBeInTheDocument();
+    expect(screen.queryByText('MongoDB Registrations')).not.toBeInTheDocument();
+    expect(screen.queryByText('Enabled Devices')).not.toBeInTheDocument();
     expect(adminJson).toHaveBeenCalledWith('/admin/push/status', { cache: 'no-store' });
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history?limit=5', { cache: 'no-store' });
     expect(screen.getByText('Recent Push History')).toBeInTheDocument();
@@ -170,7 +183,7 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getByText('Targeted 1 · FCM accepted 1 · Browser received 1 · Clicked 1')).toBeInTheDocument();
     expect(screen.getByText('Targeted 2 · FCM accepted 2 · Browser received 1 · Clicked 0')).toBeInTheDocument();
     expect(screen.getByText('Targeted 3 · FCM accepted 3 · Browser received 0 · Clicked 0')).toBeInTheDocument();
-    expect(screen.getByText('Targeted 1 · FCM accepted 0 · Failed 1')).toBeInTheDocument();
+    expect(screen.getByText('Targeted 1 · FCM accepted 0 · Browser received 0 · Clicked 0')).toBeInTheDocument();
     expect(screen.getByText('Targeted 0')).toBeInTheDocument();
     expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
@@ -210,7 +223,7 @@ describe('PushNotificationsSettings', () => {
 
     await waitFor(() => expect(screen.getByText('Error')).toBeInTheDocument());
     expect(screen.getAllByText('No')).toHaveLength(2);
-    expect(screen.getAllByText('Unknown')).toHaveLength(3);
+    expect(screen.getAllByText('Unknown')).toHaveLength(6);
     expect(screen.getAllByText('None')).toHaveLength(3);
   });
 
