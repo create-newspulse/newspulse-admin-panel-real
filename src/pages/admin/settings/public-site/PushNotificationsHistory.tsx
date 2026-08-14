@@ -125,48 +125,52 @@ export default function PushNotificationsHistory() {
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">No push history records found.</div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <table className="min-w-[1180px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3 text-left">Type</th>
-                  <th className="px-4 py-3 text-left">Title</th>
-                  <th className="px-4 py-3 text-left">Sent At</th>
-                  <th className="px-4 py-3 text-right">Targeted</th>
-                  <th className="px-4 py-3 text-right">FCM Accepted</th>
-                  <th className="px-4 py-3 text-right">Failed</th>
-                  <th className="px-4 py-3 text-right">Browser Received</th>
-                  <th className="px-4 py-3 text-right">Clicked</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Failure Code</th>
+                  <th className="w-24 whitespace-nowrap px-4 py-3 text-left">Type</th>
+                  <th className="w-[28rem] px-4 py-3 text-left">Title</th>
+                  <th className="w-52 whitespace-nowrap px-4 py-3 text-left">Sent At</th>
+                  <th className="w-24 whitespace-nowrap px-4 py-3 text-right">Targeted</th>
+                  <th className="w-28 whitespace-nowrap px-4 py-3 text-right">FCM Accepted</th>
+                  <th className="w-20 whitespace-nowrap px-4 py-3 text-right">Failed</th>
+                  <th className="w-32 whitespace-nowrap px-4 py-3 text-right">Browser Received</th>
+                  <th className="w-20 whitespace-nowrap px-4 py-3 text-right">Clicked</th>
+                  <th className="w-44 px-4 py-3 text-left">Status</th>
+                  <th className="w-56 px-4 py-3 text-left">Failure Code</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
                 {visibleRecords.map((item) => (
                   <tr key={item.id}>
-                    <td className="px-4 py-3 font-medium text-slate-900">{item.type}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.title}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.sentAt}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.targeted)}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.success)}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.failed)}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{item.type}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <div className="min-w-0 max-w-[26rem] break-words leading-5">{item.title}</div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{item.sentAt}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.targeted)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.success)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.failed)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">
                       <div>{formatCount(item.browserReceived)}</div>
                       {renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt) ? (
-                        <div className="mt-1 text-left text-xs text-slate-500">{renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt)}</div>
+                        <div className="mt-1 whitespace-normal text-left text-xs leading-4 text-slate-500">{renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt)}</div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-700">
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">
                       <div>{formatCount(item.clicked)}</div>
                       {renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt) ? (
-                        <div className="mt-1 text-left text-xs text-slate-500">{renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt)}</div>
+                        <div className="mt-1 whitespace-normal text-left text-xs leading-4 text-slate-500">{renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt)}</div>
                       ) : null}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      <div>{item.status}</div>
-                      {formatPushResponseTiming(item) ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{formatPushResponseTiming(item)}</div> : null}
+                      <div className="space-y-1 leading-5">
+                        <div className="whitespace-nowrap font-medium text-slate-900">{item.status}</div>
+                        {formatPushResponseTiming(item) ? <div className="break-words text-xs leading-4 text-slate-500">{formatPushResponseTiming(item)}</div> : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      <span className="block max-w-56 break-words">{item.failureCode ? item.failureCode : '-'}</span>
+                      <span className="block max-w-52 break-words leading-5">{item.failureCode ? item.failureCode : '-'}</span>
                     </td>
                   </tr>
                 ))}
