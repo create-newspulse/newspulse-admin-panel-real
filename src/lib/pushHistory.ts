@@ -1,7 +1,7 @@
 import { adminJson } from '@/lib/http/adminFetch';
 
-export type PushHistoryStatus = 'Sent' | 'Received' | 'Clicked' | 'Failed' | 'No recipients';
-export type PushHistoryFilterStatus = 'all' | 'sent' | 'received' | 'clicked' | 'failed' | 'no-recipients';
+export type PushHistoryStatus = 'FCM Accepted' | 'Received' | 'Clicked' | 'Failed' | 'No recipients';
+export type PushHistoryFilterStatus = 'all' | 'fcm-accepted' | 'received' | 'clicked' | 'failed' | 'no-recipients';
 export type PushHistoryFilterType = 'all' | 'breaking' | 'article';
 export type PushHistoryFilterDate = 'today' | '7d' | '30d' | 'all';
 
@@ -20,6 +20,9 @@ export type PushHistoryRecord = {
   lastReceivedAt: string | null;
   firstClickedAt: string | null;
   lastClickedAt: string | null;
+  fcmAcceptedInSeconds: number | null;
+  browserReceivedInSeconds: number | null;
+  clickedInSeconds: number | null;
   failureCode: string | null;
   failureMessage: string | null;
   status: PushHistoryStatus;
@@ -97,6 +100,30 @@ function readOptionalPushHistoryTimestamp(...values: unknown[]): string | null {
   return timestamp.ms === null ? null : timestamp.label;
 }
 
+function readOptionalPushHistoryTimestampMs(...values: unknown[]): number | null {
+  const timestamp = readPushHistoryTimestamp(...values);
+  return timestamp.ms;
+}
+
+function readPushHistorySeconds(...values: unknown[]): number | null {
+  const value = readPushHistoryNumber(...values);
+  return value !== null && value >= 0 ? value : null;
+}
+
+function readPushHistoryMillisecondsAsSeconds(...values: unknown[]): number | null {
+  const value = readPushHistoryNumber(...values);
+  return value !== null && value >= 0 ? value / 1000 : null;
+}
+
+function secondsBetween(startMs: number | null, endMs: number | null): number | null {
+  if (startMs === null || endMs === null || endMs < startMs) return null;
+  return (endMs - startMs) / 1000;
+}
+
+function formatResponseSeconds(value: number): string {
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}s`;
+}
+
 export function formatPushDeliveryProof(record: PushHistoryRecord): string {
   const targeted = record.targeted ?? 0;
   if (record.status === 'No recipients') return `Targeted ${targeted.toLocaleString()}`;
@@ -107,6 +134,13 @@ export function formatPushDeliveryProof(record: PushHistoryRecord): string {
     `Browser received ${(record.browserReceived ?? 0).toLocaleString()}`,
     `Clicked ${(record.clicked ?? 0).toLocaleString()}`,
   ].join(' · ');
+}
+
+export function formatPushResponseTiming(record: PushHistoryRecord): string | null {
+  if (record.status === 'Clicked' && record.clickedInSeconds !== null) return `Clicked in ${formatResponseSeconds(record.clickedInSeconds)}`;
+  if (record.status === 'Received' && record.browserReceivedInSeconds !== null) return `First browser received in ${formatResponseSeconds(record.browserReceivedInSeconds)}`;
+  if (record.status === 'FCM Accepted' && record.fcmAcceptedInSeconds !== null) return `FCM accepted in ${formatResponseSeconds(record.fcmAcceptedInSeconds)}`;
+  return null;
 }
 
 function readText(...values: unknown[]): string {
@@ -165,17 +199,17 @@ export function getPushHistoryStatus(
   clicked: number | null,
 ): PushHistoryStatus {
   const statusText = readText(raw?.status, raw?.state, raw?.result).toLowerCase();
+  if (targeted === 0) return 'No recipients';
+  if (typeof failed === 'number' && failed > 0 && (success ?? 0) === 0) return 'Failed';
   if (typeof clicked === 'number' && clicked > 0) return 'Clicked';
   if (typeof browserReceived === 'number' && browserReceived > 0) return 'Received';
-  if (typeof success === 'number' && success > 0) return 'Sent';
-  if (typeof failed === 'number' && failed > 0 && (success ?? 0) === 0) return 'Failed';
-  if (targeted === 0) return 'No recipients';
+  if (typeof success === 'number' && success > 0) return 'FCM Accepted';
   if (statusText.includes('click')) return 'Clicked';
   if (statusText.includes('receiv')) return 'Received';
-  if (statusText.includes('sent') || statusText.includes('success')) return 'Sent';
   if (statusText.includes('fail') || statusText.includes('error')) return 'Failed';
   if (statusText.includes('no recipient') || statusText.includes('no-recipient')) return 'No recipients';
-  return 'Sent';
+  if (statusText.includes('fcm') || statusText.includes('accept') || statusText.includes('sent') || statusText.includes('success')) return 'FCM Accepted';
+  return 'FCM Accepted';
 }
 
 export function normalizePushHistory(input: unknown, limit?: number): PushHistoryRecord[] {
@@ -188,6 +222,9 @@ export function normalizePushHistory(input: unknown, limit?: number): PushHistor
     const browserReceived = readPushHistoryNumber(raw?.browserReceivedCount, raw?.receivedCount, raw?.browserReceived, raw?.stats?.browserReceived);
     const clicked = readPushHistoryNumber(raw?.clickedCount, raw?.clickCount, raw?.clicked, raw?.stats?.clicked);
     const sentAt = readPushHistoryTimestamp(raw?.sentAt, raw?.createdAt, raw?.updatedAt, raw?.timestamp);
+    const fcmAcceptedAtMs = readOptionalPushHistoryTimestampMs(raw?.fcmAcceptedAt, raw?.acceptedAt, raw?.successAt, raw?.firstAcceptedAt, raw?.stats?.fcmAcceptedAt, raw?.timing?.fcmAcceptedAt);
+    const firstReceivedAt = readPushHistoryTimestamp(raw?.firstReceivedAt, raw?.firstBrowserReceivedAt, raw?.receivedAt?.first, raw?.stats?.firstReceivedAt);
+    const firstClickedAt = readPushHistoryTimestamp(raw?.firstClickedAt, raw?.firstClickAt, raw?.clickedAt?.first, raw?.stats?.firstClickedAt);
     const failure = readFirstFailureObject(raw);
     return {
       id: readText(raw?.id, raw?._id) || `push-history-${index}`,
@@ -200,10 +237,13 @@ export function normalizePushHistory(input: unknown, limit?: number): PushHistor
       failed,
       browserReceived,
       clicked,
-      firstReceivedAt: readOptionalPushHistoryTimestamp(raw?.firstReceivedAt, raw?.firstBrowserReceivedAt, raw?.receivedAt?.first, raw?.stats?.firstReceivedAt),
+      firstReceivedAt: firstReceivedAt.ms === null ? null : firstReceivedAt.label,
       lastReceivedAt: readOptionalPushHistoryTimestamp(raw?.lastReceivedAt, raw?.lastBrowserReceivedAt, raw?.receivedAt?.last, raw?.stats?.lastReceivedAt),
-      firstClickedAt: readOptionalPushHistoryTimestamp(raw?.firstClickedAt, raw?.firstClickAt, raw?.clickedAt?.first, raw?.stats?.firstClickedAt),
+      firstClickedAt: firstClickedAt.ms === null ? null : firstClickedAt.label,
       lastClickedAt: readOptionalPushHistoryTimestamp(raw?.lastClickedAt, raw?.lastClickAt, raw?.clickedAt?.last, raw?.stats?.lastClickedAt),
+      fcmAcceptedInSeconds: readPushHistorySeconds(raw?.fcmAcceptedInSeconds, raw?.fcmAcceptedSeconds, raw?.acceptedInSeconds, raw?.acceptedSeconds, raw?.timing?.fcmAcceptedInSeconds) ?? readPushHistoryMillisecondsAsSeconds(raw?.fcmAcceptedMs, raw?.acceptedMs, raw?.fcmLatencyMs, raw?.timing?.fcmAcceptedMs) ?? secondsBetween(sentAt.ms, fcmAcceptedAtMs),
+      browserReceivedInSeconds: readPushHistorySeconds(raw?.browserReceivedInSeconds, raw?.firstBrowserReceivedInSeconds, raw?.receivedInSeconds, raw?.timing?.browserReceivedInSeconds) ?? readPushHistoryMillisecondsAsSeconds(raw?.browserReceivedMs, raw?.firstBrowserReceivedMs, raw?.receivedMs, raw?.deliveryLatencyMs, raw?.timing?.browserReceivedMs) ?? secondsBetween(sentAt.ms, firstReceivedAt.ms),
+      clickedInSeconds: readPushHistorySeconds(raw?.clickedInSeconds, raw?.firstClickedInSeconds, raw?.clickInSeconds, raw?.timing?.clickedInSeconds) ?? readPushHistoryMillisecondsAsSeconds(raw?.clickedMs, raw?.firstClickedMs, raw?.clickMs, raw?.timing?.clickedMs) ?? secondsBetween(sentAt.ms, firstClickedAt.ms),
       failureCode: readOptionalText(raw?.failureCode, raw?.code, raw?.errorCode, raw?.firebaseCode, raw?.fcmCode, failure?.code, failure?.errorCode),
       failureMessage: readOptionalText(
         raw?.failureMessage,
@@ -236,7 +276,7 @@ export function filterPushHistory(records: PushHistoryRecord[], filters: PushHis
   return records.filter((record) => {
     if (minDate !== null && (record.sentAtMs === null || record.sentAtMs < minDate)) return false;
     if (filters.type !== 'all' && record.type.toLowerCase() !== filters.type) return false;
-    if (filters.status === 'sent' && record.status !== 'Sent') return false;
+    if (filters.status === 'fcm-accepted' && record.status !== 'FCM Accepted') return false;
     if (filters.status === 'received' && record.status !== 'Received') return false;
     if (filters.status === 'clicked' && record.status !== 'Clicked') return false;
     if (filters.status === 'failed' && record.status !== 'Failed') return false;

@@ -37,6 +37,7 @@ describe('PushNotificationsHistory', () => {
           failureCount: 0,
           browserReceivedCount: 5,
           clickedCount: 2,
+          clickedInSeconds: 4.5,
           firstReceivedAt: '2026-08-13T18:46:30.000Z',
           lastReceivedAt: '2026-08-13T18:47:00.000Z',
           firstClickedAt: '2026-08-13T18:47:30.000Z',
@@ -55,6 +56,7 @@ describe('PushNotificationsHistory', () => {
           failureCount: 0,
           browserReceivedCount: 1,
           clickedCount: 0,
+          browserReceivedInSeconds: 3.8,
           firstReceivedAt: '2026-08-13T08:01:00.000Z',
           lastReceivedAt: '2026-08-13T08:01:00.000Z',
         },
@@ -68,6 +70,7 @@ describe('PushNotificationsHistory', () => {
           failureCount: 0,
           browserReceivedCount: 0,
           clickedCount: 0,
+          fcmAcceptedMs: 1200,
         },
         {
           id: 'article-failed',
@@ -117,6 +120,15 @@ describe('PushNotificationsHistory', () => {
     expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Failure Code' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Failure Message' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('FCM Accepted').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Received').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Clicked').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Failed').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('No recipients').length).toBeGreaterThan(1);
+    expect(screen.queryByText('Sent')).not.toBeInTheDocument();
+    expect(screen.getByText('FCM accepted in 1.2s')).toBeInTheDocument();
+    expect(screen.getByText('First browser received in 3.8s')).toBeInTheDocument();
+    expect(screen.getByText('Clicked in 4.5s')).toBeInTheDocument();
     expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText(/Registration is no longer active/i)).not.toBeInTheDocument();
     expect(screen.getByText(/First 14-08-2026:00:16:30.000 IST \| Last 14-08-2026:00:17:00.000 IST/i)).toBeInTheDocument();
@@ -126,7 +138,7 @@ describe('PushNotificationsHistory', () => {
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'sent' } });
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'fcm-accepted' } });
     expect(screen.getByText('Article sent')).toBeInTheDocument();
     expect(screen.queryByText('Breaking clicked')).not.toBeInTheDocument();
 

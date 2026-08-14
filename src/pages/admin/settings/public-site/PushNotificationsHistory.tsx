@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   filterPushHistory,
+  formatPushResponseTiming,
   loadPushHistory,
   PUSH_HISTORY_PAGE_SIZE,
   type PushHistoryFilterDate,
@@ -109,7 +110,7 @@ export default function PushNotificationsHistory() {
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
             >
               <option value="all">All</option>
-              <option value="sent">Sent</option>
+              <option value="fcm-accepted">FCM Accepted</option>
               <option value="received">Received</option>
               <option value="clicked">Clicked</option>
               <option value="failed">Failed</option>
@@ -160,7 +161,10 @@ export default function PushNotificationsHistory() {
                         <div className="mt-1 text-left text-xs text-slate-500">{renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt)}</div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{item.status}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <div>{item.status}</div>
+                      {formatPushResponseTiming(item) ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{formatPushResponseTiming(item)}</div> : null}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">
                       <span className="block max-w-56 break-words">{item.failureCode ? item.failureCode : '-'}</span>
                     </td>

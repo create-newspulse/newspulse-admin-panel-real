@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PushNotificationsSettings from '../PushNotificationsSettings';
@@ -15,6 +15,20 @@ vi.mock('@/lib/http/adminFetch', () => ({
 }));
 
 const renderSettings = () => render(<PushNotificationsSettings />, { wrapper: MemoryRouter });
+
+function mockPushStatus(statusResponse: Record<string, unknown>) {
+  vi.mocked(adminJson).mockImplementation((path: string) => {
+    if (path === '/admin/push/history?limit=5') return Promise.resolve({ items: [] });
+    return Promise.resolve({ status: 'configured', messagingAvailable: true, ...statusResponse });
+  });
+}
+
+function disabledDevicesCard() {
+  const label = screen.getByText('Disabled Devices');
+  const card = label.parentElement;
+  if (!card) throw new Error('Disabled Devices card not found');
+  return card;
+}
 
 describe('PushNotificationsSettings', () => {
   const patchDraft = vi.fn();
@@ -42,6 +56,7 @@ describe('PushNotificationsSettings', () => {
               failureCount: 0,
               browserReceivedCount: 1,
               clickedCount: 1,
+              clickedInSeconds: 4.5,
               token: 'secret-token',
               fid: 'secret-fid',
               registrationId: 'secret-registration',
@@ -56,6 +71,7 @@ describe('PushNotificationsSettings', () => {
               failureCount: 0,
               browserReceivedCount: 1,
               clickedCount: 0,
+              browserReceivedInSeconds: 3.8,
             },
             {
               id: 'push-3',
@@ -67,6 +83,7 @@ describe('PushNotificationsSettings', () => {
               failureCount: 0,
               browserReceivedCount: 0,
               clickedCount: 0,
+              fcmAcceptedMs: 1200,
             },
             {
               id: 'push-4',
@@ -176,21 +193,49 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getAllByText('13-08-2026:13:30:01.002 IST').length).toBeGreaterThan(0);
     expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
     expect(screen.getByText('No recipients')).toBeInTheDocument();
+    expect(screen.getByText('FCM Accepted')).toBeInTheDocument();
     expect(screen.getByText('Received')).toBeInTheDocument();
     expect(screen.getByText('Clicked')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(screen.getAllByText('Sent').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sent')).not.toBeInTheDocument();
     expect(screen.getByText('Targeted 1 · FCM accepted 1 · Browser received 1 · Clicked 1')).toBeInTheDocument();
     expect(screen.getByText('Targeted 2 · FCM accepted 2 · Browser received 1 · Clicked 0')).toBeInTheDocument();
     expect(screen.getByText('Targeted 3 · FCM accepted 3 · Browser received 0 · Clicked 0')).toBeInTheDocument();
     expect(screen.getByText('Targeted 1 · FCM accepted 0 · Browser received 0 · Clicked 0')).toBeInTheDocument();
     expect(screen.getByText('Targeted 0')).toBeInTheDocument();
+    expect(screen.getByText('FCM accepted in 1.2s')).toBeInTheDocument();
+    expect(screen.getByText('First browser received in 3.8s')).toBeInTheDocument();
+    expect(screen.getByText('Clicked in 4.5s')).toBeInTheDocument();
     expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
+  });
+
+  it('displays disabledRegistrations when it is 0', async () => {
+    mockPushStatus({ disabledRegistrations: 0 });
+
+    renderSettings();
+
+    await waitFor(() => expect(within(disabledDevicesCard()).getByText('0')).toBeInTheDocument());
+  });
+
+  it('displays nested registrationStats disabledRegistrations when it is 1', async () => {
+    mockPushStatus({ registrationStats: { disabledRegistrations: 1 } });
+
+    renderSettings();
+
+    await waitFor(() => expect(within(disabledDevicesCard()).getByText('1')).toBeInTheDocument());
+  });
+
+  it('displays 0 for Disabled Devices when the backend omits the value', async () => {
+    mockPushStatus({});
+
+    renderSettings();
+
+    await waitFor(() => expect(within(disabledDevicesCard()).getByText('0')).toBeInTheDocument());
   });
 
   it('shows a safe empty message when push history is empty', async () => {

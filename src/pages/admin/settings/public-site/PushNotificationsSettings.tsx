@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
-import { formatPushDeliveryProof, formatPushIstTimestamp, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
+import { formatPushDeliveryProof, formatPushIstTimestamp, formatPushResponseTiming, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
 
@@ -126,6 +126,7 @@ function normalizeFcmStatus(input: unknown): Pick<PushDiagnostics, 'fcmStatus' |
 
 function normalizePushDiagnostics(input: unknown, backendReachable: boolean): PushDiagnostics {
   const raw = input && typeof input === 'object' ? (input as any) : {};
+  const registrationStats = raw.registrationStats || {};
   const registrations = raw.registrations || raw.devices || raw.subscriptions || raw.mongodb || raw.mongo || {};
   const sends = raw.sends || raw.send || raw.delivery || raw.notifications || {};
   const fcm = normalizeFcmStatus(raw);
@@ -139,7 +140,7 @@ function normalizePushDiagnostics(input: unknown, backendReachable: boolean): Pu
     fidOnlyNonDeliverableRecords: readNumber(raw.enabledFidOnlyRegistrations, raw.fidOnlyRegistrations, raw.fidOnlyNonDeliverableRecords, registrations.enabledFidOnlyRegistrations, registrations.fidOnlyRegistrations, registrations.fidOnlyCount),
     breakingNewsSubscribers: readNumber(raw.breakingNewsSubscribers, registrations.breakingNewsSubscribers, raw.subscribers?.breakingNewsSubscribers, raw.subscribers?.breakingNews),
     articleAlertSubscribers: readNumber(raw.articleAlertSubscribers, registrations.articleAlertSubscribers, raw.subscribers?.articleAlertSubscribers, raw.subscribers?.articleAlerts),
-    disabledDevices: readNumber(raw.disabledRegistrations, raw.disabledDevices, raw.disabledCount, registrations.disabledRegistrations, registrations.disabled, registrations.disabledCount),
+    disabledDevices: readNumber(raw.disabledRegistrations, registrationStats.disabledRegistrations, raw.disabledDevices, raw.disabledCount, registrations.disabledRegistrations, registrations.disabled, registrations.disabledCount) ?? 0,
     lastRegistration: readTimestamp(raw.lastRegistration, raw.lastRegistrationAt, registrations.lastRegistration, registrations.lastRegistrationAt),
     lastSuccessfulSend: readTimestamp(raw.lastSuccessfulSend, raw.lastSuccessfulSendAt, sends.lastSuccessfulSend, sends.lastSuccessfulSendAt),
     lastFailedAttempt: readTimestamp(raw.lastFailureAt, raw.lastFailedAttemptAt, sends.lastFailureAt, sends.lastFailedAttemptAt),
@@ -336,6 +337,7 @@ export default function PushNotificationsSettings() {
                     <td className="px-4 py-3 text-slate-700">
                       <div>{item.status}</div>
                       <div className="mt-1 max-w-80 break-words text-xs text-slate-500">{formatPushDeliveryProof(item)}</div>
+                      {formatPushResponseTiming(item) ? <div className="mt-1 max-w-80 break-words text-xs text-slate-500">{formatPushResponseTiming(item)}</div> : null}
                       {item.status === 'Failed' && item.failureCode ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{item.failureCode}</div> : null}
                     </td>
                   </tr>
