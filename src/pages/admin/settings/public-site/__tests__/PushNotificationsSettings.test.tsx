@@ -35,30 +35,64 @@ describe('PushNotificationsSettings', () => {
             {
               id: 'push-1',
               type: 'breaking',
-              title: 'Heavy rain alert',
-              sentAt: '2026-08-13T01:20:00.000Z',
-              targeted: 1,
-              success: 1,
-              failed: 0,
+              title: 'Clicked push',
+              sentAt: '2026-08-13T18:46:23.528Z',
+              targetedCount: 1,
+              successCount: 1,
+              failureCount: 0,
+              browserReceivedCount: 1,
+              clickedCount: 1,
               token: 'secret-token',
               fid: 'secret-fid',
               registrationId: 'secret-registration',
             },
-            { id: 'push-2', type: 'article', title: 'Article push', sentAt: '2026-08-13T01:10:00.000Z', targeted: 0, success: 0, failed: 0 },
+            {
+              id: 'push-2',
+              type: 'article',
+              title: 'Received push',
+              sentAt: '2026-08-13T08:00:01.002Z',
+              targetedCount: 2,
+              successCount: 2,
+              failureCount: 0,
+              browserReceivedCount: 1,
+              clickedCount: 0,
+            },
             {
               id: 'push-3',
               type: 'breaking',
+              title: 'Sent push',
+              sentAt: '2026-08-13T07:50:40.637Z',
+              targetedCount: 3,
+              successCount: 3,
+              failureCount: 0,
+              browserReceivedCount: 0,
+              clickedCount: 0,
+            },
+            {
+              id: 'push-4',
+              type: 'article',
               title: 'Failed push',
-              sentAt: '2026-08-13T01:00:00.000Z',
-              targeted: 4,
-              success: 3,
-              failed: 1,
+              sentAt: '2026-08-13T06:00:00.000Z',
+              targetedCount: 1,
+              successCount: 0,
+              failureCount: 1,
+              browserReceivedCount: 0,
+              clickedCount: 0,
               failureCode: 'messaging/registration-token-not-registered',
               failureMessage: 'Registration expired token=secret-token fid=secret-fid registrationId=secret-registration',
             },
-            { id: 'push-4', type: 'article', title: 'Older article push', sentAt: '2026-08-13T00:50:00.000Z', targeted: 2, success: 2, failed: 0 },
-            { id: 'push-5', type: 'breaking', title: 'Older breaking push', sentAt: '2026-08-13T00:40:00.000Z', targeted: 3, success: 3, failed: 0 },
-            { id: 'push-6', type: 'article', title: 'Hidden sixth push', sentAt: '2026-08-13T00:30:00.000Z', targeted: 1, success: 1, failed: 0 },
+            {
+              id: 'push-5',
+              type: 'breaking',
+              title: 'No recipients push',
+              sentAt: '2026-08-13T01:10:00.000Z',
+              targetedCount: 0,
+              successCount: 0,
+              failureCount: 0,
+              browserReceivedCount: 0,
+              clickedCount: 0,
+            },
+            { id: 'push-6', type: 'article', title: 'Hidden sixth push', sentAt: '2026-08-13T00:30:00.000Z', targetedCount: 1, successCount: 1, failureCount: 0 },
           ],
         });
       }
@@ -115,23 +149,32 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getByText('18')).toBeInTheDocument();
     expect(screen.getByText('15')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('14-08-2026:00:16:23.528 IST')).toBeInTheDocument();
-    expect(screen.getByText('12-08-2026:16:30:00.456 IST')).toBeInTheDocument();
-    expect(screen.getByText('13-08-2026:13:20:40.637 IST')).toBeInTheDocument();
+    expect(screen.getAllByText('14-08-2026:00:16:23.528 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('12-08-2026:16:30:00.456 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
     expect(adminJson).toHaveBeenCalledWith('/admin/push/status', { cache: 'no-store' });
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history?limit=5', { cache: 'no-store' });
     expect(screen.getByText('Recent Push History')).toBeInTheDocument();
     expect(screen.getByText('Latest 5 push notification delivery records.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View All History' })).toHaveAttribute('href', '/history');
     expect(screen.getAllByText('Breaking').length).toBeGreaterThan(0);
-    expect(screen.getByText('Heavy rain alert')).toBeInTheDocument();
-    expect(screen.getByText('13-08-2026:06:50:00.000 IST')).toBeInTheDocument();
+    expect(screen.getByText('Clicked push')).toBeInTheDocument();
+    expect(screen.getAllByText('14-08-2026:00:16:23.528 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026:13:30:01.002 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
     expect(screen.getByText('No recipients')).toBeInTheDocument();
+    expect(screen.getByText('Received')).toBeInTheDocument();
+    expect(screen.getByText('Clicked')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.getAllByText('Sent').length).toBeGreaterThan(0);
+    expect(screen.getByText('Targeted 1 · FCM accepted 1 · Browser received 1 · Clicked 1')).toBeInTheDocument();
+    expect(screen.getByText('Targeted 2 · FCM accepted 2 · Browser received 1 · Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('Targeted 3 · FCM accepted 3 · Browser received 0 · Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('Targeted 1 · FCM accepted 0 · Failed 1')).toBeInTheDocument();
+    expect(screen.getByText('Targeted 0')).toBeInTheDocument();
     expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
-    expect(screen.queryByText('2026-08-13T01:20:00.000Z')).not.toBeInTheDocument();
+    expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();

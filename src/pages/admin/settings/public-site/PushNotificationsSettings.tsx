@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
-import { formatPushIstTimestamp, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
+import { formatPushDeliveryProof, formatPushIstTimestamp, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
 
@@ -311,9 +311,8 @@ export default function PushNotificationsSettings() {
                     <td className="px-4 py-3 text-slate-700">{item.sentAt}</td>
                     <td className="px-4 py-3 text-slate-700">
                       <div>{item.status}</div>
-                      {item.status === 'Failed' && item.failureCode ? (
-                        <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{item.failureCode}</div>
-                      ) : null}
+                      <div className="mt-1 max-w-80 break-words text-xs text-slate-500">{formatPushDeliveryProof(item)}</div>
+                      {item.status === 'Failed' && item.failureCode ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{item.failureCode}</div> : null}
                     </td>
                   </tr>
                 ))}

@@ -14,6 +14,13 @@ function formatCount(value: number | null): string {
   return value === null ? 'Unknown' : value.toLocaleString();
 }
 
+function renderDeliveryTimeline(first: string | null, last: string | null): string | null {
+  if (!first && !last) return null;
+  if (first && last) return `First ${first} | Last ${last}`;
+  if (first) return `First ${first}`;
+  return `Last ${last}`;
+}
+
 export default function PushNotificationsHistory() {
   const [records, setRecords] = useState<PushHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +110,8 @@ export default function PushNotificationsHistory() {
             >
               <option value="all">All</option>
               <option value="sent">Sent</option>
+              <option value="received">Received</option>
+              <option value="clicked">Clicked</option>
               <option value="failed">Failed</option>
               <option value="no-recipients">No recipients</option>
             </select>
@@ -122,8 +131,10 @@ export default function PushNotificationsHistory() {
                   <th className="px-4 py-3 text-left">Title</th>
                   <th className="px-4 py-3 text-left">Sent At</th>
                   <th className="px-4 py-3 text-right">Targeted</th>
-                  <th className="px-4 py-3 text-right">Success</th>
+                  <th className="px-4 py-3 text-right">FCM Accepted</th>
                   <th className="px-4 py-3 text-right">Failed</th>
+                  <th className="px-4 py-3 text-right">Browser Received</th>
+                  <th className="px-4 py-3 text-right">Clicked</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Failure Code</th>
                   <th className="px-4 py-3 text-left">Failure Message</th>
@@ -138,12 +149,24 @@ export default function PushNotificationsHistory() {
                     <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.targeted)}</td>
                     <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.success)}</td>
                     <td className="px-4 py-3 text-right text-slate-700">{formatCount(item.failed)}</td>
+                    <td className="px-4 py-3 text-right text-slate-700">
+                      <div>{formatCount(item.browserReceived)}</div>
+                      {renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt) ? (
+                        <div className="mt-1 text-left text-xs text-slate-500">{renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt)}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-right text-slate-700">
+                      <div>{formatCount(item.clicked)}</div>
+                      {renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt) ? (
+                        <div className="mt-1 text-left text-xs text-slate-500">{renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt)}</div>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">{item.status}</td>
                     <td className="px-4 py-3 text-slate-700">
-                      <span className="block max-w-56 break-words">{item.status === 'Failed' && item.failureCode ? item.failureCode : '-'}</span>
+                      <span className="block max-w-56 break-words">{item.failureCode ? item.failureCode : '-'}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      <span className="block max-w-xs break-words">{item.status === 'Failed' && item.failureMessage ? item.failureMessage : '-'}</span>
+                      <span className="block max-w-xs break-words">{item.failureMessage ? item.failureMessage : '-'}</span>
                     </td>
                   </tr>
                 ))}
