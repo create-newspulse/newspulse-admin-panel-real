@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
-import { formatPushDeliveryProof, formatPushIstTimestamp, formatPushResponseTiming, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
+import { formatPushAudience, formatPushDeliverySummary, formatPushIstTimestamp, formatRecentPushStatus, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
 
@@ -154,6 +154,21 @@ function formatCount(value: number | null): string {
 
 function formatValue(value: string | null): string {
   return value || 'None';
+}
+
+function typeChipClass(type: string): string {
+  return type.toLowerCase() === 'breaking'
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : 'border-blue-200 bg-blue-50 text-blue-700';
+}
+
+function statusChipClass(status: string): string {
+  if (status === 'Clicked') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'Received') return 'border-sky-200 bg-sky-50 text-sky-700';
+  if (status === 'Sent') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+  if (status === 'Partial') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (status === 'Failed') return 'border-rose-200 bg-rose-50 text-rose-700';
+  return 'border-slate-200 bg-slate-100 text-slate-700';
 }
 
 async function loadPushDiagnostics(): Promise<PushDiagnostics> {
@@ -318,32 +333,39 @@ export default function PushNotificationsSettings() {
         {history.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">No push notifications sent yet.</div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3 text-left">Type</th>
-                  <th className="px-4 py-3 text-left">Title</th>
-                  <th className="px-4 py-3 text-left">Sent At</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {history.map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-4 py-3 font-medium text-slate-900">{item.type}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.title}</td>
-                    <td className="px-4 py-3 text-slate-700">{item.sentAt}</td>
-                    <td className="px-4 py-3 text-slate-700">
-                      <div>{item.status}</div>
-                      <div className="mt-1 max-w-80 break-words text-xs text-slate-500">{formatPushDeliveryProof(item)}</div>
-                      {formatPushResponseTiming(item) ? <div className="mt-1 max-w-80 break-words text-xs text-slate-500">{formatPushResponseTiming(item)}</div> : null}
-                      {item.status === 'Failed' && item.failureCode ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">{item.failureCode}</div> : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="overflow-hidden rounded-xl border border-slate-200" aria-label="Latest 5 push history">
+            <div className="hidden grid-cols-[7rem_minmax(12rem,1.6fr)_12rem_8rem_13rem_8rem_7rem] gap-3 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid">
+              <div>Type</div>
+              <div>Title</div>
+              <div>Sent At</div>
+              <div>Audience</div>
+              <div>Delivery</div>
+              <div>Status</div>
+              <div className="text-right">Details</div>
+            </div>
+            <div className="divide-y divide-slate-200 bg-white">
+              {history.map((item) => {
+                const statusLabel = formatRecentPushStatus(item);
+                return (
+                  <article key={item.id} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[7rem_minmax(12rem,1.6fr)_12rem_8rem_13rem_8rem_7rem] lg:items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-500 lg:hidden">Type</span>
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${typeChipClass(item.type)}`}>{item.type}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div title={item.title} className="line-clamp-2 break-words text-sm font-semibold leading-5 text-slate-950">{item.title}</div>
+                    </div>
+                    <div className="text-xs font-medium leading-5 text-slate-700">{item.sentAt}</div>
+                    <div className="font-semibold tabular-nums text-slate-800">{formatPushAudience(item)}</div>
+                    <div className="text-xs font-medium leading-5 text-slate-700">{formatPushDeliverySummary(item)}</div>
+                    <div>
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(statusLabel)}`}>{statusLabel}</span>
+                    </div>
+                    <Link to="history" className="text-right text-sm font-semibold text-blue-700 hover:text-blue-800">View Details</Link>
+                  </article>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

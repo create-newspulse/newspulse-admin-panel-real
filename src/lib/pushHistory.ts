@@ -1,7 +1,7 @@
 import { adminJson } from '@/lib/http/adminFetch';
 
-export type PushHistoryStatus = 'FCM Accepted' | 'Received' | 'Clicked' | 'Failed' | 'No recipients';
-export type PushHistoryFilterStatus = 'all' | 'fcm-accepted' | 'received' | 'clicked' | 'failed' | 'no-recipients';
+export type PushHistoryStatus = 'FCM Accepted' | 'Received' | 'Clicked' | 'Failed' | 'No recipients' | 'Partial';
+export type PushHistoryFilterStatus = 'all' | 'fcm-accepted' | 'received' | 'clicked' | 'failed' | 'no-recipients' | 'partial';
 export type PushHistoryFilterType = 'all' | 'breaking' | 'article';
 export type PushHistoryFilterDate = 'today' | '7d' | '30d' | 'all';
 
@@ -59,7 +59,7 @@ export function formatPushIstTimestamp(value: unknown): string {
     padPushTimestamp(date.getUTCDate()),
     padPushTimestamp(date.getUTCMonth() + 1),
     date.getUTCFullYear(),
-  ].join('-') + `:${padPushTimestamp(date.getUTCHours())}:${padPushTimestamp(date.getUTCMinutes())}:${padPushTimestamp(date.getUTCSeconds())}.${padPushTimestamp(date.getUTCMilliseconds(), 3)} IST`;
+  ].join('-') + ` ${padPushTimestamp(date.getUTCHours())}:${padPushTimestamp(date.getUTCMinutes())}:${padPushTimestamp(date.getUTCSeconds())}.${padPushTimestamp(date.getUTCMilliseconds(), 3)} IST`;
 }
 
 export function sanitizePushHistoryText(value: string): string | null {
@@ -136,11 +136,40 @@ export function formatPushDeliveryProof(record: PushHistoryRecord): string {
   ].join(' · ');
 }
 
+export function formatPushAudience(record: PushHistoryRecord): string {
+  return `${(record.targeted ?? 0).toLocaleString()} targeted`;
+}
+
+export function formatPushDeliverySummary(record: PushHistoryRecord): string {
+  return [
+    `FCM ${(record.success ?? 0).toLocaleString()}`,
+    `Browser ${(record.browserReceived ?? 0).toLocaleString()}`,
+    `Clicked ${(record.clicked ?? 0).toLocaleString()}`,
+  ].join(' • ');
+}
+
+export function formatRecentPushStatus(record: PushHistoryRecord): 'Sent' | 'Received' | 'Clicked' | 'Failed' | 'No recipients' | 'Partial' {
+  if (record.status === 'FCM Accepted') return 'Sent';
+  return record.status;
+}
+
 export function formatPushResponseTiming(record: PushHistoryRecord): string | null {
   if (record.status === 'Clicked' && record.clickedInSeconds !== null) return `Clicked in ${formatResponseSeconds(record.clickedInSeconds)}`;
   if (record.status === 'Received' && record.browserReceivedInSeconds !== null) return `First browser received in ${formatResponseSeconds(record.browserReceivedInSeconds)}`;
-  if (record.status === 'FCM Accepted' && record.fcmAcceptedInSeconds !== null) return `FCM accepted in ${formatResponseSeconds(record.fcmAcceptedInSeconds)}`;
+  if ((record.status === 'FCM Accepted' || record.status === 'Partial') && record.fcmAcceptedInSeconds !== null) return `FCM accepted in ${formatResponseSeconds(record.fcmAcceptedInSeconds)}`;
   return null;
+}
+
+export function formatPushAcceptedTiming(record: PushHistoryRecord): string | null {
+  return record.fcmAcceptedInSeconds === null ? null : `FCM accepted in ${formatResponseSeconds(record.fcmAcceptedInSeconds)}`;
+}
+
+export function formatPushBrowserReceivedTiming(record: PushHistoryRecord): string | null {
+  return record.browserReceivedInSeconds === null ? null : `First browser received in ${formatResponseSeconds(record.browserReceivedInSeconds)}`;
+}
+
+export function formatPushClickTiming(record: PushHistoryRecord): string | null {
+  return record.clickedInSeconds === null ? null : `Clicked in ${formatResponseSeconds(record.clickedInSeconds)}`;
 }
 
 function readText(...values: unknown[]): string {
@@ -199,16 +228,18 @@ export function getPushHistoryStatus(
   clicked: number | null,
 ): PushHistoryStatus {
   const statusText = readText(raw?.status, raw?.state, raw?.result).toLowerCase();
-  if (targeted === 0) return 'No recipients';
-  if (typeof failed === 'number' && failed > 0 && (success ?? 0) === 0) return 'Failed';
   if (typeof clicked === 'number' && clicked > 0) return 'Clicked';
   if (typeof browserReceived === 'number' && browserReceived > 0) return 'Received';
+  if (typeof failed === 'number' && failed > 0 && (success ?? 0) > 0) return 'Partial';
   if (typeof success === 'number' && success > 0) return 'FCM Accepted';
+  if (typeof failed === 'number' && failed > 0 && (success ?? 0) === 0) return 'Failed';
+  if (targeted === 0) return 'No recipients';
   if (statusText.includes('click')) return 'Clicked';
   if (statusText.includes('receiv')) return 'Received';
+  if (statusText.includes('partial')) return 'Partial';
+  if (statusText.includes('fcm') || statusText.includes('accept') || statusText.includes('sent') || statusText.includes('success')) return 'FCM Accepted';
   if (statusText.includes('fail') || statusText.includes('error')) return 'Failed';
   if (statusText.includes('no recipient') || statusText.includes('no-recipient')) return 'No recipients';
-  if (statusText.includes('fcm') || statusText.includes('accept') || statusText.includes('sent') || statusText.includes('success')) return 'FCM Accepted';
   return 'FCM Accepted';
 }
 
@@ -281,6 +312,7 @@ export function filterPushHistory(records: PushHistoryRecord[], filters: PushHis
     if (filters.status === 'clicked' && record.status !== 'Clicked') return false;
     if (filters.status === 'failed' && record.status !== 'Failed') return false;
     if (filters.status === 'no-recipients' && record.status !== 'No recipients') return false;
+    if (filters.status === 'partial' && record.status !== 'Partial') return false;
     return true;
   });
 }

@@ -34,8 +34,8 @@ describe('PushNotificationsSettings', () => {
   const patchDraft = vi.fn();
 
   it('formats push timestamps in IST and returns None for missing values', () => {
-    expect(formatPushIstTimestamp('2026-08-13T18:46:23.528Z')).toBe('14-08-2026:00:16:23.528 IST');
-    expect(formatPushIstTimestamp('2026-08-13T07:50:40.637Z')).toBe('13-08-2026:13:20:40.637 IST');
+    expect(formatPushIstTimestamp('2026-08-13T18:46:23.528Z')).toBe('14-08-2026 00:16:23.528 IST');
+    expect(formatPushIstTimestamp('2026-08-13T07:50:40.637Z')).toBe('13-08-2026 13:20:40.637 IST');
     expect(formatPushIstTimestamp(null)).toBe('None');
     expect(formatPushIstTimestamp(undefined)).toBe('None');
   });
@@ -161,24 +161,29 @@ describe('PushNotificationsSettings', () => {
 
     await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
     expect(screen.getByText('Push System Health')).toBeInTheDocument();
+    [
+      'Firebase Cloud Messaging',
+      'Messaging Available',
+      'Backend Reachable',
+      'Total Registrations',
+      'Deliverable Push Devices',
+      'FID-only / Non-deliverable Records',
+      'Breaking News Subscribers',
+      'Article Alert Subscribers',
+      'Disabled Devices',
+      'Last Registration',
+      'Last Successful Send',
+      'Last Failed Attempt',
+    ].forEach((label) => expect(screen.getByText(label)).toBeInTheDocument());
     expect(screen.getAllByText('Yes')).toHaveLength(2);
-    expect(screen.getByText('Total Registrations')).toBeInTheDocument();
-    expect(screen.getByText('Deliverable Push Devices')).toBeInTheDocument();
-    expect(screen.getByText('FID-only / Non-deliverable Records')).toBeInTheDocument();
-    expect(screen.getByText('Breaking News Subscribers')).toBeInTheDocument();
-    expect(screen.getByText('Article Alert Subscribers')).toBeInTheDocument();
-    expect(screen.getByText('Disabled Devices')).toBeInTheDocument();
-    expect(screen.getByText('Last Registration')).toBeInTheDocument();
-    expect(screen.getByText('Last Successful Send')).toBeInTheDocument();
-    expect(screen.getByText('Last Failed Attempt')).toBeInTheDocument();
     expect(screen.getByText('18')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getAllByText('3').length).toBeGreaterThan(1);
     expect(screen.getByText('9')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
-    expect(screen.getAllByText('14-08-2026:00:16:23.528 IST').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('12-08-2026:16:30:00.456 IST').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('14-08-2026 00:16:23.528 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('12-08-2026 16:30:00.456 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026 13:20:40.637 IST').length).toBeGreaterThan(0);
     expect(screen.getByText(/Code: messaging\/invalid-argument/i)).toBeInTheDocument();
     expect(screen.queryByText('MongoDB Registrations')).not.toBeInTheDocument();
     expect(screen.queryByText('Enabled Devices')).not.toBeInTheDocument();
@@ -186,30 +191,36 @@ describe('PushNotificationsSettings', () => {
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history?limit=5', { cache: 'no-store' });
     expect(screen.getByText('Recent Push History')).toBeInTheDocument();
     expect(screen.getByText('Latest 5 push notification delivery records.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Latest 5 push history')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'View All History' })).toHaveAttribute('href', '/history');
+    expect(screen.getByText('Audience')).toBeInTheDocument();
+    expect(screen.getByText('Delivery')).toBeInTheDocument();
     expect(screen.getAllByText('Breaking').length).toBeGreaterThan(0);
     expect(screen.getByText('Clicked push')).toBeInTheDocument();
-    expect(screen.getAllByText('14-08-2026:00:16:23.528 IST').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('13-08-2026:13:30:01.002 IST').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('13-08-2026:13:20:40.637 IST').length).toBeGreaterThan(0);
+    expect(screen.getByTitle('Clicked push')).toHaveClass('line-clamp-2');
+    expect(screen.getAllByText('14-08-2026 00:16:23.528 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026 13:30:01.002 IST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('13-08-2026 13:20:40.637 IST').length).toBeGreaterThan(0);
     expect(screen.getByText('No recipients')).toBeInTheDocument();
-    expect(screen.getByText('FCM Accepted')).toBeInTheDocument();
+    expect(screen.getByText('Sent')).toBeInTheDocument();
     expect(screen.getByText('Received')).toBeInTheDocument();
     expect(screen.getByText('Clicked')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(screen.queryByText('Sent')).not.toBeInTheDocument();
-    expect(screen.getByText('Targeted 1 · FCM accepted 1 · Browser received 1 · Clicked 1')).toBeInTheDocument();
-    expect(screen.getByText('Targeted 2 · FCM accepted 2 · Browser received 1 · Clicked 0')).toBeInTheDocument();
-    expect(screen.getByText('Targeted 3 · FCM accepted 3 · Browser received 0 · Clicked 0')).toBeInTheDocument();
-    expect(screen.getByText('Targeted 1 · FCM accepted 0 · Browser received 0 · Clicked 0')).toBeInTheDocument();
-    expect(screen.getByText('Targeted 0')).toBeInTheDocument();
-    expect(screen.getByText('FCM accepted in 1.2s')).toBeInTheDocument();
-    expect(screen.getByText('First browser received in 3.8s')).toBeInTheDocument();
-    expect(screen.getByText('Clicked in 4.5s')).toBeInTheDocument();
-    expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
+    expect(screen.getAllByText('1 targeted')).toHaveLength(2);
+    expect(screen.getByText('2 targeted')).toBeInTheDocument();
+    expect(screen.getByText('3 targeted')).toBeInTheDocument();
+    expect(screen.getByText('0 targeted')).toBeInTheDocument();
+    expect(screen.getByText('FCM 1 • Browser 1 • Clicked 1')).toBeInTheDocument();
+    expect(screen.getByText('FCM 2 • Browser 1 • Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('FCM 3 • Browser 0 • Clicked 0')).toBeInTheDocument();
+    expect(screen.getAllByText('FCM 0 • Browser 0 • Clicked 0')).toHaveLength(2);
+    expect(screen.queryByText('FCM accepted in 1.2s')).not.toBeInTheDocument();
+    expect(screen.queryByText('messaging/registration-token-not-registered')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'View Details' })).toHaveLength(5);
     expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
   });

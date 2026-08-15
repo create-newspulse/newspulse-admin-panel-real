@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   filterPushHistory,
+  formatPushAcceptedTiming,
+  formatPushClickTiming,
+  formatPushDeliveryProof,
   formatPushResponseTiming,
   loadPushHistory,
   PUSH_HISTORY_PAGE_SIZE,
@@ -13,6 +16,21 @@ import {
 
 function formatCount(value: number | null): string {
   return value === null ? 'Unknown' : value.toLocaleString();
+}
+
+function typeChipClass(type: string): string {
+  return type.toLowerCase() === 'breaking'
+    ? 'border-red-200 bg-red-50 text-red-700'
+    : 'border-blue-200 bg-blue-50 text-blue-700';
+}
+
+function statusChipClass(status: string): string {
+  if (status === 'Clicked') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'Received') return 'border-sky-200 bg-sky-50 text-sky-700';
+  if (status === 'FCM Accepted') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+  if (status === 'Partial') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (status === 'Failed') return 'border-rose-200 bg-rose-50 text-rose-700';
+  return 'border-slate-200 bg-slate-100 text-slate-700';
 }
 
 function renderDeliveryTimeline(first: string | null, last: string | null): string | null {
@@ -29,6 +47,7 @@ export default function PushNotificationsHistory() {
   const [typeFilter, setTypeFilter] = useState<PushHistoryFilterType>('all');
   const [statusFilter, setStatusFilter] = useState<PushHistoryFilterStatus>('all');
   const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -47,6 +66,7 @@ export default function PushNotificationsHistory() {
 
   useEffect(() => {
     setPage(1);
+    setExpandedId(null);
   }, [dateFilter, typeFilter, statusFilter]);
 
   const filteredRecords = useMemo(
@@ -57,6 +77,14 @@ export default function PushNotificationsHistory() {
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / PUSH_HISTORY_PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const visibleRecords = filteredRecords.slice((currentPage - 1) * PUSH_HISTORY_PAGE_SIZE, currentPage * PUSH_HISTORY_PAGE_SIZE);
+  const summaryCards = useMemo(() => [
+    { label: 'Total pushes', value: records.length },
+    { label: 'Sent', value: records.filter((record) => record.status === 'FCM Accepted').length },
+    { label: 'Received', value: records.filter((record) => record.status === 'Received').length },
+    { label: 'Clicked', value: records.filter((record) => record.status === 'Clicked').length },
+    { label: 'Failed', value: records.filter((record) => record.status === 'Failed').length },
+    { label: 'No recipients', value: records.filter((record) => record.status === 'No recipients').length },
+  ], [records]);
 
   return (
     <div className="space-y-4">
@@ -115,8 +143,18 @@ export default function PushNotificationsHistory() {
               <option value="clicked">Clicked</option>
               <option value="failed">Failed</option>
               <option value="no-recipients">No recipients</option>
+              <option value="partial">Partial</option>
             </select>
           </label>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6" aria-label="Push history summary">
+          {summaryCards.map((card) => (
+            <div key={card.label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.label}</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums text-slate-950">{card.value.toLocaleString()}</div>
+            </div>
+          ))}
         </div>
 
         {loading ? (
@@ -124,56 +162,89 @@ export default function PushNotificationsHistory() {
         ) : visibleRecords.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">No push history records found.</div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-[1180px] table-fixed divide-y divide-slate-200 text-sm">
+          <div data-testid="full-push-history-scroll" className="overflow-x-auto rounded-xl border border-slate-200">
+            <table aria-label="Full push history" className="min-w-[1080px] table-fixed divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  <th className="w-24 whitespace-nowrap px-4 py-3 text-left">Type</th>
-                  <th className="w-[28rem] px-4 py-3 text-left">Title</th>
                   <th className="w-52 whitespace-nowrap px-4 py-3 text-left">Sent At</th>
+                  <th className="w-28 whitespace-nowrap px-4 py-3 text-left">Type</th>
+                  <th className="w-[26rem] px-4 py-3 text-left">Title</th>
                   <th className="w-24 whitespace-nowrap px-4 py-3 text-right">Targeted</th>
                   <th className="w-28 whitespace-nowrap px-4 py-3 text-right">FCM Accepted</th>
-                  <th className="w-20 whitespace-nowrap px-4 py-3 text-right">Failed</th>
                   <th className="w-32 whitespace-nowrap px-4 py-3 text-right">Browser Received</th>
                   <th className="w-20 whitespace-nowrap px-4 py-3 text-right">Clicked</th>
-                  <th className="w-44 px-4 py-3 text-left">Status</th>
-                  <th className="w-56 px-4 py-3 text-left">Failure Code</th>
+                  <th className="w-36 px-4 py-3 text-left">Final Status</th>
+                  <th className="w-28 px-4 py-3 text-right">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {visibleRecords.map((item) => (
-                  <tr key={item.id}>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{item.type}</td>
-                    <td className="px-4 py-3 text-slate-700">
-                      <div className="min-w-0 max-w-[26rem] break-words leading-5">{item.title}</div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{item.sentAt}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.targeted)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.success)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">{formatCount(item.failed)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">
-                      <div>{formatCount(item.browserReceived)}</div>
-                      {renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt) ? (
-                        <div className="mt-1 whitespace-normal text-left text-xs leading-4 text-slate-500">{renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt)}</div>
+                {visibleRecords.map((item) => {
+                  const isExpanded = expandedId === item.id;
+                  const receivedTimeline = renderDeliveryTimeline(item.firstReceivedAt, item.lastReceivedAt);
+                  const clickedTimeline = renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt);
+                  return (
+                    <Fragment key={item.id}>
+                      <tr>
+                        <td className="whitespace-nowrap px-4 py-3 text-slate-700">{item.sentAt}</td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${typeChipClass(item.type)}`}>{item.type}</span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <div title={item.title} className="line-clamp-2 min-w-0 max-w-[24rem] break-words leading-5">{item.title}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.targeted)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.success)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.browserReceived)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.clicked)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(item.status)}`}>{item.status}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            aria-expanded={isExpanded}
+                            onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                          >
+                            {isExpanded ? 'Hide details' : 'View details'}
+                          </button>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr>
+                          <td colSpan={9} className="bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Full title</div>
+                                <div className="mt-1 break-words text-slate-900">{item.title}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Failure code</div>
+                                <div className="mt-1 break-words text-slate-900">{item.failureCode || '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Accepted timing</div>
+                                <div className="mt-1 text-slate-900">{formatPushAcceptedTiming(item) || '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Browser received</div>
+                                <div className="mt-1 break-words text-slate-900">{receivedTimeline || '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Click timing</div>
+                                <div className="mt-1 break-words text-slate-900">{formatPushClickTiming(item) || clickedTimeline || '-'}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra notes</div>
+                                <div className="mt-1 break-words text-slate-900">{formatPushDeliveryProof(item)}</div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
                       ) : null}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-slate-700">
-                      <div>{formatCount(item.clicked)}</div>
-                      {renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt) ? (
-                        <div className="mt-1 whitespace-normal text-left text-xs leading-4 text-slate-500">{renderDeliveryTimeline(item.firstClickedAt, item.lastClickedAt)}</div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      <div className="space-y-1 leading-5">
-                        <div className="whitespace-nowrap font-medium text-slate-900">{item.status}</div>
-                        {formatPushResponseTiming(item) ? <div className="break-words text-xs leading-4 text-slate-500">{formatPushResponseTiming(item)}</div> : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      <span className="block max-w-52 break-words leading-5">{item.failureCode ? item.failureCode : '-'}</span>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

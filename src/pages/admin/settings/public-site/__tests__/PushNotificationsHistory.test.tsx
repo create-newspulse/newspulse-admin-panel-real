@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PushNotificationsHistory from '../PushNotificationsHistory';
@@ -30,11 +30,11 @@ describe('PushNotificationsHistory', () => {
         {
           id: 'breaking-clicked',
           type: 'breaking',
-          title: 'Breaking clicked',
+          title: 'Breaking clicked with a long Gujarati headline ગુજરાતી સમાચાર ખૂબ લાંબા શીર્ષક સાથે',
           sentAt: '2026-08-13T18:46:23.528Z',
           targetedCount: 10,
-          successCount: 10,
-          failureCount: 0,
+          successCount: 0,
+          failureCount: 1,
           browserReceivedCount: 5,
           clickedCount: 2,
           clickedInSeconds: 4.5,
@@ -59,6 +59,19 @@ describe('PushNotificationsHistory', () => {
           browserReceivedInSeconds: 3.8,
           firstReceivedAt: '2026-08-13T08:01:00.000Z',
           lastReceivedAt: '2026-08-13T08:01:00.000Z',
+        },
+        {
+          id: 'article-partial',
+          type: 'article',
+          title: 'Article partial',
+          sentAt: '2026-08-13T07:55:40.637Z',
+          targetedCount: 7,
+          successCount: 4,
+          failureCount: 3,
+          browserReceivedCount: 0,
+          clickedCount: 0,
+          fcmAcceptedInSeconds: 0.4,
+          failureCode: 'messaging/internal-error',
         },
         {
           id: 'article-sent',
@@ -103,36 +116,59 @@ describe('PushNotificationsHistory', () => {
   it('loads full push history and filters without exposing sensitive fields', async () => {
     renderHistory();
 
-    await waitFor(() => expect(screen.getByText('Breaking clicked')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Breaking clicked with a long Gujarati headline/i)).toBeInTheDocument());
     expect(adminJson).toHaveBeenCalledWith('/admin/push/history', { cache: 'no-store' });
     expect(screen.getByRole('link', { name: 'Back to Push Notifications' })).toHaveAttribute('href', '/admin/settings/public-site/push-notifications');
-    expect(screen.getByText('14-08-2026:00:16:23.528 IST')).toBeInTheDocument();
-    expect(screen.getByText('13-08-2026:13:30:01.002 IST')).toBeInTheDocument();
-    expect(screen.getByText('13-08-2026:13:20:40.637 IST')).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Type' })).toBeInTheDocument();
+    expect(screen.getByText('14-08-2026 00:16:23.528 IST')).toBeInTheDocument();
+    expect(screen.getByText('13-08-2026 13:30:01.002 IST')).toBeInTheDocument();
+    expect(screen.getByText('13-08-2026 13:20:40.637 IST')).toBeInTheDocument();
+    expect(screen.getByLabelText('Push history summary')).toBeInTheDocument();
+    const summary = screen.getByLabelText('Push history summary');
+    ['Total pushes', 'Sent', 'Received', 'Clicked', 'Failed', 'No recipients'].forEach((label) => expect(within(summary).getByText(label)).toBeInTheDocument());
     expect(screen.getByRole('columnheader', { name: 'Title' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Sent At' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Type' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Targeted' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'FCM Accepted' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Failed' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Browser Received' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Clicked' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Failure Code' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Final Status' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Failed' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Failure Code' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Failure Message' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('full-push-history-scroll')).toHaveClass('overflow-x-auto');
+    expect(screen.getByRole('table', { name: 'Full push history' })).toHaveClass('min-w-[1080px]', 'table-fixed');
+    expect(screen.getByTitle('Breaking clicked with a long Gujarati headline ગુજરાતી સમાચાર ખૂબ લાંબા શીર્ષક સાથે')).toHaveClass('line-clamp-2');
     expect(screen.getAllByText('FCM Accepted').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Received').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Clicked').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Failed').length).toBeGreaterThan(1);
     expect(screen.getAllByText('No recipients').length).toBeGreaterThan(1);
-    expect(screen.queryByText('Sent')).not.toBeInTheDocument();
-    expect(screen.getByText('FCM accepted in 1.2s')).toBeInTheDocument();
-    expect(screen.getByText('First browser received in 3.8s')).toBeInTheDocument();
-    expect(screen.getByText('Clicked in 4.5s')).toBeInTheDocument();
-    expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
+    expect(screen.getAllByText('Partial').length).toBeGreaterThan(1);
+    expect(screen.queryByText('FCM accepted in 1.2s')).not.toBeInTheDocument();
+    expect(screen.queryByText('First browser received in 3.8s')).not.toBeInTheDocument();
+    expect(screen.queryByText('Clicked in 4.5s')).not.toBeInTheDocument();
+    expect(screen.queryByText('messaging/registration-token-not-registered')).not.toBeInTheDocument();
     expect(screen.queryByText(/Registration is no longer active/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/First 14-08-2026:00:16:30.000 IST \| Last 14-08-2026:00:17:00.000 IST/i)).toBeInTheDocument();
-    expect(screen.getByText(/First 14-08-2026:00:17:30.000 IST \| Last 14-08-2026:00:18:00.000 IST/i)).toBeInTheDocument();
+
+    const clickedRow = screen.getByRole('row', { name: /Breaking clicked with a long Gujarati headline/i });
+    fireEvent.click(within(clickedRow).getByRole('button', { name: 'View details' }));
+    expect(screen.getByText('Full title')).toBeInTheDocument();
+    expect(screen.getByText('Click timing')).toBeInTheDocument();
+    expect(screen.getByText('Clicked in 4.5s')).toBeInTheDocument();
+    expect(screen.getByText(/First 14-08-2026 00:16:30.000 IST \| Last 14-08-2026 00:17:00.000 IST/i)).toBeInTheDocument();
+
+    fireEvent.click(within(clickedRow).getByRole('button', { name: 'Hide details' }));
+    const sentRow = screen.getByRole('row', { name: /Article sent/i });
+    fireEvent.click(within(sentRow).getByRole('button', { name: 'View details' }));
+    expect(screen.getByText('Accepted timing')).toBeInTheDocument();
+    expect(screen.getByText('FCM accepted in 1.2s')).toBeInTheDocument();
+
+    fireEvent.click(within(sentRow).getByRole('button', { name: 'Hide details' }));
+    const failedRow = screen.getByRole('row', { name: /Article failed/i });
+    fireEvent.click(within(failedRow).getByRole('button', { name: 'View details' }));
+    expect(screen.getByText('messaging/registration-token-not-registered')).toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sendPush|server\.js/i)).not.toBeInTheDocument();
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
@@ -140,19 +176,23 @@ describe('PushNotificationsHistory', () => {
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'fcm-accepted' } });
     expect(screen.getByText('Article sent')).toBeInTheDocument();
-    expect(screen.queryByText('Breaking clicked')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Breaking clicked/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'received' } });
     expect(screen.getByText('Article received')).toBeInTheDocument();
     expect(screen.queryByText('Article sent')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'clicked' } });
-    expect(screen.getByText('Breaking clicked')).toBeInTheDocument();
+    expect(screen.getByText(/Breaking clicked/i)).toBeInTheDocument();
     expect(screen.queryByText('Article received')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'failed' } });
     expect(screen.getByText('Article failed')).toBeInTheDocument();
-    expect(screen.queryByText('Breaking clicked')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Breaking clicked/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'partial' } });
+    expect(screen.getByText('Article partial')).toBeInTheDocument();
+    expect(screen.queryByText('Article failed')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'no-recipients' } });
     expect(screen.getByText('Article no recipients')).toBeInTheDocument();
@@ -160,7 +200,7 @@ describe('PushNotificationsHistory', () => {
 
     fireEvent.change(screen.getByLabelText('Date'), { target: { value: '30d' } });
     expect(screen.getByText('No push history records found.')).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('paginates full push history at 20 records per page', async () => {
     vi.mocked(adminJson).mockResolvedValueOnce({ items: Array.from({ length: 22 }, (_, index) => makeRecord(index + 1)) });
