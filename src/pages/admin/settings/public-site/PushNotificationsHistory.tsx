@@ -7,6 +7,7 @@ import {
   formatPushClickTiming,
   formatPushDeliveryProof,
   formatPushNotificationShownTiming,
+  formatPushStatusLabel,
   loadPushHistory,
   PUSH_HISTORY_PAGE_SIZE,
   type PushHistoryFilterDate,
@@ -27,7 +28,7 @@ function typeChipClass(type: string): string {
 
 function statusChipClass(status: string): string {
   if (status === 'Clicked') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (status === 'Shown') return 'border-teal-200 bg-teal-50 text-teal-700';
+  if (status === 'Shown' || status === 'Notification Shown') return 'border-teal-200 bg-teal-50 text-teal-700';
   if (status === 'Browser Received') return 'border-sky-200 bg-sky-50 text-sky-700';
   if (status === 'FCM Accepted') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
   if (status === 'Partial') return 'border-amber-200 bg-amber-50 text-amber-800';
@@ -86,7 +87,7 @@ export default function PushNotificationsHistory() {
     { label: 'Notification Shown', value: records.filter((record) => record.status === 'Shown').length },
     { label: 'Clicked', value: records.filter((record) => record.status === 'Clicked').length },
     { label: 'Failed', value: records.filter((record) => record.status === 'Failed').length },
-    { label: 'No Recipients', value: records.filter((record) => record.status === 'No recipients').length },
+    { label: 'No recipients', value: records.filter((record) => record.status === 'No recipients').length },
   ], [records]);
 
   return (
@@ -205,7 +206,7 @@ export default function PushNotificationsHistory() {
                         <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.notificationShown)}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-slate-700">{formatCount(item.clicked)}</td>
                         <td className="px-4 py-3 text-slate-700">
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(item.status)}`}>{item.status}</span>
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(item.status)}`}>{formatPushStatusLabel(item.status)}</span>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button

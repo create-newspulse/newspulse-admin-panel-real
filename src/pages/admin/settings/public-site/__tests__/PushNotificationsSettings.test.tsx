@@ -179,6 +179,7 @@ describe('PushNotificationsSettings', () => {
 
     await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
     expect(screen.getByText('Push System Health')).toBeInTheDocument();
+    expect(screen.getByText('Deliverable Push Devices are browsers/devices with valid FCM tokens. FID-only records are old or non-deliverable and cannot receive push.')).toBeInTheDocument();
     [
       'Firebase Cloud Messaging',
       'Messaging Available',
@@ -222,7 +223,8 @@ describe('PushNotificationsSettings', () => {
     expect(screen.queryByText('No recipients')).not.toBeInTheDocument();
     expect(screen.getByText('FCM Accepted')).toBeInTheDocument();
     expect(screen.getByText('Browser Received')).toBeInTheDocument();
-    expect(screen.getByText('Shown')).toBeInTheDocument();
+    expect(screen.getByText('Notification Shown')).toBeInTheDocument();
+    expect(screen.queryByText('Shown')).not.toBeInTheDocument();
     expect(screen.getByText('Clicked')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.getAllByText('1 targeted')).toHaveLength(2);
@@ -243,7 +245,7 @@ describe('PushNotificationsSettings', () => {
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret-token|secret-fid|secret-registration|registrationId/i)).not.toBeInTheDocument();
   });
 
   it('displays disabledRegistrations when it is 0', async () => {

@@ -1,6 +1,11 @@
 import { adminJson } from '@/lib/http/adminFetch';
 
 export type PushHistoryStatus = 'FCM Accepted' | 'Browser Received' | 'Shown' | 'Clicked' | 'Failed' | 'No recipients' | 'Partial';
+
+export function formatPushStatusLabel(status: PushHistoryStatus | string): string {
+  return status === 'Shown' ? 'Notification Shown' : status;
+}
+
 export type PushHistoryFilterStatus = 'all' | 'fcm-accepted' | 'browser-received' | 'shown' | 'clicked' | 'failed' | 'no-recipients' | 'partial';
 export type PushHistoryFilterType = 'all' | 'breaking' | 'article';
 export type PushHistoryFilterDate = 'today' | '7d' | '30d' | 'all';

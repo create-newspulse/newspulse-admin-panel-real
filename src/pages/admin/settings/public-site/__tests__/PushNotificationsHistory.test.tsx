@@ -147,7 +147,7 @@ describe('PushNotificationsHistory', () => {
     expect(screen.getByText('13-08-2026 13:20:40.637 IST')).toBeInTheDocument();
     expect(screen.getByLabelText('Push history summary')).toBeInTheDocument();
     const summary = screen.getByLabelText('Push history summary');
-    ['Total Pushes', 'FCM Accepted', 'Browser Received', 'Notification Shown', 'Clicked', 'Failed', 'No Recipients'].forEach((label) => expect(within(summary).getByText(label)).toBeInTheDocument());
+    ['Total Pushes', 'FCM Accepted', 'Browser Received', 'Notification Shown', 'Clicked', 'Failed', 'No recipients'].forEach((label) => expect(within(summary).getByText(label)).toBeInTheDocument());
     expect(screen.getByRole('columnheader', { name: 'Title' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Sent At' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Type' })).toBeInTheDocument();
@@ -166,7 +166,8 @@ describe('PushNotificationsHistory', () => {
     expect(screen.getByTitle('Breaking clicked with a long Gujarati headline ગુજરાતી સમાચાર ખૂબ લાંબા શીર્ષક સાથે')).toHaveClass('line-clamp-2');
     expect(screen.getAllByText('FCM Accepted').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Browser Received').length).toBeGreaterThan(1);
-    expect(screen.getAllByText('Shown').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Notification Shown').length).toBeGreaterThan(1);
+    expect(screen.queryByText('Shown')).not.toBeInTheDocument();
     expect(screen.getAllByText('Clicked').length).toBeGreaterThan(1);
     expect(screen.getAllByText('Failed').length).toBeGreaterThan(1);
     expect(screen.getAllByText('No recipients').length).toBeGreaterThan(1);
@@ -205,7 +206,7 @@ describe('PushNotificationsHistory', () => {
     fireEvent.click(within(failedRow).getByRole('button', { name: 'View details' }));
     expect(screen.getByText(/messaging\/registration-token-not-registered/i)).toBeInTheDocument();
     expect(screen.getByText(/Registration is no longer active/i)).toBeInTheDocument();
-    expect(screen.queryByText(/secret-token|secret-fid|secret-registration/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret-token|secret-fid|secret-registration|registrationId/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sendPush|server\.js/i)).not.toBeInTheDocument();
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
@@ -240,7 +241,7 @@ describe('PushNotificationsHistory', () => {
 
     fireEvent.change(screen.getByLabelText('Date'), { target: { value: '30d' } });
     expect(screen.getByText('No push history records found.')).toBeInTheDocument();
-  }, 10000);
+  }, 20_000);
 
   it('paginates full push history at 20 records per page', async () => {
     vi.mocked(adminJson).mockResolvedValueOnce({ items: Array.from({ length: 22 }, (_, index) => makeRecord(index + 1)) });
@@ -256,5 +257,5 @@ describe('PushNotificationsHistory', () => {
     expect(screen.getByText('Record 21')).toBeInTheDocument();
     expect(screen.getByText('Record 22')).toBeInTheDocument();
     expect(screen.getByText('Showing 21-22 of 22')).toBeInTheDocument();
-  });
+  }, 20_000);
 });

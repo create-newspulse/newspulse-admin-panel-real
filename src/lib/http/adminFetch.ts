@@ -516,7 +516,8 @@ export async function adminJson<T = any>(path: string, init: AdminFetchOptions =
     const msg = errorMessage(body, `HTTP ${res.status} ${res.statusText}`);
     const p = adminApiPath(path);
     const errUrl = /^https?:\/\//i.test(p) ? p : `${BASE}${p}`;
-    const code = res.status === 503 ? 'DB_UNAVAILABLE' : undefined;
+    const bodyCode = body && typeof body === 'object' ? String((body as any)?.code || '').trim() : '';
+    const code = bodyCode || (res.status === 503 ? 'DB_UNAVAILABLE' : undefined);
     throw new AdminApiError(msg, { status: res.status, url: errUrl, body, code });
   }
 

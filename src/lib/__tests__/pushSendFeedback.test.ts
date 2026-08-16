@@ -4,6 +4,7 @@ import { AdminApiError } from '@/lib/http/adminFetch';
 import {
   ARTICLE_PUSH_SPAM_WARNING,
   BREAKING_PUSH_SPAM_WARNING,
+  DUPLICATE_PUSH_BLOCKED_MESSAGE,
   PUSH_SPAM_BLOCKED_MESSAGE,
   isPushSpamBlockedError,
   pushSendErrorMessage,
@@ -16,14 +17,45 @@ describe('push send feedback', () => {
     expect(BREAKING_PUSH_SPAM_WARNING).toBe('Use Breaking Push only for urgent updates. Repeated breaking alerts may be treated as spam by browsers.');
   });
 
-  it('maps duplicate and rate-limit push errors to the friendly spam-blocked message', () => {
-    const duplicate = new AdminApiError('Duplicate push blocked', { status: 409, url: '/admin-api/admin/push/article' });
-    const rateLimit = new AdminApiError('Too many push requests', { status: 429, url: '/admin-api/admin/push/breaking' });
+  it('maps duplicate_push_blocked push errors to the friendly duplicate message', () => {
+    const duplicate = new AdminApiError('Duplicate push blocked', {
+      status: 409,
+      url: '/admin-api/admin/push/article',
+      body: { code: 'duplicate_push_blocked', error: 'Duplicate push blocked by backend' },
+      code: 'duplicate_push_blocked',
+    });
 
     expect(isPushSpamBlockedError(duplicate)).toBe(true);
+    expect(pushSendErrorMessage(duplicate, 'Article push failed.')).toBe(DUPLICATE_PUSH_BLOCKED_MESSAGE);
+  });
+
+  it('maps push_rate_limited push errors to the friendly rate-limit message', () => {
+    const rateLimit = new AdminApiError('Too many push requests', {
+      status: 429,
+      url: '/admin-api/admin/push/breaking',
+      body: { code: 'push_rate_limited', error: 'Too many push requests' },
+      code: 'push_rate_limited',
+    });
+
     expect(isPushSpamBlockedError(rateLimit)).toBe(true);
-    expect(pushSendErrorMessage(duplicate, 'Article push failed.')).toBe(PUSH_SPAM_BLOCKED_MESSAGE);
     expect(pushSendErrorMessage(rateLimit, 'Breaking push failed.')).toBe(PUSH_SPAM_BLOCKED_MESSAGE);
+  });
+
+  it('does not show raw backend stack details for friendly push blocks', () => {
+    const error = new AdminApiError('Error: duplicate\n    at sendPush (/srv/server.js:10:5)', {
+      status: 409,
+      url: '/admin-api/admin/push/article',
+      body: {
+        code: 'duplicate_push_blocked',
+        stack: 'Error: duplicate\n    at sendPush (/srv/server.js:10:5)',
+      },
+      code: 'duplicate_push_blocked',
+    });
+
+    const message = pushSendErrorMessage(error, 'Article push failed.');
+
+    expect(message).toBe(DUPLICATE_PUSH_BLOCKED_MESSAGE);
+    expect(message).not.toMatch(/sendPush|server\.js|stack|Error:/i);
   });
 
   it('sanitizes non-spam push errors before display', () => {

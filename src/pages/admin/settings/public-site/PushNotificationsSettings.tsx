@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
 import { adminJson } from '@/lib/http/adminFetch';
-import { formatPushAudience, formatPushDeliverySummary, formatPushIstTimestamp, formatRecentPushStatus, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
+import { formatPushAudience, formatPushDeliverySummary, formatPushIstTimestamp, formatPushStatusLabel, formatRecentPushStatus, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
 
@@ -164,7 +164,7 @@ function typeChipClass(type: string): string {
 
 function statusChipClass(status: string): string {
   if (status === 'Clicked') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (status === 'Shown') return 'border-teal-200 bg-teal-50 text-teal-700';
+  if (status === 'Shown' || status === 'Notification Shown') return 'border-teal-200 bg-teal-50 text-teal-700';
   if (status === 'Browser Received') return 'border-sky-200 bg-sky-50 text-sky-700';
   if (status === 'FCM Accepted') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
   if (status === 'Partial') return 'border-amber-200 bg-amber-50 text-amber-800';
@@ -264,6 +264,7 @@ export default function PushNotificationsSettings() {
         <div>
           <div className="text-base font-semibold text-slate-950">Push System Health</div>
           <div className="mt-1 text-sm text-slate-600">Read-only delivery diagnostics from the admin backend.</div>
+          <div className="mt-1 text-xs text-slate-500">Deliverable Push Devices are browsers/devices with valid FCM tokens. FID-only records are old or non-deliverable and cannot receive push.</div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -347,6 +348,7 @@ export default function PushNotificationsSettings() {
             <div className="divide-y divide-slate-200 bg-white">
               {history.map((item) => {
                 const statusLabel = formatRecentPushStatus(item);
+                const statusDisplayLabel = formatPushStatusLabel(statusLabel);
                 return (
                   <article key={item.id} className="grid gap-3 px-4 py-3 text-sm lg:grid-cols-[7rem_minmax(12rem,1.6fr)_12rem_8rem_13rem_8rem_7rem] lg:items-center">
                     <div className="flex items-center gap-2">
@@ -360,7 +362,7 @@ export default function PushNotificationsSettings() {
                     <div className="font-semibold tabular-nums text-slate-800">{formatPushAudience(item)}</div>
                     <div className="text-xs font-medium leading-5 text-slate-700">{formatPushDeliverySummary(item)}</div>
                     <div>
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(statusLabel)}`}>{statusLabel}</span>
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusChipClass(statusLabel)}`}>{statusDisplayLabel}</span>
                     </div>
                     <Link to="history" className="text-right text-sm font-semibold text-blue-700 hover:text-blue-800">View Details</Link>
                   </article>
