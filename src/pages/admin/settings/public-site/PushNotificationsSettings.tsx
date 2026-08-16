@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Switch from '@/components/settings/Switch';
 import { usePublicSiteSettingsDraft } from '@/features/settings/PublicSiteSettingsDraftContext';
-import { adminJson } from '@/lib/http/adminFetch';
+import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 import { formatPushAudience, formatPushDeliverySummary, formatPushIstTimestamp, formatPushStatusLabel, formatRecentPushStatus, loadPushHistory, type PushHistoryRecord } from '@/lib/pushHistory';
 
 type FcmStatusLabel = 'Configured' | 'Not Configured' | 'Error';
@@ -22,6 +22,22 @@ type PushDiagnostics = {
   lastFailedAttempt: string | null;
   lastFailureCode: string | null;
 };
+
+type PushCleanupPreview = {
+  eligibleCount: number;
+  deletedCount: 0;
+  retentionDays: number;
+};
+
+type PushCleanupCheckState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'success'; result: PushCleanupPreview }
+  | { status: 'error' };
+
+const PUSH_CLEANUP_PREVIEW_PATH = '/admin/push/registrations/cleanup-preview';
+const PUSH_CLEANUP_RETENTION_DAYS = 30;
+const PUSH_CLEANUP_UNAVAILABLE_MESSAGE = 'Push cleanup check is temporarily unavailable. Please try again later.';
 
 const EMPTY_DIAGNOSTICS: PushDiagnostics = {
   fcmStatus: 'Not Configured',
@@ -156,6 +172,32 @@ function formatValue(value: string | null): string {
   return value || 'None';
 }
 
+function normalizePushCleanupPreview(input: unknown): PushCleanupPreview {
+  const raw = input && typeof input === 'object' ? (input as any) : {};
+  const source = raw.preview && typeof raw.preview === 'object' ? raw.preview : raw;
+  const eligibleCount = readNumber(source.eligibleCount, source.eligibleRecords, source.count, raw.eligibleCount) ?? 0;
+  const retentionDays = readNumber(source.retentionDays, source.retention, raw.retentionDays) ?? PUSH_CLEANUP_RETENTION_DAYS;
+
+  return {
+    eligibleCount: Math.max(0, eligibleCount),
+    deletedCount: 0,
+    retentionDays: retentionDays > 0 ? retentionDays : PUSH_CLEANUP_RETENTION_DAYS,
+  };
+}
+
+async function loadPushCleanupPreview(): Promise<PushCleanupPreview> {
+  try {
+    const data = await adminJson(PUSH_CLEANUP_PREVIEW_PATH, { method: 'GET', cache: 'no-store' });
+    return normalizePushCleanupPreview(data);
+  } catch (error) {
+    if (error instanceof AdminApiError && (error.status === 404 || error.status === 405)) {
+      const data = await adminJson(PUSH_CLEANUP_PREVIEW_PATH, { method: 'POST' });
+      return normalizePushCleanupPreview(data);
+    }
+    throw error;
+  }
+}
+
 function typeChipClass(type: string): string {
   return type.toLowerCase() === 'breaking'
     ? 'border-red-200 bg-red-50 text-red-700'
@@ -185,6 +227,7 @@ export default function PushNotificationsSettings() {
   const { draft, patchDraft } = usePublicSiteSettingsDraft();
   const [diagnostics, setDiagnostics] = useState<PushDiagnostics>(EMPTY_DIAGNOSTICS);
   const [history, setHistory] = useState<PushHistoryRecord[]>([]);
+  const [cleanupCheck, setCleanupCheck] = useState<PushCleanupCheckState>({ status: 'idle' });
 
   const pushSettings = useMemo(() => {
     const raw = (draft as any)?.pushNotifications || {};
@@ -214,6 +257,16 @@ export default function PushNotificationsSettings() {
       mounted = false;
     };
   }, []);
+
+  const checkPushCleanup = async () => {
+    setCleanupCheck({ status: 'checking' });
+    try {
+      const result = await loadPushCleanupPreview();
+      setCleanupCheck({ status: 'success', result });
+    } catch {
+      setCleanupCheck({ status: 'error' });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -316,6 +369,52 @@ export default function PushNotificationsSettings() {
             <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(diagnostics.lastFailedAttempt)}</div>
             {diagnostics.lastFailureCode ? <div className="mt-1 max-w-56 break-words text-xs text-slate-500">Code: {diagnostics.lastFailureCode}</div> : null}
           </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-950">Push Cleanup Check</div>
+              <div className="mt-1 text-sm text-slate-600">Checks old non-deliverable push records using safe dry-run mode. This does not delete active devices or push history.</div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={cleanupCheck.status === 'checking'}
+              onClick={checkPushCleanup}
+            >
+              {cleanupCheck.status === 'checking' ? 'Checking...' : 'Check Push Cleanup'}
+            </button>
+          </div>
+
+          {cleanupCheck.status === 'success' ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <div className="font-semibold text-slate-950">{cleanupCheck.result.eligibleCount > 0 ? 'Review Needed' : 'Clean'}</div>
+              <div className="mt-1">
+                {cleanupCheck.result.eligibleCount > 0
+                  ? `${cleanupCheck.result.eligibleCount.toLocaleString()} old non-deliverable push records found. Real cleanup should be done only after Founder verification.`
+                  : 'No cleanup needed. Your push registrations are clean.'}
+              </div>
+              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                <div>
+                  <dt className="font-semibold uppercase text-slate-500">Retention</dt>
+                  <dd className="mt-0.5 font-semibold text-slate-900">{cleanupCheck.result.retentionDays.toLocaleString()} days</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold uppercase text-slate-500">Eligible records</dt>
+                  <dd className="mt-0.5 font-semibold text-slate-900">{cleanupCheck.result.eligibleCount.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold uppercase text-slate-500">Deleted records</dt>
+                  <dd className="mt-0.5 font-semibold text-slate-900">{cleanupCheck.result.deletedCount}</dd>
+                </div>
+              </dl>
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">This check is dry-run only. It does not delete records.</div>
+            </div>
+          ) : null}
+
+          {cleanupCheck.status === 'error' ? (
+            <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">{PUSH_CLEANUP_UNAVAILABLE_MESSAGE}</div>
+          ) : null}
         </div>
       </div>
 

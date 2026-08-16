@@ -30,6 +30,19 @@ function disabledDevicesCard() {
   return card;
 }
 
+function cleanupCheckCard() {
+  const title = screen.getByText('Push Cleanup Check');
+  const card = title.closest('.rounded-xl');
+  if (!card) throw new Error('Push Cleanup Check card not found');
+  return card as HTMLElement;
+}
+
+function cleanupDetailValue(label: string) {
+  const detail = screen.getByText(label).closest('div');
+  if (!detail) throw new Error(`${label} detail not found`);
+  return detail;
+}
+
 describe('PushNotificationsSettings', () => {
   const patchDraft = vi.fn();
 
@@ -180,6 +193,12 @@ describe('PushNotificationsSettings', () => {
     await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
     expect(screen.getByText('Push System Health')).toBeInTheDocument();
     expect(screen.getByText('Deliverable Push Devices are browsers/devices with valid FCM tokens. FID-only records are old or non-deliverable and cannot receive push.')).toBeInTheDocument();
+    expect(screen.getByText('Push Cleanup Check')).toBeInTheDocument();
+    expect(screen.getByText('Checks old non-deliverable push records using safe dry-run mode. This does not delete active devices or push history.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check Push Cleanup' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cleanup now/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /confirm cleanup/i })).not.toBeInTheDocument();
     [
       'Firebase Cloud Messaging',
       'Messaging Available',
@@ -246,6 +265,88 @@ describe('PushNotificationsSettings', () => {
     expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Targeted' })).not.toBeInTheDocument();
     expect(screen.queryByText(/secret-token|secret-fid|secret-registration|registrationId/i)).not.toBeInTheDocument();
+  });
+
+  it('checks cleanup preview and shows clean dry-run results when no records are eligible', async () => {
+    vi.mocked(adminJson).mockImplementation((path: string) => {
+      if (path === '/admin/push/history?limit=5') return Promise.resolve({ items: [] });
+      if (path === '/admin/push/registrations/cleanup-preview') {
+        return Promise.resolve({
+          eligibleCount: 0,
+          deletedCount: 12,
+          token: 'secret-token',
+          fid: 'secret-fid',
+          registrationId: 'secret-registration',
+        });
+      }
+      return Promise.resolve({ status: 'configured', messagingAvailable: true });
+    });
+
+    renderSettings();
+    await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
+
+    const button = screen.getByRole('button', { name: 'Check Push Cleanup' });
+    fireEvent.click(button);
+
+    expect(await screen.findByText('Clean')).toBeInTheDocument();
+    expect(screen.getByText('No cleanup needed. Your push registrations are clean.')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Retention')).getByText('30 days')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Eligible records')).getByText('0')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Deleted records')).getByText('0')).toBeInTheDocument();
+    expect(screen.getByText('This check is dry-run only. It does not delete records.')).toBeInTheDocument();
+    expect(adminJson).toHaveBeenCalledWith('/admin/push/registrations/cleanup-preview', { method: 'GET', cache: 'no-store' });
+    expect(screen.queryByText(/secret-token|secret-fid|secret-registration|registrationId/i)).not.toBeInTheDocument();
+  });
+
+  it('shows review-needed dry-run results without rendering destructive cleanup controls', async () => {
+    vi.mocked(adminJson).mockImplementation((path: string) => {
+      if (path === '/admin/push/history?limit=5') return Promise.resolve({ items: [] });
+      if (path === '/admin/push/registrations/cleanup-preview') {
+        return Promise.resolve({
+          preview: {
+            eligibleCount: 42,
+            deletedCount: 42,
+            retentionDays: 30,
+            token: 'secret-token',
+            fid: 'secret-fid',
+            registrationId: 'secret-registration',
+          },
+        });
+      }
+      return Promise.resolve({ status: 'configured', messagingAvailable: true });
+    });
+
+    renderSettings();
+    await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check Push Cleanup' }));
+
+    expect(await screen.findByText('Review Needed')).toBeInTheDocument();
+    expect(screen.getByText('42 old non-deliverable push records found. Real cleanup should be done only after Founder verification.')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Retention')).getByText('30 days')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Eligible records')).getByText('42')).toBeInTheDocument();
+    expect(within(cleanupDetailValue('Deleted records')).getByText('0')).toBeInTheDocument();
+    expect(screen.getByText('This check is dry-run only. It does not delete records.')).toBeInTheDocument();
+    expect(within(cleanupCheckCard()).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    expect(within(cleanupCheckCard()).queryByRole('button', { name: /cleanup now/i })).not.toBeInTheDocument();
+    expect(within(cleanupCheckCard()).queryByRole('button', { name: /confirm cleanup/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret-token|secret-fid|secret-registration|registrationId/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a friendly cleanup preview error without raw backend details', async () => {
+    vi.mocked(adminJson).mockImplementation((path: string) => {
+      if (path === '/admin/push/history?limit=5') return Promise.resolve({ items: [] });
+      if (path === '/admin/push/registrations/cleanup-preview') return Promise.reject(new Error('stack token=secret-token registrationId=secret-registration'));
+      return Promise.resolve({ status: 'configured', messagingAvailable: true });
+    });
+
+    renderSettings();
+    await waitFor(() => expect(screen.getByText('Configured')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check Push Cleanup' }));
+
+    expect(await screen.findByText('Push cleanup check is temporarily unavailable. Please try again later.')).toBeInTheDocument();
+    expect(screen.queryByText(/secret-token|secret-registration|registrationId|stack/i)).not.toBeInTheDocument();
   });
 
   it('displays disabledRegistrations when it is 0', async () => {
