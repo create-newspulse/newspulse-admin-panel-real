@@ -21,6 +21,7 @@ import {
   type ListResponse,
 } from '@/lib/api/articles';
 import { normalizeError } from '@/lib/error';
+import { ARTICLE_PUSH_SPAM_WARNING, pushSendErrorMessage } from '@/lib/pushSendFeedback';
 import { useAuth } from '@/context/AuthContext';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { ScheduleDialog } from './ScheduleDialog';
@@ -30,17 +31,6 @@ import { formatDurationShort, formatNumberCompact, formatPercent } from '@/lib/f
 
 function norm(s: any): string {
   return String(s || '').trim().toLowerCase();
-}
-
-function safePushErrorMessage(input: unknown): string {
-  const raw = String((input as any)?.message || input || '').trim();
-  return raw
-    .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/gi, '[redacted]')
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
-    .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s*[:=]\s*["']?[^"',\s}]+/gi, '[redacted]')
-    .replace(/\b[A-Za-z0-9_-]{64,}\b/g, '[redacted]')
-    .slice(0, 160)
-    .trim();
 }
 
 const ARTICLE_PUSH_FALLBACK_BODY = 'Tap to read the full story on News Pulse.';
@@ -855,8 +845,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       toast.success('Article push sent successfully.');
       setArticlePushTarget(null);
     } catch (e: any) {
-      const detail = safePushErrorMessage(e);
-      toast.error(detail ? `Article push failed. ${detail}` : 'Article push failed.');
+      toast.error(pushSendErrorMessage(e, 'Article push failed.'));
     } finally {
       setArticlePushSending(false);
     }
@@ -1490,6 +1479,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
               <div className="text-lg font-semibold text-slate-950">Send Article Push?</div>
               <div className="mt-2 text-sm text-slate-600">This will notify visitors who enabled article alerts.</div>
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">{ARTICLE_PUSH_SPAM_WARNING}</div>
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="text-sm font-semibold text-slate-950">News Pulse</div>
                 <div className="mt-2 whitespace-pre-wrap text-sm font-semibold text-slate-900">{String((articlePushTarget as any)?.title || '')}</div>

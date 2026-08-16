@@ -164,8 +164,9 @@ function typeChipClass(type: string): string {
 
 function statusChipClass(status: string): string {
   if (status === 'Clicked') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (status === 'Received') return 'border-sky-200 bg-sky-50 text-sky-700';
-  if (status === 'Sent') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+  if (status === 'Shown') return 'border-teal-200 bg-teal-50 text-teal-700';
+  if (status === 'Browser Received') return 'border-sky-200 bg-sky-50 text-sky-700';
+  if (status === 'FCM Accepted') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
   if (status === 'Partial') return 'border-amber-200 bg-amber-50 text-amber-800';
   if (status === 'Failed') return 'border-rose-200 bg-rose-50 text-rose-700';
   return 'border-slate-200 bg-slate-100 text-slate-700';

@@ -14,6 +14,7 @@ import {
   saveBroadcastConfig as apiSaveBroadcastConfig,
 } from '@/api/broadcast';
 import BroadcastCenterTickerAds from './BroadcastCenterTickerAds';
+import { BREAKING_PUSH_SPAM_WARNING, isPushSpamBlockedError, sanitizePushSendError, PUSH_SPAM_BLOCKED_MESSAGE } from '@/lib/pushSendFeedback';
 
 const PROXY_MISSING_TOAST = 'API proxy missing. Check Vercel rewrites for /admin-api/* to backend.';
 const PROXY_HEALTH_URL = '/admin-api/system/health';
@@ -54,18 +55,6 @@ function detectLangFromText(input: string): SourceLang {
   // Devanagari block (Hindi): U+0900..U+097F
   if (/[\u0900-\u097F]/.test(s)) return 'hi';
   return 'en';
-}
-
-function safePushErrorMessage(input: unknown): string {
-  const raw = String((input as any)?.message || input || '').trim();
-  const text = raw
-    .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/gi, '[redacted]')
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
-    .replace(/\b(?:token|fid|registration[_ -]?id|private[_ -]?key|client[_ -]?email)\b\s*[:=]\s*["']?[^"',\s}]+/gi, '[redacted]')
-    .replace(/\b[A-Za-z0-9_-]{64,}\b/g, '[redacted]')
-    .slice(0, 160)
-    .trim();
-  return text;
 }
 
 type GlossaryEntry = { id: string; term: string; hi: string; gu: string };
@@ -1218,7 +1207,11 @@ export default function BroadcastCenter() {
       notifyRef.current.ok('Breaking push sent successfully.');
       setPendingBreakingPush(null);
     } catch (e: any) {
-      const detail = safePushErrorMessage(e);
+      if (isPushSpamBlockedError(e)) {
+        notifyRef.current.err(PUSH_SPAM_BLOCKED_MESSAGE);
+        return;
+      }
+      const detail = sanitizePushSendError(e);
       notifyRef.current.err('Breaking push failed.', detail || undefined);
     } finally {
       setBreakingPushSending(false);
@@ -1518,6 +1511,7 @@ export default function BroadcastCenter() {
             <div className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               This will send a breaking news notification to visitors who enabled Breaking News alerts.
             </div>
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">{BREAKING_PUSH_SPAM_WARNING}</div>
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950">
               <div className="text-sm font-semibold text-slate-950 dark:text-white">🔴 Breaking News</div>
               <div className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{pendingBreakingPush.text}</div>

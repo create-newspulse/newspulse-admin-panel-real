@@ -55,6 +55,7 @@ describe('PushNotificationsSettings', () => {
               successCount: 1,
               failureCount: 0,
               browserReceivedCount: 1,
+              notificationShownCount: 1,
               clickedCount: 1,
               clickedInSeconds: 4.5,
               token: 'secret-token',
@@ -70,11 +71,25 @@ describe('PushNotificationsSettings', () => {
               successCount: 2,
               failureCount: 0,
               browserReceivedCount: 1,
+              notificationShownCount: 0,
               clickedCount: 0,
               browserReceivedInSeconds: 3.8,
             },
             {
               id: 'push-3',
+              type: 'breaking',
+              title: 'Shown push',
+              sentAt: '2026-08-13T07:55:40.637Z',
+              targetedCount: 3,
+              successCount: 3,
+              failureCount: 0,
+              browserReceivedCount: 3,
+              notificationShownCount: 2,
+              clickedCount: 0,
+              notificationShownInSeconds: 5.2,
+            },
+            {
+              id: 'push-4',
               type: 'breaking',
               title: 'Sent push',
               sentAt: '2026-08-13T07:50:40.637Z',
@@ -82,11 +97,12 @@ describe('PushNotificationsSettings', () => {
               successCount: 3,
               failureCount: 0,
               browserReceivedCount: 0,
+              notificationShownCount: 0,
               clickedCount: 0,
               fcmAcceptedMs: 1200,
             },
             {
-              id: 'push-4',
+              id: 'push-5',
               type: 'article',
               title: 'Failed push',
               sentAt: '2026-08-13T06:00:00.000Z',
@@ -94,12 +110,13 @@ describe('PushNotificationsSettings', () => {
               successCount: 0,
               failureCount: 1,
               browserReceivedCount: 0,
+              notificationShownCount: 0,
               clickedCount: 0,
               failureCode: 'messaging/registration-token-not-registered',
               failureMessage: 'Registration expired token=secret-token fid=secret-fid registrationId=secret-registration',
             },
             {
-              id: 'push-5',
+              id: 'push-6',
               type: 'breaking',
               title: 'No recipients push',
               sentAt: '2026-08-13T01:10:00.000Z',
@@ -107,9 +124,10 @@ describe('PushNotificationsSettings', () => {
               successCount: 0,
               failureCount: 0,
               browserReceivedCount: 0,
+              notificationShownCount: 0,
               clickedCount: 0,
             },
-            { id: 'push-6', type: 'article', title: 'Hidden sixth push', sentAt: '2026-08-13T00:30:00.000Z', targetedCount: 1, successCount: 1, failureCount: 0 },
+            { id: 'push-7', type: 'article', title: 'Hidden seventh push', sentAt: '2026-08-13T00:30:00.000Z', targetedCount: 1, successCount: 1, failureCount: 0 },
           ],
         });
       }
@@ -201,23 +219,26 @@ describe('PushNotificationsSettings', () => {
     expect(screen.getAllByText('14-08-2026 00:16:23.528 IST').length).toBeGreaterThan(0);
     expect(screen.getAllByText('13-08-2026 13:30:01.002 IST').length).toBeGreaterThan(0);
     expect(screen.getAllByText('13-08-2026 13:20:40.637 IST').length).toBeGreaterThan(0);
-    expect(screen.getByText('No recipients')).toBeInTheDocument();
-    expect(screen.getByText('Sent')).toBeInTheDocument();
-    expect(screen.getByText('Received')).toBeInTheDocument();
+    expect(screen.queryByText('No recipients')).not.toBeInTheDocument();
+    expect(screen.getByText('FCM Accepted')).toBeInTheDocument();
+    expect(screen.getByText('Browser Received')).toBeInTheDocument();
+    expect(screen.getByText('Shown')).toBeInTheDocument();
     expect(screen.getByText('Clicked')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.getAllByText('1 targeted')).toHaveLength(2);
     expect(screen.getByText('2 targeted')).toBeInTheDocument();
-    expect(screen.getByText('3 targeted')).toBeInTheDocument();
-    expect(screen.getByText('0 targeted')).toBeInTheDocument();
-    expect(screen.getByText('FCM 1 • Browser 1 • Clicked 1')).toBeInTheDocument();
-    expect(screen.getByText('FCM 2 • Browser 1 • Clicked 0')).toBeInTheDocument();
-    expect(screen.getByText('FCM 3 • Browser 0 • Clicked 0')).toBeInTheDocument();
-    expect(screen.getAllByText('FCM 0 • Browser 0 • Clicked 0')).toHaveLength(2);
+    expect(screen.getAllByText('3 targeted')).toHaveLength(2);
+    expect(screen.queryByText('0 targeted')).not.toBeInTheDocument();
+    expect(screen.getByText('FCM 1 • Browser 1 • Shown 1 • Clicked 1')).toBeInTheDocument();
+    expect(screen.getByText('FCM 2 • Browser 1 • Shown 0 • Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('FCM 3 • Browser 3 • Shown 2 • Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('FCM 3 • Browser 0 • Shown 0 • Clicked 0')).toBeInTheDocument();
+    expect(screen.getByText('FCM 0 • Browser 0 • Shown 0 • Clicked 0')).toBeInTheDocument();
     expect(screen.queryByText('FCM accepted in 1.2s')).not.toBeInTheDocument();
     expect(screen.queryByText('messaging/registration-token-not-registered')).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'View Details' })).toHaveLength(5);
-    expect(screen.queryByText('Hidden sixth push')).not.toBeInTheDocument();
+    expect(screen.queryByText('No recipients push')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hidden seventh push')).not.toBeInTheDocument();
     expect(screen.queryByText('2026-08-13T18:46:23.528Z')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}\/\d{1,2}\/\d{4}/)).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
