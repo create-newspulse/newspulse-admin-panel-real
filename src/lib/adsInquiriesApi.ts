@@ -4,54 +4,21 @@ function stripTrailingSlashes(value: string): string {
   return String(value || '').replace(/\/+$/, '');
 }
 
-function isAbsoluteHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(String(value || '').trim());
-}
-
-function normalizeConfiguredApiBase(rawValue: unknown): string {
+function normalizeAdminProxyBase(rawValue: unknown): string {
   const raw = String(rawValue || '').trim();
-  if (!raw) return '';
-
-  if (raw === '/admin-api' || raw.startsWith('/admin-api/')) {
-    return stripTrailingSlashes(raw).replace(/\/api$/i, '');
-  }
-
-  if (isAbsoluteHttpUrl(raw)) {
-    const base = stripTrailingSlashes(raw);
-    if (/\/admin-api$/i.test(base) || /\/admin-api\//i.test(base)) return base;
-    return /\/api$/i.test(base) ? base : `${base}/api`;
-  }
-
+  if (!raw) return '/admin-api';
+  if (/^https?:\/\//i.test(raw)) return '/admin-api';
   const normalized = raw.startsWith('/') ? raw : `/${raw}`;
-  if (normalized === '/api' || normalized.startsWith('/api/')) {
-    return stripTrailingSlashes(normalized);
+  if (normalized === '/admin-api' || normalized.startsWith('/admin-api/')) {
+    return stripTrailingSlashes(normalized).replace(/\/api$/i, '');
   }
-
-  return stripTrailingSlashes(normalized).replace(/\/api$/i, '');
+  return '/admin-api';
 }
 
 function resolveAdsInquiriesBase(): string {
   const env = ((import.meta as any)?.env || {}) as Record<string, unknown>;
-  const candidates = [
-    env.VITE_ADMIN_API_URL,
-    env.VITE_ADMIN_API_BASE,
-    env.VITE_ADMIN_API_PROXY_BASE,
-    env.VITE_ADMIN_API_BASE_URL,
-    env.VITE_API_BASE_URL,
-    env.VITE_API_URL,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeConfiguredApiBase(candidate);
-    if (normalized) {
-      if (normalized === '/admin-api' || normalized.startsWith('/admin-api/')) {
-        return `${normalized}/ads/inquiries`;
-      }
-      return `${normalized}/ads/inquiries`;
-    }
-  }
-
-  return '/admin-api/ads/inquiries';
+  const base = normalizeAdminProxyBase(env.VITE_ADMIN_API_BASE || env.VITE_ADMIN_API_PROXY_BASE || env.VITE_ADMIN_API_URL);
+  return `${base}/ads/inquiries`;
 }
 
 export const ADS_INQUIRIES_BASE = resolveAdsInquiriesBase();
@@ -240,17 +207,8 @@ async function runInquiryMutation<T>(args: {
 export function getAdsInquiriesAdminApiTarget(): string {
   const env = (import.meta as any)?.env || {};
   return String(
-    env.VITE_ADMIN_API_URL
-    || env.VITE_ADMIN_API_BASE
-    || env.VITE_ADMIN_API_PROXY_BASE
-    || env.VITE_ADMIN_API_BASE_URL
-    || env.VITE_API_BASE_URL
-    || env.VITE_API_URL
-    || ''
-  ).trim() || String(
     env.VITE_ADMIN_API_TARGET
     || env.VITE_DEV_PROXY_TARGET
-    || env.VITE_BACKEND_ORIGIN
     || DEFAULT_LOCAL_ADMIN_API_TARGET
   ).trim();
 }

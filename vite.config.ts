@@ -9,13 +9,34 @@ const isValidAbsoluteUrl = (u?: string) => {
   if (!/^https?:\/\//i.test(s)) return false;
   try { new URL(s); return true; } catch { return false; }
 };
+const isLocalDevTarget = (u?: string) => {
+  const s = String(u || '').trim();
+  if (!isValidAbsoluteUrl(s)) return false;
+  try {
+    const host = new URL(s).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+  } catch {
+    return false;
+  }
+};
+const isProductionLikeAdminTarget = (u?: string) => {
+  const s = String(u || '').trim();
+  if (!isValidAbsoluteUrl(s)) return false;
+  try {
+    const host = new URL(s).hostname.toLowerCase();
+    return host === 'admin.newspulse.co.in' || host.endsWith('.vercel.app') || host.endsWith('.onrender.com');
+  } catch {
+    return false;
+  }
+};
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }): UserConfig => {
+export default defineConfig(({ command, mode }): UserConfig => {
   const env = loadEnv(mode, process.cwd(), '');
   const baseLogger = createLogger();
   const DEFAULT_LOCAL_BACKEND = 'http://localhost:5000';
   const DEV_SERVER_PORT = 5173;
+  const isServe = command === 'serve';
   const useProxy = String(env.VITE_USE_PROXY || '').toLowerCase() === 'true';
   const proxyDebug = String(env.VITE_PROXY_DEBUG || '').toLowerCase() === 'true';
   // Per project convention, allow a non-VITE env var for proxy targeting.
@@ -23,10 +44,16 @@ export default defineConfig(({ mode }): UserConfig => {
   const BACKEND_URL_ENV = stripSlash(env.BACKEND_URL || process.env.BACKEND_URL || '');
   const adminApiOrigin = stripSlash(env.VITE_ADMIN_API_ORIGIN || ''); // no /api suffix per spec
   const adminApiUrl = stripSlash(env.VITE_ADMIN_API_URL || '');
-  const rawDevProxyEnv = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_DEV_PROXY_TARGET || '');
+  const rawDevProxyEnv = stripSlash(env.VITE_ADMIN_API_TARGET || process.env.VITE_ADMIN_API_TARGET || env.VITE_DEV_PROXY_TARGET || process.env.VITE_DEV_PROXY_TARGET || '');
   const normalizedDevProxyEnv = /\/api$/i.test(rawDevProxyEnv)
     ? rawDevProxyEnv.replace(/\/api$/i, '')
     : rawDevProxyEnv;
+  if (isServe && normalizedDevProxyEnv && isProductionLikeAdminTarget(normalizedDevProxyEnv)) {
+    throw new Error(`[vite] Refusing to start local admin dev with production-like backend target: ${normalizedDevProxyEnv}. Use VITE_ADMIN_API_TARGET or VITE_DEV_PROXY_TARGET with a local/testing backend such as ${DEFAULT_LOCAL_BACKEND}.`);
+  }
+  if (isServe && normalizedDevProxyEnv && isValidAbsoluteUrl(normalizedDevProxyEnv) && !isLocalDevTarget(normalizedDevProxyEnv)) {
+    baseLogger.warn(`[vite] Local admin dev is using a non-local backend target: ${normalizedDevProxyEnv}. Use only local/testing backends for localhost:5173.`);
+  }
   const DEV_PROXY_TARGET = (!normalizedDevProxyEnv || hasPlaceholders(normalizedDevProxyEnv) || !isValidAbsoluteUrl(normalizedDevProxyEnv))
     ? DEFAULT_LOCAL_BACKEND
     : normalizedDevProxyEnv;
@@ -69,7 +96,6 @@ export default defineConfig(({ mode }): UserConfig => {
   // IMPORTANT: Vite proxy `target` must be the backend ORIGIN (no /api suffix).
   // Otherwise, forwarding a path that already starts with `/api/...` becomes `/api/api/...`.
   const BACKEND_ORIGIN = /\/api$/i.test(API_TARGET) ? API_TARGET.replace(/\/api$/i, '') : API_TARGET;
-  const BACKEND_URL = BACKEND_ORIGIN;
   const API_WS = stripSlash(env.VITE_API_WS) || BACKEND_ORIGIN; // default WS -> same host if available
 
   // Keep /admin-api proxy target consistent with the primary backend origin.

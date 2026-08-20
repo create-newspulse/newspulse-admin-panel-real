@@ -41,17 +41,15 @@ function isValidApiBase(u: string): boolean {
   }
 }
 
-function resolveDevBackendOrigin(): string {
+function warnIgnoredDevBackendOriginOnce(raw: string) {
+  if (!import.meta.env.DEV || !raw) return;
   try {
-    const raw = (envAny.VITE_BACKEND_ORIGIN || '').toString().trim();
-    if (!raw) return '';
-    if (!isAbsoluteHttpUrl(raw)) return '';
-    if (looksLikePlaceholder(raw)) return '';
-    // eslint-disable-next-line no-new
-    new URL(raw);
-    return stripTrailingSlashes(raw).replace(/\/api$/i, '');
+    const w: any = typeof window !== 'undefined' ? (window as any) : null;
+    if (w && w.__npIgnoredDevBackendOriginWarned) return;
+    if (w) w.__npIgnoredDevBackendOriginWarned = true;
+    console.warn('[api] Ignoring VITE_BACKEND_ORIGIN in local admin dev. Use VITE_ADMIN_API_TARGET or VITE_DEV_PROXY_TARGET for the Vite proxy; browser requests stay on /admin-api.');
   } catch {
-    return '';
+    // ignore
   }
 }
 
@@ -76,14 +74,8 @@ function logResolvedBaseOnce(base: string) {
 }
 
 export function getApiBase(): string {
-  // DEV convenience: allow directing the UI to a backend origin without relying on Vite proxy.
-  // This keeps production behavior unchanged (still uses /admin-api rewrites).
   if (import.meta.env.DEV) {
-    const devOrigin = resolveDevBackendOrigin();
-    if (devOrigin) {
-      logResolvedBaseOnce(devOrigin);
-      return devOrigin;
-    }
+    warnIgnoredDevBackendOriginOnce((envAny.VITE_BACKEND_ORIGIN || '').toString().trim());
   }
 
   // Prefer the explicit admin proxy base, then fall back to VITE_API_URL.

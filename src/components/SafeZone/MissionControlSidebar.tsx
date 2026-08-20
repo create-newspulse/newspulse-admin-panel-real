@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '');
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaBrain, FaTrafficLight, FaMoneyBill, FaHeartbeat, FaTools,
@@ -25,7 +23,7 @@ export default function MissionControlSidebar({
   const [lastCheck, setLastCheck] = useState<string>("");
 
   useEffect(() => {
-    fetchJson<{ status?: string }>(`${API_BASE}/system/constitution-status`)
+    fetchJson<{ status?: string }>('/system/constitution-status')
       .then((data) => {
         setSyncStatus(data.status === 'ok' ? 'ok' : 'fail');
         setLastCheck(new Date().toLocaleTimeString());

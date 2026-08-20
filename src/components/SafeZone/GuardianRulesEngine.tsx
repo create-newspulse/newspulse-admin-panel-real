@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-const API_ORIGIN = (import.meta.env.VITE_API_URL?.toString() || '').replace(/\/+$/, '');
-const API_BASE = API_ORIGIN ? `${API_ORIGIN}/api` : '/api';
 import { fetchJson } from '@lib/fetchJson';
 import {
   FaThumbtack,
@@ -20,7 +18,7 @@ const GuardianRulesEngine = () => {
   }>(null);
 
   useEffect(() => {
-    fetchJson<NonNullable<typeof status>>(`${API_BASE}/system/guardian-status`)
+    fetchJson<NonNullable<typeof status>>('/system/guardian-status')
       .then(setStatus)
       .catch((err) => console.error('GuardianRulesEngine fetch failed:', err));
   }, []);

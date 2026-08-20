@@ -17,16 +17,45 @@ const isValidAbsoluteUrl = (u) => {
         return false;
     }
 };
+const isLocalDevTarget = (u) => {
+    const s = String(u || '').trim();
+    if (!isValidAbsoluteUrl(s)) return false;
+    try {
+        const host = new URL(s).hostname.toLowerCase();
+        return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    }
+    catch {
+        return false;
+    }
+};
+const isProductionLikeAdminTarget = (u) => {
+    const s = String(u || '').trim();
+    if (!isValidAbsoluteUrl(s)) return false;
+    try {
+        const host = new URL(s).hostname.toLowerCase();
+        return host === 'admin.newspulse.co.in' || host.endsWith('.vercel.app') || host.endsWith('.onrender.com');
+    }
+    catch {
+        return false;
+    }
+};
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const DEFAULT_LOCAL_BACKEND = 'http://localhost:5000';
     const DEV_SERVER_PORT = 5173;
+    const isServe = command === 'serve';
     const proxyDebug = String(env.VITE_PROXY_DEBUG || '').toLowerCase() === 'true';
-    const rawDevProxyEnv = stripSlash(env.VITE_ADMIN_API_TARGET || env.VITE_DEV_PROXY_TARGET || '');
+    const rawDevProxyEnv = stripSlash(env.VITE_ADMIN_API_TARGET || process.env.VITE_ADMIN_API_TARGET || env.VITE_DEV_PROXY_TARGET || process.env.VITE_DEV_PROXY_TARGET || '');
     const normalizedDevProxyEnv = /\/api$/i.test(rawDevProxyEnv)
         ? rawDevProxyEnv.replace(/\/api$/i, '')
         : rawDevProxyEnv;
+    if (isServe && normalizedDevProxyEnv && isProductionLikeAdminTarget(normalizedDevProxyEnv)) {
+        throw new Error(`[vite] Refusing to start local admin dev with production-like backend target: ${normalizedDevProxyEnv}. Use VITE_ADMIN_API_TARGET or VITE_DEV_PROXY_TARGET with a local/testing backend such as ${DEFAULT_LOCAL_BACKEND}.`);
+    }
+    if (isServe && normalizedDevProxyEnv && isValidAbsoluteUrl(normalizedDevProxyEnv) && !isLocalDevTarget(normalizedDevProxyEnv)) {
+        console.warn(`[vite] Local admin dev is using a non-local backend target: ${normalizedDevProxyEnv}. Use only local/testing backends for localhost:5173.`);
+    }
     const DEV_PROXY_TARGET = (!normalizedDevProxyEnv || hasPlaceholders(normalizedDevProxyEnv) || !isValidAbsoluteUrl(normalizedDevProxyEnv))
         ? DEFAULT_LOCAL_BACKEND
         : normalizedDevProxyEnv;
