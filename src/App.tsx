@@ -100,7 +100,6 @@ import GlobalCommandPalette from '@components/GlobalCommandPalette';
 import EnvTest from '@components/EnvTest';
 import NotFound from '@pages/NotFound';
 import Denied from '@pages/Denied';
-import MediaKitPublic from '@pages/MediaKitPublic';
 import ViralVideosArchivePage from '@pages/ViralVideosArchivePage';
 // Settings Center (admin)
 import SettingsCenterLayout from '@pages/admin/settings/SettingsCenterLayout';
@@ -271,7 +270,7 @@ function App() {
               {mustChangePasswordBlocked ? <Navigate to={`${accountPasswordPath}#change-password`} replace /> : <Routes>
               {/* 🧭 Default Redirect to Admin Dashboard */}
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
-              <Route path="/media-kit" element={<MediaKitPublic />} />
+              <Route path="/media-kit" element={<AdminModuleRoute moduleKey="ads_manager"><LockCheckWrapper><Navigate to="/admin/ads-manager" replace /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/viral-videos" element={<ViralVideosArchivePage />} />
               <Route path="/viral-videos/:slug" element={<ViralVideosArchivePage />} />
               {/* New role-based panel (founder/admin/employee) */}

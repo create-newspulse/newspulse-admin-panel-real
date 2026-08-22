@@ -392,15 +392,16 @@ const PRESET_BLOCKED_RIGHTS = new Set<SpecialRightKey>([
 
 const ROLE_CATEGORY_OPTIONS = ['Editorial', 'Live TV', 'Ads', 'Analytics', 'Finance', 'Compliance', 'Tasks', 'Technical', 'Management', 'Training'];
 const PRESET_MODULE_OPTIONS = ADMIN_MODULES.filter((item) => !PRESET_BLOCKED_MODULES.has(item.key));
-const PRESET_ACTION_GROUPS: { title: string; rights: SpecialRightKey[] }[] = [
+const PRESET_ACTION_GROUP_SOURCE: { title: string; rights: SpecialRightKey[] }[] = [
   { title: 'Editorial', rights: ['can_create_news', 'can_edit_news', 'can_submit_news', 'can_publish_news', 'can_schedule_news', 'can_delete_news', 'can_approve_news', 'can_reject_or_send_back_news', 'can_pin_breaking_news', 'can_restore_news'] },
   { title: 'Live TV', rights: ['can_prepare_live_tv', 'can_edit_live_tv_title', 'can_add_stream_link', 'can_update_ticker', 'can_schedule_live_tv', 'can_start_live_tv', 'can_stop_live_tv'] },
-  { title: 'Ads', rights: ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval'] },
+  { title: 'Ads', rights: ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'media_kit_view', 'media_kit_manage', 'can_submit_sponsor_request_for_approval'] },
   { title: 'Analytics', rights: ['analytics.view_traffic', 'analytics.view_ad_performance', 'analytics.view_revenue', 'analytics.refresh', 'analytics.export'] },
   { title: 'Finance', rights: ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status'] },
   { title: 'Compliance', rights: ['can_view_compliance', 'can_manage_dpdp_privacy_requests'] },
   { title: 'Tasks', rights: ['can_create_task', 'can_assign_task', 'can_edit_task', 'can_update_task_status', 'can_complete_task', 'can_close_task', 'can_delete_task', 'can_view_team_tasks', 'can_manage_department_tasks', 'can_comment_on_task', 'can_escalate_task'] },
-].map((group) => ({ ...group, rights: group.rights.filter((key) => !PRESET_BLOCKED_RIGHTS.has(key)) }));
+];
+const PRESET_ACTION_GROUPS: { title: string; rights: SpecialRightKey[] }[] = PRESET_ACTION_GROUP_SOURCE.map((group) => ({ ...group, rights: group.rights.filter((key) => !PRESET_BLOCKED_RIGHTS.has(key)) }));
 
 const ACCESS_STUDIO_TABS: { key: AccessStudioTab; label: string }[] = [
   { key: 'modules', label: 'Step 2: What can this staff open?' },

@@ -2,6 +2,7 @@ import React from 'react';
 import toast from 'react-hot-toast';
 
 import { adminApi, api } from '@/lib/api';
+import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
 import {
   normalizeSponsoredContentPlacement,
   type SponsoredContentPlacement,
@@ -180,6 +181,14 @@ const TICKER_SCROLL_LANGUAGE_PACKAGE_BULLETS: string[] = [
 const RATE_CARD_ROUNDING_STEP = 50;
 const COMBO_CAMPAIGN_PRODUCT_KEY = 'COMBO_CAMPAIGN';
 const LEGACY_COMBO_CAMPAIGN_PRODUCT_KEY = 'SPONSORED_FEATURE_ARTICLE_COMBO';
+const MEDIA_KIT_CONTACT_EMAIL = 'ads@newspulse.co.in';
+const MEDIA_KIT_ANALYTICS_NOTICE = 'Analytics not connected. Real traffic and performance data will appear after approved analytics integration is configured.';
+const MEDIA_KIT_ACCESS_DENIED_MESSAGE = 'Access Denied. Founder permission is required.';
+const LEGACY_PUBLIC_MEDIA_KIT_EMAILS = new Set([
+  'newspulse.ads@gmail.com',
+  'newspulse.team@gmail.com',
+  'newspulse.community@gmail.com',
+]);
 
 const MEDIA_KIT_RATE_CARD_GROUPS: readonly MediaKitRateCardGroup[] = [
   {
@@ -265,6 +274,27 @@ function deriveRateCardPricesFromDay(day: number, step = RATE_CARD_ROUNDING_STEP
   };
 }
 
+function safeMediaKitEmail(value: unknown): string {
+  const email = String(value || '').trim().toLowerCase();
+  if (!email || LEGACY_PUBLIC_MEDIA_KIT_EMAILS.has(email)) return MEDIA_KIT_CONTACT_EMAIL;
+  return email;
+}
+
+function mediaKitErrorMessage(err: any): string {
+  const status = Number(err?.response?.status || err?.status || 0);
+  if (status === 401) return 'Session expired. Please login again.';
+  if (status === 403) return MEDIA_KIT_ACCESS_DENIED_MESSAGE;
+  if (status === 404) return 'Media Kit service is not available yet. Please check backend route configuration.';
+  return 'Unable to load Media Kit. Please try again.';
+}
+
+function canViewMediaKitForUser(user: any, isFounder: boolean): boolean {
+  const roleId = normalizeRoleId(user?.role);
+  if (isFounder || roleId === 'founder' || roleId === 'ads_revenue_growth_manager') return true;
+  const rights = getEffectiveSpecialRights(user) as string[];
+  return rights.includes('media_kit_view') || rights.includes('media_kit_manage');
+}
+
 function normalizeRateCard(
   card: {
     placementKey: string;
@@ -305,7 +335,7 @@ function defaultMediaKit(): MediaKitDoc {
   return {
     title: 'News Pulse Media Kit (Ad Rates & Sponsorship)',
     tagline: 'Sponsor placements across homepage and articles',
-    contactEmail: 'newspulse.ads@gmail.com',
+    contactEmail: MEDIA_KIT_CONTACT_EMAIL,
     currencyCode: 'INR',
     currencySymbol: '₹',
     showUsdApprox: false,
@@ -386,7 +416,7 @@ function defaultMediaKit(): MediaKitDoc {
           notes: ['Upgrade pricing for higher frequency or guaranteed premium rotation is available on request.'],
         },
       ],
-      bookingEmail: 'newspulse.ads@gmail.com',
+      bookingEmail: MEDIA_KIT_CONTACT_EMAIL,
     },
     brandedProducts: [
       {
@@ -1301,7 +1331,7 @@ function extractAdsList(payload: any): any[] {
 
 export default function AdsManager() {
   const [tab, setTab] = React.useState<'ads' | 'inquiries' | 'media-kit'>('ads');
-  const { isFounder } = useAuth();
+  const { isFounder, user } = useAuth();
 
   type InquiryStatusTab = 'new' | 'read' | 'deleted';
   type InquiryTabCounts = Record<InquiryStatusTab, number | null>;
@@ -1322,6 +1352,7 @@ export default function AdsManager() {
   const [mediaKit, setMediaKit] = React.useState<MediaKitDoc>(() => defaultMediaKit());
   const [mediaKitSource, setMediaKitSource] = React.useState<'default' | 'saved'>('default');
   const [mediaKitLoading, setMediaKitLoading] = React.useState(false);
+  const [mediaKitLoaded, setMediaKitLoaded] = React.useState(false);
   const [mediaKitError, setMediaKitError] = React.useState<string | null>(null);
   const [mediaKitPreview, setMediaKitPreview] = React.useState(false);
   const [mediaKitEditing, setMediaKitEditing] = React.useState(false);
@@ -1386,6 +1417,7 @@ export default function AdsManager() {
   }, [inquiryPage, inquirySearch, inquiryStatusTab, tabLabelMap]);
 
   const canEmailFromCurrentTab = inquiryStatusTab !== 'deleted';
+  const canViewMediaKit = React.useMemo(() => canViewMediaKitForUser(user, isFounder), [isFounder, user]);
 
   React.useEffect(() => {
     inquiryReplyOverridesRef.current = inquiryReplyOverrides;
@@ -1415,7 +1447,7 @@ export default function AdsManager() {
     const base = defaultMediaKit();
     const title = typeof raw.title === 'string' ? raw.title : base.title;
     const tagline = typeof raw.tagline === 'string' ? raw.tagline : base.tagline;
-    const contactEmail = typeof raw.contactEmail === 'string' ? raw.contactEmail : base.contactEmail;
+    const contactEmail = safeMediaKitEmail(typeof raw.contactEmail === 'string' ? raw.contactEmail : base.contactEmail);
     const currencyCode = typeof raw.currencyCode === 'string'
       ? raw.currencyCode
       : (typeof raw.currency_code === 'string' ? raw.currency_code : base.currencyCode);
@@ -1506,7 +1538,7 @@ export default function AdsManager() {
           ? rawTickerScrollAds.frequency.map((item: any) => String(item).trim()).filter(Boolean)
           : baseTicker.frequency,
         pricingTables,
-        bookingEmail: String(rawTickerScrollAds.bookingEmail ?? rawTickerScrollAds.contactEmail ?? baseTicker.bookingEmail ?? '').trim() || baseTicker.bookingEmail,
+        bookingEmail: safeMediaKitEmail(rawTickerScrollAds.bookingEmail ?? rawTickerScrollAds.contactEmail ?? baseTicker.bookingEmail),
       } as MediaKitTickerScrollAds;
     })();
 
@@ -1731,6 +1763,11 @@ export default function AdsManager() {
   }, []);
 
   const fetchMediaKit = React.useCallback(async () => {
+    if (!canViewMediaKit) {
+      setMediaKitError(MEDIA_KIT_ACCESS_DENIED_MESSAGE);
+      return;
+    }
+
     setMediaKitLoading(true);
     setMediaKitError(null);
     try {
@@ -1745,18 +1782,20 @@ export default function AdsManager() {
         setMediaKit(defaultMediaKit());
         setMediaKitSource('default');
       }
+      setMediaKitLoaded(true);
     } catch (err: any) {
-      setMediaKit(defaultMediaKit());
-      setMediaKitSource('default');
-      setMediaKitError(err?.response?.data?.message || err?.message || 'Failed to load media kit');
+      setMediaKitLoaded(false);
+      setMediaKitError(mediaKitErrorMessage(err));
     } finally {
       setMediaKitLoading(false);
     }
-  }, [normalizeMediaKit]);
+  }, [canViewMediaKit, normalizeMediaKit]);
 
   React.useEffect(() => {
+    if (tab !== 'media-kit') return;
+    if (!canViewMediaKit || mediaKitLoaded || mediaKitLoading) return;
     void fetchMediaKit();
-  }, [fetchMediaKit]);
+  }, [canViewMediaKit, fetchMediaKit, mediaKitLoaded, mediaKitLoading, tab]);
 
   const copyMediaKitAsText = React.useCallback(async () => {
     try {
@@ -2995,7 +3034,7 @@ export default function AdsManager() {
             </>
           ) : null}
 
-          {tab === 'media-kit' ? (
+          {tab === 'media-kit' && canViewMediaKit ? (
             <>
               <button
                 type="button"
@@ -3008,16 +3047,10 @@ export default function AdsManager() {
               <button
                 type="button"
                 onClick={() => void copyMediaKitAsText()}
-                className="px-3 py-1 bg-slate-700 text-white rounded"
+                className="px-3 py-1 bg-slate-700 text-white rounded disabled:opacity-60"
+                disabled={!mediaKitLoaded || !!mediaKitError}
               >
                 Copy as Text
-              </button>
-              <button
-                type="button"
-                onClick={() => setMediaKitPreview((p) => !p)}
-                className="px-3 py-1 bg-slate-700 text-white rounded"
-              >
-                {mediaKitPreview ? 'Exit Preview' : 'Preview'}
               </button>
               {isFounder ? (
                 mediaKitEditing ? (
@@ -3043,7 +3076,8 @@ export default function AdsManager() {
                   <button
                     type="button"
                     onClick={openMediaKitEditor}
-                    className="px-3 py-1 bg-green-600 text-white rounded"
+                    className="px-3 py-1 bg-green-600 text-white rounded disabled:opacity-60"
+                    disabled={!mediaKitLoaded || !!mediaKitError}
                   >
                     Edit
                   </button>
@@ -3751,7 +3785,13 @@ export default function AdsManager() {
         </div>
       ) : null}
 
-      {tab === 'media-kit' ? (
+      {tab === 'media-kit' && !canViewMediaKit ? (
+        <div className="border rounded p-4 bg-rose-50 text-rose-900 border-rose-200">
+          <div className="text-sm font-semibold">{MEDIA_KIT_ACCESS_DENIED_MESSAGE}</div>
+        </div>
+      ) : null}
+
+      {tab === 'media-kit' && canViewMediaKit ? (
         <div className="space-y-4">
           <div className="border rounded p-4 bg-white dark:bg-slate-900">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3760,30 +3800,49 @@ export default function AdsManager() {
                 {mediaKit.tagline ? (
                   <div className="text-sm text-slate-600 dark:text-slate-300">{mediaKit.tagline}</div>
                 ) : null}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900">
+                    Internal / Confidential
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Visible only to Founder and approved Ads/Revenue staff.
+                  </span>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={
                     'px-2 py-1 rounded text-xs border ' +
-                    (mediaKitSource === 'saved'
+                    (mediaKitLoaded && mediaKitSource === 'saved'
                       ? 'bg-green-50 text-green-800 border-green-200'
                       : 'bg-slate-50 text-slate-700 border-slate-200')
                   }
-                  title={mediaKitSource === 'saved' ? 'Loaded from backend' : 'Using local default fallback'}
+                  title={mediaKitLoaded ? (mediaKitSource === 'saved' ? 'Loaded from backend' : 'Using local default') : 'Media Kit has not loaded yet'}
                 >
-                  Source: {mediaKitSource === 'saved' ? 'Saved' : 'Default'}
+                  Source: {!mediaKitLoaded ? 'Not loaded' : (mediaKitSource === 'saved' ? 'Saved' : 'Default')}
                 </span>
-                {mediaKitError ? (
-                  <span className="px-2 py-1 rounded text-xs border bg-amber-50 text-amber-800 border-amber-200" title={mediaKitError}>
-                    API fallback
-                  </span>
-                ) : null}
               </div>
             </div>
           </div>
 
-          {mediaKitEditing ? (
+          <div className="border rounded p-3 bg-blue-50 text-blue-900 border-blue-200 text-sm">
+            {MEDIA_KIT_ANALYTICS_NOTICE}
+          </div>
+
+          {mediaKitLoading ? (
+            <div className="border rounded p-4 bg-white dark:bg-slate-900 text-sm text-slate-600 dark:text-slate-300">
+              Loading Media Kit...
+            </div>
+          ) : null}
+
+          {mediaKitError ? (
+            <div className="border rounded p-4 bg-rose-50 text-rose-900 border-rose-200">
+              <div className="text-sm font-semibold">{mediaKitError}</div>
+            </div>
+          ) : null}
+
+          {mediaKitLoaded && !mediaKitError && mediaKitEditing ? (
             <div className="border rounded p-4 bg-white dark:bg-slate-900 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -3820,7 +3879,9 @@ export default function AdsManager() {
                 spellCheck={false}
               />
             </div>
-          ) : (
+          ) : null}
+
+          {mediaKitLoaded && !mediaKitError && !mediaKitEditing ? (
             <div className={mediaKitPreview ? 'space-y-4' : 'space-y-4'}>
               <div className="border rounded p-4 bg-white dark:bg-slate-900">
                 <div className="text-sm font-semibold mb-2">Overview</div>
@@ -3847,7 +3908,7 @@ export default function AdsManager() {
                       <div className="text-sm text-slate-600 dark:text-slate-300">{mediaKit.tickerScrollAds.description}</div>
                     </div>
                     <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
-                      Booking: {mediaKit.tickerScrollAds.bookingEmail || mediaKit.contactEmail || 'newspulse.ads@gmail.com'}
+                      Booking: {safeMediaKitEmail(mediaKit.tickerScrollAds.bookingEmail || mediaKit.contactEmail)}
                     </div>
                   </div>
 
@@ -3934,7 +3995,7 @@ export default function AdsManager() {
                       <div className="text-sm text-slate-600 dark:text-slate-300">Sponsored Feature, Sponsored Article, and Combo Campaign pricing for advertiser bookings.</div>
                     </div>
                     <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
-                      Booking: {mediaKit.contactEmail || 'newspulse.ads@gmail.com'}
+                      Booking: {safeMediaKitEmail(mediaKit.contactEmail)}
                     </div>
                   </div>
 
@@ -4120,12 +4181,12 @@ export default function AdsManager() {
                   <div className="text-sm font-semibold mb-2">Contact</div>
                   <div className="text-sm text-slate-700 dark:text-slate-200">
                     <span className="font-medium">Email:</span>{' '}
-                    <a className="text-blue-600 underline" href={mailtoHref(mediaKit.contactEmail)}>{mediaKit.contactEmail}</a>
+                    <a className="text-blue-600 underline" href={mailtoHref(safeMediaKitEmail(mediaKit.contactEmail))}>{safeMediaKitEmail(mediaKit.contactEmail)}</a>
                   </div>
                 </div>
               ) : null}
             </div>
-          )}
+          ) : null}
         </div>
       ) : null}
 

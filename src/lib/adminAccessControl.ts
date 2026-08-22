@@ -59,6 +59,8 @@ export type SpecialRightKey =
   | 'can_manage_sponsor_leads'
   | 'can_manage_campaigns'
   | 'can_view_ad_analytics'
+  | 'media_kit_view'
+  | 'media_kit_manage'
   | 'analytics.view_traffic'
   | 'analytics.view_ad_performance'
   | 'analytics.view_revenue'
@@ -237,6 +239,8 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'can_manage_sponsor_leads', label: 'Can manage sponsor leads' },
   { key: 'can_manage_campaigns', label: 'Can manage campaigns' },
   { key: 'can_view_ad_analytics', label: 'Can view ad analytics' },
+  { key: 'media_kit_view', label: 'Media Kit: view' },
+  { key: 'media_kit_manage', label: 'Media Kit: manage' },
   { key: 'analytics.view_traffic', label: 'Analytics: view traffic' },
   { key: 'analytics.view_ad_performance', label: 'Analytics: view ad performance' },
   { key: 'analytics.view_revenue', label: 'Analytics: view revenue' },
@@ -351,7 +355,7 @@ const LIVE_MODULES: AdminModuleKey[] = ['dashboard', 'broadcast_center', 'live_t
 const ANALYTICS_TRAFFIC_RIGHTS: SpecialRightKey[] = ['analytics.view_traffic'];
 const ANALYTICS_AD_PERFORMANCE_RIGHTS: SpecialRightKey[] = ['analytics.view_ad_performance'];
 const ANALYTICS_REVENUE_RIGHTS: SpecialRightKey[] = ['analytics.view_revenue'];
-const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'can_submit_sponsor_request_for_approval', ...ANALYTICS_TRAFFIC_RIGHTS, ...ANALYTICS_AD_PERFORMANCE_RIGHTS];
+const ADS_GROWTH_RIGHTS: SpecialRightKey[] = ['can_view_ads', 'can_manage_ad_slots', 'can_manage_sponsor_leads', 'can_manage_campaigns', 'can_view_ad_analytics', 'media_kit_view', 'media_kit_manage', 'can_submit_sponsor_request_for_approval', ...ANALYTICS_TRAFFIC_RIGHTS, ...ANALYTICS_AD_PERFORMANCE_RIGHTS];
 const FINANCE_OPERATIONS_RIGHTS: SpecialRightKey[] = ['can_view_finance', 'can_create_invoice', 'can_update_invoice_status', 'can_add_revenue_entry', 'can_add_expense_entry', 'can_upload_receipt', 'can_prepare_monthly_finance_report', 'can_export_finance_summary', 'can_view_sponsor_payment_status', ...ANALYTICS_REVENUE_RIGHTS];
 const FOUNDER_ONLY_FINANCE_RIGHTS: SpecialRightKey[] = ['can_approve_payment', 'can_delete_finance_record', 'can_change_bank_details', 'can_change_payment_gateway', 'can_approve_withdrawal', 'can_approve_final_finance_report'];
 const FOUNDER_ONLY_DPDP_RIGHTS: SpecialRightKey[] = ['can_manage_dpdp_privacy_requests'];
