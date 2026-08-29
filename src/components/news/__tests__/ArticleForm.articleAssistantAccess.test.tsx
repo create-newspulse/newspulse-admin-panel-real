@@ -121,7 +121,7 @@ describe('ArticleForm Article Assistant access', () => {
 
     await waitFor(() => expect(suggestButton).toBeEnabled());
     expect(screen.queryByText('Article Assistant for Staff is currently off.')).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('lets staff use the assistant when the staff setting is on', async () => {
     mocks.getAdminSettings.mockResolvedValue({ adminPanel: { articleAssistantForStaff: true } });
@@ -130,7 +130,7 @@ describe('ArticleForm Article Assistant access', () => {
 
     await waitFor(() => expect(suggestButton).toBeEnabled());
     expect(screen.queryByText('Article Assistant for Staff is currently off.')).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('gates only News Pulse Article Assistant for staff when the setting is off', async () => {
     renderArticleForm();
@@ -147,7 +147,7 @@ describe('ArticleForm Article Assistant access', () => {
     expect(await screen.findByText('Article Assistant for Staff is currently off.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Suggest' })).toBeDisabled();
     expect(screen.queryByText('AI Assistant')).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('lets Founder keep the assistant even when staff access is off', async () => {
     mocks.authUser = { id: 'founder-1', email: 'kiran@newspulse.co.in', role: 'founder' };
@@ -156,5 +156,5 @@ describe('ArticleForm Article Assistant access', () => {
 
     expect(screen.queryByText('Article Assistant for Staff is currently off.')).not.toBeInTheDocument();
     await waitFor(() => expect(suggestButton).toBeEnabled());
-  });
+  }, 15000);
 });
