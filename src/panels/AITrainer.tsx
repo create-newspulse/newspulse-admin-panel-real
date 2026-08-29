@@ -64,7 +64,7 @@ export default function AITrainer() {
         AI Trainer Control Panel
       </h2>
       <p className="text-sm text-gray-300 mb-4">
-        Tune your AI engine for smarter behavior, better decisions, and intelligent automation.
+        Tune your News Pulse Engine for smarter behavior, better decisions, and intelligent automation.
       </p>
 
       {error ? (

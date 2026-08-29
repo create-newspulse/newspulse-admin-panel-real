@@ -207,7 +207,7 @@ export const ADMIN_MODULES: AdminModuleDefinition[] = [
   { key: 'marketing', label: 'Marketing', ownerVisibilityKey: 'marketing' },
   { key: 'compliance_reports', label: 'Compliance Reports', ownerVisibilityKey: 'compliance-reports' },
   { key: 'dpdp_privacy_requests', label: 'DPDP Privacy Requests' },
-  { key: 'ai_engine', label: 'AI Engine', ownerVisibilityKey: 'ai-engine' },
+  { key: 'ai_engine', label: 'News Pulse Engine', ownerVisibilityKey: 'ai-engine' },
   { key: 'settings', label: 'Settings', ownerVisibilityKey: 'settings' },
   { key: 'safe_zone', label: 'Safe Zone' },
   { key: 'staff_tasks', label: 'Staff Tasks' },
@@ -343,7 +343,7 @@ export const SPECIAL_RIGHTS: SpecialRightDefinition[] = [
   { key: 'can_delete_roles', label: 'Can delete roles' },
   { key: 'can_change_settings', label: 'Can change settings' },
   { key: 'can_access_safe_zone', label: 'Can access Safe Zone' },
-  { key: 'can_control_ai_engine', label: 'Can control AI Engine' },
+  { key: 'can_control_ai_engine', label: 'Can control News Pulse Engine' },
   { key: 'can_use_emergency_lock', label: 'Can use Emergency Lock' },
 ];
 

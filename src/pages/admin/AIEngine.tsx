@@ -154,7 +154,7 @@ export default function AIEngine(): JSX.Element {
     });
       setResult(resp.result);
     } catch (e: any) {
-      setError(e?.response?.data?.error || 'Failed to run AI Engine');
+      setError(e?.response?.data?.error || 'Failed to run News Pulse Engine');
     } finally {
       setLoading(false);
     }
@@ -167,14 +167,14 @@ export default function AIEngine(): JSX.Element {
 
   return (
     <div className="max-w-5xl mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-2">🧠 News Pulse AI Engine</h1>
+      <h1 className="text-3xl font-bold mb-2">🧠 News Pulse Engine</h1>
       <p className="text-slate-600 dark:text-slate-300 mb-6">Paste any news content or URL and generate a fresh, publication-ready article. Original narrative with 5W1H framing and SEO extras.</p>
 
       {/* Task selection is handled via the Task Type dropdown below; tab presets removed for simplicity. */}
 
       {/* Provider */}
-      <div className="mb-4" aria-label="AI Engine Provider">
-        <div className="text-sm font-medium mb-1">AI Engine:</div>
+      <div className="mb-4" aria-label="News Pulse Engine Provider">
+        <div className="text-sm font-medium mb-1">News Pulse Engine:</div>
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <div className={`rounded border p-3 ${provider === 'openai' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-700'}`}>
             <div className="flex items-center justify-between gap-3">

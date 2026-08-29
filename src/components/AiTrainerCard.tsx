@@ -59,7 +59,7 @@ export default function AiTrainerCard() {
       <h2 className="text-xl font-bold text-blue-700 dark:text-blue-300 mb-2">🧬 AI Trainer</h2>
 
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-        Train your AI engine for smarter automation, engagement optimization, and performance learning.
+        Train your News Pulse Engine for smarter automation, engagement optimization, and performance learning.
       </p>
 
       {error ? (

@@ -95,12 +95,22 @@ async function tryLogAiMode(evt: {
 
 type Props = {
   title: string;
+  summary?: string;
   content: string;
   language?: 'en' | 'hi' | 'gu';
+  disabledReason?: string | null;
   onApplyTitle: (v: string) => void;
   onApplySlug: (v: string) => void;
   onApplySummary: (v: string) => void;
 };
+
+export function hasMeaningfulArticleDraft(input: { title?: string | null; summary?: string | null; content?: string | null }): boolean {
+  const text = [input.title, input.summary, input.content]
+    .map((value) => String(value || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim())
+    .join(' ')
+    .trim();
+  return text.length > 0;
+}
 
 function normalizeLocalized(text: string, language: 'en'|'hi'|'gu'): string {
   if (language === 'gu') {
@@ -111,8 +121,10 @@ function normalizeLocalized(text: string, language: 'en'|'hi'|'gu'): string {
 
 export default function AiAssistantTipBox({
   title,
+  summary = '',
   content,
   language = 'en',
+  disabledReason = null,
   onApplyTitle,
   onApplySlug,
   onApplySummary,
@@ -124,8 +136,11 @@ export default function AiAssistantTipBox({
   const [suggest, setSuggest] = React.useState<{
     title: string; slug: string; summary: string; tips: string[];
   } | null>(null);
+  const draftReady = hasMeaningfulArticleDraft({ title, summary, content });
+  const unavailableReason = disabledReason || (!draftReady ? 'Start writing your article to use draft assistance.' : null);
 
   const generate = async () => {
+    if (unavailableReason) return;
     setBusy(true);
     setMode('idle');
     setErrorMessage(null);
@@ -163,7 +178,7 @@ export default function AiAssistantTipBox({
     if (!/https?:\/\//.test(content)) tips.push('Consider adding a source link for trust.');
     setSuggest({ title: normalizedTitle, slug, summary, tips });
     setMode('offline');
-    setErrorMessage('AI service unavailable — using offline suggestions.');
+    setErrorMessage('Connected suggestion service unavailable — using offline suggestions.');
     setLastGeneratedAt(new Date());
     void tryLogAiMode({
       feature: 'assist_suggest',
@@ -178,28 +193,26 @@ export default function AiAssistantTipBox({
   return (
     <div className="rounded-xl border bg-white/70 dark:bg-slate-900/40 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="font-semibold">🤖 AI Assistant Tip Box</div>
+        <div className="font-semibold">News Pulse Article Assistant</div>
         <div className="flex items-center gap-3">
-          {mode !== 'idle' && (
-            <div className="text-xs text-slate-500">
-              Mode: <span className="font-medium">{mode === 'ai' ? 'AI' : 'Offline'}</span>
-            </div>
-          )}
           <button
             onClick={generate}
-            disabled={busy}
+            disabled={busy || !!unavailableReason}
             className="px-3 py-1.5 rounded-lg bg-slate-800 text-white disabled:opacity-50"
-            title="Generate suggestions"
+            title="Suggest draft improvements"
           >
-            {busy ? 'Thinking…' : 'Generate'}
+            {busy ? 'Thinking…' : 'Suggest'}
           </button>
         </div>
       </div>
 
-      {!suggest && (
+      {unavailableReason && (
+        <p className="text-sm text-slate-500">{unavailableReason}</p>
+      )}
+
+      {!suggest && !unavailableReason && (
         <p className="text-sm text-slate-500">
-          Get headline, slug, and summary suggestions based on your draft. Works offline;
-          upgrades to AI when connected.
+          Get headline, slug and summary suggestions based on your draft.
         </p>
       )}
 
@@ -207,7 +220,7 @@ export default function AiAssistantTipBox({
         <div className="space-y-3">
           {(mode === 'offline' || errorMessage) && (
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-sm">
-              <div className="font-medium">{errorMessage || 'AI service unavailable — using offline suggestions.'}</div>
+              <div className="font-medium">{errorMessage || 'Connected suggestion service unavailable — using offline suggestions.'}</div>
             </div>
           )}
           {lastGeneratedAt && (
@@ -220,7 +233,7 @@ export default function AiAssistantTipBox({
               <button
                 className="text-blue-600 underline text-sm"
                 onClick={() => onApplyTitle(suggest.title)}
-              >Apply Title</button>
+              >Use Title Suggestion</button>
             </div>
           </div>
 
@@ -231,7 +244,7 @@ export default function AiAssistantTipBox({
               <button
                 className="text-blue-600 underline text-sm"
                 onClick={() => onApplySlug(suggest.slug)}
-              >Apply Slug</button>
+              >Use Slug Suggestion</button>
             </div>
           </div>
 
@@ -244,7 +257,7 @@ export default function AiAssistantTipBox({
               <button
                 className="text-blue-600 underline text-sm"
                 onClick={() => onApplySummary(suggest.summary)}
-              >Apply Summary</button>
+              >Use Summary Suggestion</button>
             </div>
           </div>
 

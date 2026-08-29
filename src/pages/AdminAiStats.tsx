@@ -71,7 +71,7 @@ const AdminAiStats: React.FC = () => {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-blue-700 mb-6">📊 AI Engine Usage</h1>
+      <h1 className="text-2xl font-bold text-blue-700 mb-6">📊 News Pulse Engine Usage</h1>
 
       <ResponsiveContainer width="100%" height={300}>
         <PieChart>

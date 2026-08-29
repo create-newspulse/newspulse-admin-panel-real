@@ -84,7 +84,7 @@ const AiEngineToggle: React.FC<AiEngineToggleProps> = ({ engine, setEngine }) =>
   return (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
       <label className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-        🤖 {t("aiEngineLabel") || "AI Engine"}:
+        🤖 {t("aiEngineLabel") || "News Pulse Engine"}:
       </label>
       {loading ? (
         <div className="text-sm text-slate-500 dark:text-slate-300 ml-2">

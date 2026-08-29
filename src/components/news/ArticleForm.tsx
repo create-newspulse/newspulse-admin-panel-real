@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
+import { useAuth } from '@context/AuthContext';
 import { verifyLanguage, readability } from '@/lib/api/language';
 import { ptiCheck } from '@/lib/api/compliance';
 import TagInput from '@/components/ui/TagInput';
@@ -25,6 +26,8 @@ import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticle
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
+import settingsApi from '@/lib/settingsApi';
+import { getArticleAssistantForStaff, getArticleAssistantUnavailableReason } from '@/lib/articleAssistantSettings';
 
 type LangCode = 'en' | 'hi' | 'gu';
 type EditorialType = 'editorial' | 'special_story';
@@ -427,6 +430,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   // resolve edit id
   const initialEditId = id || articleId || null;
   const [effectiveId, setEffectiveId] = useState<string | null>(initialEditId);
@@ -486,6 +490,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [founderOverride, setFounderOverride] = useState(false);
   const autoSaveRef = useRef<number | null>(null);
   const [suggestions, setSuggestions] = useState<AssistSuggestV2Response | null>(null);
+  const [articleAssistantForStaff, setArticleAssistantForStaff] = useState(true);
   const [useLatinSlug, setUseLatinSlug] = useState(true);
   const [tone, setTone] = useState<'neutral'|'impact'|'analytical'>('neutral');
   const [checks, setChecks] = useState<{ seo: any; compliance: any; duplicate: any }>({ seo: null, compliance: null, duplicate: null });
@@ -518,6 +523,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
+
+  useEffect(() => {
+    let mounted = true;
+    settingsApi.getAdminSettings()
+      .then((settings) => {
+        if (mounted) setArticleAssistantForStaff(getArticleAssistantForStaff(settings));
+      })
+      .catch(() => {
+        if (mounted) setArticleAssistantForStaff(true);
+      });
+    return () => { mounted = false; };
+  }, []);
 
   const coverUploadEnabled = mediaStatusQuery.data?.uploadEnabled === true;
   const coverUploadStatusText = (() => {
@@ -2470,7 +2487,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const languageOk = founderOverride || ['en', 'hi', 'gu'].every((l) => ((langIssues as any)[l] || []).length === 0);
   const seoBadgeText = checks.seo ? 'preview' : '—';
   const readabilityBadgeText = typeof readabilityGrade === 'number' ? String(readabilityGrade) : '—';
-  const aiBadgeText = suggestions ? 'AI' : 'Offline';
+  const effectiveRole = String((user as any)?.role || userRole || '').trim().toLowerCase();
+  const articleAssistantUnavailableReason = getArticleAssistantUnavailableReason(effectiveRole, articleAssistantForStaff);
 
   const accordionItems: AccordionItem[] = useMemo(() => {
     const hasLangIssues = !languageOk;
@@ -2482,15 +2500,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return [
       {
         id: 'ai',
-        title: 'AI Assistant',
-        badge: <span className={aiBadgeText === 'AI' ? badgeClsOk : badgeClsWarn}>{aiBadgeText}</span>,
+        title: 'News Pulse Article Assistant',
         defaultOpen: false,
         forceOpenWhen: false,
         children: (
           <AiAssistantTipBox
             title={title}
+            summary={summary}
             content={content}
             language={language}
+            disabledReason={articleAssistantUnavailableReason}
             onApplyTitle={(v)=> { setTitle(v); }}
             onApplySlug={(v)=> { setSlug(v); setAutoSlug(false); }}
             onApplySummary={(v)=> { setSummary(v); setAutoSummary(false); }}
@@ -2566,7 +2585,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ),
       },
     ];
-  }, [aiBadgeText, checks.seo, content, language, langIssues, languageOk, ptiOk, ptiReasons, ptiStatus, readabilityBadgeText, readabilityGrade, readingSeconds, runLanguageCheck, runPti, runReadability, seoBadgeText, suggestions, summary, title]);
+  }, [articleAssistantUnavailableReason, checks.seo, content, language, langIssues, languageOk, ptiOk, ptiReasons, ptiStatus, readabilityBadgeText, readabilityGrade, readingSeconds, runLanguageCheck, runPti, runReadability, seoBadgeText, summary, title]);
 
   async function beginPublishFlow() {
     if (isSaving || isPublishing) return;

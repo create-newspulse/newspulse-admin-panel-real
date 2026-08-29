@@ -64,7 +64,7 @@ const SystemVersionControl = () => {
           <FaTools className="text-amber-500" /> Maintain rollback points for each patch
         </li>
         <li className="flex items-center gap-2">
-          <FaBrain className="text-pink-500" /> Version notes for AI engine & backend logic
+          <FaBrain className="text-pink-500" /> Version notes for engine and backend logic
         </li>
         <li className="flex items-center gap-2">
           <FaFileExport className="text-green-500" /> Export full version history as CSV or JSON

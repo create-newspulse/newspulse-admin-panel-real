@@ -9,7 +9,7 @@ const nav: NavItem[] = [
   { label: 'All News', href: '/AllNews' },
   // Normalize to lowercase path; alias route added (/admin/manage-news) in App.tsx
   { label: 'Manage News', href: '/admin/manage-news' },
-  { label: 'AI Engine', href: '/admin/ai-engine' },
+  { label: 'News Pulse Engine', href: '/admin/ai-engine' },
   { label: 'Embeds', href: '/admin/EmbedManager' },
   { label: 'Marketing', href: ADMIN_MARKETING_ROUTE },
   { label: 'Analytics', href: '/AnalyticsDashboard' },

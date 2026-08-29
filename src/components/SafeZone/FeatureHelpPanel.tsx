@@ -27,7 +27,7 @@ const features = [
   },
   {
     title: "📂 Backup & Recovery",
-    details: `Secure system backups:\n• MongoDB\n• Config files & AI\n\n✅ Tools:\n• Download backup\n• Restore stable state\n• Rollback AI engine`,
+    details: `Secure system backups:\n• MongoDB\n• Config files & engine settings\n\n✅ Tools:\n• Download backup\n• Restore stable state\n• Rollback engine settings`,
   },
   {
     title: "🔐 Login Record Tracker",

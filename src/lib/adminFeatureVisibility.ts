@@ -16,7 +16,7 @@ export const OWNER_CONTROLLED_FEATURES = [
   { key: 'analytics', apiKey: 'analytics', label: 'Analytics' },
   { key: 'marketing', apiKey: 'marketing', label: 'Marketing' },
   { key: 'compliance-reports', apiKey: 'complianceReports', label: 'Compliance Reports' },
-  { key: 'ai-engine', apiKey: 'aiEngine', label: 'AI Engine' },
+  { key: 'ai-engine', apiKey: 'aiEngine', label: 'News Pulse Engine' },
   { key: 'settings', apiKey: 'settings', label: 'Settings' },
 ] as const;
 

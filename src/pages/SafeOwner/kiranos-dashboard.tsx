@@ -59,7 +59,7 @@ const KiranOSDashboard: React.FC = () => {
           >
             <FaChartPie className="text-2xl text-yellow-600" />
             <div>
-              <h2 className="text-lg font-semibold">AI Engine Stats</h2>
+              <h2 className="text-lg font-semibold">News Pulse Engine Stats</h2>
               <p className="text-sm text-gray-600">Track usage of GPT and Gemini over time</p>
             </div>
           </NavLink>

@@ -34,7 +34,7 @@ export default function GlobalCommandPalette({
   { label: 'Go: Safe Zone', hint: 'Founder hub', path: '/safeownerzone/founder' },
       { label: 'Go: Add News', path: '/add' },
       { label: 'Go: Manage News', path: '/manage-news' },
-      { label: 'Go: AI Engine', path: '/admin/ai-engine' },
+      { label: 'Go: News Pulse Engine', path: '/admin/ai-engine' },
   { label: 'Go: Analytics', path: '/admin/analytics' },
   { label: 'Go: Live TV Control', path: '/admin/live' },
       { label: 'Go: Poll Editor', path: '/poll-editor' },

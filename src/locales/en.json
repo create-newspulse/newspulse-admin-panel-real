@@ -13,8 +13,8 @@
   "dark": "Dark",
   "safeOwnerZone": "Safe Owner Zone",
   "aiPanel": "AI Panel",
-  "aiHeader": "News Pulse AI Engine",
-  "aiEngineLabel": "AI Engine",
+  "aiHeader": "News Pulse Engine",
+  "aiEngineLabel": "News Pulse Engine",
   "autoMode": "Auto",
 
   "loadingDashboard": "Loading dashboard stats...",
@@ -22,7 +22,7 @@
   "weeklyAiInsights": "Weekly AI Insights",
 
   "aiSummaryTitle": "AI Summary Report",
-  "aiSummaryBody": "📝 Last week, 82 new stories were suggested by the AI engine.",
+  "aiSummaryBody": "📝 Last week, 82 new stories were suggested by the News Pulse Engine.",
   "topNewsTitle": "Top Performing News",
   "topNewsBody": "🔥 ‘India’s Tech Leap in 2025’ had 21k reads and 97% engagement.",
 

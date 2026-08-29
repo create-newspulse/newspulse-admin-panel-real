@@ -70,7 +70,7 @@ const AIGlowPanel: React.FC = () => {
 
       <p className="text-sm md:text-base text-purple-200 mb-4 flex items-center gap-2">
         <FaBolt className="text-yellow-300 animate-bounce" />
-        Real-time snapshot of AI engines working inside News Pulse.
+        Real-time snapshot of engine services working inside News Pulse.
       </p>
 
       {loading ? (

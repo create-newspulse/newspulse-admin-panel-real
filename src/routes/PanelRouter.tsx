@@ -70,7 +70,7 @@ export default function PanelRouter() {
           {/* Employee */}
           <Route path="employee/news/new" element={<RequireRole allow={['founder','admin','employee']}><Page title="Add News (Restricted)" /></RequireRole>} />
           <Route path="employee/drafts" element={<RequireRole allow={['founder','admin','employee']}><Page title="Draft Box" /></RequireRole>} />
-          <Route path="employee/assistant" element={<RequireRole allow={['founder','admin','employee']}><Page title="AI Assistant Tip Box" /></RequireRole>} />
+          <Route path="employee/assistant" element={<RequireRole allow={['founder','admin','employee']}><Page title="News Pulse Article Assistant" /></RequireRole>} />
           <Route path="employee/tools" element={<RequireRole allow={['founder','admin','employee']}><Page title="Grammar & Dictionary" /></RequireRole>} />
 
           {/* Default */}

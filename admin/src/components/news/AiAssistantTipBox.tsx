@@ -87,13 +87,13 @@ export default function AiAssistantTipBox({ title, content, language='en', onApp
   return (
     <div className="rounded-xl border border-newspulse-slate/30 bg-newspulse-white/70 dark:bg-slate-900/40 p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="font-semibold">🤖 AI Assistant Tip Box</div>
-        <button onClick={generate} disabled={busy} className="px-3 py-1.5 rounded-lg bg-newspulse-blue text-newspulse-white disabled:opacity-50" title="Generate suggestions">
-          {busy ? 'Thinking…' : 'Generate'}
+        <div className="font-semibold">News Pulse Article Assistant</div>
+        <button onClick={generate} disabled={busy} className="px-3 py-1.5 rounded-lg bg-newspulse-blue text-newspulse-white disabled:opacity-50" title="Suggest draft improvements">
+          {busy ? 'Thinking…' : 'Suggest'}
         </button>
       </div>
       {!suggest && (
-        <p className="text-sm text-newspulse-slate">Get headline, slug, and summary suggestions. Works offline; upgrades to AI when connected.</p>
+        <p className="text-sm text-newspulse-slate">Get headline, slug and summary suggestions based on your draft.</p>
       )}
       {suggest && (
         <div className="space-y-3">
@@ -101,21 +101,21 @@ export default function AiAssistantTipBox({ title, content, language='en', onApp
             <div className="text-xs text-newspulse-slate mb-1">Suggested Title</div>
             <div className="rounded-lg border border-newspulse-slate/30 p-2 bg-newspulse-white dark:bg-slate-900">{suggest.title || '—'}</div>
             <div className="mt-1">
-              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplyTitle(suggest.title)}>Apply Title</button>
+              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplyTitle(suggest.title)}>Use Title Suggestion</button>
             </div>
           </div>
           <div>
             <div className="text-xs text-newspulse-slate mb-1">Suggested Slug</div>
             <div className="rounded-lg border border-newspulse-slate/30 p-2 bg-newspulse-white dark:bg-slate-900">{suggest.slug || '—'}</div>
             <div className="mt-1">
-              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplySlug(suggest.slug)}>Apply Slug</button>
+              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplySlug(suggest.slug)}>Use Slug Suggestion</button>
             </div>
           </div>
           <div>
             <div className="text-xs text-newspulse-slate mb-1">Suggested Summary</div>
             <div className="rounded-lg border border-newspulse-slate/30 p-2 bg-newspulse-white dark:bg-slate-900 whitespace-pre-wrap">{suggest.summary || '—'}</div>
             <div className="mt-1">
-              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplySummary(suggest.summary)}>Apply Summary</button>
+              <button className="text-newspulse-blue underline text-sm" onClick={()=> onApplySummary(suggest.summary)}>Use Summary Suggestion</button>
             </div>
           </div>
           {suggest.tips?.length > 0 && (

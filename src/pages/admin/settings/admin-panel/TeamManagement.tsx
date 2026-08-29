@@ -56,6 +56,8 @@ import {
 } from '@/lib/adminModulePolicy';
 import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
 import { localSpecialRightKey, localStaffModuleKey } from '@/lib/staffAccessSerializer';
+import settingsApi from '@/lib/settingsApi';
+import { createArticleAssistantForStaffPatch, getArticleAssistantForStaff } from '@/lib/articleAssistantSettings';
 
 const FOUNDER_EMAIL = 'kiran@newspulse.co.in';
 const FOUNDER_RECOVERY_EMAIL = 'newspulse.team@gmail.com';
@@ -1307,6 +1309,10 @@ export default function TeamManagement() {
   const [temporaryGrants, setTemporaryGrants] = useState<TemporaryAccessGrant[]>([]);
   const [temporaryGrantForm, setTemporaryGrantForm] = useState<{ targetType: 'module' | 'right'; key: string; expiresAt: string; reason: string }>({ targetType: 'module', key: 'dashboard', expiresAt: '', reason: '' });
   const { policy: globalModulePolicy } = useFounderModulePolicy({ enabled: isFounder });
+  const [articleAssistantStaffEnabled, setArticleAssistantStaffEnabled] = useState(true);
+  const [articleAssistantSettingsLoading, setArticleAssistantSettingsLoading] = useState(true);
+  const [articleAssistantSettingsSaving, setArticleAssistantSettingsSaving] = useState(false);
+  const [articleAssistantSettingsError, setArticleAssistantSettingsError] = useState<string | null>(null);
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [taskErr, setTaskErr] = useState<string | null>(null);
@@ -1402,6 +1408,39 @@ export default function TeamManagement() {
       setTeamTasks([]);
     } finally {
       setTasksLoading(false);
+    }
+  }
+
+  async function fetchArticleAssistantSetting() {
+    setArticleAssistantSettingsLoading(true);
+    setArticleAssistantSettingsError(null);
+    try {
+      const settings = await settingsApi.getAdminSettings();
+      setArticleAssistantStaffEnabled(getArticleAssistantForStaff(settings));
+    } catch (settingsError: any) {
+      setArticleAssistantSettingsError(settingsError?.message || 'Failed to load Article Assistant setting.');
+    } finally {
+      setArticleAssistantSettingsLoading(false);
+    }
+  }
+
+  async function saveArticleAssistantSetting(enabled: boolean) {
+    if (!isFounder || articleAssistantSettingsSaving) return;
+    const previous = articleAssistantStaffEnabled;
+    setArticleAssistantStaffEnabled(enabled);
+    setArticleAssistantSettingsSaving(true);
+    setArticleAssistantSettingsError(null);
+    try {
+      const next = await settingsApi.putAdminSettings(createArticleAssistantForStaffPatch(enabled), { action: 'article-assistant-for-staff' });
+      setArticleAssistantStaffEnabled(getArticleAssistantForStaff(next));
+      toast.success('Article Assistant for Staff updated');
+    } catch (settingsError: any) {
+      setArticleAssistantStaffEnabled(previous);
+      const message = settingsError?.message || 'Failed to update Article Assistant for Staff.';
+      setArticleAssistantSettingsError(message);
+      toast.error(message);
+    } finally {
+      setArticleAssistantSettingsSaving(false);
     }
   }
 
@@ -2773,8 +2812,34 @@ export default function TeamManagement() {
     void fetchStaff();
     void refreshStaffIdPreview();
     void fetchTasks();
+    void fetchArticleAssistantSetting();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const renderArticleAssistantStaffControl = () => (
+    <SectionCard title="Article Assistant for Staff" subtitle="Control whether staff can use the News Pulse Article Assistant inside Add News.">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={articleAssistantStaffEnabled}
+            disabled={!isFounder || articleAssistantSettingsLoading || articleAssistantSettingsSaving}
+            onChange={(event) => { void saveArticleAssistantSetting(event.target.checked); }}
+            aria-label="Article Assistant for Staff"
+          />
+          <span>
+            <span className="block">Article Assistant for Staff</span>
+            <span className="mt-1 block text-xs font-normal leading-5 text-slate-600">
+              {articleAssistantSettingsLoading ? 'Loading current setting...' : articleAssistantStaffEnabled ? 'Staff with Add News access can use draft assistance.' : 'Staff with Add News access cannot use draft assistance.'}
+            </span>
+          </span>
+        </label>
+      </div>
+      {!isFounder ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">Only the Founder can change this control.</div> : null}
+      {articleAssistantSettingsError ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">{articleAssistantSettingsError}</div> : null}
+    </SectionCard>
+  );
 
   useEffect(() => {
     if (!isCreatePage || !createFormDirty) return;
@@ -3062,7 +3127,7 @@ export default function TeamManagement() {
 
       {!isCreatePage && activeTab === 'create' ? renderCreateStaffAccount() : null}
       {!isCreatePage && activeTab === 'registry' ? renderStaffRegistry() : null}
-      {!isCreatePage && activeTab === 'access' ? renderFounderAccessStudio() : null}
+      {!isCreatePage && activeTab === 'access' ? <div className="space-y-4">{renderArticleAssistantStaffControl()}{renderFounderAccessStudio()}</div> : null}
       {!isCreatePage && activeTab === 'tasks' ? renderStaffTasks() : null}
       {!isCreatePage && activeTab === 'account' ? renderAccountControlV2() : null}
       {!isCreatePage && activeTab === 'security' ? renderSecurityAndSessions() : null}

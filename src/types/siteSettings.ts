@@ -208,6 +208,10 @@ export const SiteSettingsSchema = z.object({
     twoFactorRequired: z.boolean().default(false),
     allowedHosts: z.array(z.string()).default([]),
   }).default({}),
+  // Admin Panel controls
+  adminPanel: z.object({
+    articleAssistantForStaff: z.boolean().default(true),
+  }).default({}),
   // Backups (founder-only)
   backups: z.object({
     enabled: z.boolean().default(false),

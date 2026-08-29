@@ -46,7 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key:'marketing', label:'Marketing', path:ADMIN_MARKETING_ROUTE, roles:['admin','founder'], icon:'📣', moduleKey:'marketing' },
   { key:'compliance-reports', label:'Compliance Reports', path:'/admin/compliance-reports', roles:['admin','founder'], icon:'🧾', moduleKey:'compliance_reports' },
   { key:'dpdp-compliance', label:'DPDP Compliance', path:'/admin/dpdp/privacy-requests', roles:['founder','admin'], icon:'🛡️', moduleKey:'dpdp_privacy_requests' },
-  { key:'ai-engine', label:'AI Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠', moduleKey:'ai_engine' },
+  { key:'ai-engine', label:'News Pulse Engine', path:'/admin/ai-engine', roles:['editor','admin','founder'], icon:'🧠', moduleKey:'ai_engine' },
   // Settings entry
   { key:'settings', label:'Settings', path:'/admin/settings', roles:['editor','admin','founder','moderator'], icon:'⚙️', moduleKey:'settings' },
   // Owner Control Center (single link; module navigation handled inside the pages)

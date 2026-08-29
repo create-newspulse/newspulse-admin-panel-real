@@ -66,7 +66,7 @@ const MODULE_GROUPS: ModuleGroup[] = [
     modules: [
       { key: 'compliance_reports', description: 'Prepare and review compliance reporting records.' },
       { key: 'dpdp_privacy_requests', description: 'Manage DPDP privacy request workflows.' },
-      { key: 'ai_engine', description: 'Control AI Engine configuration and operations.' },
+      { key: 'ai_engine', description: 'Control News Pulse Engine configuration and operations.' },
       { key: 'settings', description: 'Open Admin Panel settings and operational configuration.' },
     ],
   },

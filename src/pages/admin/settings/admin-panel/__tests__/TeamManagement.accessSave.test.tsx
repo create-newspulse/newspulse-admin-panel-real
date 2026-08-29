@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   createTeamUser: vi.fn(),
   saveStaffAccessOverride: vi.fn(),
   saveFounderDelegation: vi.fn(),
+  getAdminSettings: vi.fn(),
+  putAdminSettings: vi.fn(),
   clearAdminEffectiveAccessCache: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -44,6 +46,13 @@ vi.mock('@/hooks/useFounderModulePolicy', () => ({
       add_news: { moduleKey: 'add_news', state: 'available' },
     },
   }),
+}));
+
+vi.mock('@/lib/settingsApi', () => ({
+  default: {
+    getAdminSettings: mocks.getAdminSettings,
+    putAdminSettings: mocks.putAdminSettings,
+  },
 }));
 
 vi.mock('@/api/teamManagementApi', () => ({
@@ -171,6 +180,8 @@ beforeEach(() => {
   mocks.createTeamUser.mockResolvedValue({ temporaryPassword: 'Temp#12345', staffId: 'NP-2026-0003' });
   mocks.saveStaffAccessOverride.mockResolvedValue([]);
   mocks.saveFounderDelegation.mockResolvedValue({ ok: true });
+  mocks.getAdminSettings.mockResolvedValue({ adminPanel: { articleAssistantForStaff: true } });
+  mocks.putAdminSettings.mockImplementation(async (settings: any) => settings);
 });
 
 afterEach(() => {
@@ -318,6 +329,36 @@ describe('TeamManagement route organization', () => {
 
     expect(mocks.toastError).toHaveBeenCalledWith("Enter the team member's real name.");
     expect(mocks.createTeamUser).not.toHaveBeenCalled();
+  });
+
+  it('lets Founder change Article Assistant for Staff from the staff access tab', async () => {
+    renderTeamRoute('/admin/settings/admin-panel/team');
+    fireEvent.click(await screen.findByRole('button', { name: 'Staff Access & Special Rights' }));
+
+    const toggle = await screen.findByLabelText('Article Assistant for Staff') as HTMLInputElement;
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(mocks.putAdminSettings).toHaveBeenCalledWith(
+      { adminPanel: { articleAssistantForStaff: false } },
+      { action: 'article-assistant-for-staff' },
+    ));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Article Assistant for Staff updated');
+  });
+
+  it('shows Article Assistant for Staff as read-only for non-Founder users and never submits the protected key', async () => {
+    mocks.authUser = { id: 'editor-1', email: 'editor@newspulse.co.in', role: 'editor' } as any;
+    renderTeamRoute('/admin/settings/admin-panel/team');
+    fireEvent.click(await screen.findByRole('button', { name: 'Staff Access & Special Rights' }));
+
+    const toggle = await screen.findByLabelText('Article Assistant for Staff') as HTMLInputElement;
+
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText('Only the Founder can change this control.')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(mocks.putAdminSettings).not.toHaveBeenCalled();
   });
 
   it('keeps the existing staff creation API payload shape', async () => {

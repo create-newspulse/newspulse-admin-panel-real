@@ -23,7 +23,7 @@ export const MENU: Item[] = [
   { key:'founderCommand', label:'Founder Command', path:'/panel/founder/command', icon:WrenchIcon, roles:['founder'], section:'founder' },
   { key:'securityLockdown', label:'Security & Lockdown', path:'/panel/founder/security', icon:ShieldCheckIcon, roles:['founder'], section:'founder' },
   { key:'vaults', label:'Vaults', path:'/panel/founder/vaults', icon:FolderOpenIcon, roles:['founder'], section:'founder' },
-  { key:'aiControl', label:'AI Control', path:'/panel/founder/ai-control', icon:CpuChipIcon, roles:['founder'], section:'founder' },
+  { key:'aiControl', label:'News Pulse Engine', path:'/panel/founder/ai-control', icon:CpuChipIcon, roles:['founder'], section:'founder' },
   { key:'siteControls', label:'Site Controls', path:'/panel/founder/site-controls', icon:WrenchIcon, roles:['founder'], section:'founder' },
   { key:'featureToggles', label:'Feature Toggles', path:'/panel/founder/feature-toggles', icon:WrenchIcon, roles:['founder'], section:'founder' },
   { key:'analyticsRevenue', label:'Analytics & Revenue', path:'/panel/founder/analytics-revenue', icon:PresentationChartLineIcon, roles:['founder'], section:'founder' },
@@ -42,6 +42,6 @@ export const MENU: Item[] = [
   // Employee
   { key:'employeeAdd', label:'Add News (Restricted)', path:'/panel/employee/news/new', icon:BoltIcon, roles:['employee','admin','founder'], section:'employee' },
   { key:'drafts', label:'Draft Box', path:'/panel/employee/drafts', icon:FolderOpenIcon, roles:['employee','admin','founder'], section:'employee' },
-  { key:'assistant', label:'AI Assistant Tip Box', path:'/panel/employee/assistant', icon:CpuChipIcon, roles:['employee','admin','founder'], section:'employee' },
+  { key:'assistant', label:'News Pulse Article Assistant', path:'/panel/employee/assistant', icon:CpuChipIcon, roles:['employee','admin','founder'], section:'employee' },
   { key:'tools', label:'Grammar & Dictionary', path:'/panel/employee/tools', icon:GlobeAltIcon, roles:['employee','admin','founder'], section:'employee' },
 ];

@@ -21,7 +21,7 @@ const Breadcrumbs = () => {
     operations: 'Operations',
     revenue: 'Revenue',
     'admin-oversight': 'Admin Oversight',
-    'ai-engine': 'AI Engine',
+    'ai-engine': 'News Pulse Engine',
     // News management aliases → single label
     articles: 'Manage News',
     news: 'Manage News',
