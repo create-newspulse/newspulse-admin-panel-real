@@ -301,11 +301,14 @@ describe('AIEngine health dashboard', () => {
     expect(await screen.findByRole('heading', { name: /news pulse engine/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'System Health' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Content Checker' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Check Again' })).toBeInTheDocument();
     expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Content Checker' }));
 
     expect(await screen.findByRole('heading', { name: 'News Pulse Content Checker' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Check Again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check Content' })).toBeInTheDocument();
     expect(screen.getByText('Review a news draft for editorial issues that may require verification before publication.')).toBeInTheDocument();
     expect(screen.getByText('This checker provides editorial indicators only. It does not determine whether a claim is true or false.')).toBeInTheDocument();
     expect(screen.queryByText('AI Content Checker')).not.toBeInTheDocument();

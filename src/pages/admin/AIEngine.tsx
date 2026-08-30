@@ -487,15 +487,17 @@ export default function AIEngine(): JSX.Element {
             Monitor the health of News Pulse, identify problems affecting the live website and newsroom systems, and see what needs attention.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadHealth(true)}
-          disabled={loading || refreshing}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-          {refreshing ? 'Refreshing...' : 'Run Check Again'}
-        </button>
+        {activeView === 'health' ? (
+          <button
+            type="button"
+            onClick={() => void loadHealth(true)}
+            disabled={loading || refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {refreshing ? 'Refreshing...' : 'Run Check Again'}
+          </button>
+        ) : null}
       </header>
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="News Pulse Engine sections">
