@@ -25,7 +25,6 @@ vi.mock('@/lib/http/adminFetch', () => ({
 }));
 
 const checkedAt = '2026-08-30T05:15:00.000Z';
-const contentCheckedAt = '2026-08-30T06:30:00.000Z';
 
 function healthResponse(overrides: Record<string, any> = {}) {
   return {
@@ -62,56 +61,6 @@ function healthResponse(overrides: Record<string, any> = {}) {
     ],
     ...overrides,
   };
-}
-
-function contentCheckResponse(overrides: Record<string, any> = {}) {
-  return {
-    ok: true,
-    checkedAt: contentCheckedAt,
-    overallStatus: 'review',
-    summary: { passed: 4, review: 2, highRisk: 1 },
-    checks: [
-      {
-        id: 'quote-verification',
-        label: 'Quote Verification',
-        status: 'review',
-        message: 'Quotation requires source verification.',
-        recommendation: 'Verify the quotation source.',
-        evidence: [{ excerpt: 'The official said the figure would double by Friday.' }],
-      },
-      {
-        id: 'language-support',
-        label: 'Language Support',
-        status: 'pass',
-        message: 'Language is supported for current editorial checks.',
-      },
-    ],
-    ...overrides,
-  };
-}
-
-function mockEngineApi(checkResult: any = contentCheckResponse()) {
-  mocks.adminJson.mockImplementation((path: string) => {
-    if (path === '/news-pulse-engine/content-check') return Promise.resolve(checkResult);
-    return Promise.resolve(healthResponse());
-  });
-}
-
-function contentCheckCalls() {
-  return mocks.adminJson.mock.calls.filter(([path]) => path === '/news-pulse-engine/content-check');
-}
-
-async function openContentChecker() {
-  render(<AIEngine />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Content Checker' }));
-  return screen.findByRole('heading', { name: 'News Pulse Content Checker' });
-}
-
-async function runContentCheck(content = 'A draft with reporting details for review.') {
-  fireEvent.change(screen.getByLabelText(/Article Content/i), { target: { value: content } });
-  fireEvent.click(screen.getByRole('button', { name: 'Check Content' }));
-  await waitFor(() => expect(contentCheckCalls()).toHaveLength(1));
-  return contentCheckCalls()[0];
 }
 
 beforeEach(() => {
@@ -295,167 +244,21 @@ describe('AIEngine health dashboard', () => {
     expect(DEFAULT_ADMIN_MODULE_POLICY.ai_engine.state).toBe('founder_only');
   });
 
-  it('shows News Pulse Content Checker inside News Pulse Engine while keeping System Health present', async () => {
+  it('shows only the System Health dashboard without Content Checker controls', async () => {
     render(<AIEngine />);
 
     expect(await screen.findByRole('heading', { name: /news pulse engine/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'System Health' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Content Checker' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Check Again' })).toBeInTheDocument();
     expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Content Checker' }));
-
-    expect(await screen.findByRole('heading', { name: 'News Pulse Content Checker' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Run Check Again' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Check Content' })).toBeInTheDocument();
-    expect(screen.getByText('Review a news draft for editorial issues that may require verification before publication.')).toBeInTheDocument();
-    expect(screen.getByText('This checker provides editorial indicators only. It does not determine whether a claim is true or false.')).toBeInTheDocument();
-    expect(screen.queryByText('AI Content Checker')).not.toBeInTheDocument();
-    expect(screen.queryByText(/AI probability|Human probability|ChatGPT detector|machine-generated/i)).not.toBeInTheDocument();
-  });
-
-  it('requires article content before calling the checker endpoint', async () => {
-    await openContentChecker();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Check Content' }));
-
-    expect(await screen.findByText('Enter article content before running the check.')).toBeInTheDocument();
-    expect(contentCheckCalls()).toHaveLength(0);
-  });
-
-  it.each([
-    ['English', 'en'],
-    ['Hindi', 'hi'],
-    ['Gujarati', 'gu'],
-  ])('submits %s as %s through the authenticated admin JSON helper', async (_label, value) => {
-    mockEngineApi();
-    await openContentChecker();
-
-    fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: '  City water update  ' } });
-    fireEvent.change(screen.getByLabelText(/Summary/i), { target: { value: '  Municipal update  ' } });
-    fireEvent.change(screen.getByLabelText(/Language/i), { target: { value } });
-    fireEvent.change(screen.getByLabelText(/Article Content/i), { target: { value: '  Reported content for review.  ' } });
-    fireEvent.change(screen.getByLabelText(/Sources \/ References/i), { target: { value: '  municipal release  \n\n  field reporter note  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Check Content' }));
-
-    await waitFor(() => expect(contentCheckCalls()).toHaveLength(1));
-    expect(contentCheckCalls()[0]).toEqual([
-      '/news-pulse-engine/content-check',
-      {
-        method: 'POST',
-        json: {
-          title: 'City water update',
-          summary: 'Municipal update',
-          content: 'Reported content for review.',
-          language: value,
-          sources: ['municipal release', 'field reporter note'],
-        },
-      },
-    ]);
-  });
-
-  it.each([
-    ['clear', 'Clear', 'No major editorial indicators were found by the current checks.'],
-    ['review', 'Needs Review', 'Some items should be reviewed before publication.'],
-    ['high-risk', 'High Priority Review', 'One or more issues should be resolved or verified before publication.'],
-  ])('renders %s overall result with backend summary counts', async (overallStatus, label, description) => {
-    mockEngineApi(contentCheckResponse({ overallStatus, summary: { passed: 8, review: 3, highRisk: 2 } }));
-    await openContentChecker();
-
-    await runContentCheck();
-
-    expect(await screen.findByRole('heading', { name: label })).toBeInTheDocument();
-    expect(screen.getByText(description)).toBeInTheDocument();
-    expect(screen.getByLabelText('Passed: 8')).toBeInTheDocument();
-    expect(screen.getByLabelText('Needs Review: 3')).toBeInTheDocument();
-    expect(screen.getByLabelText('High Priority: 2')).toBeInTheDocument();
-  });
-
-  it('renders dynamic checks, recommendation, evidence excerpt, checkedAt, and neutral wording', async () => {
-    mockEngineApi();
-    await openContentChecker();
-
-    await runContentCheck('Unicode Gujarati ગુજરાતી and Hindi हिंदी content remains intact.');
-
-    expect(await screen.findByText('Quote Verification')).toBeInTheDocument();
-    expect(screen.getByText('Quotation requires source verification.')).toBeInTheDocument();
-    expect(screen.getByText('Recommended review:')).toBeInTheDocument();
-    expect(screen.getByText('Verify the quotation source.')).toBeInTheDocument();
-    expect(screen.getByText('Review excerpt')).toBeInTheDocument();
-    expect(screen.getByText('The official said the figure would double by Friday.')).toBeInTheDocument();
-    expect(screen.getByText('Language Support')).toBeInTheDocument();
-    expect(screen.getByText('Language is supported for current editorial checks.')).toBeInTheDocument();
-    expect(screen.getByText(`Checked: ${new Date(contentCheckedAt).toLocaleString()}`)).toBeInTheDocument();
-    expect(screen.queryByText(/fake quotation|fake news|false claim|plagiarism detected|misinformation/i)).not.toBeInTheDocument();
-  });
-
-  it('does not crash when recommendation and evidence are missing', async () => {
-    mockEngineApi(contentCheckResponse({
-      checks: [{ id: 'completeness', label: 'Article Completeness', status: 'pass', message: 'Required draft sections are present.' }],
-    }));
-    await openContentChecker();
-
-    await runContentCheck();
-
-    expect(await screen.findByText('Article Completeness')).toBeInTheDocument();
-    expect(screen.getByText('Required draft sections are present.')).toBeInTheDocument();
-    expect(screen.queryByText('Recommended review:')).not.toBeInTheDocument();
-    expect(screen.queryByText('Review excerpt')).not.toBeInTheDocument();
-  });
-
-  it('shows loading state and prevents duplicate content-check submissions', async () => {
-    let resolveCheck: (value: any) => void = () => {};
-    const pendingCheck = new Promise((resolve) => {
-      resolveCheck = resolve;
-    });
-    mocks.adminJson.mockImplementation((path: string) => {
-      if (path === '/news-pulse-engine/content-check') return pendingCheck;
-      return Promise.resolve(healthResponse());
-    });
-    await openContentChecker();
-
-    fireEvent.change(screen.getByLabelText(/Article Content/i), { target: { value: 'Draft for duplicate-submit guard.' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Check Content' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Checking content...' }));
-
-    expect(screen.getByRole('status')).toHaveTextContent('Checking content...');
-    expect(screen.getByRole('button', { name: 'Checking content...' })).toBeDisabled();
-    expect(contentCheckCalls()).toHaveLength(1);
-
-    resolveCheck(contentCheckResponse({ overallStatus: 'clear' }));
-    expect(await screen.findByRole('heading', { name: 'Clear' })).toBeInTheDocument();
-  });
-
-  it('renders safe API error state and allows retry', async () => {
-    mocks.adminJson.mockImplementation((path: string) => {
-      if (path === '/news-pulse-engine/content-check') {
-        return Promise.reject(new Error('stack trace should not appear'));
-      }
-      return Promise.resolve(healthResponse());
-    });
-    await openContentChecker();
-
-    await runContentCheck();
-
-    expect(await screen.findByText('Content check could not be completed.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Check Content' })).toBeEnabled();
-    expect(screen.queryByText('stack trace should not appear')).not.toBeInTheDocument();
-  });
-
-  it('does not call article-writing or assistant endpoints and does not persist results', async () => {
-    mockEngineApi();
-    await openContentChecker();
-
-    await runContentCheck();
-
-    const calledPaths = mocks.adminJson.mock.calls.map(([path]) => String(path));
-    expect(calledPaths).not.toContain('/assist/suggest');
-    expect(calledPaths.some((path) => path.includes('/articles'))).toBe(false);
-
-    const source = readFileSync(join(process.cwd(), 'src', 'pages', 'admin', 'AIEngine.tsx'), 'utf8');
-    expect(source).not.toMatch(/localStorage|sessionStorage/);
-    expect(screen.queryByRole('button', { name: /save draft|publish|unpublish|rewrite/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'News Pulse Content Checker' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Content Checker')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Title/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Language$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Summary/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Article Content/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Sources \/ References/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Check Content|Clear/i })).not.toBeInTheDocument();
   });
 
   it('keeps System Health refresh on the original health endpoint only', async () => {
@@ -475,6 +278,6 @@ describe('AIEngine health dashboard', () => {
       method: 'GET',
       cache: 'no-store',
     });
-    expect(contentCheckCalls()).toHaveLength(0);
+    expect(mocks.adminJson.mock.calls.map(([path]) => path)).not.toContain('/news-pulse-engine/content-check');
   });
 });

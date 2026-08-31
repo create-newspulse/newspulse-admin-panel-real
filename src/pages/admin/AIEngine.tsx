@@ -3,14 +3,8 @@ import { RefreshCw } from 'lucide-react';
 import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 
 const HEALTH_ENDPOINT = '/news-pulse-engine/health';
-const CONTENT_CHECK_ENDPOINT = '/news-pulse-engine/content-check';
-const MAX_CONTENT_CHECK_SOURCES = 10;
 
 type HealthStatus = 'healthy' | 'attention' | 'critical' | 'unknown';
-type EngineView = 'health' | 'checker';
-type ContentCheckLanguage = 'en' | 'hi' | 'gu';
-type ContentCheckOverallStatus = 'clear' | 'review' | 'high-risk' | 'unknown';
-type ContentCheckStatus = 'pass' | 'review' | 'high-risk' | 'unknown';
 
 type HealthSummary = {
   healthy: number;
@@ -35,31 +29,6 @@ type HealthSnapshot = {
   overallStatus: HealthStatus | string;
   summary?: Partial<HealthSummary> | null;
   checks?: HealthCheck[] | null;
-};
-
-type ContentCheckEvidence = {
-  excerpt?: string | null;
-};
-
-type ContentCheckItem = {
-  id: string;
-  label: string;
-  status: ContentCheckStatus | string;
-  message: string;
-  recommendation?: string | null;
-  evidence?: ContentCheckEvidence[] | null;
-};
-
-type ContentCheckResult = {
-  ok: boolean;
-  checkedAt?: string | null;
-  overallStatus: ContentCheckOverallStatus | string;
-  summary?: {
-    passed?: number | null;
-    review?: number | null;
-    highRisk?: number | null;
-  } | null;
-  checks?: ContentCheckItem[] | null;
 };
 
 type StatusMeta = {
@@ -97,73 +66,9 @@ const SUMMARY_CARDS: Array<{ key: keyof HealthSummary; label: string; tone: Heal
   { key: 'critical', label: 'Critical', tone: 'critical' },
 ];
 
-const CHECKER_SUMMARY_CARDS: Array<{ key: 'passed' | 'review' | 'highRisk'; label: string; status: ContentCheckStatus }> = [
-  { key: 'passed', label: 'Passed', status: 'pass' },
-  { key: 'review', label: 'Needs Review', status: 'review' },
-  { key: 'highRisk', label: 'High Priority', status: 'high-risk' },
-];
-
-const CONTENT_CHECK_LANGUAGES: Array<{ value: ContentCheckLanguage; label: string }> = [
-  { value: 'en', label: 'English' },
-  { value: 'hi', label: 'Hindi' },
-  { value: 'gu', label: 'Gujarati' },
-];
-
-const CONTENT_STATUS_META: Record<ContentCheckStatus, StatusMeta & { description: string }> = {
-  pass: {
-    label: 'Passed',
-    description: 'No major editorial indicators were found by the current checks.',
-    cardClass: 'border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100',
-    badgeClass: 'border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-100',
-  },
-  review: {
-    label: 'Needs Review',
-    description: 'Some items should be reviewed before publication.',
-    cardClass: 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100',
-    badgeClass: 'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-100',
-  },
-  'high-risk': {
-    label: 'High Priority Review',
-    description: 'One or more issues should be resolved or verified before publication.',
-    cardClass: 'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100',
-    badgeClass: 'border-rose-200 bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-900/40 dark:text-rose-100',
-  },
-  unknown: {
-    label: 'Needs Review',
-    description: 'Some items should be reviewed before publication.',
-    cardClass: 'border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100',
-    badgeClass: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
-  },
-};
-
-const CONTENT_OVERALL_STATUS_META: Record<ContentCheckOverallStatus, StatusMeta & { description: string }> = {
-  clear: {
-    ...CONTENT_STATUS_META.pass,
-    label: 'Clear',
-  },
-  review: CONTENT_STATUS_META.review,
-  'high-risk': CONTENT_STATUS_META['high-risk'],
-  unknown: CONTENT_STATUS_META.unknown,
-};
-
-const inputClass = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-400 dark:focus:ring-slate-800';
-const labelClass = 'text-sm font-semibold text-slate-800 dark:text-slate-100';
-
 function normalizeStatus(value: unknown): HealthStatus {
   const status = String(value || '').trim().toLowerCase();
   if (status === 'healthy' || status === 'attention' || status === 'critical') return status;
-  return 'unknown';
-}
-
-function normalizeContentStatus(value: unknown): ContentCheckStatus {
-  const status = String(value || '').trim().toLowerCase();
-  if (status === 'pass' || status === 'review' || status === 'high-risk') return status;
-  return 'unknown';
-}
-
-function normalizeOverallContentStatus(value: unknown): ContentCheckOverallStatus {
-  const status = String(value || '').trim().toLowerCase();
-  if (status === 'clear' || status === 'review' || status === 'high-risk') return status;
   return 'unknown';
 }
 
@@ -190,30 +95,6 @@ function safeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function hasMeaningfulContent(value: string): boolean {
-  return value.replace(/\s+/g, ' ').trim().length > 0;
-}
-
-function readSafeApiMessage(error: unknown): string {
-  if (error instanceof AdminApiError) {
-    if (error.status === 401) return 'Session expired. Please sign in again.';
-    if (error.status === 403) return 'Founder access is required to use the content checker.';
-    if (error.status === 400 || error.status === 422) {
-      const message = safeText(error.message).replace(/(?:\r?\n|\r)[\s\S]*$/g, '').slice(0, 180);
-      if (message && !/stack|trace|at\s+/i.test(message)) return message;
-    }
-  }
-  return 'Content check could not be completed.';
-}
-
-function prepareSources(value: string): string[] {
-  return value
-    .split(/\r?\n/)
-    .map((source) => source.trim())
-    .filter(Boolean)
-    .slice(0, MAX_CONTENT_CHECK_SOURCES);
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof AdminApiError) {
     if (error.status === 401) return 'Session expired. Please sign in again.';
@@ -224,15 +105,6 @@ function errorMessage(error: unknown): string {
 
 function StatusBadge({ status }: { status: HealthStatus }) {
   const meta = STATUS_META[status];
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
-      {meta.label}
-    </span>
-  );
-}
-
-function ContentStatusBadge({ status }: { status: ContentCheckStatus }) {
-  const meta = CONTENT_STATUS_META[status];
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
       {meta.label}
@@ -293,105 +165,12 @@ function CheckCard({ check }: { check: HealthCheck }) {
   );
 }
 
-function ContentCheckResultCard({ result }: { result: ContentCheckResult }) {
-  const overallStatus = normalizeOverallContentStatus(result.overallStatus);
-  const overallMeta = CONTENT_OVERALL_STATUS_META[overallStatus];
-  const checks = Array.isArray(result.checks) ? result.checks : [];
-  const summary = result.summary || {};
-
-  return (
-    <section className="space-y-4" aria-label="Content Check Result">
-      <div className={`rounded-2xl border p-5 shadow-sm ${overallMeta.cardClass}`}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide opacity-75">Overall Result</div>
-            <h2 className="mt-2 text-2xl font-bold">{overallMeta.label}</h2>
-            <p className="mt-2 text-sm opacity-80">{overallMeta.description}</p>
-            {result.checkedAt ? <p className="mt-2 text-sm opacity-80">Checked: {formatDateTime(result.checkedAt)}</p> : null}
-          </div>
-          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${overallMeta.badgeClass}`}>
-            {overallMeta.label}
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3" aria-label="Content Check Summary">
-        {CHECKER_SUMMARY_CARDS.map((item) => {
-          const value = typeof summary[item.key] === 'number' ? summary[item.key] || 0 : 0;
-          const meta = CONTENT_STATUS_META[item.status];
-          return (
-            <div key={item.key} className={`rounded-xl border p-4 ${meta.cardClass}`} aria-label={`${item.label}: ${value}`}>
-              <div className="text-xs font-semibold uppercase tracking-wide opacity-75">{item.label}</div>
-              <div className="mt-2 text-3xl font-bold">{value}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      <section className="space-y-3" aria-label="Content Check Details">
-        <h3 className="text-xl font-semibold text-slate-950 dark:text-slate-100">Check Results</h3>
-        {checks.length ? checks.map((check) => {
-          const status = normalizeContentStatus(check.status);
-          const recommendation = safeText(check.recommendation);
-          const excerpts = Array.isArray(check.evidence)
-            ? check.evidence.map((item) => safeText(item?.excerpt)).filter(Boolean)
-            : [];
-
-          return (
-            <article key={check.id || check.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h4 className="text-base font-semibold text-slate-950 dark:text-slate-100">{check.label || 'Editorial Check'}</h4>
-                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{check.message || 'No message provided.'}</p>
-                </div>
-                <ContentStatusBadge status={status} />
-              </div>
-
-              {recommendation || excerpts.length ? (
-                <div className="mt-3 space-y-3 text-sm text-slate-600 dark:text-slate-300">
-                  {recommendation ? <div><span className="font-semibold text-slate-800 dark:text-slate-100">Recommended review:</span> {recommendation}</div> : null}
-                  {excerpts.length ? (
-                    <div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">Review excerpt</div>
-                      <div className="mt-2 space-y-2">
-                        {excerpts.map((excerpt, index) => (
-                          <blockquote key={`${check.id || check.label}-excerpt-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 dark:border-slate-800 dark:bg-slate-950/40">
-                            {excerpt}
-                          </blockquote>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </article>
-          );
-        }) : (
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-            No check details were returned by the backend.
-          </div>
-        )}
-      </section>
-    </section>
-  );
-}
-
 export default function AIEngine(): JSX.Element {
-  const [activeView, setActiveView] = useState<EngineView>('health');
   const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkerTitle, setCheckerTitle] = useState('');
-  const [checkerSummary, setCheckerSummary] = useState('');
-  const [checkerContent, setCheckerContent] = useState('');
-  const [checkerLanguage, setCheckerLanguage] = useState<ContentCheckLanguage>('en');
-  const [checkerSources, setCheckerSources] = useState('');
-  const [checkerResult, setCheckerResult] = useState<ContentCheckResult | null>(null);
-  const [checkerError, setCheckerError] = useState<string | null>(null);
-  const [checkingContent, setCheckingContent] = useState(false);
   const inFlightRef = useRef(false);
-  const contentCheckInFlightRef = useRef(false);
 
   const loadHealth = useCallback(async (refresh = false) => {
     if (inFlightRef.current) return;
@@ -420,50 +199,6 @@ export default function AIEngine(): JSX.Element {
     void loadHealth(false);
   }, [loadHealth]);
 
-  const submitContentCheck = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (contentCheckInFlightRef.current) return;
-
-    if (!hasMeaningfulContent(checkerContent)) {
-      setCheckerError('Enter article content before running the check.');
-      return;
-    }
-
-    contentCheckInFlightRef.current = true;
-    setCheckingContent(true);
-    setCheckerError(null);
-
-    try {
-      const result = await adminJson<ContentCheckResult>(CONTENT_CHECK_ENDPOINT, {
-        method: 'POST',
-        json: {
-          title: checkerTitle.trim(),
-          summary: checkerSummary.trim(),
-          content: checkerContent.trim(),
-          language: checkerLanguage,
-          sources: prepareSources(checkerSources),
-        },
-      });
-      setCheckerResult(result);
-    } catch (contentCheckError) {
-      setCheckerError(readSafeApiMessage(contentCheckError));
-    } finally {
-      setCheckingContent(false);
-      contentCheckInFlightRef.current = false;
-    }
-  }, [checkerContent, checkerLanguage, checkerSources, checkerSummary, checkerTitle]);
-
-  const clearContentCheck = useCallback(() => {
-    if (contentCheckInFlightRef.current) return;
-    setCheckerTitle('');
-    setCheckerSummary('');
-    setCheckerContent('');
-    setCheckerLanguage('en');
-    setCheckerSources('');
-    setCheckerResult(null);
-    setCheckerError(null);
-  }, []);
-
   const overallStatus = normalizeStatus(snapshot?.overallStatus);
   const summary = snapshot?.summary || {};
   const checks = Array.isArray(snapshot?.checks) ? snapshot.checks : [];
@@ -487,43 +222,20 @@ export default function AIEngine(): JSX.Element {
             Monitor the health of News Pulse, identify problems affecting the live website and newsroom systems, and see what needs attention.
           </p>
         </div>
-        {activeView === 'health' ? (
-          <button
-            type="button"
-            onClick={() => void loadHealth(true)}
-            disabled={loading || refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {refreshing ? 'Refreshing...' : 'Run Check Again'}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => void loadHealth(true)}
+          disabled={loading || refreshing}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+          {refreshing ? 'Refreshing...' : 'Run Check Again'}
+        </button>
       </header>
 
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="News Pulse Engine sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeView === 'health'}
-          onClick={() => setActiveView('health')}
-          className={`rounded-lg border px-4 py-2 text-sm font-semibold ${activeView === 'health' ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-        >
-          System Health
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeView === 'checker'}
-          onClick={() => setActiveView('checker')}
-          className={`rounded-lg border px-4 py-2 text-sm font-semibold ${activeView === 'checker' ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-        >
-          Content Checker
-        </button>
-      </div>
+      {loading ? <LoadingState /> : null}
 
-      {activeView === 'health' && loading ? <LoadingState /> : null}
-
-      {activeView === 'health' && !loading && error ? (
+      {!loading && error ? (
         <section className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-950 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100" aria-live="polite">
           <h2 className="text-lg font-semibold">News Pulse Engine could not load the current system status.</h2>
           <p className="mt-2 text-sm leading-6">{error}</p>
@@ -539,7 +251,7 @@ export default function AIEngine(): JSX.Element {
         </section>
       ) : null}
 
-      {activeView === 'health' && !loading && !error && snapshot ? (
+      {!loading && !error && snapshot ? (
         <>
           <section className={`rounded-2xl border p-5 shadow-sm ${STATUS_META[overallStatus].cardClass}`} aria-label="Overall System Status">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -608,102 +320,6 @@ export default function AIEngine(): JSX.Element {
         </>
       ) : null}
 
-      {activeView === 'checker' ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-label="News Pulse Content Checker">
-          <div className="max-w-3xl">
-            <h2 className="text-2xl font-bold text-slate-950 dark:text-slate-100">News Pulse Content Checker</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              Review a news draft for editorial issues that may require verification before publication.
-            </p>
-            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
-              This checker provides editorial indicators only. It does not determine whether a claim is true or false.
-            </div>
-          </div>
-
-          <form className="mt-5 space-y-4" onSubmit={submitContentCheck} noValidate>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <label className={labelClass}>
-                Title <span className="font-normal text-slate-500">(optional)</span>
-                <input
-                  type="text"
-                  value={checkerTitle}
-                  onChange={(event) => setCheckerTitle(event.target.value)}
-                  className={inputClass}
-                />
-              </label>
-              <label className={labelClass}>
-                Language
-                <select
-                  value={checkerLanguage}
-                  onChange={(event) => setCheckerLanguage(event.target.value as ContentCheckLanguage)}
-                  className={inputClass}
-                >
-                  {CONTENT_CHECK_LANGUAGES.map((language) => (
-                    <option key={language.value} value={language.value}>{language.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label className={labelClass}>
-              Summary <span className="font-normal text-slate-500">(optional)</span>
-              <textarea
-                value={checkerSummary}
-                onChange={(event) => setCheckerSummary(event.target.value)}
-                className={`${inputClass} min-h-24 resize-y`}
-              />
-            </label>
-
-            <label className={labelClass}>
-              Article Content <span className="font-normal text-rose-600">(required)</span>
-              <textarea
-                value={checkerContent}
-                onChange={(event) => setCheckerContent(event.target.value)}
-                className={`${inputClass} min-h-56 resize-y`}
-                aria-describedby="content-checker-error"
-                required
-              />
-            </label>
-
-            <label className={labelClass}>
-              Sources / References <span className="font-normal text-slate-500">(optional)</span>
-              <textarea
-                value={checkerSources}
-                onChange={(event) => setCheckerSources(event.target.value)}
-                className={`${inputClass} min-h-28 resize-y`}
-                placeholder="One source per line"
-              />
-            </label>
-
-            {checkerError ? (
-              <div id="content-checker-error" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100" role="alert">
-                {checkerError}
-              </div>
-            ) : null}
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="submit"
-                disabled={checkingContent}
-                className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
-              >
-                {checkingContent ? 'Checking content...' : 'Check Content'}
-              </button>
-              <button
-                type="button"
-                onClick={clearContentCheck}
-                disabled={checkingContent}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Clear
-              </button>
-            </div>
-          </form>
-
-          {checkingContent ? <div className="mt-4 text-sm font-semibold text-slate-600 dark:text-slate-300" role="status">Checking content...</div> : null}
-          {checkerResult ? <div className="mt-6"><ContentCheckResultCard result={checkerResult} /></div> : null}
-        </section>
-      ) : null}
     </div>
   );
 }
