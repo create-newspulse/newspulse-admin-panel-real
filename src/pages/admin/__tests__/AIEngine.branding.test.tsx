@@ -25,6 +25,10 @@ vi.mock('@/lib/http/adminFetch', () => ({
 }));
 
 const checkedAt = '2026-08-30T05:15:00.000Z';
+const automaticCheckedAt = '2026-08-31T11:15:00.000Z';
+const incidentStartedAt = '2026-08-31T10:00:00.000Z';
+const incidentLastSeenAt = '2026-08-31T10:03:00.000Z';
+const incidentResolvedAt = '2026-08-31T10:08:00.000Z';
 
 function healthResponse(overrides: Record<string, any> = {}) {
   return {
@@ -63,8 +67,81 @@ function healthResponse(overrides: Record<string, any> = {}) {
   };
 }
 
+function monitoringStatusResponse(overrides: Record<string, any> = {}) {
+  return {
+    ok: true,
+    enabled: true,
+    checkIntervalMs: 5 * 60 * 1000,
+    lastAutomaticCheckAt: automaticCheckedAt,
+    lastRunStatus: 'healthy',
+    ...overrides,
+  };
+}
+
+function incidentsResponse(overrides: Record<string, any> = {}) {
+  return {
+    ok: true,
+    incidents: [
+      {
+        id: 'analytics-attention',
+        area: 'Analytics',
+        status: 'attention',
+        state: 'open',
+        message: 'Analytics provider configuration needs review.',
+        startedAt: '2026-08-31T10:05:00.000Z',
+        lastSeenAt: '2026-08-31T10:06:00.000Z',
+        resolvedAt: null,
+        durationMs: null,
+        recommendation: 'Connect an analytics provider.',
+      },
+      {
+        id: 'public-website-critical',
+        area: 'Public Website',
+        status: 'critical',
+        state: 'open',
+        message: 'Public website returned HTTP 500.',
+        startedAt: incidentStartedAt,
+        lastSeenAt: incidentLastSeenAt,
+        resolvedAt: null,
+        durationMs: 45_000,
+        recommendation: 'Check frontend deployment.',
+      },
+      {
+        id: 'backend-recovered',
+        area: 'Backend API',
+        status: 'critical',
+        state: 'resolved',
+        message: 'Backend API recovered after timeout.',
+        startedAt: incidentStartedAt,
+        lastSeenAt: incidentLastSeenAt,
+        resolvedAt: incidentResolvedAt,
+        durationMs: 8 * 60 * 1000,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function mockEngineEndpoints(options: { health?: any; monitoring?: any; incidents?: any; monitoringError?: Error; incidentsError?: Error } = {}) {
+  mocks.adminJson.mockImplementation((path: string) => {
+    if (path === '/news-pulse-engine/monitoring/status') {
+      if (options.monitoringError) return Promise.reject(options.monitoringError);
+      return Promise.resolve(options.monitoring ?? monitoringStatusResponse());
+    }
+    if (path === '/news-pulse-engine/incidents') {
+      if (options.incidentsError) return Promise.reject(options.incidentsError);
+      return Promise.resolve(options.incidents ?? incidentsResponse());
+    }
+    return Promise.resolve(options.health ?? healthResponse());
+  });
+}
+
+function callsFor(path: string) {
+  return mocks.adminJson.mock.calls.filter(([calledPath]) => calledPath === path);
+}
+
 beforeEach(() => {
-  mocks.adminJson.mockResolvedValue(healthResponse());
+  mockEngineEndpoints();
 });
 
 afterEach(() => {
@@ -95,7 +172,7 @@ describe('AIEngine health dashboard', () => {
     ['attention', 'Some areas need attention.'],
     ['critical', 'A core News Pulse service needs immediate attention.'],
   ])('renders %s overall state correctly', async (overallStatus, message) => {
-    mocks.adminJson.mockResolvedValue(healthResponse({ overallStatus }));
+    mockEngineEndpoints({ health: healthResponse({ overallStatus }) });
 
     render(<AIEngine />);
 
@@ -103,13 +180,13 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('renders backend summary counts and dynamic system checks', async () => {
-    mocks.adminJson.mockResolvedValue(healthResponse({
+    mockEngineEndpoints({ health: healthResponse({
       summary: { healthy: 7, attention: 1, critical: 2 },
       checks: [
         { id: 'publishing', area: 'Publishing', status: 'healthy', message: 'Publishing queue is clear.', latencyMs: 15 },
         { id: 'push', area: 'Push Notifications', status: 'attention', message: 'Push provider needs review.', recommendation: 'Check push provider credentials.' },
       ],
-    }));
+    }) });
 
     render(<AIEngine />);
 
@@ -123,7 +200,7 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('prioritizes critical and attention items in Founder Attention without listing healthy checks', async () => {
-    mocks.adminJson.mockResolvedValue(healthResponse({
+    mockEngineEndpoints({ health: healthResponse({
       overallStatus: 'critical',
       summary: { healthy: 1, attention: 1, critical: 1 },
       checks: [
@@ -131,7 +208,7 @@ describe('AIEngine health dashboard', () => {
         { id: 'database', area: 'Database', status: 'critical', message: 'Database connection failed.', recommendation: 'Check database connectivity.' },
         { id: 'analytics', area: 'Analytics', status: 'attention', message: 'No authoritative analytics-provider integration is configured.' },
       ],
-    }));
+    }) });
 
     render(<AIEngine />);
 
@@ -144,9 +221,9 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('shows a calm Founder Attention empty state when there are no issues', async () => {
-    mocks.adminJson.mockResolvedValue(healthResponse({
+    mockEngineEndpoints({ health: healthResponse({
       checks: [{ id: 'backend-api', area: 'Backend API', status: 'healthy', message: 'Backend API is reachable.' }],
-    }));
+    }) });
 
     render(<AIEngine />);
 
@@ -165,9 +242,9 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('handles missing recommendation and technical detail without crashing', async () => {
-    mocks.adminJson.mockResolvedValue(healthResponse({
+    mockEngineEndpoints({ health: healthResponse({
       checks: [{ id: 'seo', area: 'SEO', status: 'healthy', message: 'SEO diagnostics completed.' }],
-    }));
+    }) });
 
     render(<AIEngine />);
 
@@ -176,9 +253,9 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('shows recommendation and technical detail when provided', async () => {
-    mocks.adminJson.mockResolvedValue(healthResponse({
+    mockEngineEndpoints({ health: healthResponse({
       checks: [{ id: 'public-site', area: 'Public Website', status: 'critical', message: 'Public website returned HTTP 500.', recommendation: 'Check the frontend deployment and domain availability.', technicalDetail: 'httpStatus=500' }],
-    }));
+    }) });
 
     render(<AIEngine />);
 
@@ -192,19 +269,116 @@ describe('AIEngine health dashboard', () => {
   it('uses backend checkedAt for Last checked', async () => {
     render(<AIEngine />);
 
-    await screen.findByText('Backend API');
+    expect((await screen.findAllByText('Backend API')).length).toBeGreaterThan(0);
     expect(screen.getAllByText(`Last checked: ${new Date(checkedAt).toLocaleString()}`).length).toBeGreaterThan(0);
   });
 
+  it('requests monitoring status and incident history through the authenticated admin JSON helper', async () => {
+    render(<AIEngine />);
+
+    await waitFor(() => expect(callsFor('/news-pulse-engine/monitoring/status')).toHaveLength(1));
+    expect(callsFor('/news-pulse-engine/monitoring/status')[0]).toEqual(['/news-pulse-engine/monitoring/status', {
+      method: 'GET',
+      cache: 'no-store',
+    }]);
+    expect(callsFor('/news-pulse-engine/incidents')[0]).toEqual(['/news-pulse-engine/incidents', {
+      method: 'GET',
+      cache: 'no-store',
+    }]);
+  });
+
+  it('renders active automatic monitoring with backend interval, timestamp, and last run status', async () => {
+    render(<AIEngine />);
+
+    const monitoring = await screen.findByLabelText('Automatic Monitoring');
+    expect(within(monitoring).getByText('Automatic Monitoring')).toBeInTheDocument();
+    expect(within(monitoring).getAllByText('Active').length).toBeGreaterThan(0);
+    expect(within(monitoring).getByText('Every 5 minutes')).toBeInTheDocument();
+    expect(within(monitoring).getByText(new Date(automaticCheckedAt).toLocaleString())).toBeInTheDocument();
+    expect(within(monitoring).getByText('Healthy')).toBeInTheDocument();
+    expect(within(monitoring).getByText('News Pulse automatically checks system health every 5 minutes.')).toBeInTheDocument();
+  });
+
+  it('renders disabled automatic monitoring without pretending it is healthy', async () => {
+    mockEngineEndpoints({ monitoring: monitoringStatusResponse({ enabled: false, lastRunStatus: 'attention' }) });
+
+    render(<AIEngine />);
+
+    const monitoring = await screen.findByLabelText('Automatic Monitoring');
+    expect(within(monitoring).getAllByText('Disabled').length).toBeGreaterThan(0);
+    expect(within(monitoring).getByText('Automatic monitoring is currently disabled.')).toBeInTheDocument();
+    expect(within(monitoring).queryByText('Active')).not.toBeInTheDocument();
+  });
+
+  it('renders open and resolved incident history with open critical issues first', async () => {
+    render(<AIEngine />);
+
+    const openIssues = await screen.findByLabelText('Open Issues');
+    const openCards = within(openIssues).getAllByRole('article');
+    expect(openCards[0]).toHaveTextContent('Public Website');
+    expect(openCards[0]).toHaveTextContent('Critical');
+    expect(openCards[0]).toHaveTextContent('Open');
+    expect(openCards[0]).toHaveTextContent('Public website returned HTTP 500.');
+    expect(openCards[0]).toHaveTextContent(new Date(incidentStartedAt).toLocaleString());
+    expect(openCards[0]).toHaveTextContent(new Date(incidentLastSeenAt).toLocaleString());
+    expect(openCards[0]).toHaveTextContent('Still open');
+    expect(openCards[0]).toHaveTextContent('45 seconds');
+    expect(openCards[0]).toHaveTextContent('Check frontend deployment.');
+    expect(openCards[1]).toHaveTextContent('Analytics');
+    expect(openCards[1]).toHaveTextContent('Needs Attention');
+
+    const resolved = screen.getByLabelText('Recently Resolved');
+    expect(within(resolved).getByText('Backend API')).toBeInTheDocument();
+    expect(within(resolved).getAllByText('Resolved').length).toBeGreaterThan(0);
+    expect(within(resolved).getByText(new Date(incidentResolvedAt).toLocaleString())).toBeInTheDocument();
+    expect(within(resolved).getByText('8 minutes')).toBeInTheDocument();
+  });
+
+  it('renders empty states when there are no open or resolved incidents', async () => {
+    mockEngineEndpoints({ incidents: incidentsResponse({ incidents: [] }) });
+
+    render(<AIEngine />);
+
+    expect(await screen.findByText('No open monitoring issues.')).toBeInTheDocument();
+    expect(screen.getByText('No recently resolved issues.')).toBeInTheDocument();
+  });
+
+  it('isolates incident-history failures from the current health dashboard', async () => {
+    mockEngineEndpoints({ incidentsError: new Error('incident stack should not appear') });
+
+    render(<AIEngine />);
+
+    expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
+    expect(screen.getByText('Issue history could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText('incident stack should not appear')).not.toBeInTheDocument();
+  });
+
+  it('isolates monitoring-status failures from the current health dashboard', async () => {
+    mockEngineEndpoints({ monitoringError: new Error('monitoring stack should not appear') });
+
+    render(<AIEngine />);
+
+    expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
+    expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Monitoring status could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText('monitoring stack should not appear')).not.toBeInTheDocument();
+  });
+
   it('runs the health check again on refresh without creating repair actions', async () => {
-    mocks.adminJson
-      .mockResolvedValueOnce(healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } }))
-      .mockResolvedValueOnce(healthResponse({ summary: { healthy: 2, attention: 1, critical: 0 } }));
+    let healthCalls = 0;
+    mocks.adminJson.mockImplementation((path: string) => {
+      if (path === '/news-pulse-engine/monitoring/status') return Promise.resolve(monitoringStatusResponse());
+      if (path === '/news-pulse-engine/incidents') return Promise.resolve(incidentsResponse());
+      healthCalls += 1;
+      return Promise.resolve(healthCalls === 1
+        ? healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } })
+        : healthResponse({ summary: { healthy: 2, attention: 1, critical: 0 } }));
+    });
 
     render(<AIEngine />);
     fireEvent.click(await screen.findByRole('button', { name: 'Run Check Again' }));
 
-    await waitFor(() => expect(mocks.adminJson).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(callsFor('/news-pulse-engine/health')).toHaveLength(2));
     expect(screen.queryByRole('button', { name: /fix|repair|restart|deploy|reconnect|clean database/i })).not.toBeInTheDocument();
   });
 
@@ -217,7 +391,10 @@ describe('AIEngine health dashboard', () => {
   });
 
   it('renders API error state without fake healthy data', async () => {
-    mocks.adminJson.mockRejectedValue(new Error('stack trace should not appear'));
+    mocks.adminJson.mockImplementation((path: string) => {
+      if (path === '/news-pulse-engine/health') return Promise.reject(new Error('stack trace should not appear'));
+      return Promise.resolve(path === '/news-pulse-engine/incidents' ? incidentsResponse() : monitoringStatusResponse());
+    });
 
     render(<AIEngine />);
 
@@ -252,6 +429,7 @@ describe('AIEngine health dashboard', () => {
     expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'News Pulse Content Checker' })).not.toBeInTheDocument();
+    expect(screen.queryByText('News Pulse Article Assistant')).not.toBeInTheDocument();
     expect(screen.queryByText('Content Checker')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Title/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Language$/i)).not.toBeInTheDocument();
@@ -259,25 +437,33 @@ describe('AIEngine health dashboard', () => {
     expect(screen.queryByLabelText(/^Article Content/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Sources \/ References/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Check Content|Clear/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /fix|repair|restart|deploy|reconnect|resolve manually|delete incident/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /email|push|sms|whatsapp|notification|alert/i })).not.toBeInTheDocument();
   });
 
   it('keeps System Health refresh on the original health endpoint only', async () => {
-    mocks.adminJson
-      .mockResolvedValueOnce(healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } }))
-      .mockResolvedValueOnce(healthResponse({ summary: { healthy: 2, attention: 0, critical: 0 } }));
+    let healthCalls = 0;
+    mocks.adminJson.mockImplementation((path: string) => {
+      if (path === '/news-pulse-engine/monitoring/status') return Promise.resolve(monitoringStatusResponse());
+      if (path === '/news-pulse-engine/incidents') return Promise.resolve(incidentsResponse());
+      healthCalls += 1;
+      return Promise.resolve(healthCalls === 1
+        ? healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } })
+        : healthResponse({ summary: { healthy: 2, attention: 0, critical: 0 } }));
+    });
 
     render(<AIEngine />);
     fireEvent.click(await screen.findByRole('button', { name: 'Run Check Again' }));
 
-    await waitFor(() => expect(mocks.adminJson).toHaveBeenCalledTimes(2));
-    expect(mocks.adminJson).toHaveBeenNthCalledWith(1, '/news-pulse-engine/health', {
+    await waitFor(() => expect(callsFor('/news-pulse-engine/health')).toHaveLength(2));
+    expect(callsFor('/news-pulse-engine/health')[0]).toEqual(['/news-pulse-engine/health', {
       method: 'GET',
       cache: 'no-store',
-    });
-    expect(mocks.adminJson).toHaveBeenNthCalledWith(2, '/news-pulse-engine/health', {
+    }]);
+    expect(callsFor('/news-pulse-engine/health')[1]).toEqual(['/news-pulse-engine/health', {
       method: 'GET',
       cache: 'no-store',
-    });
+    }]);
     expect(mocks.adminJson.mock.calls.map(([path]) => path)).not.toContain('/news-pulse-engine/content-check');
   });
 });

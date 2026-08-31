@@ -3,8 +3,11 @@ import { RefreshCw } from 'lucide-react';
 import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 
 const HEALTH_ENDPOINT = '/news-pulse-engine/health';
+const MONITORING_STATUS_ENDPOINT = '/news-pulse-engine/monitoring/status';
+const INCIDENTS_ENDPOINT = '/news-pulse-engine/incidents';
 
 type HealthStatus = 'healthy' | 'attention' | 'critical' | 'unknown';
+type IncidentState = 'open' | 'resolved' | 'unknown';
 
 type HealthSummary = {
   healthy: number;
@@ -29,6 +32,34 @@ type HealthSnapshot = {
   overallStatus: HealthStatus | string;
   summary?: Partial<HealthSummary> | null;
   checks?: HealthCheck[] | null;
+};
+
+type MonitoringStatus = {
+  ok?: boolean;
+  enabled?: boolean | null;
+  intervalMs?: number | null;
+  checkIntervalMs?: number | null;
+  intervalMinutes?: number | null;
+  checkIntervalMinutes?: number | null;
+  lastAutomaticCheckAt?: string | null;
+  lastCheckedAt?: string | null;
+  lastRunAt?: string | null;
+  lastRunStatus?: string | null;
+  status?: string | null;
+};
+
+type IncidentRecord = {
+  id?: string | null;
+  area?: string | null;
+  status?: HealthStatus | string | null;
+  state?: IncidentState | string | null;
+  message?: string | null;
+  startedAt?: string | null;
+  firstSeenAt?: string | null;
+  lastSeenAt?: string | null;
+  resolvedAt?: string | null;
+  durationMs?: number | null;
+  recommendation?: string | null;
 };
 
 type StatusMeta = {
@@ -66,10 +97,32 @@ const SUMMARY_CARDS: Array<{ key: keyof HealthSummary; label: string; tone: Heal
   { key: 'critical', label: 'Critical', tone: 'critical' },
 ];
 
+const INCIDENT_STATE_META: Record<IncidentState, { label: string; badgeClass: string }> = {
+  open: {
+    label: 'Open',
+    badgeClass: 'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-100',
+  },
+  resolved: {
+    label: 'Resolved',
+    badgeClass: 'border-emerald-200 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-100',
+  },
+  unknown: {
+    label: 'Unknown',
+    badgeClass: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  },
+};
+
 function normalizeStatus(value: unknown): HealthStatus {
   const status = String(value || '').trim().toLowerCase();
   if (status === 'healthy' || status === 'attention' || status === 'critical') return status;
   return 'unknown';
+}
+
+function normalizeIncidentState(value: unknown, resolvedAt?: string | null): IncidentState {
+  const state = String(value || '').trim().toLowerCase();
+  if (state === 'open' || state === 'active') return 'open';
+  if (state === 'resolved' || state === 'recovered' || state === 'closed') return 'resolved';
+  return resolvedAt ? 'resolved' : 'open';
 }
 
 function overallMessage(status: HealthStatus): string {
@@ -91,8 +144,58 @@ function formatLatency(value?: number | null): string | null {
   return `${Math.max(0, Math.round(value))}ms`;
 }
 
+function formatDuration(value?: number | null): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  const totalSeconds = Math.max(0, Math.round(value / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} ${totalSeconds === 1 ? 'second' : 'seconds'}`;
+  const totalMinutes = Math.round(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes} ${totalMinutes === 1 ? 'minute' : 'minutes'}`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!minutes) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  return `${hours} ${hours === 1 ? 'hour' : 'hours'} ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+function formatInterval(status: MonitoringStatus | null): string | null {
+  if (!status) return null;
+  const intervalMs = typeof status.checkIntervalMs === 'number'
+    ? status.checkIntervalMs
+    : typeof status.intervalMs === 'number'
+      ? status.intervalMs
+      : null;
+  if (intervalMs !== null) {
+    const formatted = formatDuration(intervalMs);
+    return formatted ? `Every ${formatted}` : null;
+  }
+  const intervalMinutes = typeof status.checkIntervalMinutes === 'number'
+    ? status.checkIntervalMinutes
+    : typeof status.intervalMinutes === 'number'
+      ? status.intervalMinutes
+      : null;
+  if (typeof intervalMinutes === 'number' && Number.isFinite(intervalMinutes) && intervalMinutes > 0) {
+    return `Every ${intervalMinutes} ${intervalMinutes === 1 ? 'minute' : 'minutes'}`;
+  }
+  return null;
+}
+
 function safeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function monitoringStatusErrorMessage(error: unknown): string {
+  if (error instanceof AdminApiError) {
+    if (error.status === 401) return 'Session expired. Please sign in again.';
+    if (error.status === 403) return 'Founder access is required to view automatic monitoring.';
+  }
+  return 'Monitoring status could not be loaded.';
+}
+
+function incidentHistoryErrorMessage(error: unknown): string {
+  if (error instanceof AdminApiError) {
+    if (error.status === 401) return 'Session expired. Please sign in again.';
+    if (error.status === 403) return 'Founder access is required to view issue history.';
+  }
+  return 'Issue history could not be loaded.';
 }
 
 function errorMessage(error: unknown): string {
@@ -105,6 +208,15 @@ function errorMessage(error: unknown): string {
 
 function StatusBadge({ status }: { status: HealthStatus }) {
   const meta = STATUS_META[status];
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function IncidentStateBadge({ state }: { state: IncidentState }) {
+  const meta = INCIDENT_STATE_META[state];
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
       {meta.label}
@@ -165,15 +277,164 @@ function CheckCard({ check }: { check: HealthCheck }) {
   );
 }
 
+function MonitoringStatusCard({ status, loading, error }: { status: MonitoringStatus | null; loading: boolean; error: string | null }) {
+  const enabled = typeof status?.enabled === 'boolean' ? status.enabled : null;
+  const statusLabel = enabled === true ? 'Active' : enabled === false ? 'Disabled' : 'Status unavailable';
+  const interval = formatInterval(status);
+  const lastAutomaticCheck = status?.lastAutomaticCheckAt || status?.lastCheckedAt || status?.lastRunAt || null;
+  const lastRunStatusRaw = safeText(status?.lastRunStatus || status?.status);
+  const lastRunStatus = lastRunStatusRaw ? STATUS_META[normalizeStatus(lastRunStatusRaw)].label : null;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-label="Automatic Monitoring">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-950 dark:text-slate-100">Automatic Monitoring</h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            {enabled === false ? 'Automatic monitoring is currently disabled.' : interval ? `News Pulse automatically checks system health ${interval.toLowerCase()}.` : 'Backend monitoring status is shown below.'}
+          </p>
+        </div>
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${enabled === true ? STATUS_META.healthy.badgeClass : enabled === false ? STATUS_META.unknown.badgeClass : STATUS_META.attention.badgeClass}`}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {loading ? <div className="mt-4 h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" role="status" aria-label="Loading monitoring status" /> : null}
+      {!loading && error ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{error}</div> : null}
+      {!loading && !error ? (
+        <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+            <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Status</dt>
+            <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{statusLabel}</dd>
+          </div>
+          {interval ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Check interval</dt>
+              <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{interval}</dd>
+            </div>
+          ) : null}
+          {lastAutomaticCheck ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Last automatic check</dt>
+              <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{formatDateTime(lastAutomaticCheck)}</dd>
+            </div>
+          ) : null}
+          {lastRunStatus ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Last run status</dt>
+              <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{lastRunStatus}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
+function IncidentCard({ incident }: { incident: IncidentRecord }) {
+  const status = normalizeStatus(incident.status);
+  const state = normalizeIncidentState(incident.state, incident.resolvedAt);
+  const startedAt = incident.startedAt || incident.firstSeenAt || null;
+  const recommendation = safeText(incident.recommendation);
+  const duration = formatDuration(incident.durationMs);
+
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-slate-950 dark:text-slate-100">{safeText(incident.area) || 'System Check'}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{safeText(incident.message) || 'No message provided.'}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge status={status} />
+          <IncidentStateBadge state={state} />
+        </div>
+      </div>
+      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+        {startedAt ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Started</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{formatDateTime(startedAt)}</dd></div> : null}
+        {incident.lastSeenAt ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Last Seen</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{formatDateTime(incident.lastSeenAt)}</dd></div> : null}
+        <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Resolved</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{incident.resolvedAt ? formatDateTime(incident.resolvedAt) : 'Still open'}</dd></div>
+        {duration ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Duration</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{duration}</dd></div> : null}
+      </dl>
+      {recommendation ? <p className="mt-4 text-sm text-slate-600 dark:text-slate-300"><span className="font-semibold text-slate-800 dark:text-slate-100">Recommendation:</span> {recommendation}</p> : null}
+    </article>
+  );
+}
+
+function extractIncidentList(payload: unknown): IncidentRecord[] {
+  if (Array.isArray(payload)) return payload as IncidentRecord[];
+  if (payload && typeof payload === 'object') {
+    const body = payload as any;
+    if (Array.isArray(body.incidents)) return body.incidents as IncidentRecord[];
+    if (Array.isArray(body.items)) return body.items as IncidentRecord[];
+    if (Array.isArray(body.data)) return body.data as IncidentRecord[];
+  }
+  return [];
+}
+
 export default function AIEngine(): JSX.Element {
   const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
+  const [monitoringLoading, setMonitoringLoading] = useState(true);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
+  const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+  const [incidentsLoading, setIncidentsLoading] = useState(true);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
+  const monitoringInFlightRef = useRef(false);
+  const incidentsInFlightRef = useRef(false);
+
+  const loadMonitoringStatus = useCallback(async (showLoading = true) => {
+    if (monitoringInFlightRef.current) return false;
+    monitoringInFlightRef.current = true;
+    setMonitoringError(null);
+    if (showLoading) setMonitoringLoading(true);
+
+    try {
+      const data = await adminJson<MonitoringStatus>(MONITORING_STATUS_ENDPOINT, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      setMonitoringStatus(data);
+      return true;
+    } catch (statusError) {
+      setMonitoringStatus(null);
+      setMonitoringError(monitoringStatusErrorMessage(statusError));
+      return false;
+    } finally {
+      setMonitoringLoading(false);
+      monitoringInFlightRef.current = false;
+    }
+  }, []);
+
+  const loadIncidentHistory = useCallback(async (showLoading = true) => {
+    if (incidentsInFlightRef.current) return false;
+    incidentsInFlightRef.current = true;
+    setIncidentsError(null);
+    if (showLoading) setIncidentsLoading(true);
+
+    try {
+      const data = await adminJson<unknown>(INCIDENTS_ENDPOINT, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      setIncidents(extractIncidentList(data));
+      return true;
+    } catch (incidentError) {
+      setIncidents([]);
+      setIncidentsError(incidentHistoryErrorMessage(incidentError));
+      return false;
+    } finally {
+      setIncidentsLoading(false);
+      incidentsInFlightRef.current = false;
+    }
+  }, []);
 
   const loadHealth = useCallback(async (refresh = false) => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current) return false;
     inFlightRef.current = true;
     setError(null);
     if (refresh) setRefreshing(true);
@@ -185,9 +446,11 @@ export default function AIEngine(): JSX.Element {
         cache: 'no-store',
       });
       setSnapshot(data);
+      return true;
     } catch (healthError) {
       setSnapshot(null);
       setError(errorMessage(healthError));
+      return false;
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -197,7 +460,17 @@ export default function AIEngine(): JSX.Element {
 
   useEffect(() => {
     void loadHealth(false);
-  }, [loadHealth]);
+    void loadMonitoringStatus(true);
+    void loadIncidentHistory(true);
+  }, [loadHealth, loadIncidentHistory, loadMonitoringStatus]);
+
+  const runManualRefresh = useCallback(async () => {
+    const ok = await loadHealth(true);
+    if (ok) {
+      void loadMonitoringStatus(false);
+      void loadIncidentHistory(false);
+    }
+  }, [loadHealth, loadIncidentHistory, loadMonitoringStatus]);
 
   const overallStatus = normalizeStatus(snapshot?.overallStatus);
   const summary = snapshot?.summary || {};
@@ -212,6 +485,18 @@ export default function AIEngine(): JSX.Element {
       .slice()
       .sort((a, b) => priority[normalizeStatus(a.status)] - priority[normalizeStatus(b.status)]);
   }, [checks]);
+  const sortedIncidents = useMemo(() => {
+    const severityPriority: Record<HealthStatus, number> = { critical: 0, attention: 1, healthy: 2, unknown: 3 };
+    return incidents.slice().sort((a, b) => {
+      const severityDiff = severityPriority[normalizeStatus(a.status)] - severityPriority[normalizeStatus(b.status)];
+      if (severityDiff !== 0) return severityDiff;
+      const aTime = Date.parse(a.startedAt || a.firstSeenAt || a.lastSeenAt || '') || 0;
+      const bTime = Date.parse(b.startedAt || b.firstSeenAt || b.lastSeenAt || '') || 0;
+      return bTime - aTime;
+    });
+  }, [incidents]);
+  const openIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'open'), [sortedIncidents]);
+  const resolvedIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'resolved'), [sortedIncidents]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
@@ -224,7 +509,7 @@ export default function AIEngine(): JSX.Element {
         </div>
         <button
           type="button"
-          onClick={() => void loadHealth(true)}
+          onClick={() => void runManualRefresh()}
           disabled={loading || refreshing}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-300"
         >
@@ -316,6 +601,34 @@ export default function AIEngine(): JSX.Element {
                 No system checks were returned by the backend.
               </div>
             )}
+          </section>
+
+          <MonitoringStatusCard status={monitoringStatus} loading={monitoringLoading} error={monitoringError} />
+
+          <section className="space-y-4" aria-label="Issue History">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950 dark:text-slate-100">Issue History</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Resolved monitoring issues are retained temporarily for recent history.</p>
+            </div>
+            {incidentsLoading ? <div className="h-20 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" role="status" aria-label="Loading issue history" /> : null}
+            {!incidentsLoading && incidentsError ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{incidentsError}</div> : null}
+            {!incidentsLoading && !incidentsError ? (
+              <>
+                <section className="space-y-3" aria-label="Open Issues">
+                  <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-100">Open Issues</h3>
+                  {openIncidents.length ? openIncidents.map((incident, index) => <IncidentCard key={incident.id || `${incident.area || 'incident'}-${index}`} incident={incident} />) : (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">No open monitoring issues.</div>
+                  )}
+                </section>
+
+                <section className="space-y-3" aria-label="Recently Resolved">
+                  <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-100">Recently Resolved</h3>
+                  {resolvedIncidents.length ? resolvedIncidents.map((incident, index) => <IncidentCard key={incident.id || `${incident.area || 'incident'}-resolved-${index}`} incident={incident} />) : (
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">No recently resolved issues.</div>
+                  )}
+                </section>
+              </>
+            ) : null}
           </section>
         </>
       ) : null}
