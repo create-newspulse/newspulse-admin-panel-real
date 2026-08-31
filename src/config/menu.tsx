@@ -42,6 +42,5 @@ export const MENU: Item[] = [
   // Employee
   { key:'employeeAdd', label:'Add News (Restricted)', path:'/panel/employee/news/new', icon:BoltIcon, roles:['employee','admin','founder'], section:'employee' },
   { key:'drafts', label:'Draft Box', path:'/panel/employee/drafts', icon:FolderOpenIcon, roles:['employee','admin','founder'], section:'employee' },
-  { key:'assistant', label:'News Pulse Article Assistant', path:'/panel/employee/assistant', icon:CpuChipIcon, roles:['employee','admin','founder'], section:'employee' },
   { key:'tools', label:'Grammar & Dictionary', path:'/panel/employee/tools', icon:GlobeAltIcon, roles:['employee','admin','founder'], section:'employee' },
 ];

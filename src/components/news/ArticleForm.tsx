@@ -6,15 +6,12 @@ import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '@context/AuthContext';
 import { verifyLanguage, readability } from '@/lib/api/language';
-import { ptiCheck } from '@/lib/api/compliance';
 import TagInput from '@/components/ui/TagInput';
 import Accordion, { type AccordionItem } from '@/components/ui/Accordion';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { uniqueSlug } from '@/lib/slug';
 import { readingTimeSec } from '@/lib/readtime';
-import AiAssistantTipBox from '@/components/news/AiAssistantTipBox';
 import RichTextEditor from '@/components/editor/RichTextEditor';
-import { assistSuggestV2, type AssistSuggestV2Response } from '@/lib/api/assist';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { normalizeError } from '@/lib/error';
 import PreviewModal from '@/components/preview/PreviewModal';
@@ -26,8 +23,6 @@ import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticle
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
-import settingsApi from '@/lib/settingsApi';
-import { getArticleAssistantForStaff, getArticleAssistantUnavailableReason } from '@/lib/articleAssistantSettings';
 
 type LangCode = 'en' | 'hi' | 'gu';
 type EditorialType = 'editorial' | 'special_story';
@@ -482,19 +477,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const originalStatusRef = useRef<'draft'|'scheduled'|'published'|'unknown'>('unknown');
   const [tags, setTags] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState<string>('');
-  const [ptiStatus, setPtiStatus] = useState<'pending'|'compliant'|'needs_review'>('pending');
-  const [ptiReasons, setPtiReasons] = useState<string[]>([]);
   const [langIssues, setLangIssues] = useState<Record<string, any[]>>({});
   const [readabilityGrade, setReadabilityGrade] = useState<number|undefined>();
   const [readingSeconds, setReadingSeconds] = useState<number|undefined>();
   const [founderOverride, setFounderOverride] = useState(false);
   const autoSaveRef = useRef<number | null>(null);
-  const [suggestions, setSuggestions] = useState<AssistSuggestV2Response | null>(null);
-  const [articleAssistantForStaff, setArticleAssistantForStaff] = useState(true);
-  const [useLatinSlug, setUseLatinSlug] = useState(true);
-  const [tone, setTone] = useState<'neutral'|'impact'|'analytical'>('neutral');
-  const [checks, setChecks] = useState<{ seo: any; compliance: any; duplicate: any }>({ seo: null, compliance: null, duplicate: null });
-  const suggestCacheRef = useRef<Map<string, AssistSuggestV2Response>>(new Map());
   const { publishEnabled } = usePublishFlag();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLanguage, setPreviewLanguage] = useState<LangCode>(DEFAULT_CREATE_LANGUAGE);
@@ -523,18 +510,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
-
-  useEffect(() => {
-    let mounted = true;
-    settingsApi.getAdminSettings()
-      .then((settings) => {
-        if (mounted) setArticleAssistantForStaff(getArticleAssistantForStaff(settings));
-      })
-      .catch(() => {
-        if (mounted) setArticleAssistantForStaff(true);
-      });
-    return () => { mounted = false; };
-  }, []);
 
   const coverUploadEnabled = mediaStatusQuery.data?.uploadEnabled === true;
   const coverUploadStatusText = (() => {
@@ -748,15 +723,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setSponsorDisclosure('');
     setSponsorCtaText('');
     setSponsorCtaUrl('');
-    setPtiStatus('pending');
-    setPtiReasons([]);
     setLangIssues({});
     setReadabilityGrade(undefined);
     setReadingSeconds(undefined);
     setFounderOverride(false);
-    setSuggestions(null);
-    setTone('neutral');
-    setChecks({ seo: null, compliance: null, duplicate: null });
     setSlugCheck({ status: 'idle' });
     setCoverImage(null);
     setCoverImageFile(null);
@@ -1695,52 +1665,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (autoSummary) setSummary(generateSummary(title, content));
   }, [title, content, autoSummary]);
 
-  // Debounced v2 suggestions based on title/content/language
-  useEffect(()=>{
-    if (!title.trim()) return;
-    const key = JSON.stringify({ t: title.slice(0, 160), l: language });
-    const timer = window.setTimeout(async ()=>{
-      const extractNeutralSummary = (payload: any): string => {
-        // Expected shape: { summary: { neutral: string } }
-        const obj = payload as any;
-        const neutral = obj?.summary?.neutral;
-        if (typeof neutral === 'string' && neutral.trim()) return neutral;
-        // Back-compat: some older contracts may send summary as a string
-        if (typeof obj?.summary === 'string' && obj.summary.trim()) return obj.summary;
-        return '';
-      };
-
-      const cached = suggestCacheRef.current.get(key);
-      if (cached) {
-        try {
-          setSuggestions(cached);
-          setChecks({ seo: cached.seo, compliance: cached.compliance, duplicate: cached.duplicate });
-          if (autoSlug && !slug) setSlug(useLatinSlug ? cached.slug.latin : cached.slug.native);
-          if (autoSummary && !summary.trim()) {
-            const candidate = extractNeutralSummary(cached);
-            setSummary(candidate || generateSummary(title, content));
-          }
-        } catch {}
-        return;
-      }
-      try {
-        const res = await assistSuggestV2({ title, content: contentPlain.slice(0, 4000), language });
-        suggestCacheRef.current.set(key, res);
-        setSuggestions(res);
-        setChecks({ seo: res.seo, compliance: res.compliance, duplicate: res.duplicate });
-        if (autoSlug && !slug) setSlug(useLatinSlug ? res.slug.latin : res.slug.native);
-        if (autoSummary && !summary.trim()) {
-          const candidate = extractNeutralSummary(res);
-          setSummary(candidate || generateSummary(title, content));
-        }
-      } catch {}
-    }, 500);
-    return ()=> window.clearTimeout(timer);
-  }, [title, content, language, autoSlug, autoSummary, useLatinSlug, slug, summary]);
-
-  function addAttribution(){
-    setSummary(s => (/\b(as per|according to|officials|police|sources|report|pti|agency)\b/i.test(s) ? s : s.replace(/\.*$/, '') + '. As per officials, details are being verified.'));
-  }
   function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '…')); }
 
   const lastSubmitRef = useRef<null | {
@@ -2412,10 +2336,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, ptiStatus, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
-  async function runPti(){ try { const res = await ptiCheck({ title, content: contentPlain }); setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review'); setPtiReasons(res.reasons); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
 
   const requiredForPublishOk = useMemo(() => {
@@ -2483,53 +2406,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return `All changes saved · ${timeLabel}`;
   }, [autosaveFailed, isDirty, isPublishing, isSaving, lastSavedAt, mutation.isPending]);
 
-  const ptiOk = ptiStatus === 'compliant' || founderOverride;
   const languageOk = founderOverride || ['en', 'hi', 'gu'].every((l) => ((langIssues as any)[l] || []).length === 0);
-  const seoBadgeText = checks.seo ? 'preview' : '—';
+  const seoBadgeText = '—';
   const readabilityBadgeText = typeof readabilityGrade === 'number' ? String(readabilityGrade) : '—';
-  const effectiveRole = String((user as any)?.role || userRole || '').trim().toLowerCase();
-  const articleAssistantUnavailableReason = getArticleAssistantUnavailableReason(effectiveRole, articleAssistantForStaff);
 
   const accordionItems: AccordionItem[] = useMemo(() => {
     const hasLangIssues = !languageOk;
-    const hasPtiIssues = !ptiOk;
 
     const badgeClsOk = 'text-[11px] px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-700';
     const badgeClsWarn = 'text-[11px] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800';
 
     return [
-      {
-        id: 'ai',
-        title: 'News Pulse Article Assistant',
-        defaultOpen: false,
-        forceOpenWhen: false,
-        children: (
-          <AiAssistantTipBox
-            title={title}
-            summary={summary}
-            content={content}
-            language={language}
-            disabledReason={articleAssistantUnavailableReason}
-            onApplyTitle={(v)=> { setTitle(v); }}
-            onApplySlug={(v)=> { setSlug(v); setAutoSlug(false); }}
-            onApplySummary={(v)=> { setSummary(v); setAutoSummary(false); }}
-          />
-        ),
-      },
-      {
-        id: 'pti',
-        title: 'PTI Compliance',
-        badge: <span className={ptiOk ? badgeClsOk : badgeClsWarn}>{ptiOk ? '✅' : '⚠️'}</span>,
-        defaultOpen: false,
-        forceOpenWhen: hasPtiIssues,
-        children: (
-          <div className="space-y-2">
-            <button type="button" onClick={runPti} className="btn-secondary text-xs">Run PTI Check</button>
-            <div className="text-sm">Status: {ptiStatus === 'compliant' ? '✅ Compliant' : '⚠️ Needs Review'}</div>
-            {ptiReasons.map(r=> <div key={r} className="text-xs text-red-600">• {r}</div>)}
-          </div>
-        ),
-      },
       {
         id: 'lang',
         title: 'Language Guard',
@@ -2564,9 +2451,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           <div className="space-y-1">
             <div className="text-xs">Title Tag Preview: {title || 'Untitled'} | News Pulse</div>
             <div className="text-xs">Meta Description: {(summary||'').slice(0,140)}</div>
-            {checks.seo && (
-              <div className="text-[11px] text-gray-600">Hook score: {checks.seo.titleHookScore} · Keywords: {checks.seo.keywords.join(', ')}</div>
-            )}
           </div>
         ),
       },
@@ -2585,7 +2469,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ),
       },
     ];
-  }, [articleAssistantUnavailableReason, checks.seo, content, language, langIssues, languageOk, ptiOk, ptiReasons, ptiStatus, readabilityBadgeText, readabilityGrade, readingSeconds, runLanguageCheck, runPti, runReadability, seoBadgeText, summary, title]);
+  }, [content, language, langIssues, languageOk, readabilityBadgeText, readabilityGrade, readingSeconds, runLanguageCheck, runReadability, seoBadgeText, summary, title]);
 
   async function beginPublishFlow() {
     if (isSaving || isPublishing) return;
@@ -2616,37 +2500,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
     }
 
-    const needsPtiConfirm = !founderOverride && (ptiStatus === 'pending' || ptiStatus === 'needs_review');
     const needsLangConfirm = !founderOverride && !languageOk;
 
     const proceed = () => {
       if (!publishedAt) setPublishedAt(new Date().toISOString());
       handlePublish();
     };
-
-    if (needsPtiConfirm) {
-      setConfirmState({
-        title: 'PTI review not cleared — publish anyway?',
-        description: 'PTI compliance is not marked as compliant (or not run yet). You can publish anyway, but review is recommended.',
-        confirmLabel: 'Publish Anyway',
-        cancelLabel: 'Cancel',
-        onConfirm: () => {
-          setConfirmState(null);
-          if (needsLangConfirm) {
-            setConfirmState({
-              title: 'Language issues detected — publish anyway?',
-              description: 'Language Guard found issues. You can publish anyway, but review is recommended.',
-              confirmLabel: 'Publish Anyway',
-              cancelLabel: 'Cancel',
-              onConfirm: () => { setConfirmState(null); proceed(); },
-            });
-            return;
-          }
-          proceed();
-        },
-      });
-      return;
-    }
 
     if (needsLangConfirm) {
       setConfirmState({
@@ -2755,12 +2614,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 </div>
               )}
 
-              {suggestions && (
-                <label className="mt-2 inline-flex items-center gap-2 text-[11px]">
-                  <input type="checkbox" checked={useLatinSlug} onChange={e=> { setUseLatinSlug(e.target.checked); if (autoSlug && suggestions) setSlug(e.target.checked ? suggestions.slug.latin : suggestions.slug.native); }} />
-                  Use Latin SEO slug
-                </label>
-              )}
             </div>
             <div>
               <div className="flex items-center justify-between">
@@ -2773,24 +2626,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               {breakingChecked && !summary.trim() && (
                 <div className="mt-1 text-[11px] text-amber-700">Summary is recommended for breaking stories (ticker previews look better).</div>
               )}
-              {suggestions && (
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  {(['neutral','impact','analytical'] as const).map(t => (
-                    <button type="button" key={t} onClick={()=> { setTone(t); setSummary(suggestions.summary[t]); setAutoSummary(false); }}
-                      className={`px-2 py-1 rounded text-xs border ${tone===t? 'bg-black text-white':'bg-white'}`}>{t}</button>
-                  ))}
-                  <span className={`text-[11px] ${summary.length>=120 && summary.length<=180 ? 'text-green-600' : 'text-amber-600'}`}>{summary.length} chars (aim 120–180)</span>
-                </div>
-              )}
-              {checks.compliance?.ptiFlags?.length > 0 && (
-                <div className="mt-2 text-xs text-red-600">PTI flags: {checks.compliance.ptiFlags.join(' · ')} <button type="button" className="underline" onClick={addAttribution}>Add attribution</button></div>
-              )}
-              {checks.duplicate && checks.duplicate.score >= 0.78 && (
-                <div className="mt-1 text-xs text-amber-700">Similar headline ({Math.round(checks.duplicate.score*100)}%). {checks.duplicate.closestId && <a className="underline" href={`/admin/articles/${checks.duplicate.closestId}`} target="_blank" rel="noreferrer">View closest</a>}</div>
-              )}
               <div className="mt-2 flex gap-2 flex-wrap">
                 {summary.length > 200 && <button type="button" onClick={trimSummaryTo160} className="btn-secondary text-[11px] px-2 py-1">Trim to ~160</button>}
-                {(checks.compliance?.ptiFlags?.length ?? 0) > 0 && <button type="button" onClick={addAttribution} className="btn-secondary text-[11px] px-2 py-1">Add attribution</button>}
               </div>
             </div>
             <div>
@@ -3369,7 +3206,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <label className="flex items-center gap-2 text-xs">
                     <input type="checkbox" checked={founderOverride} onChange={e=> setFounderOverride(e.target.checked)} /> Enable Force Publish
                   </label>
-                  {founderOverride && <div className="text-xs text-red-600 mt-1">Publishing will ignore PTI & language issues.</div>}
+                  {founderOverride && <div className="text-xs text-red-600 mt-1">Publishing will ignore language issues.</div>}
                 </div>
               )}
             </div>

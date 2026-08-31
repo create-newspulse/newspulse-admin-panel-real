@@ -65,9 +65,6 @@ export default function Sidebar() {
         <NavLink to="/admin/media-library" className={({ isActive }) => linkClass(isActive)}>
           �️ {isOpen && <span className="font-bold">Media Library</span>}
         </NavLink>
-        <NavLink to="/admin/ai-assistant" className={({ isActive }) => linkClass(isActive)}>
-          🤖 {isOpen && <span className="font-bold">News Pulse Article Assistant</span>}
-        </NavLink>
         {/* Workflow moved under Safe Owner Zone → Advanced Controls */}
         <NavLink to="/admin/analytics" className={({ isActive }) => linkClass(isActive)}>
           � {isOpen && <span className="font-bold">Analytics</span>}

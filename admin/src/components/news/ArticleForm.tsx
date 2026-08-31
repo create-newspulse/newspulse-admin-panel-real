@@ -2,10 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createArticle, updateArticle, getArticle, retryArticleTranslation } from '../../lib/api/articles';
 import { verifyLanguage, readability } from '../../lib/api/language';
-import { ptiCheck } from '../../lib/api/compliance';
 import { uploadCoverImage } from '../../lib/api/media';
 import TagInput from '../ui/TagInput';
-import AiAssistantTipBox from './AiAssistantTipBox';
 import { uniqueSlug } from '../../lib/slug';
 import { readingTimeSec } from '../../lib/readtime';
 import toast from 'react-hot-toast';
@@ -84,8 +82,6 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
   const [tags, setTags] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState<string>('');
-  const [ptiStatus, setPtiStatus] = useState<'pending'|'compliant'|'needs_review'>('pending');
-  const [ptiReasons, setPtiReasons] = useState<string[]>([]);
   const [langIssues, setLangIssues] = useState<Record<string, any[]>>({});
   const [readabilityGrade, setReadabilityGrade] = useState<number|undefined>();
   const [readingSeconds, setReadingSeconds] = useState<number|undefined>();
@@ -140,8 +136,6 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         setStatus((art.status || 'draft') as any);
         setTags(Array.isArray(art.tags) ? art.tags : []);
         setScheduledAt(art.scheduledAt || '');
-        const pti = art.ptiCompliance || art.ptiStatus;
-        if (pti) setPtiStatus(pti);
         setTranslationStatus(extractTranslationStatus(art));
       } catch (err) {
         console.error('[ADMIN][EDIT_NEWS] Load error', err);
@@ -196,7 +190,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         clearInterval(autoSaveRef.current);
       }
     };
-  }, [title, slug, summary, content, category, language, status, tags, scheduledAt, ptiStatus]);
+  }, [title, slug, summary, content, category, language, status, tags, scheduledAt]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -212,7 +206,6 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
         status,
         language,
         scheduledAt: scheduledAt || undefined,
-        ptiCompliance: ptiStatus === 'needs_review' ? 'pending' : ptiStatus,
         imageUrl: coverUrl || undefined,
         coverImageUrl: coverUrl || undefined,
         coverImage: coverUrl ? { url: coverUrl, publicId: coverPid || undefined } : undefined,
@@ -268,19 +261,13 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
     setLangIssues(prev => ({ ...prev, [l]: res.issues }));
   }
 
-  async function runPti(){
-    const res = await ptiCheck({ title, content: contentPlain });
-    setPtiStatus(res.status === 'compliant' ? 'compliant' : 'needs_review');
-    setPtiReasons(res.reasons);
-  }
-
   async function runReadability(){
     const res = await readability(contentPlain || title, language);
     setReadabilityGrade(res.grade);
     setReadingSeconds(res.readingTimeSec);
   }
 
-  const canPublish = (userRole === 'admin' || userRole === 'founder') && (ptiStatus === 'compliant' || founderOverride) && ['en','hi','gu'].every(l => (langIssues[l]||[]).length === 0 || founderOverride);
+  const canPublish = (userRole === 'admin' || userRole === 'founder') && ['en','hi','gu'].every(l => (langIssues[l]||[]).length === 0 || founderOverride);
 
   async function onPickCoverFile(file: File | null) {
     setCoverUploadError('');
@@ -429,22 +416,8 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
               ))}
             </div>
           </div>
-          <div className="card p-4">
-            <h3 className="font-semibold mb-2">PTI Compliance</h3>
-            <button type="button" onClick={runPti} className="btn-secondary mb-2">Run PTI Check</button>
-            <div className="text-sm">Status: {ptiStatus === 'compliant' ? '✅ Compliant' : '⚠️ Needs Review'}</div>
-            {ptiReasons.map(r=> <div key={r} className="text-xs text-newspulse-red">• {r}</div>)}
-          </div>
         </div>
         <div className="space-y-4">
-          <AiAssistantTipBox
-            title={title}
-            content={contentPlain}
-            language={language}
-            onApplyTitle={(v)=> { setTitle(v); }}
-            onApplySlug={(v)=> { setSlug(v); setAutoSlug(false); }}
-            onApplySummary={(v)=> { setSummary(v); setAutoSummary(false); }}
-          />
           <div className="card p-4">
             <h3 className="font-semibold mb-2">SEO</h3>
             <div className="text-xs">Title Tag Preview: {title || 'Untitled'} | NewsPulse</div>
@@ -462,7 +435,7 @@ export function ArticleForm({ mode, articleId, userRole='writer' }: ArticleFormP
               <label className="flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={founderOverride} onChange={e=> setFounderOverride(e.target.checked)} /> Enable Force Publish
               </label>
-              {founderOverride && <div className="text-xs text-newspulse-red mt-1">Publishing will ignore PTI & language issues.</div>}
+              {founderOverride && <div className="text-xs text-newspulse-red mt-1">Publishing will ignore language issues.</div>}
             </div>
           )}
         </div>
