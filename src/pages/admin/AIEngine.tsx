@@ -40,6 +40,7 @@ type HealthSnapshot = {
 type MonitoringStatus = {
   ok?: boolean;
   enabled?: boolean | null;
+  running?: boolean | null;
   intervalMs?: number | null;
   checkIntervalMs?: number | null;
   intervalMinutes?: number | null;
@@ -244,6 +245,15 @@ function formatInterval(status: MonitoringStatus | null): string | null {
   return null;
 }
 
+function formatMonitoringRunStatus(value: unknown): string | null {
+  const status = safeText(value);
+  if (!status) return null;
+  if (status.toLowerCase() === 'ok') return 'OK';
+  const normalized = normalizeStatus(status);
+  if (normalized !== 'unknown') return STATUS_META[normalized].label;
+  return status.toUpperCase();
+}
+
 function safeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -367,11 +377,25 @@ function CheckCard({ check }: { check: HealthCheck }) {
 
 function MonitoringStatusCard({ status, loading, error }: { status: MonitoringStatus | null; loading: boolean; error: string | null }) {
   const enabled = typeof status?.enabled === 'boolean' ? status.enabled : null;
-  const statusLabel = enabled === true ? 'Active' : enabled === false ? 'Disabled' : 'Status unavailable';
+  const running = typeof status?.running === 'boolean' ? status.running : null;
+  const statusLabel = enabled === false
+    ? 'Disabled'
+    : enabled === true && running === false
+      ? 'Enabled / Not Running'
+      : enabled === true
+        ? 'Active'
+        : running === true
+          ? 'Active'
+          : 'Status unavailable';
   const interval = formatInterval(status);
   const lastAutomaticCheck = status?.lastAutomaticCheckAt || status?.lastCheckedAt || status?.lastRunAt || null;
   const lastRunStatusRaw = safeText(status?.lastRunStatus || status?.status);
-  const lastRunStatus = lastRunStatusRaw ? STATUS_META[normalizeStatus(lastRunStatusRaw)].label : null;
+  const lastRunStatus = formatMonitoringRunStatus(lastRunStatusRaw);
+  const statusBadgeClass = statusLabel === 'Active'
+    ? STATUS_META.healthy.badgeClass
+    : statusLabel === 'Enabled / Not Running'
+      ? STATUS_META.attention.badgeClass
+      : STATUS_META.unknown.badgeClass;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-label="Automatic Monitoring">
@@ -382,7 +406,7 @@ function MonitoringStatusCard({ status, loading, error }: { status: MonitoringSt
             {enabled === false ? 'Automatic monitoring is currently disabled.' : interval ? `News Pulse automatically checks system health ${interval.toLowerCase()}.` : 'Backend monitoring status is shown below.'}
           </p>
         </div>
-        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${enabled === true ? STATUS_META.healthy.badgeClass : enabled === false ? STATUS_META.unknown.badgeClass : STATUS_META.attention.badgeClass}`}>
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClass}`}>
           {statusLabel}
         </span>
       </div>
@@ -395,6 +419,12 @@ function MonitoringStatusCard({ status, loading, error }: { status: MonitoringSt
             <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Status</dt>
             <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{statusLabel}</dd>
           </div>
+          {running !== null ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Running</dt>
+              <dd className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">{running ? 'Yes' : 'No'}</dd>
+            </div>
+          ) : null}
           {interval ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <dt className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Check interval</dt>
@@ -507,6 +537,15 @@ function extractIncidentList(payload: unknown): IncidentRecord[] {
   return [];
 }
 
+function extractMonitoringStatus(payload: unknown): MonitoringStatus | null {
+  if (payload && typeof payload === 'object') {
+    const body = payload as any;
+    if (body.data && typeof body.data === 'object' && !Array.isArray(body.data)) return body.data as MonitoringStatus;
+    return body as MonitoringStatus;
+  }
+  return null;
+}
+
 function extractAlertList(payload: unknown): FounderAlert[] {
   if (Array.isArray(payload)) return payload as FounderAlert[];
   if (payload && typeof payload === 'object') {
@@ -544,11 +583,11 @@ export default function AIEngine(): JSX.Element {
     if (showLoading) setMonitoringLoading(true);
 
     try {
-      const data = await adminJson<MonitoringStatus>(MONITORING_STATUS_ENDPOINT, {
+      const data = await adminJson<unknown>(MONITORING_STATUS_ENDPOINT, {
         method: 'GET',
         cache: 'no-store',
       });
-      setMonitoringStatus(data);
+      setMonitoringStatus(extractMonitoringStatus(data));
       return true;
     } catch (statusError) {
       setMonitoringStatus(null);

@@ -70,13 +70,20 @@ function healthResponse(overrides: Record<string, any> = {}) {
 }
 
 function monitoringStatusResponse(overrides: Record<string, any> = {}) {
+  const { ok, success, status, data, ...dataOverrides } = overrides;
   return {
-    ok: true,
-    enabled: true,
-    checkIntervalMs: 5 * 60 * 1000,
-    lastAutomaticCheckAt: automaticCheckedAt,
-    lastRunStatus: 'healthy',
-    ...overrides,
+    ok: ok ?? true,
+    success: success ?? true,
+    status: status ?? 200,
+    data: {
+      enabled: true,
+      running: true,
+      intervalMinutes: 5,
+      lastRunAt: automaticCheckedAt,
+      lastRunStatus: 'ok',
+      ...dataOverrides,
+      ...(data && typeof data === 'object' ? data : {}),
+    },
   };
 }
 
@@ -336,10 +343,25 @@ describe('AIEngine health dashboard', () => {
     const monitoring = await screen.findByLabelText('Automatic Monitoring');
     expect(within(monitoring).getByText('Automatic Monitoring')).toBeInTheDocument();
     expect(within(monitoring).getAllByText('Active').length).toBeGreaterThan(0);
+    expect(within(monitoring).getByText('Running')).toBeInTheDocument();
+    expect(within(monitoring).getByText('Yes')).toBeInTheDocument();
     expect(within(monitoring).getByText('Every 5 minutes')).toBeInTheDocument();
     expect(within(monitoring).getByText(new Date(automaticCheckedAt).toLocaleString())).toBeInTheDocument();
-    expect(within(monitoring).getByText('Healthy')).toBeInTheDocument();
+    expect(within(monitoring).getByText('OK')).toBeInTheDocument();
+    expect(within(monitoring).queryByText('Status unavailable')).not.toBeInTheDocument();
     expect(within(monitoring).getByText('News Pulse automatically checks system health every 5 minutes.')).toBeInTheDocument();
+  });
+
+  it('renders enabled but not running monitoring honestly', async () => {
+    mockEngineEndpoints({ monitoring: monitoringStatusResponse({ running: false }) });
+
+    render(<AIEngine />);
+
+    const monitoring = await screen.findByLabelText('Automatic Monitoring');
+    expect(within(monitoring).getAllByText('Enabled / Not Running').length).toBeGreaterThan(0);
+    expect(within(monitoring).getByText('Running')).toBeInTheDocument();
+    expect(within(monitoring).getByText('No')).toBeInTheDocument();
+    expect(within(monitoring).queryByText('Status unavailable')).not.toBeInTheDocument();
   });
 
   it('renders disabled automatic monitoring without pretending it is healthy', async () => {
