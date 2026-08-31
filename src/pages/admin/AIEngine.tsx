@@ -5,9 +5,12 @@ import { AdminApiError, adminJson } from '@/lib/http/adminFetch';
 const HEALTH_ENDPOINT = '/news-pulse-engine/health';
 const MONITORING_STATUS_ENDPOINT = '/news-pulse-engine/monitoring/status';
 const INCIDENTS_ENDPOINT = '/news-pulse-engine/incidents';
+const ALERTS_ENDPOINT = '/news-pulse-engine/alerts';
 
 type HealthStatus = 'healthy' | 'attention' | 'critical' | 'unknown';
 type IncidentState = 'open' | 'resolved' | 'unknown';
+type AlertType = 'critical' | 'recovery' | 'unknown';
+type AlertDeliveryStatus = 'sent' | 'recorded' | 'failed' | 'unknown';
 
 type HealthSummary = {
   healthy: number;
@@ -62,6 +65,17 @@ type IncidentRecord = {
   recommendation?: string | null;
 };
 
+type FounderAlert = {
+  id?: string | null;
+  incidentId?: string | null;
+  type?: AlertType | string | null;
+  area?: string | null;
+  message?: string | null;
+  createdAt?: string | null;
+  deliveryStatus?: AlertDeliveryStatus | string | null;
+  deliveryErrorCode?: string | null;
+};
+
 type StatusMeta = {
   label: string;
   cardClass: string;
@@ -112,9 +126,56 @@ const INCIDENT_STATE_META: Record<IncidentState, { label: string; badgeClass: st
   },
 };
 
+const ALERT_TYPE_META: Record<AlertType, { label: string; badgeClass: string }> = {
+  critical: {
+    label: 'Critical Alert',
+    badgeClass: STATUS_META.critical.badgeClass,
+  },
+  recovery: {
+    label: 'Recovered',
+    badgeClass: STATUS_META.healthy.badgeClass,
+  },
+  unknown: {
+    label: 'Founder Alert',
+    badgeClass: STATUS_META.unknown.badgeClass,
+  },
+};
+
+const DELIVERY_STATUS_META: Record<AlertDeliveryStatus, { label: string; badgeClass: string; detail?: string }> = {
+  sent: {
+    label: 'Email Sent',
+    badgeClass: STATUS_META.healthy.badgeClass,
+  },
+  recorded: {
+    label: 'Stored Internally',
+    badgeClass: STATUS_META.unknown.badgeClass,
+    detail: 'External email delivery was not configured.',
+  },
+  failed: {
+    label: 'Delivery Failed',
+    badgeClass: STATUS_META.critical.badgeClass,
+  },
+  unknown: {
+    label: 'Status Unknown',
+    badgeClass: STATUS_META.unknown.badgeClass,
+  },
+};
+
 function normalizeStatus(value: unknown): HealthStatus {
   const status = String(value || '').trim().toLowerCase();
   if (status === 'healthy' || status === 'attention' || status === 'critical') return status;
+  return 'unknown';
+}
+
+function normalizeAlertType(value: unknown): AlertType {
+  const type = String(value || '').trim().toLowerCase();
+  if (type === 'critical' || type === 'recovery') return type;
+  return 'unknown';
+}
+
+function normalizeDeliveryStatus(value: unknown): AlertDeliveryStatus {
+  const status = String(value || '').trim().toLowerCase();
+  if (status === 'sent' || status === 'recorded' || status === 'failed') return status;
   return 'unknown';
 }
 
@@ -137,6 +198,11 @@ function formatDateTime(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Not available';
   return date.toLocaleString();
+}
+
+function formatAlertTime(value?: string | null): string {
+  const formatted = formatDateTime(value);
+  return formatted === 'Not available' ? 'Time unavailable' : formatted;
 }
 
 function formatLatency(value?: number | null): string | null {
@@ -198,6 +264,10 @@ function incidentHistoryErrorMessage(error: unknown): string {
   return 'Issue history could not be loaded.';
 }
 
+function founderAlertsErrorMessage(_error: unknown): string {
+  return 'Founder alerts could not be loaded.';
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof AdminApiError) {
     if (error.status === 401) return 'Session expired. Please sign in again.';
@@ -217,6 +287,24 @@ function StatusBadge({ status }: { status: HealthStatus }) {
 
 function IncidentStateBadge({ state }: { state: IncidentState }) {
   const meta = INCIDENT_STATE_META[state];
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function AlertTypeBadge({ type }: { type: AlertType }) {
+  const meta = ALERT_TYPE_META[type];
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function DeliveryStatusBadge({ status }: { status: AlertDeliveryStatus }) {
+  const meta = DELIVERY_STATUS_META[status];
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
       {meta.label}
@@ -361,6 +449,53 @@ function IncidentCard({ incident }: { incident: IncidentRecord }) {
   );
 }
 
+function safeDeliveryErrorCode(value: unknown): string {
+  const code = safeText(value);
+  if (!code || code.length > 80) return '';
+  return /^[A-Za-z0-9_-]+$/.test(code) ? code : '';
+}
+
+function AlertCard({ alert }: { alert: FounderAlert }) {
+  const type = normalizeAlertType(alert.type);
+  const deliveryStatus = normalizeDeliveryStatus(alert.deliveryStatus);
+  const typeMeta = ALERT_TYPE_META[type];
+  const deliveryMeta = DELIVERY_STATUS_META[deliveryStatus];
+  const deliveryErrorCode = deliveryStatus === 'failed' ? safeDeliveryErrorCode(alert.deliveryErrorCode) : '';
+
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <AlertTypeBadge type={type} />
+            <DeliveryStatusBadge status={deliveryStatus} />
+          </div>
+          <h3 className="mt-3 text-base font-semibold text-slate-950 dark:text-slate-100">{safeText(alert.area) || 'News Pulse Engine'}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{safeText(alert.message) || `${typeMeta.label} recorded.`}</p>
+        </div>
+      </div>
+
+      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+        <div>
+          <dt className="font-semibold text-slate-800 dark:text-slate-100">Delivery</dt>
+          <dd className="mt-1 text-slate-600 dark:text-slate-300">{deliveryMeta.label}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-800 dark:text-slate-100">Time</dt>
+          <dd className="mt-1 text-slate-600 dark:text-slate-300">{formatAlertTime(alert.createdAt)}</dd>
+        </div>
+      </dl>
+
+      {deliveryMeta.detail ? <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{deliveryMeta.detail}</p> : null}
+      {deliveryErrorCode ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+          Code: {deliveryErrorCode}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function extractIncidentList(payload: unknown): IncidentRecord[] {
   if (Array.isArray(payload)) return payload as IncidentRecord[];
   if (payload && typeof payload === 'object') {
@@ -368,6 +503,17 @@ function extractIncidentList(payload: unknown): IncidentRecord[] {
     if (Array.isArray(body.incidents)) return body.incidents as IncidentRecord[];
     if (Array.isArray(body.items)) return body.items as IncidentRecord[];
     if (Array.isArray(body.data)) return body.data as IncidentRecord[];
+  }
+  return [];
+}
+
+function extractAlertList(payload: unknown): FounderAlert[] {
+  if (Array.isArray(payload)) return payload as FounderAlert[];
+  if (payload && typeof payload === 'object') {
+    const body = payload as any;
+    if (Array.isArray(body.alerts)) return body.alerts as FounderAlert[];
+    if (Array.isArray(body.items)) return body.items as FounderAlert[];
+    if (Array.isArray(body.data)) return body.data as FounderAlert[];
   }
   return [];
 }
@@ -383,9 +529,13 @@ export default function AIEngine(): JSX.Element {
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [incidentsLoading, setIncidentsLoading] = useState(true);
   const [incidentsError, setIncidentsError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<FounderAlert[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
   const monitoringInFlightRef = useRef(false);
   const incidentsInFlightRef = useRef(false);
+  const alertsInFlightRef = useRef(false);
 
   const loadMonitoringStatus = useCallback(async (showLoading = true) => {
     if (monitoringInFlightRef.current) return false;
@@ -433,6 +583,29 @@ export default function AIEngine(): JSX.Element {
     }
   }, []);
 
+  const loadFounderAlerts = useCallback(async (showLoading = true) => {
+    if (alertsInFlightRef.current) return false;
+    alertsInFlightRef.current = true;
+    setAlertsError(null);
+    if (showLoading) setAlertsLoading(true);
+
+    try {
+      const data = await adminJson<unknown>(ALERTS_ENDPOINT, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      setAlerts(extractAlertList(data));
+      return true;
+    } catch (alertsLoadError) {
+      setAlerts([]);
+      setAlertsError(founderAlertsErrorMessage(alertsLoadError));
+      return false;
+    } finally {
+      setAlertsLoading(false);
+      alertsInFlightRef.current = false;
+    }
+  }, []);
+
   const loadHealth = useCallback(async (refresh = false) => {
     if (inFlightRef.current) return false;
     inFlightRef.current = true;
@@ -462,15 +635,17 @@ export default function AIEngine(): JSX.Element {
     void loadHealth(false);
     void loadMonitoringStatus(true);
     void loadIncidentHistory(true);
-  }, [loadHealth, loadIncidentHistory, loadMonitoringStatus]);
+    void loadFounderAlerts(true);
+  }, [loadFounderAlerts, loadHealth, loadIncidentHistory, loadMonitoringStatus]);
 
   const runManualRefresh = useCallback(async () => {
     const ok = await loadHealth(true);
     if (ok) {
       void loadMonitoringStatus(false);
       void loadIncidentHistory(false);
+      void loadFounderAlerts(false);
     }
-  }, [loadHealth, loadIncidentHistory, loadMonitoringStatus]);
+  }, [loadFounderAlerts, loadHealth, loadIncidentHistory, loadMonitoringStatus]);
 
   const overallStatus = normalizeStatus(snapshot?.overallStatus);
   const summary = snapshot?.summary || {};
@@ -497,6 +672,11 @@ export default function AIEngine(): JSX.Element {
   }, [incidents]);
   const openIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'open'), [sortedIncidents]);
   const resolvedIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'resolved'), [sortedIncidents]);
+  const sortedAlerts = useMemo(() => alerts.slice().sort((a, b) => {
+    const aTime = Date.parse(a.createdAt || '') || 0;
+    const bTime = Date.parse(b.createdAt || '') || 0;
+    return bTime - aTime;
+  }), [alerts]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
@@ -628,6 +808,24 @@ export default function AIEngine(): JSX.Element {
                   )}
                 </section>
               </>
+            ) : null}
+          </section>
+
+          <section className="space-y-4" aria-label="Founder Alerts">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950 dark:text-slate-100">Founder Alerts</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Recorded critical and recovery alerts from backend monitoring.</p>
+            </div>
+            {alertsLoading ? <div className="h-20 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" role="status" aria-label="Loading Founder alerts" /> : null}
+            {!alertsLoading && alertsError ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{alertsError}</div> : null}
+            {!alertsLoading && !alertsError ? (
+              sortedAlerts.length ? (
+                <div className="space-y-3">
+                  {sortedAlerts.map((alert, index) => <AlertCard key={alert.id || alert.incidentId || `${alert.area || 'alert'}-${index}`} alert={alert} />)}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">No Founder alerts recorded yet.</div>
+              )
             ) : null}
           </section>
         </>

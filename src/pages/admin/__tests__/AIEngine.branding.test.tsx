@@ -29,6 +29,8 @@ const automaticCheckedAt = '2026-08-31T11:15:00.000Z';
 const incidentStartedAt = '2026-08-31T10:00:00.000Z';
 const incidentLastSeenAt = '2026-08-31T10:03:00.000Z';
 const incidentResolvedAt = '2026-08-31T10:08:00.000Z';
+const criticalAlertCreatedAt = '2026-08-31T11:20:00.000Z';
+const recoveryAlertCreatedAt = '2026-08-31T11:10:00.000Z';
 
 function healthResponse(overrides: Record<string, any> = {}) {
   return {
@@ -122,7 +124,34 @@ function incidentsResponse(overrides: Record<string, any> = {}) {
   };
 }
 
-function mockEngineEndpoints(options: { health?: any; monitoring?: any; incidents?: any; monitoringError?: Error; incidentsError?: Error } = {}) {
+function alertsResponse(overrides: Record<string, any> = {}) {
+  return {
+    ok: true,
+    alerts: [
+      {
+        id: 'critical-alert-public-website',
+        incidentId: 'public-website-critical',
+        type: 'critical',
+        area: 'Public Website',
+        message: 'Public Website has entered a critical state.',
+        createdAt: criticalAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+      {
+        id: 'recovery-alert-public-website',
+        incidentId: 'public-website-critical',
+        type: 'recovery',
+        area: 'Public Website',
+        message: 'Public Website has recovered.',
+        createdAt: recoveryAlertCreatedAt,
+        deliveryStatus: 'recorded',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function mockEngineEndpoints(options: { health?: any; monitoring?: any; incidents?: any; alerts?: any; monitoringError?: Error; incidentsError?: Error; alertsError?: Error } = {}) {
   mocks.adminJson.mockImplementation((path: string) => {
     if (path === '/news-pulse-engine/monitoring/status') {
       if (options.monitoringError) return Promise.reject(options.monitoringError);
@@ -131,6 +160,10 @@ function mockEngineEndpoints(options: { health?: any; monitoring?: any; incident
     if (path === '/news-pulse-engine/incidents') {
       if (options.incidentsError) return Promise.reject(options.incidentsError);
       return Promise.resolve(options.incidents ?? incidentsResponse());
+    }
+    if (path === '/news-pulse-engine/alerts') {
+      if (options.alertsError) return Promise.reject(options.alertsError);
+      return Promise.resolve(options.alerts ?? alertsResponse());
     }
     return Promise.resolve(options.health ?? healthResponse());
   });
@@ -287,6 +320,16 @@ describe('AIEngine health dashboard', () => {
     }]);
   });
 
+  it('requests Founder alerts through the authenticated admin JSON helper', async () => {
+    render(<AIEngine />);
+
+    await waitFor(() => expect(callsFor('/news-pulse-engine/alerts')).toHaveLength(1));
+    expect(callsFor('/news-pulse-engine/alerts')[0]).toEqual(['/news-pulse-engine/alerts', {
+      method: 'GET',
+      cache: 'no-store',
+    }]);
+  });
+
   it('renders active automatic monitoring with backend interval, timestamp, and last run status', async () => {
     render(<AIEngine />);
 
@@ -343,6 +386,85 @@ describe('AIEngine health dashboard', () => {
     expect(screen.getByText('No recently resolved issues.')).toBeInTheDocument();
   });
 
+  it('renders Founder Alerts with critical and recovery alerts newest first', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'older-recovery',
+        type: 'recovery',
+        area: 'Public Website',
+        message: 'Public Website has recovered.',
+        createdAt: recoveryAlertCreatedAt,
+        deliveryStatus: 'recorded',
+      },
+      {
+        id: 'newer-critical',
+        type: 'critical',
+        area: 'Public Website',
+        message: 'Public Website has entered a critical state.',
+        createdAt: criticalAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    expect(within(alerts).getByRole('heading', { name: 'Founder Alerts' })).toBeInTheDocument();
+    const alertCards = within(alerts).getAllByRole('article');
+    expect(alertCards[0]).toHaveTextContent('Critical Alert');
+    expect(alertCards[0]).toHaveTextContent('Public Website');
+    expect(alertCards[0]).toHaveTextContent('Public Website has entered a critical state.');
+    expect(alertCards[0]).toHaveTextContent('Email Sent');
+    expect(alertCards[0]).toHaveTextContent(new Date(criticalAlertCreatedAt).toLocaleString());
+    expect(alertCards[1]).toHaveTextContent('Recovered');
+    expect(alertCards[1]).toHaveTextContent('Public Website has recovered.');
+    expect(alertCards[1]).toHaveTextContent('Stored Internally');
+    expect(alertCards[1]).toHaveTextContent('External email delivery was not configured.');
+  });
+
+  it('renders failed alert delivery with a safe backend error code', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'failed-alert',
+        type: 'critical',
+        area: 'Backend API',
+        message: 'Backend API has entered a critical state.',
+        createdAt: criticalAlertCreatedAt,
+        deliveryStatus: 'failed',
+        deliveryErrorCode: 'SMTP_UNAVAILABLE',
+        providerError: 'password=secret stack trace should not render',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    expect(within(alerts).getAllByText('Delivery Failed').length).toBeGreaterThan(0);
+    expect(within(alerts).getByText('Code: SMTP_UNAVAILABLE')).toBeInTheDocument();
+    expect(within(alerts).queryByText(/password=secret|stack trace should not render/i)).not.toBeInTheDocument();
+  });
+
+  it('handles missing optional alert fields without crashing', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [{}] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    expect(within(alerts).getByText('Founder Alert')).toBeInTheDocument();
+  expect(within(alerts).getAllByText('Status Unknown').length).toBeGreaterThan(0);
+    expect(within(alerts).getByText('News Pulse Engine')).toBeInTheDocument();
+    expect(within(alerts).getByText('Founder Alert recorded.')).toBeInTheDocument();
+    expect(within(alerts).getByText('Time unavailable')).toBeInTheDocument();
+  });
+
+  it('renders a normal empty state when there are no Founder alerts', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [] }) });
+
+    render(<AIEngine />);
+
+    expect(await screen.findByText('No Founder alerts recorded yet.')).toBeInTheDocument();
+  });
+
   it('isolates incident-history failures from the current health dashboard', async () => {
     mockEngineEndpoints({ incidentsError: new Error('incident stack should not appear') });
 
@@ -351,6 +473,16 @@ describe('AIEngine health dashboard', () => {
     expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
     expect(screen.getByText('Issue history could not be loaded.')).toBeInTheDocument();
     expect(screen.queryByText('incident stack should not appear')).not.toBeInTheDocument();
+  });
+
+  it('isolates Founder alert failures from the current health dashboard', async () => {
+    mockEngineEndpoints({ alertsError: new Error('smtp provider secret should not appear') });
+
+    render(<AIEngine />);
+
+    expect(await screen.findByLabelText('Overall System Status')).toBeInTheDocument();
+    expect(screen.getByText('Founder alerts could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText('smtp provider secret should not appear')).not.toBeInTheDocument();
   });
 
   it('isolates monitoring-status failures from the current health dashboard', async () => {
@@ -369,6 +501,7 @@ describe('AIEngine health dashboard', () => {
     mocks.adminJson.mockImplementation((path: string) => {
       if (path === '/news-pulse-engine/monitoring/status') return Promise.resolve(monitoringStatusResponse());
       if (path === '/news-pulse-engine/incidents') return Promise.resolve(incidentsResponse());
+      if (path === '/news-pulse-engine/alerts') return Promise.resolve(alertsResponse());
       healthCalls += 1;
       return Promise.resolve(healthCalls === 1
         ? healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } })
@@ -380,6 +513,37 @@ describe('AIEngine health dashboard', () => {
 
     await waitFor(() => expect(callsFor('/news-pulse-engine/health')).toHaveLength(2));
     expect(screen.queryByRole('button', { name: /fix|repair|restart|deploy|reconnect|clean database/i })).not.toBeInTheDocument();
+  });
+
+  it('refreshes Founder alerts after a successful manual health refresh', async () => {
+    let healthCalls = 0;
+    let alertCalls = 0;
+    mocks.adminJson.mockImplementation((path: string) => {
+      if (path === '/news-pulse-engine/monitoring/status') return Promise.resolve(monitoringStatusResponse());
+      if (path === '/news-pulse-engine/incidents') return Promise.resolve(incidentsResponse());
+      if (path === '/news-pulse-engine/alerts') {
+        alertCalls += 1;
+        return Promise.resolve(alertsResponse({ alerts: [{
+          id: `alert-${alertCalls}`,
+          type: alertCalls === 1 ? 'critical' : 'recovery',
+          area: 'Public Website',
+          message: alertCalls === 1 ? 'Public Website has entered a critical state.' : 'Public Website has recovered.',
+          createdAt: alertCalls === 1 ? recoveryAlertCreatedAt : criticalAlertCreatedAt,
+          deliveryStatus: 'sent',
+        }] }));
+      }
+      healthCalls += 1;
+      return Promise.resolve(healthCalls === 1
+        ? healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } })
+        : healthResponse({ summary: { healthy: 2, attention: 0, critical: 0 } }));
+    });
+
+    render(<AIEngine />);
+    expect(await screen.findByText('Public Website has entered a critical state.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Run Check Again' }));
+
+    await waitFor(() => expect(callsFor('/news-pulse-engine/alerts')).toHaveLength(2));
+    expect(await screen.findByText('Public Website has recovered.')).toBeInTheDocument();
   });
 
   it('renders loading state while the endpoint is pending', () => {
@@ -431,6 +595,7 @@ describe('AIEngine health dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'News Pulse Content Checker' })).not.toBeInTheDocument();
     expect(screen.queryByText('News Pulse Article Assistant')).not.toBeInTheDocument();
     expect(screen.queryByText('Content Checker')).not.toBeInTheDocument();
+    expect(screen.queryByText('PTI Compliance')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Title/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Language$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Summary/i)).not.toBeInTheDocument();
@@ -441,11 +606,19 @@ describe('AIEngine health dashboard', () => {
     expect(screen.queryByRole('button', { name: /email|push|sms|whatsapp|notification|alert/i })).not.toBeInTheDocument();
   });
 
+  it('does not add Founder alert resend, delete, dismiss, resolve, or repair actions', async () => {
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    expect(within(alerts).queryByRole('button', { name: /resend|delete|retry|mark read|dismiss|resolve|fix|repair/i })).not.toBeInTheDocument();
+  });
+
   it('keeps System Health refresh on the original health endpoint only', async () => {
     let healthCalls = 0;
     mocks.adminJson.mockImplementation((path: string) => {
       if (path === '/news-pulse-engine/monitoring/status') return Promise.resolve(monitoringStatusResponse());
       if (path === '/news-pulse-engine/incidents') return Promise.resolve(incidentsResponse());
+      if (path === '/news-pulse-engine/alerts') return Promise.resolve(alertsResponse());
       healthCalls += 1;
       return Promise.resolve(healthCalls === 1
         ? healthResponse({ summary: { healthy: 1, attention: 0, critical: 0 } })
