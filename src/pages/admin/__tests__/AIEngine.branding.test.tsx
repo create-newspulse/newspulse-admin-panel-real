@@ -31,6 +31,8 @@ const incidentLastSeenAt = '2026-08-31T10:03:00.000Z';
 const incidentResolvedAt = '2026-08-31T10:08:00.000Z';
 const criticalAlertCreatedAt = '2026-08-31T11:20:00.000Z';
 const recoveryAlertCreatedAt = '2026-08-31T11:10:00.000Z';
+const pairedCriticalAlertCreatedAt = '2026-08-31T17:36:00.000Z';
+const pairedRecoveryAlertCreatedAt = '2026-08-31T17:46:00.000Z';
 
 function healthResponse(overrides: Record<string, any> = {}) {
   return {
@@ -408,22 +410,24 @@ describe('AIEngine health dashboard', () => {
     expect(screen.getByText('No recently resolved issues.')).toBeInTheDocument();
   });
 
-  it('renders Founder Alerts with critical and recovery alerts newest first', async () => {
+  it('groups matching critical and recovery Founder alerts with compact lifecycle metadata', async () => {
     mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
       {
-        id: 'older-recovery',
-        type: 'recovery',
-        area: 'Public Website',
-        message: 'Public Website has recovered.',
-        createdAt: recoveryAlertCreatedAt,
-        deliveryStatus: 'recorded',
-      },
-      {
-        id: 'newer-critical',
+        id: 'public-critical',
+        incidentId: 'incident-public',
         type: 'critical',
         area: 'Public Website',
         message: 'Public Website has entered a critical state.',
-        createdAt: criticalAlertCreatedAt,
+        createdAt: pairedCriticalAlertCreatedAt,
+        deliveryStatus: 'recorded',
+      },
+      {
+        id: 'public-recovery',
+        incidentId: 'incident-public',
+        type: 'recovery',
+        area: 'Public Website',
+        message: 'Public Website has recovered.',
+        createdAt: pairedRecoveryAlertCreatedAt,
         deliveryStatus: 'sent',
       },
     ] }) });
@@ -432,16 +436,70 @@ describe('AIEngine health dashboard', () => {
 
     const alerts = await screen.findByLabelText('Founder Alerts');
     expect(within(alerts).getByRole('heading', { name: 'Founder Alerts' })).toBeInTheDocument();
-    const alertCards = within(alerts).getAllByRole('article');
-    expect(alertCards[0]).toHaveTextContent('Critical Alert');
-    expect(alertCards[0]).toHaveTextContent('Public Website');
-    expect(alertCards[0]).toHaveTextContent('Public Website has entered a critical state.');
-    expect(alertCards[0]).toHaveTextContent('Email Sent');
-    expect(alertCards[0]).toHaveTextContent(new Date(criticalAlertCreatedAt).toLocaleString());
-    expect(alertCards[1]).toHaveTextContent('Recovered');
-    expect(alertCards[1]).toHaveTextContent('Public Website has recovered.');
-    expect(alertCards[1]).toHaveTextContent('Stored Internally');
-    expect(alertCards[1]).toHaveTextContent('External email delivery was not configured.');
+    const alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(1);
+    expect(alertRows[0]).toHaveTextContent('Public Website');
+    expect(alertRows[0]).toHaveTextContent('Recovered');
+    expect(alertRows[0]).toHaveTextContent('Previously Critical');
+    expect(alertRows[0]).toHaveTextContent('Email Sent');
+    expect(alertRows[0]).toHaveTextContent('Critical at');
+    expect(alertRows[0]).toHaveTextContent(new Date(pairedCriticalAlertCreatedAt).toLocaleString());
+    expect(alertRows[0]).toHaveTextContent('Recovered at');
+    expect(alertRows[0]).toHaveTextContent(new Date(pairedRecoveryAlertCreatedAt).toLocaleString());
+    expect(alertRows[0]).toHaveTextContent('Duration');
+    expect(alertRows[0]).toHaveTextContent('10 minutes');
+    expect(within(alertRows[0]).queryByText('Delivery')).not.toBeInTheDocument();
+  });
+
+  it('keeps active critical Founder alerts visible and more prominent', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'active-critical',
+        incidentId: 'incident-admin',
+        type: 'critical',
+        area: 'Admin Panel',
+        message: 'Admin Panel has entered a critical state.',
+        createdAt: criticalAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    const alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows[0]).toHaveTextContent('Admin Panel');
+    expect(alertRows[0]).toHaveTextContent('Critical — Active');
+    expect(alertRows[0]).toHaveTextContent('Critical at');
+    expect(alertRows[0]).toHaveClass('border-rose-300');
+    expect(within(alerts).getByLabelText('Active Critical: 1')).toBeInTheDocument();
+  });
+
+  it('renders Stored Internally delivery for the latest lifecycle event', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'public-critical',
+        incidentId: 'incident-public',
+        type: 'critical',
+        area: 'Public Website',
+        createdAt: pairedCriticalAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+      {
+        id: 'public-recovery',
+        incidentId: 'incident-public',
+        type: 'recovery',
+        area: 'Public Website',
+        createdAt: pairedRecoveryAlertCreatedAt,
+        deliveryStatus: 'recorded',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    expect(within(alerts).getAllByText('Stored Internally').length).toBeGreaterThan(0);
+    expect(within(alerts).getByText('External email delivery was not configured.')).toBeInTheDocument();
   });
 
   it('renders failed alert delivery with a safe backend error code', async () => {
@@ -463,7 +521,82 @@ describe('AIEngine health dashboard', () => {
     const alerts = await screen.findByLabelText('Founder Alerts');
     expect(within(alerts).getAllByText('Delivery Failed').length).toBeGreaterThan(0);
     expect(within(alerts).getByText('Code: SMTP_UNAVAILABLE')).toBeInTheDocument();
+    expect(within(alerts).getByLabelText('Email Delivery Issues: 1')).toBeInTheDocument();
     expect(within(alerts).queryByText(/password=secret|stack trace should not render/i)).not.toBeInTheDocument();
+  });
+
+  it('filters Founder alerts and keeps newest lifecycle activity first', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'public-critical',
+        incidentId: 'incident-public',
+        type: 'critical',
+        area: 'Public Website',
+        createdAt: pairedCriticalAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+      {
+        id: 'public-recovery',
+        incidentId: 'incident-public',
+        type: 'recovery',
+        area: 'Public Website',
+        createdAt: pairedRecoveryAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+      {
+        id: 'admin-critical',
+        incidentId: 'incident-admin',
+        type: 'critical',
+        area: 'Admin Panel',
+        createdAt: '2026-08-31T18:00:00.000Z',
+        deliveryStatus: 'recorded',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    let alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows[0]).toHaveTextContent('Admin Panel');
+    expect(alertRows[1]).toHaveTextContent('Public Website');
+
+    fireEvent.click(within(alerts).getByRole('button', { name: 'Recovered' }));
+    alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(1);
+    expect(alertRows[0]).toHaveTextContent('Public Website');
+
+    fireEvent.click(within(alerts).getByRole('button', { name: 'Active Critical' }));
+    alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(1);
+    expect(alertRows[0]).toHaveTextContent('Admin Panel');
+
+    fireEvent.click(within(alerts).getByRole('button', { name: 'All' }));
+    expect(within(alerts).getAllByRole('article')).toHaveLength(2);
+  });
+
+  it('shows the latest Founder alert groups first and lets older alerts be expanded', async () => {
+    const generatedAlerts = Array.from({ length: 11 }, (_, index) => ({
+      id: `alert-${index}`,
+      type: 'critical',
+      area: `System ${index}`,
+      createdAt: `2026-08-31T10:${String(index).padStart(2, '0')}:00.000Z`,
+      deliveryStatus: 'sent',
+    }));
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: generatedAlerts }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    let alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(10);
+    expect(alertRows[0]).toHaveTextContent('System 10');
+    expect(alertRows[9]).toHaveTextContent('System 1');
+    expect(within(alerts).queryByText('System 0')).not.toBeInTheDocument();
+
+    fireEvent.click(within(alerts).getByRole('button', { name: 'View older alerts' }));
+    alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(11);
+    expect(within(alerts).getByText('System 0')).toBeInTheDocument();
   });
 
   it('handles missing optional alert fields without crashing', async () => {
@@ -473,10 +606,35 @@ describe('AIEngine health dashboard', () => {
 
     const alerts = await screen.findByLabelText('Founder Alerts');
     expect(within(alerts).getByText('Founder Alert')).toBeInTheDocument();
-  expect(within(alerts).getAllByText('Status Unknown').length).toBeGreaterThan(0);
+    expect(within(alerts).getAllByText('Status Unknown').length).toBeGreaterThan(0);
     expect(within(alerts).getByText('News Pulse Engine')).toBeInTheDocument();
     expect(within(alerts).getByText('Founder Alert recorded.')).toBeInTheDocument();
+    expect(within(alerts).getByText('Alert at')).toBeInTheDocument();
     expect(within(alerts).getByText('Time unavailable')).toBeInTheDocument();
+  });
+
+  it('renders unmatched recovery alerts separately without inventing critical context', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: [
+      {
+        id: 'unmatched-recovery',
+        incidentId: 'incident-recovery-only',
+        type: 'recovery',
+        area: 'Public Website',
+        message: 'Public Website has recovered.',
+        createdAt: recoveryAlertCreatedAt,
+        deliveryStatus: 'sent',
+      },
+    ] }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    const alertRows = within(alerts).getAllByRole('article');
+    expect(alertRows).toHaveLength(1);
+    expect(alertRows[0]).toHaveTextContent('Recovered');
+    expect(alertRows[0]).toHaveTextContent('Recovered at');
+    expect(alertRows[0]).not.toHaveTextContent('Previously Critical');
+    expect(alertRows[0]).not.toHaveTextContent('Critical at');
   });
 
   it('renders a normal empty state when there are no Founder alerts', async () => {
@@ -566,6 +724,26 @@ describe('AIEngine health dashboard', () => {
 
     await waitFor(() => expect(callsFor('/news-pulse-engine/alerts')).toHaveLength(2));
     expect(await screen.findByText('Public Website has recovered.')).toBeInTheDocument();
+  });
+
+  it('does not add backend write actions for Founder alert display controls', async () => {
+    mockEngineEndpoints({ alerts: alertsResponse({ alerts: Array.from({ length: 11 }, (_, index) => ({
+      id: `alert-${index}`,
+      type: index === 0 ? 'recovery' : 'critical',
+      area: `System ${index}`,
+      createdAt: `2026-08-31T10:${String(index).padStart(2, '0')}:00.000Z`,
+      deliveryStatus: 'sent',
+    })) }) });
+
+    render(<AIEngine />);
+
+    const alerts = await screen.findByLabelText('Founder Alerts');
+    fireEvent.click(within(alerts).getByRole('button', { name: 'Recovered' }));
+    fireEvent.click(within(alerts).getByRole('button', { name: 'All' }));
+    fireEvent.click(within(alerts).getByRole('button', { name: 'View older alerts' }));
+
+    expect(mocks.adminJson.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+    expect(callsFor('/news-pulse-engine/alerts')).toHaveLength(1);
   });
 
   it('renders loading state while the endpoint is pending', () => {

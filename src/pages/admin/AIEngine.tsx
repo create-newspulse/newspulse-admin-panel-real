@@ -6,11 +6,13 @@ const HEALTH_ENDPOINT = '/news-pulse-engine/health';
 const MONITORING_STATUS_ENDPOINT = '/news-pulse-engine/monitoring/status';
 const INCIDENTS_ENDPOINT = '/news-pulse-engine/incidents';
 const ALERTS_ENDPOINT = '/news-pulse-engine/alerts';
+const FOUNDER_ALERTS_INITIAL_LIMIT = 10;
 
 type HealthStatus = 'healthy' | 'attention' | 'critical' | 'unknown';
 type IncidentState = 'open' | 'resolved' | 'unknown';
 type AlertType = 'critical' | 'recovery' | 'unknown';
 type AlertDeliveryStatus = 'sent' | 'recorded' | 'failed' | 'unknown';
+type FounderAlertFilter = 'all' | 'active' | 'recovered';
 
 type HealthSummary = {
   healthy: number;
@@ -77,6 +79,19 @@ type FounderAlert = {
   deliveryErrorCode?: string | null;
 };
 
+type FounderAlertGroupStatus = 'active' | 'recovered' | 'unknown';
+
+type FounderAlertGroup = {
+  id: string;
+  alerts: FounderAlert[];
+  area: string;
+  status: FounderAlertGroupStatus;
+  latestAlert: FounderAlert;
+  criticalAlert?: FounderAlert;
+  recoveryAlert?: FounderAlert;
+  sortTime: number;
+};
+
 type StatusMeta = {
   label: string;
   cardClass: string;
@@ -129,7 +144,7 @@ const INCIDENT_STATE_META: Record<IncidentState, { label: string; badgeClass: st
 
 const ALERT_TYPE_META: Record<AlertType, { label: string; badgeClass: string }> = {
   critical: {
-    label: 'Critical Alert',
+    label: 'Critical',
     badgeClass: STATUS_META.critical.badgeClass,
   },
   recovery: {
@@ -485,35 +500,150 @@ function safeDeliveryErrorCode(value: unknown): string {
   return /^[A-Za-z0-9_-]+$/.test(code) ? code : '';
 }
 
-function AlertCard({ alert }: { alert: FounderAlert }) {
+function alertTimeMs(alert?: FounderAlert): number {
+  const timestamp = Date.parse(alert?.createdAt || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function latestAlert(alerts: FounderAlert[]): FounderAlert {
+  return alerts.reduce((latest, alert) => (alertTimeMs(alert) >= alertTimeMs(latest) ? alert : latest), alerts[0] || {});
+}
+
+function earliestTypedAlert(alerts: FounderAlert[], type: AlertType): FounderAlert | undefined {
+  return alerts
+    .filter((alert) => normalizeAlertType(alert.type) === type)
+    .sort((a, b) => alertTimeMs(a) - alertTimeMs(b))[0];
+}
+
+function latestTypedAlert(alerts: FounderAlert[], type: AlertType): FounderAlert | undefined {
+  return alerts
+    .filter((alert) => normalizeAlertType(alert.type) === type)
+    .sort((a, b) => alertTimeMs(b) - alertTimeMs(a))[0];
+}
+
+function alertDuration(start?: FounderAlert, end?: FounderAlert): string | null {
+  const startTime = alertTimeMs(start);
+  const endTime = alertTimeMs(end);
+  if (!startTime || !endTime || endTime < startTime) return null;
+  return formatDuration(endTime - startTime);
+}
+
+function alertFallbackMessage(alert: FounderAlert): string {
   const type = normalizeAlertType(alert.type);
-  const deliveryStatus = normalizeDeliveryStatus(alert.deliveryStatus);
-  const typeMeta = ALERT_TYPE_META[type];
+  if (type === 'critical') return 'Critical alert recorded.';
+  if (type === 'recovery') return 'Recovery alert recorded.';
+  return 'Founder Alert recorded.';
+}
+
+function standaloneAlertGroup(alert: FounderAlert, index: number): FounderAlertGroup {
+  const type = normalizeAlertType(alert.type);
+  return {
+    id: alert.id || alert.incidentId || `${safeText(alert.area) || 'founder-alert'}-${index}`,
+    alerts: [alert],
+    area: safeText(alert.area) || 'News Pulse Engine',
+    status: type === 'critical' ? 'active' : type === 'recovery' ? 'recovered' : 'unknown',
+    latestAlert: alert,
+    criticalAlert: type === 'critical' ? alert : undefined,
+    recoveryAlert: type === 'recovery' ? alert : undefined,
+    sortTime: alertTimeMs(alert),
+  };
+}
+
+function buildFounderAlertGroups(alerts: FounderAlert[]): FounderAlertGroup[] {
+  const groupedByIncident = new Map<string, FounderAlert[]>();
+  const groups: FounderAlertGroup[] = [];
+
+  alerts.forEach((alert, index) => {
+    const incidentId = safeText(alert.incidentId);
+    if (!incidentId) {
+      groups.push(standaloneAlertGroup(alert, index));
+      return;
+    }
+    groupedByIncident.set(incidentId, [...(groupedByIncident.get(incidentId) || []), alert]);
+  });
+
+  groupedByIncident.forEach((incidentAlerts, incidentId) => {
+    const criticalAlert = earliestTypedAlert(incidentAlerts, 'critical');
+    const latestCriticalAlert = latestTypedAlert(incidentAlerts, 'critical');
+    const recoveryAlert = latestTypedAlert(incidentAlerts, 'recovery');
+    const latest = latestAlert(incidentAlerts);
+    const latestType = normalizeAlertType(latest.type);
+    const area = safeText(latest.area) || safeText(criticalAlert?.area) || safeText(recoveryAlert?.area) || 'News Pulse Engine';
+
+    if (criticalAlert && recoveryAlert && latestType === 'recovery') {
+      groups.push({
+        id: incidentId,
+        alerts: incidentAlerts,
+        area,
+        status: 'recovered',
+        latestAlert: latest,
+        criticalAlert,
+        recoveryAlert,
+        sortTime: alertTimeMs(latest),
+      });
+      return;
+    }
+
+    if (latestCriticalAlert && latestType === 'critical') {
+      groups.push({
+        id: incidentId,
+        alerts: incidentAlerts,
+        area,
+        status: 'active',
+        latestAlert: latestCriticalAlert,
+        criticalAlert: latestCriticalAlert,
+        sortTime: alertTimeMs(latestCriticalAlert),
+      });
+      return;
+    }
+
+    incidentAlerts.forEach((alert, index) => groups.push(standaloneAlertGroup(alert, index)));
+  });
+
+  return groups.sort((a, b) => b.sortTime - a.sortTime);
+}
+
+function FounderAlertStatusBadge({ group }: { group: FounderAlertGroup }) {
+  if (group.status === 'active') {
+    return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${STATUS_META.critical.badgeClass}`}>Critical — Active</span>;
+  }
+  if (group.status === 'recovered') {
+    return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${STATUS_META.healthy.badgeClass}`}>Recovered</span>;
+  }
+  return <AlertTypeBadge type={normalizeAlertType(group.latestAlert.type)} />;
+}
+
+function FounderAlertGroupCard({ group }: { group: FounderAlertGroup }) {
+  const deliveryStatus = normalizeDeliveryStatus(group.latestAlert.deliveryStatus);
   const deliveryMeta = DELIVERY_STATUS_META[deliveryStatus];
-  const deliveryErrorCode = deliveryStatus === 'failed' ? safeDeliveryErrorCode(alert.deliveryErrorCode) : '';
+  const deliveryErrorCode = deliveryStatus === 'failed' ? safeDeliveryErrorCode(group.latestAlert.deliveryErrorCode) : '';
+  const duration = alertDuration(group.criticalAlert, group.recoveryAlert);
+  const latestMessage = safeText(group.latestAlert.message) || alertFallbackMessage(group.latestAlert);
+  const cardClass = group.status === 'active'
+    ? 'border-rose-300 bg-rose-50 shadow-sm dark:border-rose-900/70 dark:bg-rose-950/25'
+    : 'border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900';
 
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap gap-2">
-            <AlertTypeBadge type={type} />
+    <article className={`rounded-xl border px-4 py-3 ${cardClass}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-950 dark:text-slate-100">{group.area}</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <FounderAlertStatusBadge group={group} />
             <DeliveryStatusBadge status={deliveryStatus} />
+            {group.status === 'recovered' && group.criticalAlert ? (
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">Previously Critical</span>
+            ) : null}
           </div>
-          <h3 className="mt-3 text-base font-semibold text-slate-950 dark:text-slate-100">{safeText(alert.area) || 'News Pulse Engine'}</h3>
-          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{safeText(alert.message) || `${typeMeta.label} recorded.`}</p>
+          <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">{latestMessage}</p>
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="font-semibold text-slate-800 dark:text-slate-100">Delivery</dt>
-          <dd className="mt-1 text-slate-600 dark:text-slate-300">{deliveryMeta.label}</dd>
-        </div>
-        <div>
-          <dt className="font-semibold text-slate-800 dark:text-slate-100">Time</dt>
-          <dd className="mt-1 text-slate-600 dark:text-slate-300">{formatAlertTime(alert.createdAt)}</dd>
-        </div>
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+        {group.criticalAlert ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Critical at</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{formatAlertTime(group.criticalAlert.createdAt)}</dd></div> : null}
+        {group.recoveryAlert ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Recovered at</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{formatAlertTime(group.recoveryAlert.createdAt)}</dd></div> : null}
+        {!group.criticalAlert && !group.recoveryAlert ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Alert at</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{formatAlertTime(group.latestAlert.createdAt)}</dd></div> : null}
+        {duration ? <div><dt className="font-semibold text-slate-800 dark:text-slate-100">Duration</dt><dd className="mt-1 text-slate-600 dark:text-slate-300">{duration}</dd></div> : null}
       </dl>
 
       {deliveryMeta.detail ? <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{deliveryMeta.detail}</p> : null}
@@ -571,6 +701,8 @@ export default function AIEngine(): JSX.Element {
   const [alerts, setAlerts] = useState<FounderAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
   const [alertsError, setAlertsError] = useState<string | null>(null);
+  const [alertFilter, setAlertFilter] = useState<FounderAlertFilter>('all');
+  const [showOlderAlerts, setShowOlderAlerts] = useState(false);
   const inFlightRef = useRef(false);
   const monitoringInFlightRef = useRef(false);
   const incidentsInFlightRef = useRef(false);
@@ -711,11 +843,19 @@ export default function AIEngine(): JSX.Element {
   }, [incidents]);
   const openIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'open'), [sortedIncidents]);
   const resolvedIncidents = useMemo(() => sortedIncidents.filter((incident) => normalizeIncidentState(incident.state, incident.resolvedAt) === 'resolved'), [sortedIncidents]);
-  const sortedAlerts = useMemo(() => alerts.slice().sort((a, b) => {
-    const aTime = Date.parse(a.createdAt || '') || 0;
-    const bTime = Date.parse(b.createdAt || '') || 0;
-    return bTime - aTime;
-  }), [alerts]);
+  const alertGroups = useMemo(() => buildFounderAlertGroups(alerts), [alerts]);
+  const alertSummary = useMemo(() => ({
+    activeCritical: alertGroups.filter((group) => group.status === 'active').length,
+    recovered: alertGroups.filter((group) => group.status === 'recovered').length,
+    emailDeliveryIssues: alerts.filter((alert) => normalizeDeliveryStatus(alert.deliveryStatus) === 'failed').length,
+  }), [alertGroups, alerts]);
+  const filteredAlertGroups = useMemo(() => alertGroups.filter((group) => {
+    if (alertFilter === 'active') return group.status === 'active';
+    if (alertFilter === 'recovered') return group.status === 'recovered';
+    return true;
+  }), [alertFilter, alertGroups]);
+  const visibleAlertGroups = showOlderAlerts ? filteredAlertGroups : filteredAlertGroups.slice(0, FOUNDER_ALERTS_INITIAL_LIMIT);
+  const hasOlderAlertGroups = filteredAlertGroups.length > visibleAlertGroups.length;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
@@ -858,10 +998,59 @@ export default function AIEngine(): JSX.Element {
             {alertsLoading ? <div className="h-20 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800" role="status" aria-label="Loading Founder alerts" /> : null}
             {!alertsLoading && alertsError ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">{alertsError}</div> : null}
             {!alertsLoading && !alertsError ? (
-              sortedAlerts.length ? (
-                <div className="space-y-3">
-                  {sortedAlerts.map((alert, index) => <AlertCard key={alert.id || alert.incidentId || `${alert.area || 'alert'}-${index}`} alert={alert} />)}
-                </div>
+              alertGroups.length ? (
+                <>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Founder Alerts Summary">
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-900/60 dark:bg-rose-950/25" aria-label={`Active Critical: ${alertSummary.activeCritical}`}>
+                      <div className="text-xs font-semibold uppercase text-rose-700 dark:text-rose-200">Active Critical</div>
+                      <div className="mt-1 text-2xl font-bold text-rose-950 dark:text-rose-100">{alertSummary.activeCritical}</div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900/60 dark:bg-emerald-950/25" aria-label={`Recovered: ${alertSummary.recovered}`}>
+                      <div className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-200">Recovered</div>
+                      <div className="mt-1 text-2xl font-bold text-emerald-950 dark:text-emerald-100">{alertSummary.recovered}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900" aria-label={`Email Delivery Issues: ${alertSummary.emailDeliveryIssues}`}>
+                      <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Email Delivery Issues</div>
+                      <div className="mt-1 text-2xl font-bold text-slate-950 dark:text-slate-100">{alertSummary.emailDeliveryIssues}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2" aria-label="Founder Alerts Filters">
+                    {([
+                      ['all', 'All'],
+                      ['active', 'Active Critical'],
+                      ['recovered', 'Recovered'],
+                    ] as Array<[FounderAlertFilter, string]>).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={alertFilter === value}
+                        onClick={() => {
+                          setAlertFilter(value);
+                          setShowOlderAlerts(false);
+                        }}
+                        className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${alertFilter === value ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {visibleAlertGroups.length ? (
+                    <div className="space-y-2">
+                      {visibleAlertGroups.map((group) => <FounderAlertGroupCard key={group.id} group={group} />)}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">No Founder alerts match this filter.</div>
+                  )}
+                  {hasOlderAlertGroups ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowOlderAlerts(true)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      View older alerts
+                    </button>
+                  ) : null}
+                </>
               ) : (
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">No Founder alerts recorded yet.</div>
               )
