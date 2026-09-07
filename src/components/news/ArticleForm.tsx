@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
-import { useAuth } from '@context/AuthContext';
 import { verifyLanguage, readability } from '@/lib/api/language';
 import TagInput from '@/components/ui/TagInput';
 import Accordion, { type AccordionItem } from '@/components/ui/Accordion';
@@ -63,11 +62,6 @@ const EMPTY_LANGUAGE_REVIEW_FIELDS: ArticleLanguageReviewFields = {
 function hasAnyLanguageDraftContent(draft: ArticleLanguageDraft | null | undefined): boolean {
   if (!draft) return false;
   return !!(draft.title.trim() || draft.slug.trim() || draft.summary.trim() || draft.content.trim());
-}
-
-function isLanguageDraftComplete(draft: ArticleLanguageDraft | null | undefined): boolean {
-  if (!draft) return false;
-  return !!(draft.title.trim() && draft.summary.trim() && draft.content.trim());
 }
 
 function getArticleDraftFromRecord(record: any): ArticleLanguageDraft {
@@ -425,7 +419,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
   // resolve edit id
   const initialEditId = id || articleId || null;
   const [effectiveId, setEffectiveId] = useState<string | null>(initialEditId);
@@ -1497,20 +1490,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     });
   }, [translationVariants, language, title, slug, summary, content]);
 
-  const translationCompletion = useMemo<Record<LangCode, boolean>>(() => {
-    const result = {} as Record<LangCode, boolean>;
-    for (const code of ARTICLE_LANGUAGE_CODES) {
-      const draft = code === language ? { title, slug, summary, content } : languageDrafts[code];
-      const variant = translationVariants[code];
-      result[code] = isLanguageDraftComplete(draft) || isLanguageDraftComplete(variant ? getArticleDraftFromRecord(variant) : null);
-    }
-    return result;
-  }, [language, languageDrafts, translationVariants, title, slug, summary, content]);
-
-  const allTranslationsComplete = useMemo(() => {
-    return ARTICLE_LANGUAGE_CODES.every((code) => translationCompletion[code]);
-  }, [translationCompletion]);
-
   const isMasterArticle = useMemo(() => {
     return !!translationGroupIdTrimmed && !!translationSourceLanguage && translationSourceLanguage === currentArticleLanguage;
   }, [translationGroupIdTrimmed, translationSourceLanguage, currentArticleLanguage]);
@@ -1882,7 +1861,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       })();
 
       // Production CMS contract:
-      // Publish should create (draft) first if needed, then publish via endpoint.
+      // Publish should persist the source draft first if needed, then publish via the canonical endpoint.
       if (!onSubmit && desiredStatusOverride === 'published') {
         const publishAtToSend = publishedAtIso || new Date().toISOString();
 
@@ -1892,7 +1871,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         if (!categoryAllowed) throw new Error('Category is not allowed');
 
         const draftPayload = buildPublicPayload({ status: 'draft' });
-        const publishPayload = buildPublicPayload({ status: 'published', publishedAt: publishAtToSend });
 
         let idToPublish: string | null = effectiveId ? String(effectiveId) : null;
         if (!idToPublish) {
@@ -1900,17 +1878,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           const createdPayload = created?.article || created?.data?.article || created?.data || created;
           idToPublish = createdPayload?._id || createdPayload?.id || created?._id || created?.id || null;
           if (!idToPublish) throw new Error('Failed to create draft before publish (missing id).');
+        } else {
+          await updateArticle(idToPublish, draftPayload as any);
         }
 
-        try {
-          // Preferred: send full payload via update (ensures backend receives clean fields)
-          const updated: any = await updateArticle(idToPublish, publishPayload as any);
-          return { ...(updated as any), __npCreatedId: idToPublish };
-        } catch {
-          // Fallback: minimal publish contract via admin proxy
-          const published: any = await publishArticle(idToPublish, publishAtToSend, { summary });
-          return { data: { ...(published as any), __npCreatedId: idToPublish } };
-        }
+        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId };
+        const published: any = await publishArticle(idToPublish, publishAtToSend);
+        return { ...(published as any), __npCreatedId: idToPublish };
       }
 
       // Compute safe status to send:
@@ -2474,10 +2448,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   async function beginPublishFlow() {
     if (isSaving || isPublishing) return;
     if (!canPublish) return;
-    if (!allTranslationsComplete) {
-      toast.error('Complete the English, Hindi and Gujarati versions before publishing.');
-      return;
-    }
     // Guard: required fields
     if (publishMissing.length > 0) return;
 
@@ -2522,10 +2492,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }
 
   const previewDraft = getDraftForLanguage(previewLanguage);
-  const previewLanguageEnabled = (code: LangCode) => {
-    const draft = getDraftForLanguage(code);
-    return !!(draft.title.trim() && draft.content.trim());
-  };
   const sourceLanguageForReview = translationSourceLanguage || language;
   const translationStatusVisible = !!effectiveId || !!translationGroupIdTrimmed;
   const automaticProgressLabel = (() => {

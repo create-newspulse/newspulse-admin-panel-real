@@ -8,6 +8,7 @@ import { NewsTable } from '@/components/news/NewsTable';
 import { QuickViewsBar, type QuickViewCounts, type QuickViewKey } from '@/components/news/QuickViewsBar';
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
 import apiClient from '@/lib/api';
+import { publishArticle } from '@/lib/api/articles';
 import { debug } from '@/lib/debug';
 import { guardAction, type ArticleWorkflowAction } from '@/lib/articleWorkflowGuard';
 import toast from 'react-hot-toast';
@@ -227,7 +228,11 @@ export default function ManageNews() {
         return;
       }
 
-      await apiClient.post(`/news/${id}/transition`, { action });
+      if (action === 'publish') {
+        await publishArticle(id);
+      } else {
+        await apiClient.post(`/news/${id}/transition`, { action });
+      }
       toast.success(`${action} done`);
 
       // Trigger a soft refresh by nudging params (keeps pagination)

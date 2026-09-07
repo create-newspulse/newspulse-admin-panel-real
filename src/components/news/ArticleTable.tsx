@@ -6,6 +6,7 @@ import {
   archiveArticle,
   restoreArticle,
   deleteArticle,
+  publishArticle,
   updateArticleStatus,
   scheduleArticle,
   unscheduleArticle,
@@ -130,7 +131,7 @@ export const ArticleTable: React.FC<Props> = ({ params, onSelectIds, onPageChang
 
   // Mutations for status transitions
   const mutatePublish = useMutation({
-    mutationFn: (id: string) => updateArticleStatus(id, 'published'),
+    mutationFn: (id: string) => publishArticle(id),
     onSuccess: () => { toast.success('Published'); },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['articles'] }); }
   });

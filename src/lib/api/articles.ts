@@ -69,7 +69,6 @@ export interface Article {
   trackName?: string;
   subCategory?: string;
   subcategory?: string;
-  state?: string;
   district?: string;
   city?: string;
   // Optional editorial workflow state (admin backend may enrich articles with this)
@@ -81,8 +80,6 @@ export interface Article {
   createdAt?: string;
   updatedAt?: string;
   scheduledAt?: string;
-  // Back-compat: scheduled publish timestamp.
-  publishAt?: string;
 }
 
 export interface ListResponse {
@@ -349,16 +346,7 @@ export async function deleteArticle(id: string) {
 export async function updateArticleStatus(id: string, status: ArticleStatus) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   if (status === 'published') {
-    const publishedAt = new Date().toISOString();
-    logAdminArticleRequest('updateArticleStatus', {
-      targetArticleId: id,
-      route: `/admin-api/${url}`,
-      payload: { status: 'published', publishedAt },
-      relatedArticleIds: [],
-    });
-    // Prefer PUT for publish to avoid accidental calls to a /publish endpoint on the frontend host.
-    const res = await adminApiClient.put(url, { status: 'published', publishedAt });
-    return res.data as any;
+    return publishArticle(id);
   }
   logAdminArticleRequest('updateArticleStatus', {
     targetArticleId: id,
@@ -369,10 +357,10 @@ export async function updateArticleStatus(id: string, status: ArticleStatus) {
   return patchThenPut<Article>(url, { status });
 }
 
-export async function publishArticle(id: string, publishedAt?: string, extra?: Partial<Article>) {
+export async function publishArticle(id: string, publishedAt?: string) {
   const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
   const ts = (publishedAt && String(publishedAt).trim()) ? String(publishedAt).trim() : new Date().toISOString();
-  const payload = withDescriptionFallback({ ...(extra || {}), status: 'published', publishedAt: ts } as any);
+  const payload = { status: 'published', publishedAt: ts };
   logAdminArticleRequest('publishArticle', {
     targetArticleId: id,
     route: `/admin-api/${url}`,

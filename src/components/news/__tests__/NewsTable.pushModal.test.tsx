@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARTICLE_PUSH_SPAM_WARNING } from '@/lib/pushSendFeedback';
-import { listArticles } from '@/lib/api/articles';
+import { listArticles, publishArticle, updateArticleStatus } from '@/lib/api/articles';
 import { NewsTable } from '../NewsTable';
 
 vi.mock('@/context/AuthContext', () => ({
@@ -24,6 +24,7 @@ vi.mock('@/lib/api/articles', () => ({
   archiveArticle: vi.fn(),
   restoreArticle: vi.fn(),
   deleteArticle: vi.fn(),
+  publishArticle: vi.fn(),
   updateArticleStatus: vi.fn(),
   scheduleArticle: vi.fn(),
   unscheduleArticle: vi.fn(),
@@ -44,7 +45,7 @@ function renderNewsTable() {
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <NewsTable
-          params={{ page: 1, limit: 20 }}
+          params={{ status: 'all', page: 1, limit: 20 }}
           search=""
           quickView="all"
           onCounts={vi.fn()}
@@ -73,6 +74,7 @@ describe('NewsTable article push modal', () => {
       page: 1,
       pages: 1,
     } as any);
+    vi.mocked(publishArticle).mockResolvedValue({ ok: true } as any);
   });
 
   it('shows the anti-spam warning in the article push confirmation modal', async () => {
@@ -85,5 +87,32 @@ describe('NewsTable article push modal', () => {
 
     expect(screen.getByText('Send Article Push?')).toBeInTheDocument();
     expect(screen.getByText(ARTICLE_PUSH_SPAM_WARNING)).toBeInTheDocument();
+  });
+
+  it('publishes draft articles through the shared publish service used by Add News', async () => {
+    vi.mocked(listArticles).mockResolvedValueOnce({
+      rows: [
+        {
+          _id: 'draft-1',
+          title: 'Draft story',
+          slug: 'draft-story',
+          summary: 'Short summary',
+          category: 'national',
+          status: 'draft',
+          language: 'en',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pages: 1,
+    } as any);
+
+    renderNewsTable();
+
+    const publishButtons = await screen.findAllByRole('button', { name: 'Publish' });
+    fireEvent.click(publishButtons[0]);
+
+    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('draft-1'));
+    expect(updateArticleStatus).not.toHaveBeenCalledWith('draft-1', 'published');
   });
 });

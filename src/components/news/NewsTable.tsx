@@ -11,6 +11,7 @@ import {
   archiveArticle,
   restoreArticle,
   deleteArticle,
+  publishArticle,
   updateArticleStatus,
   scheduleArticle,
   unscheduleArticle,
@@ -393,7 +394,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
   });
   const mutatePublish = useMutation({
-    mutationFn: (id: string) => updateArticleStatus(id, 'published'),
+    mutationFn: (id: string) => publishArticle(id),
     onSuccess: () => toast.success('Published'),
     onError: (err: any) => toast.error(normalizeError(err, 'Publish failed').message),
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
