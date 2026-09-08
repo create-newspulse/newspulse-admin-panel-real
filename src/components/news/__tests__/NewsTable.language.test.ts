@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildArticlePushPayload, getArticleLanguageInfo } from '../NewsTable';
+import { buildArticlePushPayload, getArticleLanguageInfo, groupManageNewsArticleRows } from '../NewsTable';
 import type { Article } from '@/lib/api/articles';
 
 function article(input: Partial<Article>): Article {
@@ -38,6 +38,97 @@ describe('Manage News compact language badge', () => {
     });
 
     expect(getArticleLanguageInfo(row, [row]).badge).toBe('EN+HI+GU');
+  });
+});
+
+describe('Manage News logical translation grouping', () => {
+  it('renders linked EN/HI/GU records as one logical group with EN+HI+GU', () => {
+    const rows = [
+      article({ _id: 'gu-1', title: 'Gujarati title', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'en' }),
+      article({ _id: 'hi-1', title: 'Hindi title', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'en' }),
+      article({ _id: 'en-1', title: 'English source title', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' }),
+    ];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].primary._id).toBe('en-1');
+    expect(groups[0].primary.title).toBe('English source title');
+    expect(getArticleLanguageInfo(groups[0].primary, rows).badge).toBe('EN+HI+GU');
+  });
+
+  it('keeps an English-only article as one EN row', () => {
+    const rows = [article({ _id: 'en-only', language: 'en' })];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].primary._id).toBe('en-only');
+    expect(getArticleLanguageInfo(groups[0].primary, rows).badge).toBe('EN');
+  });
+
+  it('keeps linked EN+HI records as one EN+HI row', () => {
+    const rows = [
+      article({ _id: 'hi-1', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'en' }),
+      article({ _id: 'en-1', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' }),
+    ];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups).toHaveLength(1);
+    expect(getArticleLanguageInfo(groups[0].primary, rows).badge).toBe('EN+HI');
+  });
+
+  it('keeps two multilingual stories as exactly two logical groups', () => {
+    const rows = [
+      article({ _id: 'story-a-hi', language: 'hi', translationGroupId: 'story-a', sourceLanguage: 'en' }),
+      article({ _id: 'story-b-gu', language: 'gu', translationGroupId: 'story-b', sourceLanguage: 'hi' }),
+      article({ _id: 'story-a-en', language: 'en', translationGroupId: 'story-a', sourceLanguage: 'en' }),
+      article({ _id: 'story-b-hi', language: 'hi', translationGroupId: 'story-b', sourceLanguage: 'hi' }),
+    ];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.primary._id).sort()).toEqual(['story-a-en', 'story-b-hi']);
+  });
+
+  it('prefers the explicit source language over English when choosing the display record', () => {
+    const rows = [
+      article({ _id: 'en-1', title: 'English translation', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+      article({ _id: 'gu-1', title: 'Gujarati translation', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+      article({ _id: 'hi-source', title: 'Hindi source title', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+    ];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups[0].primary._id).toBe('hi-source');
+    expect(groups[0].primary.title).toBe('Hindi source title');
+  });
+
+  it('does not depend on random API ordering when source hints are missing', () => {
+    const firstOrder = [
+      article({ _id: 'gu-1', language: 'gu', translationGroupId: 'group-1', createdAt: '2026-01-03T00:00:00.000Z' }),
+      article({ _id: 'hi-1', language: 'hi', translationGroupId: 'group-1', createdAt: '2026-01-02T00:00:00.000Z' }),
+      article({ _id: 'en-1', language: 'en', translationGroupId: 'group-1', createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const secondOrder = [firstOrder[1], firstOrder[2], firstOrder[0]];
+
+    expect(groupManageNewsArticleRows(firstOrder)[0].primary._id).toBe('en-1');
+    expect(groupManageNewsArticleRows(secondOrder)[0].primary._id).toBe('en-1');
+  });
+
+  it('uses the source row status as the logical group status', () => {
+    const rows = [
+      article({ _id: 'en-stale', language: 'en', status: 'published', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+      article({ _id: 'hi-source', language: 'hi', status: 'draft', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+      article({ _id: 'gu-1', language: 'gu', status: 'published', translationGroupId: 'group-1', sourceLanguage: 'hi' }),
+    ];
+
+    const groups = groupManageNewsArticleRows(rows);
+
+    expect(groups[0].primary._id).toBe('hi-source');
+    expect(groups[0].primary.status).toBe('draft');
   });
 });
 

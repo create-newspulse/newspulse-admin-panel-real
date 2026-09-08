@@ -164,6 +164,144 @@ type ArticleLanguageInfo = {
   badge: string;
 };
 
+export type ManageNewsArticleGroup = {
+  key: string;
+  primary: Article;
+  articles: Article[];
+};
+
+function getArticleId(a: Article): string {
+  return String((a as any)?._id || (a as any)?.id || '').trim();
+}
+
+function getManageNewsGroupKey(a: Article): string {
+  return String((a as any)?.translationGroupId || '').trim() || getArticleId(a);
+}
+
+function getSourceLanguageHint(a: Article): 'en' | 'hi' | 'gu' | '' {
+  return normalizeArticleLang(
+    (a as any)?.sourceLanguage
+      ?? (a as any)?.originalLanguage
+      ?? (a as any)?.baseLanguage
+      ?? (a as any)?.sourceLang
+      ?? (a as any)?.originalLang
+      ?? (a as any)?.baseLang,
+  );
+}
+
+function getNestedSourceArticleId(a: Article): string {
+  const source = (a as any)?.sourceArticle ?? (a as any)?.originalArticle ?? (a as any)?.baseArticle;
+  if (!source || typeof source !== 'object') return '';
+  return String((source as any)?._id || (source as any)?.id || (source as any)?.articleId || '').trim();
+}
+
+function isExplicitSourceRow(a: Article): boolean {
+  return (a as any)?.__isSource === true
+    || (a as any)?.isSource === true
+    || (a as any)?.source === true
+    || (a as any)?.canonical === true;
+}
+
+function getArticleLanguageRank(a: Article): number {
+  const lang = normalizeArticleLang((a as any)?.lang ?? (a as any)?.language);
+  if (lang === 'en') return 0;
+  if (lang === 'hi') return 1;
+  if (lang === 'gu') return 2;
+  return 3;
+}
+
+function getCreatedTimestamp(a: Article): number {
+  const raw = (a as any)?.createdAt || (a as any)?.updatedAt || '';
+  const ts = Date.parse(String(raw));
+  return Number.isNaN(ts) ? Number.MAX_SAFE_INTEGER : ts;
+}
+
+function compareCanonicalFallback(a: Article, b: Article): number {
+  const langDiff = getArticleLanguageRank(a) - getArticleLanguageRank(b);
+  if (langDiff !== 0) return langDiff;
+
+  const createdDiff = getCreatedTimestamp(a) - getCreatedTimestamp(b);
+  if (createdDiff !== 0) return createdDiff;
+
+  return getArticleId(a).localeCompare(getArticleId(b));
+}
+
+function chooseManageNewsPrimaryArticle(articles: Article[]): Article | null {
+  const rows = articles.filter((a) => !!getArticleId(a));
+  if (!rows.length) return null;
+
+  const sortedRows = [...rows].sort(compareCanonicalFallback);
+
+  const nestedSourceIds = Array.from(new Set(rows.map(getNestedSourceArticleId).filter(Boolean))).sort();
+  for (const sourceId of nestedSourceIds) {
+    const found = sortedRows.find((a) => getArticleId(a) === sourceId);
+    if (found) return found;
+  }
+
+  const explicitSource = sortedRows.find(isExplicitSourceRow);
+  if (explicitSource) return explicitSource;
+
+  const sourceLangHints = Array.from(new Set(rows.map(getSourceLanguageHint).filter(Boolean))).sort((a, b) => {
+    const order = { en: 0, hi: 1, gu: 2 } as const;
+    return order[a as keyof typeof order] - order[b as keyof typeof order];
+  });
+  for (const lang of sourceLangHints) {
+    const found = sortedRows.find((a) => normalizeArticleLang((a as any)?.lang ?? (a as any)?.language) === lang);
+    if (found) return found;
+  }
+
+  return sortedRows[0];
+}
+
+export function groupManageNewsArticleRows(rows: Article[]): ManageNewsArticleGroup[] {
+  const groups = new Map<string, Article[]>();
+  for (const article of rows) {
+    const id = getArticleId(article);
+    if (!id) continue;
+    const key = getManageNewsGroupKey(article) || id;
+    const existing = groups.get(key);
+    if (existing) existing.push(article);
+    else groups.set(key, [article]);
+  }
+
+  return Array.from(groups.entries()).flatMap(([key, articles]) => {
+    const primary = chooseManageNewsPrimaryArticle(articles);
+    return primary ? [{ key, primary, articles }] : [];
+  });
+}
+
+async function listManageNewsArticles(params: ManageNewsParams): Promise<ListResponse> {
+  const limit = Math.max(1, params.limit || 20);
+  const firstPage = await listArticles({ ...params, page: 1, limit });
+  const firstRows: Article[] = Array.isArray((firstPage as any)?.rows)
+    ? (firstPage as any).rows
+    : (Array.isArray((firstPage as any)?.data) ? (firstPage as any).data : []);
+  const pageCount = Math.max(1, Number((firstPage as any)?.pages || 1));
+
+  if (pageCount <= 1) {
+    return { ...firstPage, rows: firstRows, page: params.page || 1 };
+  }
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) => listArticles({ ...params, page: index + 2, limit })),
+  );
+  const remainingRows = remainingPages.flatMap((pageData) => {
+    const rows: Article[] = Array.isArray((pageData as any)?.rows)
+      ? (pageData as any).rows
+      : (Array.isArray((pageData as any)?.data) ? (pageData as any).data : []);
+    return rows;
+  });
+  const rows = [...firstRows, ...remainingRows];
+
+  return {
+    ...firstPage,
+    rows,
+    total: rows.length,
+    page: params.page || 1,
+    pages: Math.max(1, Math.ceil(rows.length / limit)),
+  };
+}
+
 function normalizeArticleLang(input: any): 'en' | 'hi' | 'gu' | '' {
   const c = String(input || '').trim().toLowerCase();
   return c === 'en' || c === 'hi' || c === 'gu' ? c : '';
@@ -356,7 +494,6 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const { data, isLoading, error } = useQuery<ListResponse>({
     queryKey: [
       'articles',
-      fetchParams.page ?? 1,
       fetchParams.limit ?? 20,
       fetchParams.sort ?? '-updatedAt',
       fetchParams.status ?? 'all',
@@ -366,13 +503,10 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       fetchParams.to ?? '',
       fetchParams.q ?? '',
     ],
-    queryFn: () => listArticles(fetchParams),
+    queryFn: () => listManageNewsArticles(fetchParams),
   });
 
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
-  const total: number = (data as any)?.total ?? rawRows.length;
-  const page = (data as any)?.page || 1;
-  const pages = (data as any)?.pages || 1;
 
   // Mutations
   const mutateArchive = useMutation({
@@ -565,33 +699,46 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     return cleaned;
   }, [rawRows, params.status, isSeededSample]);
 
+  const logicalGroups = React.useMemo(() => groupManageNewsArticleRows(baseRows), [baseRows]);
+
+  const articleMatchesSearch = React.useCallback((a: Article) => {
+    if (!searchKey) return true;
+    const title = norm((a as any)?.title);
+    const summary = norm((a as any)?.summary);
+    const content = norm((a as any)?.content);
+    const category = norm((a as any)?.category);
+    const tags = getTags(a).map((t) => norm(t)).join(' ');
+    return (
+      title.includes(searchKey)
+      || summary.includes(searchKey)
+      || content.includes(searchKey)
+      || category.includes(searchKey)
+      || tags.includes(searchKey)
+    );
+  }, [searchKey]);
+
+  const groupMatches = React.useCallback((group: ManageNewsArticleGroup, predicate: (a: Article) => boolean) => {
+    return predicate(group.primary) || group.articles.some(predicate);
+  }, []);
+
   const searchedRows = React.useMemo(() => {
-    if (!searchKey) return baseRows;
-    return baseRows.filter((a) => {
-      const title = norm((a as any)?.title);
-      const summary = norm((a as any)?.summary);
-      const content = norm((a as any)?.content);
-      const category = norm((a as any)?.category);
-      const tags = getTags(a).map((t) => norm(t)).join(' ');
-      return (
-        title.includes(searchKey)
-        || summary.includes(searchKey)
-        || content.includes(searchKey)
-        || category.includes(searchKey)
-        || tags.includes(searchKey)
-      );
-    });
-  }, [baseRows, searchKey]);
+    const groups = searchKey
+      ? logicalGroups.filter((group) => groupMatches(group, articleMatchesSearch))
+      : logicalGroups;
+    return groups.map((group) => group.primary);
+  }, [articleMatchesSearch, groupMatches, logicalGroups, searchKey]);
 
   const counts = React.useMemo<QuickViewCounts>(() => {
     const all = searchedRows.length;
     const published = searchedRows.filter((a) => (a.status ?? 'draft') === 'published').length;
     const draft = searchedRows.filter((a) => (a.status ?? 'draft') === 'draft').length;
     const scheduled = searchedRows.filter((a) => (a.status ?? 'draft') === 'scheduled').length;
-    const breaking = searchedRows.filter(isBreakingStory).length;
-    const regional = searchedRows.filter(isGujaratRegional).length;
-    const pti = searchedRows.filter(needsPtiReview).length;
-    const flagged = searchedRows.filter(isFlagged).length;
+    const searchedSet = new Set(searchedRows.map((a) => getArticleId(a)));
+    const searchedGroups = logicalGroups.filter((group) => searchedSet.has(getArticleId(group.primary)));
+    const breaking = searchedGroups.filter((group) => groupMatches(group, isBreakingStory)).length;
+    const regional = searchedGroups.filter((group) => groupMatches(group, isGujaratRegional)).length;
+    const pti = searchedGroups.filter((group) => groupMatches(group, needsPtiReview)).length;
+    const flagged = searchedGroups.filter((group) => groupMatches(group, isFlagged)).length;
     return {
       all,
       published,
@@ -602,7 +749,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       pti,
       flagged,
     };
-  }, [searchedRows]);
+  }, [groupMatches, logicalGroups, searchedRows]);
 
   // Avoid maximum update depth errors when parent passes a non-memoized callback.
   const onCountsRef = React.useRef(onCounts);
@@ -616,6 +763,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   }, [counts]);
 
   const quickFilteredRows = React.useMemo(() => {
+    const searchedSet = new Set(searchedRows.map((a) => getArticleId(a)));
+    const searchedGroups = logicalGroups.filter((group) => searchedSet.has(getArticleId(group.primary)));
     switch (quickView) {
       case 'published':
         return searchedRows.filter((a) => (a.status ?? 'draft') === 'published');
@@ -624,18 +773,18 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       case 'scheduled':
         return searchedRows.filter((a) => (a.status ?? 'draft') === 'scheduled');
       case 'breaking':
-        return searchedRows.filter(isBreakingStory);
+        return searchedGroups.filter((group) => groupMatches(group, isBreakingStory)).map((group) => group.primary);
       case 'regional':
-        return searchedRows.filter(isGujaratRegional);
+        return searchedGroups.filter((group) => groupMatches(group, isGujaratRegional)).map((group) => group.primary);
       case 'pti':
-        return searchedRows.filter(needsPtiReview);
+        return searchedGroups.filter((group) => groupMatches(group, needsPtiReview)).map((group) => group.primary);
       case 'flagged':
-        return searchedRows.filter(isFlagged);
+        return searchedGroups.filter((group) => groupMatches(group, isFlagged)).map((group) => group.primary);
       case 'all':
       default:
         return searchedRows;
     }
-  }, [searchedRows, quickView]);
+  }, [groupMatches, logicalGroups, quickView, searchedRows]);
 
   const sortedRows = React.useMemo(() => {
     // Lock default sorting: newest-first by updatedAt, falling back to createdAt / publishedAt.
@@ -653,6 +802,14 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     arr.sort((a, b) => getSortTs(b) - getSortTs(a));
     return arr;
   }, [quickFilteredRows]);
+
+  const pageSize = Math.max(1, fetchParams.limit ?? 20);
+  const logicalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(Math.max(1, fetchParams.page ?? 1), logicalPages);
+  const visibleRows = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [currentPage, pageSize, sortedRows]);
 
   const analyticsQuery = useQuery({
     queryKey: ['admin', 'analytics', 'articles', 'table', analyticsRange, fetchParams],
@@ -696,7 +853,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     return m;
   }, [analyticsQuery.data]);
 
-  const visibleIds = React.useMemo(() => sortedRows.map((a) => a._id), [sortedRows]);
+  const visibleIds = React.useMemo(() => visibleRows.map((a) => a._id), [visibleRows]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
   const someVisibleSelected = visibleIds.some((id) => selected.includes(id));
   const selectAllRef = React.useRef<HTMLInputElement | null>(null);
@@ -707,8 +864,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
   const selectedArticles = React.useMemo(() => {
     const selectedSet = new Set(selected);
-    return rawRows.filter((a) => selectedSet.has(String((a as any)?._id || '')));
-  }, [rawRows, selected]);
+    return logicalGroups.map((group) => group.primary).filter((a) => selectedSet.has(getArticleId(a)));
+  }, [logicalGroups, selected]);
 
   const runMissingTranslationBackfill = () => {
     if (role !== 'founder') return;
@@ -884,7 +1041,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     return <div className="text-red-600">{n.message}</div>;
   }
 
-  const empty = !showSkeleton && sortedRows.length === 0;
+  const empty = !showSkeleton && visibleRows.length === 0;
 
   const EmptyState = (
     <div className="rounded border bg-white p-6 text-sm text-slate-700">
@@ -1091,7 +1248,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs text-slate-600">Showing {sortedRows.length} of {total} loaded</div>
+        <div className="text-xs text-slate-600">Showing {visibleRows.length} of {quickFilteredRows.length} loaded</div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
             <input
@@ -1269,7 +1426,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                 </thead>
 
                 <tbody className="[&>tr:hover]:bg-slate-50">
-                  {sortedRows.map((a) => {
+                  {visibleRows.map((a) => {
                     const isHighlighted = !!highlightId && a._id === highlightId;
                     const st = (a.status ?? 'draft') as ArticleStatus;
                     const isSelected = selected.includes(a._id);
@@ -1357,7 +1514,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
           {/* Mobile card list */}
           <div className="md:hidden space-y-2">
-            {sortedRows.map((a) => {
+            {visibleRows.map((a) => {
               const st = (a.status ?? 'draft') as ArticleStatus;
               const languageInfo = getArticleLanguageInfo(a, rawRows);
               return (
@@ -1432,21 +1589,21 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
       {/* Pagination */}
       <div className="flex items-center justify-between text-sm">
-        <div className="text-xs text-slate-600">Page {page} of {pages}</div>
+        <div className="text-xs text-slate-600">Page {currentPage} of {logicalPages}</div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={page <= 1}
-            onClick={() => onPageChange?.(page - 1)}
-            className={`px-2 py-1 rounded border text-xs ${page <= 1 ? 'opacity-50 cursor-not-allowed' : 'bg-white hover:bg-slate-50'}`}
+            disabled={currentPage <= 1}
+            onClick={() => onPageChange?.(currentPage - 1)}
+            className={`px-2 py-1 rounded border text-xs ${currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : 'bg-white hover:bg-slate-50'}`}
           >
             Prev
           </button>
           <button
             type="button"
-            disabled={page >= pages}
-            onClick={() => onPageChange?.(page + 1)}
-            className={`px-2 py-1 rounded border text-xs ${page >= pages ? 'opacity-50 cursor-not-allowed' : 'bg-white hover:bg-slate-50'}`}
+            disabled={currentPage >= logicalPages}
+            onClick={() => onPageChange?.(currentPage + 1)}
+            className={`px-2 py-1 rounded border text-xs ${currentPage >= logicalPages ? 'opacity-50 cursor-not-allowed' : 'bg-white hover:bg-slate-50'}`}
           >
             Next
           </button>
