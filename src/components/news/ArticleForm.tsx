@@ -609,6 +609,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [sponsorDisclosure, setSponsorDisclosure] = useState('');
   const [sponsorCtaText, setSponsorCtaText] = useState('');
   const [sponsorCtaUrl, setSponsorCtaUrl] = useState('');
+  const [inlineImageUploadPending, setInlineImageUploadPending] = useState(false);
 
   type Snapshot = {
     title: string;
@@ -1655,6 +1656,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const mutation = useMutation({
     // desiredStatusOverride lets callers force a specific status (e.g., Publish)
     mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
+      if (inlineImageUploadPending || /data-np-inline-image-uploading/i.test(content)) {
+        throw new Error('Please wait for the image upload to finish.');
+      }
+
       // Ensure we never send an empty/invalid slug on publish/save.
       const safeSlug = ensureValidSlug(slug, title);
       const currentLanguageDrafts: Record<LangCode, ArticleLanguageDraft> = {
@@ -2610,6 +2615,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 value={content}
                 onChange={setContent}
                 placeholder="Write article content…"
+                onPendingUploadChange={setInlineImageUploadPending}
               />
             </div>
           </div>

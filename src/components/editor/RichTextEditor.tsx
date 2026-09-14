@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -8,14 +8,68 @@ import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Node, mergeAttributes, type Editor as TiptapEditor } from '@tiptap/core';
 import { TextSelection } from 'prosemirror-state';
+import toast from 'react-hot-toast';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
+import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
+import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
 
 export interface RichTextEditorProps {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  onPendingUploadChange?: (pending: boolean) => void;
+}
+
+const INLINE_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function isInlineImageFile(file: File): boolean {
+  return INLINE_IMAGE_MIME_TYPES.has(file.type);
+}
+
+function getImageFilesFromList(files: FileList | File[] | null | undefined): File[] {
+  return Array.from(files || []).filter((file) => file.type.startsWith('image/'));
+}
+
+function getClipboardImageFiles(data: DataTransfer | null | undefined): File[] {
+  if (!data) return [];
+  const fromFiles = getImageFilesFromList(data.files);
+  if (fromFiles.length) return fromFiles;
+
+  return Array.from(data.items || [])
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => !!file);
+}
+
+function htmlHasImage(html: string): boolean {
+  return /<img\b/i.test(html);
+}
+
+function removeImagesFromHtml(html: string): { html: string; text: string } {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('img').forEach((image) => image.remove());
+  return {
+    html: doc.body.innerHTML,
+    text: doc.body.textContent?.trim() || '',
+  };
+}
+
+function getDropInsertPosition(view: TiptapEditor['view'], left: number, top: number): number {
+  try {
+    return view.posAtCoords({ left, top })?.pos ?? view.state.selection.from;
+  } catch {
+    return view.state.selection.from;
+  }
+}
+
+function isInlineImageDropHandled(event: Event): boolean {
+  return Boolean((event as any).__npInlineImageDropHandled);
+}
+
+function markInlineImageDropHandled(event: Event): void {
+  (event as any).__npInlineImageDropHandled = true;
 }
 
 function toggleBoldCurrentParagraph(editor: TiptapEditor) {
@@ -108,7 +162,11 @@ function ToolbarButton({
   );
 }
 
-export default function RichTextEditor({ value, onChange, placeholder = 'Write article content…' }: RichTextEditorProps) {
+export default function RichTextEditor({ value, onChange, placeholder = 'Write article content…', onPendingUploadChange }: RichTextEditorProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingUploadsRef = useRef(0);
+  const [pendingUploads, setPendingUploads] = useState(0);
+
   const extensions = useMemo(
     () => [
       StarterKit,
@@ -116,6 +174,8 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       Highlight.configure({ multicolor: false }),
       Link.configure({ openOnClick: false }),
       Image,
+      NewsPulseInlineImage,
+      InlineImageUploadPlaceholder,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -131,8 +191,134 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         class: 'min-h-[360px] p-4 prose prose-sm max-w-none bg-white text-slate-900 focus:outline-none',
         'data-placeholder': placeholder,
       },
+      handleDOMEvents: {
+        drop: (view, event) => {
+          const dragEvent = event as DragEvent;
+          if (isInlineImageDropHandled(dragEvent)) return true;
+          const imageFiles = getImageFilesFromList(dragEvent.dataTransfer?.files);
+          if (imageFiles.length === 0) return false;
+
+          markInlineImageDropHandled(dragEvent);
+          dragEvent.preventDefault();
+          const accepted = imageFiles.filter(isInlineImageFile);
+          if (accepted.length !== imageFiles.length) {
+            toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+          }
+          const dropPos = getDropInsertPosition(view, dragEvent.clientX, dragEvent.clientY);
+          accepted.forEach((file, index) => insertUploadingImage(file, dropPos + index));
+          return true;
+        },
+      },
+      handlePaste: (_view, event) => {
+        const imageFiles = getClipboardImageFiles(event.clipboardData);
+        if (imageFiles.length > 0) {
+          event.preventDefault();
+          const accepted = imageFiles.filter(isInlineImageFile);
+          if (accepted.length !== imageFiles.length) {
+            toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+          }
+          accepted.forEach((file) => insertUploadingImage(file));
+          return true;
+        }
+
+        const html = event.clipboardData?.getData('text/html') || '';
+        if (html && htmlHasImage(html)) {
+          const cleaned = removeImagesFromHtml(html);
+          event.preventDefault();
+          if (cleaned.text || cleaned.html.trim()) editor.chain().focus().insertContent(cleaned.html || cleaned.text).run();
+          toast.error('Paste or upload the image file directly. Website image URLs are not imported as inline images.');
+          return true;
+        }
+
+        return false;
+      },
+      handleDrop: (view, event) => {
+        if (isInlineImageDropHandled(event)) return true;
+        const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
+        if (imageFiles.length === 0) return false;
+
+        markInlineImageDropHandled(event);
+        event.preventDefault();
+        const accepted = imageFiles.filter(isInlineImageFile);
+        if (accepted.length !== imageFiles.length) {
+          toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+        }
+        const dropPos = getDropInsertPosition(view, event.clientX, event.clientY);
+        accepted.forEach((file, index) => insertUploadingImage(file, dropPos + index));
+        return true;
+      },
     },
   });
+
+  const setPendingUploadCount = (nextCount: number) => {
+    const normalized = Math.max(0, nextCount);
+    pendingUploadsRef.current = normalized;
+    setPendingUploads(normalized);
+    onPendingUploadChange?.(normalized > 0);
+  };
+
+  const updatePendingUploads = (delta: number) => {
+    setPendingUploadCount(pendingUploadsRef.current + delta);
+  };
+
+  const findUploadPlaceholder = (uploadId: string): { from: number; to: number } | null => {
+    if (!editor) return null;
+    let found: { from: number; to: number } | null = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'inlineImageUploadPlaceholder' && node.attrs.id === uploadId) {
+        found = { from: pos, to: pos + node.nodeSize };
+        return false;
+      }
+      return true;
+    });
+    return found;
+  };
+
+  const insertNewsPulseImage = (attrs: NewsPulseInlineImageAttrs, range?: { from: number; to: number }) => {
+    if (!editor) return;
+    const content = { type: 'newsPulseInlineImage', attrs };
+    if (range) {
+      editor.chain().focus().insertContentAt(range, content).run();
+      return;
+    }
+    editor.chain().focus().insertContent(content).run();
+  };
+
+  const removeUploadPlaceholder = (uploadId: string) => {
+    const range = findUploadPlaceholder(uploadId);
+    if (!editor || !range) return;
+    editor.chain().focus().deleteRange(range).run();
+  };
+
+  const attrsFromUploadResult = (result: UploadInlineImageResult, file: File): NewsPulseInlineImageAttrs => ({
+    mediaId: result.mediaId,
+    src: result.url,
+    alt: result.alt || file.name,
+    caption: result.caption || null,
+    credit: result.credit || null,
+    width: result.width || null,
+    height: result.height || null,
+  });
+
+  const insertUploadingImage = (file: File, pos?: number) => {
+    if (!editor) return;
+    const uploadId = `inline-image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const placeholder = { type: 'inlineImageUploadPlaceholder', attrs: { id: uploadId, filename: file.name } };
+    if (typeof pos === 'number') editor.chain().focus().insertContentAt(pos, placeholder).run();
+    else editor.chain().focus().insertContent(placeholder).run();
+
+    updatePendingUploads(1);
+    void uploadInlineImage(file)
+      .then((result) => {
+        const range = findUploadPlaceholder(uploadId);
+        insertNewsPulseImage(attrsFromUploadResult(result, file), range || undefined);
+      })
+      .catch((error: any) => {
+        removeUploadPlaceholder(uploadId);
+        toast.error(String(error?.message || 'Inline image upload failed'));
+      })
+      .finally(() => updatePendingUploads(-1));
+  };
 
   useEffect(() => {
     if (!editor) return;
@@ -140,6 +326,10 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     const current = editor.getHTML();
     if (current !== next) editor.commands.setContent(next);
   }, [editor, value]);
+
+  useEffect(() => {
+    return () => onPendingUploadChange?.(false);
+  }, [onPendingUploadChange]);
 
   const [symbol, setSymbol] = useState('');
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
@@ -162,9 +352,34 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         },
       }).run();
     } else {
-      editor.chain().focus().setImage({ src: asset.url, alt: asset.filename }).run();
+      insertNewsPulseImage({
+        mediaId: asset.id,
+        src: asset.url,
+        alt: asset.filename,
+        caption: null,
+        credit: null,
+      });
     }
     setMediaLibraryOpen(false);
+  };
+
+  const onChooseLocalImage = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (isInlineImageDropHandled(event.nativeEvent)) return;
+    const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
+    if (imageFiles.length === 0) return;
+
+    markInlineImageDropHandled(event.nativeEvent);
+    event.preventDefault();
+    const accepted = imageFiles.filter(isInlineImageFile);
+    if (accepted.length !== imageFiles.length) {
+      toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+    }
+    const dropPos = getDropInsertPosition(editor.view, event.clientX, event.clientY);
+    accepted.forEach((file, index) => insertUploadingImage(file, dropPos + index));
   };
 
   const onLink = () => {
@@ -210,7 +425,25 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="Quote" onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} />
         <ToolbarButton editor={editor} label="Highlight" onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} />
         <ToolbarButton editor={editor} label="Link" onClick={onLink} active={editor.isActive('link')} />
+        <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          aria-label="Upload inline image"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (!file) return;
+            if (!isInlineImageFile(file)) {
+              toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+              return;
+            }
+            insertUploadingImage(file);
+          }}
+        />
 
         <span className="mx-1 h-4 w-px bg-slate-200" />
 
@@ -251,7 +484,14 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       <EditorContent
         editor={editor}
         className="bg-white shadow-[inset_0_1px_2px_rgba(15,23,42,0.03)]"
+        onDrop={onEditorDrop}
       />
+
+      {pendingUploads > 0 ? (
+        <div className="border-t border-slate-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Uploading inline image{pendingUploads > 1 ? 's' : ''}... Please wait before saving.
+        </div>
+      ) : null}
 
       <MediaLibrarySelector
         open={mediaLibraryOpen}

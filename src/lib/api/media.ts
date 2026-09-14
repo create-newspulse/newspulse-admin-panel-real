@@ -37,6 +37,18 @@ export type UploadCoverImageResult = {
   format?: string;
 };
 
+export type UploadInlineImageResult = {
+  mediaId: string;
+  url: string;
+  alt?: string;
+  caption?: string;
+  credit?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  format?: string;
+};
+
 export type UploadVideoFileResult = {
   url: string;
   filename?: string;
@@ -79,9 +91,14 @@ function extractUploadedUrlFromPayload(raw: any): string {
     root?.url ||
     root?.secureUrl ||
     root?.secure_url ||
+    root?.inlineImageUrl ||
+    root?.inline_image_url ||
     root?.coverImageUrl ||
     root?.imageUrl ||
     root?.location ||
+    root?.media?.url ||
+    root?.asset?.url ||
+    root?.image?.url ||
     root?.item?.url ||
     root?.file?.url;
   return String(url || '').trim();
@@ -89,8 +106,45 @@ function extractUploadedUrlFromPayload(raw: any): string {
 
 function extractUploadedPublicIdFromPayload(raw: any): string {
   const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
-  const pid = root?.publicId || root?.public_id || root?.id;
+  const pid =
+    root?.mediaId ||
+    root?.media_id ||
+    root?.publicId ||
+    root?.public_id ||
+    root?._id ||
+    root?.id ||
+    root?.media?._id ||
+    root?.media?.id ||
+    root?.media?.publicId ||
+    root?.asset?._id ||
+    root?.asset?.id ||
+    root?.asset?.publicId ||
+    root?.image?._id ||
+    root?.image?.id ||
+    root?.image?.publicId ||
+    root?.file?._id ||
+    root?.file?.id;
   return String(pid || '').trim();
+}
+
+function extractUploadedNestedString(raw: any, key: string): string | undefined {
+  const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const candidates = [root?.[key], root?.media?.[key], root?.asset?.[key], root?.image?.[key], root?.file?.[key]];
+  for (const candidate of candidates) {
+    const normalized = String(candidate || '').trim();
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function extractUploadedNestedNumber(raw: any, key: string): number | undefined {
+  const root = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+  const candidates = [root?.[key], root?.media?.[key], root?.asset?.[key], root?.image?.[key], root?.file?.[key]];
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 export async function getMediaStatus(client: AxiosInstance = apiClient): Promise<MediaStatus> {
@@ -301,6 +355,104 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
   };
   devDebug('[media] upload cover success', result);
   return result;
+}
+
+const INLINE_IMAGE_UPLOAD_ENDPOINTS = [
+  '/admin-api/uploads/inline-image',
+  '/admin-api/uploads/inline',
+  '/admin-api/media/inline-image',
+  '/admin-api/media/inline-upload',
+] as const;
+
+function isAllowedInlineImageFile(file: File): boolean {
+  return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
+}
+
+function isTemporaryImageUrl(url: string): boolean {
+  return /^(blob:|data:)/i.test(url.trim());
+}
+
+function shouldTryNextInlineEndpoint(message: string, status: number): boolean {
+  if (status === 404 || status === 405) return true;
+  return /route not found|not found|cannot post|missing file|missing image|unexpected field/i.test(message);
+}
+
+async function postInlineImageFile(file: File, url: string): Promise<UploadInlineImageResult> {
+  const fd = new FormData();
+  fd.append('image', file);
+
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem('np_token');
+  } catch {}
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    body: fd,
+    credentials: 'include',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  let payload: any = null;
+  try {
+    payload = await resp.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!resp.ok || payload?.ok === false) {
+    const msg =
+      payload?.error ||
+      payload?.message ||
+      payload?.data?.error ||
+      payload?.data?.message ||
+      `Inline image upload failed (${resp.status})`;
+    const error = new Error(String(msg));
+    (error as any).status = resp.status;
+    (error as any).uploadUrl = url;
+    throw error;
+  }
+
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+  const uploadedUrl = extractUploadedUrlFromPayload(data);
+  if (!uploadedUrl) throw new Error('Inline image upload succeeded but no URL was returned');
+  if (isTemporaryImageUrl(uploadedUrl)) throw new Error('Inline image upload returned a temporary URL');
+
+  const mediaId = extractUploadedPublicIdFromPayload(data);
+  if (!mediaId) throw new Error('Inline image upload succeeded but no media id was returned');
+
+  return {
+    mediaId,
+    url: uploadedUrl,
+    alt: extractUploadedNestedString(data, 'alt') || extractUploadedNestedString(data, 'altText'),
+    caption: extractUploadedNestedString(data, 'caption'),
+    credit: extractUploadedNestedString(data, 'credit') || extractUploadedNestedString(data, 'source'),
+    width: extractUploadedNestedNumber(data, 'width'),
+    height: extractUploadedNestedNumber(data, 'height'),
+    bytes: extractUploadedNestedNumber(data, 'bytes') || extractUploadedNestedNumber(data, 'size'),
+    format: extractUploadedNestedString(data, 'format') || extractUploadedNestedString(data, 'mimeType'),
+  };
+}
+
+export async function uploadInlineImage(file: File): Promise<UploadInlineImageResult> {
+  if (!isAllowedInlineImageFile(file)) {
+    throw new Error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+  }
+
+  let lastError: any = null;
+  for (const endpoint of INLINE_IMAGE_UPLOAD_ENDPOINTS) {
+    try {
+      return await postInlineImageFile(file, endpoint);
+    } catch (error: any) {
+      lastError = error;
+      const message = String(error?.message || '').trim();
+      const status = Number(error?.status || 0);
+      if (!shouldTryNextInlineEndpoint(message, status)) throw error;
+    }
+  }
+  throw lastError || new Error('Inline image upload failed');
 }
 
 async function postViralVideoFile(file: File, url: string): Promise<UploadVideoFileResult> {
