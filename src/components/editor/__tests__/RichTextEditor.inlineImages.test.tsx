@@ -137,6 +137,27 @@ describe('RichTextEditor inline image authoring', () => {
     expect(pending).toHaveBeenLastCalledWith(false);
   });
 
+  it('does not turn internal upload source into visible credit', async () => {
+    mocks.uploadInlineImage.mockResolvedValueOnce({
+      mediaId: 'media-source',
+      url: 'https://cdn.newspulse.co.in/inline/source.webp',
+      width: 1200,
+      height: 800,
+      source: 'article-inline',
+      provider: 'cloudinary',
+    });
+    const { editorElement, getHtml } = renderEditor();
+    const file = createImageFile('source.webp', 'image/webp');
+
+    fireEvent.paste(editorElement, { clipboardData: clipboardData({ files: [file] }) });
+
+    const figure = await waitForInlineImage(getHtml);
+    expect(figure.querySelector('[data-np-credit="true"]')).toBeNull();
+    expect(getHtml()).not.toContain('Credit: article-inline');
+    expect(getHtml()).not.toContain('article-inline');
+    expect(getHtml()).not.toContain('cloudinary');
+  });
+
   it('uploads a pasted PNG and inserts the permanent URL', async () => {
     const { editorElement, getHtml } = renderEditor();
     const file = createImageFile('paste.png', 'image/png');
@@ -244,9 +265,9 @@ describe('RichTextEditor inline image authoring', () => {
     expect(figure.querySelector('img')?.getAttribute('src')).toBe('https://cdn.newspulse.co.in/library/library-image.webp');
   });
 
-  it('persists caption and credit edits in serialized markup', async () => {
+  it('renders user-entered ANI credit in serialized markup', async () => {
     const promptSpy = vi.spyOn(window, 'prompt');
-    promptSpy.mockReturnValueOnce('Flooding near the riverfront').mockReturnValueOnce('PTI');
+    promptSpy.mockReturnValueOnce('Flooding near the riverfront').mockReturnValueOnce('ANI');
     const { editorElement, getHtml } = renderEditor();
     const file = createImageFile('caption.jpg', 'image/jpeg');
 
@@ -256,23 +277,51 @@ describe('RichTextEditor inline image authoring', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit credit' }));
 
     await waitFor(() => expect(getHtml()).toContain('Flooding near the riverfront'));
-    expect(getHtml()).toContain('Credit: PTI');
+    expect(getHtml()).toContain('Credit: ANI');
     const figure = parseHtml(getHtml()).querySelector('figure[data-np-block="inline-image"]') as HTMLElement;
     expect(figure.querySelector('[data-np-caption="true"]')?.textContent).toBe('Flooding near the riverfront');
-    expect(figure.querySelector('[data-np-credit="true"]')?.textContent).toBe('Credit: PTI');
+    expect(figure.querySelector('[data-np-credit="true"]')?.textContent).toBe('Credit: ANI');
   });
 
-  it('save and reload preserves a controlled inline image block', () => {
-    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="media-42" data-np-width="900" data-np-height="600"><img src="https://cdn.newspulse.co.in/inline/reload.jpg" alt="Reloaded" width="900" height="600"><figcaption data-np-caption="true">Scene</figcaption><div data-np-credit="true">Credit: ANI</div></figure>');
+  it('save and reload preserves user-entered PTI credit in a controlled inline image block', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="media-42" data-np-width="900" data-np-height="600"><img src="https://cdn.newspulse.co.in/inline/reload.jpg" alt="Reloaded" width="900" height="600"><figcaption data-np-caption="true">Scene</figcaption><div data-np-credit="true">Credit: PTI</div></figure>');
 
     expect(html).toContain('data-np-block="inline-image"');
     expect(html).toContain('data-np-media-id="media-42"');
     expect(html).toContain('data-np-width="900"');
     expect(html).toContain('data-np-height="600"');
     expect(html).toContain('Scene');
-    expect(html).toContain('Credit: ANI');
+    expect(html).toContain('Credit: PTI');
     expect(html).toContain('width="900"');
     expect(html).toContain('height="600"');
+  });
+
+  it('serializes image-only controlled markup without blank caption or credit blocks', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="image-only"><img src="https://cdn.newspulse.co.in/inline/image-only.jpg" alt="Image only"></figure>');
+
+    expect(html).toContain('data-np-block="inline-image"');
+    expect(html).toContain('data-np-media-id="image-only"');
+    expect(html).toContain('src="https://cdn.newspulse.co.in/inline/image-only.jpg"');
+    expect(html).not.toContain('data-np-caption="true"');
+    expect(html).not.toContain('data-np-credit="true"');
+  });
+
+  it('serializes caption-only controlled markup without a credit block', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="caption-only"><img src="https://cdn.newspulse.co.in/inline/caption-only.jpg" alt="Caption only"><figcaption data-np-caption="true">Riverfront scene</figcaption></figure>');
+
+    expect(html).toContain('data-np-block="inline-image"');
+    expect(html).toContain('Riverfront scene');
+    expect(html).toContain('data-np-caption="true"');
+    expect(html).not.toContain('data-np-credit="true"');
+  });
+
+  it('serializes credit-only controlled markup without a caption block', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="credit-only"><img src="https://cdn.newspulse.co.in/inline/credit-only.jpg" alt="Credit only"><div data-np-credit="true">Credit: ANI</div></figure>');
+
+    expect(html).toContain('data-np-block="inline-image"');
+    expect(html).toContain('Credit: ANI');
+    expect(html).toContain('data-np-credit="true"');
+    expect(html).not.toContain('data-np-caption="true"');
   });
 
   it('parses old Phase 1A markers and reserializes the canonical contract', () => {

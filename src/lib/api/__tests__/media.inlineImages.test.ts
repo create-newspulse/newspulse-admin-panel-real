@@ -59,6 +59,7 @@ describe('inline article image upload API contract', () => {
         mimeType: 'image/webp',
         size: 34567,
         provider: 'cloudinary',
+        source: 'article-inline',
       },
     }));
 
@@ -75,7 +76,11 @@ describe('inline article image upload API contract', () => {
       provider: 'cloudinary',
       bytes: 34567,
       format: 'image/webp',
+      source: 'article-inline',
     });
+    expect(result.credit).toBeUndefined();
+    expect(result.caption).toBeUndefined();
+    expect(result.alt).toBeUndefined();
     const init = expectSingleCanonicalRequest(fetchMock);
     expect(init.method).toBe('POST');
     expect(init.credentials).toBe('include');

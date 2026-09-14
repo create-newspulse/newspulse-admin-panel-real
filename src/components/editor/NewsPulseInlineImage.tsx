@@ -169,7 +169,7 @@ export const NewsPulseInlineImage = Node.create({
         width,
         height,
       }],
-      ['figcaption', { 'data-np-caption': 'true' }, caption || ''],
+      ...(caption ? [['figcaption', { 'data-np-caption': 'true' }, caption]] : []),
       ...(credit ? [['div', { 'data-np-credit': 'true' }, `Credit: ${credit}`]] : []),
     ];
   },

@@ -51,6 +51,7 @@ export type UploadInlineImageResult = {
   mimeType?: string;
   size?: number;
   provider?: string;
+  source?: string;
 };
 
 export type UploadVideoFileResult = {
@@ -416,7 +417,7 @@ async function postInlineImageFile(file: File): Promise<UploadInlineImageResult>
     url: uploadedUrl,
     alt: extractUploadedNestedString(data, 'alt') || extractUploadedNestedString(data, 'altText'),
     caption: extractUploadedNestedString(data, 'caption'),
-    credit: extractUploadedNestedString(data, 'credit') || extractUploadedNestedString(data, 'source'),
+    credit: extractUploadedNestedString(data, 'credit'),
     width: extractUploadedNestedNumber(data, 'width'),
     height: extractUploadedNestedNumber(data, 'height'),
     bytes: extractUploadedNestedNumber(data, 'bytes') || size,
@@ -424,6 +425,7 @@ async function postInlineImageFile(file: File): Promise<UploadInlineImageResult>
     mimeType,
     size,
     provider: extractUploadedNestedString(data, 'provider'),
+    source: extractUploadedNestedString(data, 'source'),
   };
 }
 
