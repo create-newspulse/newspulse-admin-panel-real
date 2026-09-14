@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARTICLE_PUSH_SPAM_WARNING } from '@/lib/pushSendFeedback';
-import { listArticles, publishArticle, scheduleArticle, updateArticleStatus } from '@/lib/api/articles';
+import { listArticles, publishArticle, requeueArticleTranslations, scheduleArticle, updateArticleStatus } from '@/lib/api/articles';
 import { NewsTable } from '../NewsTable';
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -88,6 +88,7 @@ describe('NewsTable article push modal', () => {
     } as any);
     vi.mocked(publishArticle).mockResolvedValue({ ok: true } as any);
     vi.mocked(scheduleArticle).mockResolvedValue({ ok: true } as any);
+    vi.mocked(requeueArticleTranslations).mockResolvedValue({ ok: true } as any);
   });
 
   it('shows the anti-spam warning in the article push confirmation modal', async () => {
@@ -310,6 +311,28 @@ describe('NewsTable article push modal', () => {
     expect(screen.getByText('Showing 1 of 1 loaded')).toBeInTheDocument();
     expect(listArticles).toHaveBeenNthCalledWith(1, expect.objectContaining({ page: 1, limit: 20 }));
     expect(listArticles).toHaveBeenNthCalledWith(2, expect.objectContaining({ page: 2, limit: 20 }));
+  });
+
+  it('uses the shared helper for bulk Generate Missing Translations', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(listArticles).mockResolvedValueOnce({
+      rows: [
+        { _id: 'en-source', title: 'English source', status: 'published', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' },
+      ],
+      total: 1,
+      page: 1,
+      pages: 1,
+    } as any);
+
+    renderNewsTable();
+
+    fireEvent.click((await screen.findAllByLabelText('Select row'))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Missing Translations' }));
+
+    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('en-source', { languages: ['hi', 'gu'] }));
+    expect(requeueArticleTranslations).toHaveBeenCalledTimes(1);
+    expect(publishArticle).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it.each([

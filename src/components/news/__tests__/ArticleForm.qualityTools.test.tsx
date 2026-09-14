@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArticleForm } from '@/components/news/ArticleForm';
-import { createArticle, publishArticle, updateArticle } from '@/lib/api/articles';
+import { createArticle, publishArticle, requeueArticleTranslations, updateArticle } from '@/lib/api/articles';
 
 const mocks = vi.hoisted(() => ({
   authUser: { id: 'editor-1', email: 'editor@newspulse.co.in', role: 'editor' },
@@ -156,7 +156,53 @@ describe('ArticleForm Quality Tools', () => {
       category: 'national',
     }));
     expect(updateArticle).not.toHaveBeenCalled();
+    expect(requeueArticleTranslations).not.toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalledWith(expect.stringContaining('Complete the English, Hindi and Gujarati versions'));
+  });
+
+  it('keeps Save Draft successful when automatic translation generation fails', async () => {
+    mocks.requeueArticleTranslations.mockRejectedValueOnce(new Error('Translation generation failed'));
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({ status: 'draft' })));
+    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('created-1', { languages: ['hi', 'gu'] }));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Draft saved');
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Translation generation failed'));
+    expect(publishArticle).not.toHaveBeenCalled();
+  });
+
+  it('keeps Generate and Regenerate translation controls on the shared helper', async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
+        <ArticleForm
+          mode="edit"
+          id="article-1"
+          userRole="admin"
+          initialValues={{
+            _id: 'article-1',
+            title: 'Existing English story',
+            slug: 'existing-english-story',
+            summary: 'Existing summary',
+            content: 'Existing body content',
+            category: 'national',
+            status: 'draft',
+            language: 'en',
+            lang: 'en',
+          }}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('article-1', { languages: ['hi', 'gu'] }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Translations' }));
+    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledTimes(2));
+    expect(requeueArticleTranslations).toHaveBeenLastCalledWith('article-1', { languages: ['hi', 'gu'] });
+    expect(publishArticle).not.toHaveBeenCalled();
   });
 
   it('keeps genuine required-field validation before publish', async () => {

@@ -385,7 +385,7 @@ export async function requeueArticleTranslations(id: string, opts?: { languages?
   const payload = Array.isArray(opts?.languages) && opts?.languages.length > 0
     ? { languages: opts.languages }
     : undefined;
-  const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/requeue-translations`, payload);
+  const res = await adminApiClient.post(`admin/${ARTICLES_PATH}/${encoded}/translations/generate`, payload);
   return res.data as any;
 }
 
