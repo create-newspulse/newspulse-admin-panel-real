@@ -13,8 +13,10 @@ import toast from 'react-hot-toast';
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
 import { extractNewsPulseYouTubeFromHtml, parseNewsPulseYouTubeUrl, type NewsPulseYouTubeEmbed } from '@/lib/youtube';
+import { extractNewsPulseXFromHtml, parseNewsPulseXUrl, type NewsPulseXEmbed } from '@/lib/x';
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
+import { NewsPulseX } from './NewsPulseX';
 import { NewsPulseYouTube } from './NewsPulseYouTube';
 
 export interface RichTextEditorProps {
@@ -200,6 +202,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       NewsPulseInlineImage,
       InlineImageUploadPlaceholder,
       NewsPulseYouTube,
+      NewsPulseX,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -246,11 +249,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         }
 
         const html = event.clipboardData?.getData('text/html') || '';
-        if (html && /<\s*(iframe|script)\b/i.test(html)) {
+        if (html && (/<\s*(iframe|script)\b/i.test(html) || /<\s*blockquote\b[^>]*twitter-tweet/i.test(html))) {
           event.preventDefault();
           const youtubeEmbed = extractNewsPulseYouTubeFromHtml(html);
           if (youtubeEmbed) {
             insertNewsPulseYouTube(youtubeEmbed);
+            return true;
+          }
+
+          const xEmbed = extractNewsPulseXFromHtml(html);
+          if (xEmbed) {
+            insertNewsPulseX(xEmbed);
             return true;
           }
 
@@ -273,6 +282,13 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         if (youtubeUrl && isSingleClipboardUrl(plainText)) {
           event.preventDefault();
           insertNewsPulseYouTube(youtubeUrl);
+          return true;
+        }
+
+        const xUrl = parseNewsPulseXUrl(plainText);
+        if (xUrl && isSingleClipboardUrl(plainText)) {
+          event.preventDefault();
+          insertNewsPulseX(xUrl);
           return true;
         }
 
@@ -336,6 +352,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       type: 'newsPulseYouTube',
       attrs: {
         videoId: embed.videoId,
+        url: embed.url,
+      },
+    }).run();
+  };
+
+  const insertNewsPulseX = (embed: NewsPulseXEmbed) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent({
+      type: 'newsPulseX',
+      attrs: {
+        postId: embed.postId,
         url: embed.url,
       },
     }).run();
@@ -435,6 +462,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     insertNewsPulseYouTube(youtubeUrl);
   };
 
+  const onX = () => {
+    const raw = window.prompt('X/Twitter post URL');
+    if (raw == null) return;
+    const xUrl = parseNewsPulseXUrl(raw);
+    if (!xUrl) {
+      toast.error('Enter a valid X/Twitter status URL.');
+      return;
+    }
+    insertNewsPulseX(xUrl);
+  };
+
   const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     if (isInlineImageDropHandled(event.nativeEvent)) return;
     const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
@@ -494,6 +532,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="Highlight" onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} />
         <ToolbarButton editor={editor} label="Link" onClick={onLink} active={editor.isActive('link')} />
         <ToolbarButton editor={editor} label="YouTube" onClick={onYouTube} title="Insert a YouTube video block" />
+        <ToolbarButton editor={editor} label="X / Twitter" onClick={onX} title="Insert an X/Twitter post block" />
         <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
         <input

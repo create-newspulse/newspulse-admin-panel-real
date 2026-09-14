@@ -42,4 +42,21 @@ describe('ArticlePreview inline images', () => {
     expect(container.textContent).not.toContain('data-np-video-id');
     expect(container.textContent).not.toContain('data-np-url');
   });
+
+  it('renders a controlled X marker as a safe preview card', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'X preview',
+      content: '<p>Before</p><div data-np-block="x" data-np-post-id="1234567890123456789" data-np-url="https://x.com/newspulse/status/1234567890123456789?s=20"></div><p>After</p>',
+    }} />);
+
+    const link = screen.getByRole('link', { name: 'Open post' });
+    expect(screen.getByText('X Post')).toBeInTheDocument();
+    expect(screen.getByText('@newspulse')).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'https://x.com/newspulse/status/1234567890123456789?s=20');
+    expect(container.querySelector('[data-np-block="x"]')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('blockquote')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-post-id');
+    expect(container.textContent).not.toContain('data-np-url');
+  });
 });

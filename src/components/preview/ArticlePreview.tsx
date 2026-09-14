@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { parseNewsPulseYouTubeAttrs } from '@/lib/youtube';
+import { parseNewsPulseXAttrs } from '@/lib/x';
 
 export type PreviewLanguage = 'en' | 'hi' | 'gu';
 
@@ -67,6 +68,49 @@ function renderControlledYouTubeBlocks(html: string): string {
   }
 }
 
+function renderControlledXBlocks(html: string): string {
+  if (!html || !/data-np-block=["']x["']/i.test(html)) return html;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('div[data-np-block="x"]').forEach((node) => {
+      const embed = parseNewsPulseXAttrs({
+        postId: node.getAttribute('data-np-post-id'),
+        url: node.getAttribute('data-np-url'),
+      });
+      const replacement = doc.createElement('div');
+      if (!embed) {
+        replacement.textContent = 'X post unavailable';
+        node.replaceWith(replacement);
+        return;
+      }
+
+      const label = doc.createElement('strong');
+      label.textContent = 'X Post';
+      replacement.appendChild(label);
+
+      if (embed.username) {
+        replacement.appendChild(doc.createElement('br'));
+        const username = doc.createElement('span');
+        username.textContent = `@${embed.username}`;
+        replacement.appendChild(username);
+      }
+
+      replacement.appendChild(doc.createElement('br'));
+      const link = doc.createElement('a');
+      link.setAttribute('href', embed.url);
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noreferrer');
+      link.textContent = 'Open post';
+      replacement.appendChild(link);
+      node.replaceWith(replacement);
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html.replace(/<div\b[^>]*data-np-block=["']x["'][\s\S]*?<\/div>/gi, '');
+  }
+}
+
 const LANG_LABEL: Record<PreviewLanguage, string> = {
   en: 'English',
   hi: 'Hindi',
@@ -100,7 +144,7 @@ export default function ArticlePreview({
   const safeHtml = useMemo(() => {
     if (!content) return '';
     if (!looksLikeHtml(content)) return '';
-    return sanitizeHtml(renderControlledYouTubeBlocks(content));
+    return sanitizeHtml(renderControlledXBlocks(renderControlledYouTubeBlocks(content)));
   }, [content]);
 
   const seoDescription = useMemo(() => {
