@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { parseNewsPulseYouTubeAttrs } from '@/lib/youtube';
 
 export type PreviewLanguage = 'en' | 'hi' | 'gu';
 
@@ -31,6 +32,39 @@ function stripHtml(input: string): string {
 
 function looksLikeHtml(input: string): boolean {
   return /<\s*\/?\s*[a-z][\s\S]*>/i.test(input || '');
+}
+
+function renderControlledYouTubeBlocks(html: string): string {
+  if (!html || !/data-np-block=["']youtube["']/i.test(html)) return html;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('div[data-np-block="youtube"]').forEach((node) => {
+      const embed = parseNewsPulseYouTubeAttrs({
+        videoId: node.getAttribute('data-np-video-id'),
+        url: node.getAttribute('data-np-url'),
+      });
+      const replacement = doc.createElement('div');
+      if (!embed) {
+        replacement.textContent = 'YouTube video unavailable';
+        node.replaceWith(replacement);
+        return;
+      }
+
+      const iframe = doc.createElement('iframe');
+      iframe.setAttribute('src', embed.embedUrl);
+      iframe.setAttribute('title', 'YouTube video');
+      iframe.setAttribute('width', '560');
+      iframe.setAttribute('height', '315');
+      iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+      iframe.setAttribute('allowfullscreen', 'true');
+      replacement.appendChild(iframe);
+      node.replaceWith(replacement);
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html.replace(/<div\b[^>]*data-np-block=["']youtube["'][\s\S]*?<\/div>/gi, '');
+  }
 }
 
 const LANG_LABEL: Record<PreviewLanguage, string> = {
@@ -66,7 +100,7 @@ export default function ArticlePreview({
   const safeHtml = useMemo(() => {
     if (!content) return '';
     if (!looksLikeHtml(content)) return '';
-    return sanitizeHtml(content);
+    return sanitizeHtml(renderControlledYouTubeBlocks(content));
   }, [content]);
 
   const seoDescription = useMemo(() => {

@@ -28,4 +28,18 @@ describe('ArticlePreview inline images', () => {
     expect(container.querySelector('.prose [data-np-credit="true"]')?.textContent).toBe('Credit: PTI');
     expect(screen.queryByText(/article-inline/i)).toBeNull();
   });
+
+  it('renders a controlled YouTube marker as a safe preview player', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'YouTube preview',
+      content: '<p>Before</p><div data-np-block="youtube" data-np-video-id="dQw4w9WgXcQ" data-np-url="https://www.youtube.com/watch?v=dQw4w9WgXcQ"></div><p>After</p>',
+    }} />);
+
+    const iframe = container.querySelector('.prose iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+    expect(container.querySelector('[data-np-block="youtube"]')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-video-id');
+    expect(container.textContent).not.toContain('data-np-url');
+  });
 });

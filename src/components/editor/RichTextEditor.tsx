@@ -12,8 +12,10 @@ import toast from 'react-hot-toast';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
+import { extractNewsPulseYouTubeFromHtml, parseNewsPulseYouTubeUrl, type NewsPulseYouTubeEmbed } from '@/lib/youtube';
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
+import { NewsPulseYouTube } from './NewsPulseYouTube';
 
 export interface RichTextEditorProps {
   value: string;
@@ -54,6 +56,27 @@ function removeImagesFromHtml(html: string): { html: string; text: string } {
     html: doc.body.innerHTML,
     text: doc.body.textContent?.trim() || '',
   };
+}
+
+function textFromRejectedEmbedHtml(html: string): string {
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('iframe,script,style').forEach((node) => node.remove());
+    return doc.body.textContent?.trim() || '';
+  } catch {
+    return html
+      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, ' ')
+      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+}
+
+function isSingleClipboardUrl(value: string): boolean {
+  const text = String(value || '').trim();
+  return /^https?:\/\/\S+$/i.test(text) && !/\s/.test(text);
 }
 
 function getDropInsertPosition(view: TiptapEditor['view'], left: number, top: number): number {
@@ -176,6 +199,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       Image,
       NewsPulseInlineImage,
       InlineImageUploadPlaceholder,
+      NewsPulseYouTube,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -222,11 +246,33 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         }
 
         const html = event.clipboardData?.getData('text/html') || '';
+        if (html && /<\s*(iframe|script)\b/i.test(html)) {
+          event.preventDefault();
+          const youtubeEmbed = extractNewsPulseYouTubeFromHtml(html);
+          if (youtubeEmbed) {
+            insertNewsPulseYouTube(youtubeEmbed);
+            return true;
+          }
+
+          const text = textFromRejectedEmbedHtml(html);
+          if (text) editor.chain().focus().insertContent(text).run();
+          toast.error('Only supported YouTube URLs can be inserted as video blocks.');
+          return true;
+        }
+
         if (html && htmlHasImage(html)) {
           const cleaned = removeImagesFromHtml(html);
           event.preventDefault();
           if (cleaned.text || cleaned.html.trim()) editor.chain().focus().insertContent(cleaned.html || cleaned.text).run();
           toast.error('Paste or upload the image file directly. Website image URLs are not imported as inline images.');
+          return true;
+        }
+
+        const plainText = event.clipboardData?.getData('text/plain') || '';
+        const youtubeUrl = parseNewsPulseYouTubeUrl(plainText);
+        if (youtubeUrl && isSingleClipboardUrl(plainText)) {
+          event.preventDefault();
+          insertNewsPulseYouTube(youtubeUrl);
           return true;
         }
 
@@ -282,6 +328,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       return;
     }
     editor.chain().focus().insertContent(content).run();
+  };
+
+  const insertNewsPulseYouTube = (embed: NewsPulseYouTubeEmbed) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent({
+      type: 'newsPulseYouTube',
+      attrs: {
+        videoId: embed.videoId,
+        url: embed.url,
+      },
+    }).run();
   };
 
   const removeUploadPlaceholder = (uploadId: string) => {
@@ -367,6 +424,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     fileInputRef.current?.click();
   };
 
+  const onYouTube = () => {
+    const raw = window.prompt('YouTube URL');
+    if (raw == null) return;
+    const youtubeUrl = parseNewsPulseYouTubeUrl(raw);
+    if (!youtubeUrl) {
+      toast.error('Enter a valid YouTube URL.');
+      return;
+    }
+    insertNewsPulseYouTube(youtubeUrl);
+  };
+
   const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     if (isInlineImageDropHandled(event.nativeEvent)) return;
     const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
@@ -425,6 +493,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="Quote" onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} />
         <ToolbarButton editor={editor} label="Highlight" onClick={() => editor.chain().focus().toggleHighlight().run()} active={editor.isActive('highlight')} />
         <ToolbarButton editor={editor} label="Link" onClick={onLink} active={editor.isActive('link')} />
+        <ToolbarButton editor={editor} label="YouTube" onClick={onYouTube} title="Insert a YouTube video block" />
         <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
         <input
