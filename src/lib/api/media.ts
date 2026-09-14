@@ -1,5 +1,6 @@
 import type { AxiosInstance } from 'axios';
 import apiClient, { apiUrl } from '@/lib/api';
+import { adminFetch } from '@/lib/http/adminFetch';
 
 export type MediaStatus = {
   uploadEnabled: boolean;
@@ -47,6 +48,9 @@ export type UploadInlineImageResult = {
   height?: number;
   bytes?: number;
   format?: string;
+  mimeType?: string;
+  size?: number;
+  provider?: string;
 };
 
 export type UploadVideoFileResult = {
@@ -357,12 +361,7 @@ export async function uploadCoverImage(file: File, client: AxiosInstance = apiCl
   return result;
 }
 
-const INLINE_IMAGE_UPLOAD_ENDPOINTS = [
-  '/admin-api/uploads/inline-image',
-  '/admin-api/uploads/inline',
-  '/admin-api/media/inline-image',
-  '/admin-api/media/inline-upload',
-] as const;
+const INLINE_ARTICLE_IMAGE_UPLOAD_PATH = '/admin/articles/media/image';
 
 function isAllowedInlineImageFile(file: File): boolean {
   return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
@@ -372,27 +371,13 @@ function isTemporaryImageUrl(url: string): boolean {
   return /^(blob:|data:)/i.test(url.trim());
 }
 
-function shouldTryNextInlineEndpoint(message: string, status: number): boolean {
-  if (status === 404 || status === 405) return true;
-  return /route not found|not found|cannot post|missing file|missing image|unexpected field/i.test(message);
-}
-
-async function postInlineImageFile(file: File, url: string): Promise<UploadInlineImageResult> {
+async function postInlineImageFile(file: File): Promise<UploadInlineImageResult> {
   const fd = new FormData();
   fd.append('image', file);
 
-  let token: string | null = null;
-  try {
-    token = localStorage.getItem('np_token');
-  } catch {}
-
-  const resp = await fetch(url, {
+  const resp = await adminFetch(INLINE_ARTICLE_IMAGE_UPLOAD_PATH, {
     method: 'POST',
     body: fd,
-    credentials: 'include',
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
   });
 
   let payload: any = null;
@@ -411,7 +396,7 @@ async function postInlineImageFile(file: File, url: string): Promise<UploadInlin
       `Inline image upload failed (${resp.status})`;
     const error = new Error(String(msg));
     (error as any).status = resp.status;
-    (error as any).uploadUrl = url;
+    (error as any).uploadUrl = INLINE_ARTICLE_IMAGE_UPLOAD_PATH;
     throw error;
   }
 
@@ -423,6 +408,9 @@ async function postInlineImageFile(file: File, url: string): Promise<UploadInlin
   const mediaId = extractUploadedPublicIdFromPayload(data);
   if (!mediaId) throw new Error('Inline image upload succeeded but no media id was returned');
 
+  const mimeType = extractUploadedNestedString(data, 'mimeType');
+  const size = extractUploadedNestedNumber(data, 'size');
+
   return {
     mediaId,
     url: uploadedUrl,
@@ -431,8 +419,11 @@ async function postInlineImageFile(file: File, url: string): Promise<UploadInlin
     credit: extractUploadedNestedString(data, 'credit') || extractUploadedNestedString(data, 'source'),
     width: extractUploadedNestedNumber(data, 'width'),
     height: extractUploadedNestedNumber(data, 'height'),
-    bytes: extractUploadedNestedNumber(data, 'bytes') || extractUploadedNestedNumber(data, 'size'),
-    format: extractUploadedNestedString(data, 'format') || extractUploadedNestedString(data, 'mimeType'),
+    bytes: extractUploadedNestedNumber(data, 'bytes') || size,
+    format: extractUploadedNestedString(data, 'format') || mimeType,
+    mimeType,
+    size,
+    provider: extractUploadedNestedString(data, 'provider'),
   };
 }
 
@@ -441,18 +432,7 @@ export async function uploadInlineImage(file: File): Promise<UploadInlineImageRe
     throw new Error('Only JPEG, PNG, or WebP images can be uploaded inline.');
   }
 
-  let lastError: any = null;
-  for (const endpoint of INLINE_IMAGE_UPLOAD_ENDPOINTS) {
-    try {
-      return await postInlineImageFile(file, endpoint);
-    } catch (error: any) {
-      lastError = error;
-      const message = String(error?.message || '').trim();
-      const status = Number(error?.status || 0);
-      if (!shouldTryNextInlineEndpoint(message, status)) throw error;
-    }
-  }
-  throw lastError || new Error('Inline image upload failed');
+  return postInlineImageFile(file);
 }
 
 async function postViralVideoFile(file: File, url: string): Promise<UploadVideoFileResult> {
