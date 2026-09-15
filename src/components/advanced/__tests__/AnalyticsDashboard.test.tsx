@@ -25,6 +25,13 @@ function integrationCard(label: string): HTMLElement {
   return card as HTMLElement;
 }
 
+function metricCard(label: string): HTMLElement {
+  const heading = screen.getByText(label);
+  const card = heading.closest('.rounded-lg');
+  if (!card) throw new Error(`Metric card not found: ${label}`);
+  return card as HTMLElement;
+}
+
 function formatDateParam(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -89,8 +96,50 @@ describe('AnalyticsDashboard source wiring', () => {
     expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
     expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
     expect(within(integrationCard('Traffic Analytics')).getByText('News Pulse Analytics')).toBeInTheDocument();
+    expect(within(metricCard('Page Views')).getByText('120')).toBeInTheDocument();
+    expect(within(metricCard('Unique Visitors')).getByText('45')).toBeInTheDocument();
     expect(screen.queryByText('Connect an analytics provider before refreshing.')).toBeNull();
     expect(getAdminAnalyticsDashboard).toHaveBeenCalledWith({ range: '24h' });
+  });
+
+  it('shows zero for connected traffic page views and unique visitors', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({
+      totals: { views: 0, uniqueReaders: 0 },
+      sources: [],
+      languages: [],
+    });
+
+    renderDashboard();
+
+    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
+    expect(within(metricCard('Page Views')).getByText('0')).toBeInTheDocument();
+    expect(within(metricCard('Unique Visitors')).getByText('0')).toBeInTheDocument();
+    expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
+  });
+
+  it('normalizes connected empty traffic responses to zero without manufacturing non-zero counts', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({ totals: {}, sources: [], languages: [] });
+
+    renderDashboard();
+
+    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
+    expect(within(metricCard('Page Views')).getByText('0')).toBeInTheDocument();
+    expect(within(metricCard('Unique Visitors')).getByText('0')).toBeInTheDocument();
+  });
+
+  it('renders non-zero traffic values from root dashboard fields', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({
+      pageViews: 1234,
+      uniqueVisitors: 567,
+      sources: [],
+      languages: [],
+    });
+
+    renderDashboard();
+
+    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
+    expect(within(metricCard('Page Views')).getByText('1,234')).toBeInTheDocument();
+    expect(within(metricCard('Unique Visitors')).getByText('567')).toBeInTheDocument();
   });
 
   it('connects Ad Tracking to Ads Manager when the ad endpoint is connected', async () => {
@@ -204,6 +253,19 @@ describe('AnalyticsDashboard source wiring', () => {
     expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
     expect(within(integrationCard('Revenue Data')).getByText('Connected')).toBeInTheDocument();
     expect(within(integrationCard('Ad Tracking')).getByText('Error')).toBeInTheDocument();
+  });
+
+  it('keeps traffic metrics unconfigured when the traffic source is unavailable', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockRejectedValueOnce(new Error('Traffic offline'));
+
+    renderDashboard();
+
+    expect(await screen.findByText('Some analytics sources are unavailable: Traffic Analytics.')).toBeInTheDocument();
+    expect(within(integrationCard('Traffic Analytics')).getByText('Error')).toBeInTheDocument();
+    expect(within(metricCard('Page Views')).getByText('Not configured')).toBeInTheDocument();
+    expect(within(metricCard('Unique Visitors')).getByText('Not configured')).toBeInTheDocument();
+    expect(within(integrationCard('Ad Tracking')).getByText('Connected')).toBeInTheDocument();
+    expect(within(integrationCard('Revenue Data')).getByText('Connected')).toBeInTheDocument();
   });
 
   it('refreshes traffic, ad tracking, and revenue sources', async () => {

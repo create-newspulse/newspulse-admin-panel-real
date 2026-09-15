@@ -396,9 +396,11 @@ function revenueDateParams(dateFilter: DateFilter, customStart: string, customEn
 function mapFirstPartyDashboardReport(payload: DashboardAnalyticsResponse | null | undefined): AnalyticsReportPatch {
   const data = payload && typeof payload === 'object' ? payload : {};
   const totals = data.totals && typeof data.totals === 'object' ? data.totals : {};
+  const pageViews = pickFirstNumber(data.pageViews, data.views, data.totalViews, totals.pageViews, totals.views, totals.totalViews) ?? 0;
+  const uniqueVisitors = pickFirstNumber(data.uniqueVisitors, data.uniqueReaders, data.readers, totals.uniqueVisitors, totals.uniqueReaders, totals.readers) ?? 0;
   const overview: Partial<OverviewMetrics> = {
-    pageViews: pickFirstNumber(totals.views, totals.totalViews),
-    uniqueVisitors: pickFirstNumber(totals.uniqueReaders, totals.readers),
+    pageViews,
+    uniqueVisitors,
   };
 
   return {
@@ -631,8 +633,8 @@ export default function AnalyticsDashboard(): JSX.Element {
   const refreshLabel = loading ? 'Loading data...' : refreshing ? 'Refreshing data...' : 'Refresh Data';
 
   const overviewCards = useMemo(() => [
-    { label: 'Page Views', value: formatNumber(currentReport.overview.pageViews), visible: currentReport.permissions.viewTraffic },
-    { label: 'Unique Visitors', value: formatNumber(currentReport.overview.uniqueVisitors), visible: currentReport.permissions.viewTraffic },
+    { label: 'Page Views', value: currentReport.integrations.trafficAnalytics.status === 'connected' ? formatNumber(currentReport.overview.pageViews) : 'Not configured', visible: true },
+    { label: 'Unique Visitors', value: currentReport.integrations.trafficAnalytics.status === 'connected' ? formatNumber(currentReport.overview.uniqueVisitors) : 'Not configured', visible: true },
     { label: 'Ad Impressions', value: formatNumber(currentReport.overview.adImpressions), visible: canViewAdPerformance },
     { label: 'Ad Clicks', value: formatNumber(currentReport.overview.adClicks), visible: canViewAdPerformance },
     { label: 'CTR', value: formatPercent(currentReport.overview.ctr), visible: canViewAdPerformance },
@@ -642,7 +644,7 @@ export default function AnalyticsDashboard(): JSX.Element {
     { label: 'Paid Amount', value: canViewRevenue ? formatINR(currentReport.overview.paidAmount) : 'Restricted', visible: true },
     { label: 'Outstanding Amount', value: canViewRevenue ? formatINR(currentReport.overview.outstandingAmount) : 'Restricted', visible: true },
     { label: 'Revenue Records', value: canViewRevenue ? formatNumber(currentReport.overview.revenueRecordCount) : 'Restricted', visible: true },
-  ], [canViewAdPerformance, canViewRevenue, currentReport.overview, currentReport.permissions.viewTraffic]);
+  ], [canViewAdPerformance, canViewRevenue, currentReport.integrations.trafficAnalytics.status, currentReport.overview]);
 
   return (
     <div className="space-y-6">

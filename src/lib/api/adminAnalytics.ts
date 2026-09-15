@@ -12,11 +12,19 @@ export type AnalyticsCommonFilters = {
 };
 
 export type DashboardAnalyticsResponse = {
+  pageViews?: number | string;
+  views?: number | string;
+  totalViews?: number | string;
+  uniqueVisitors?: number | string;
+  uniqueReaders?: number | string;
+  readers?: number | string;
   totals?: {
-    views?: number;
-    totalViews?: number;
-    uniqueReaders?: number;
-    readers?: number;
+    pageViews?: number | string;
+    views?: number | string;
+    totalViews?: number | string;
+    uniqueVisitors?: number | string;
+    uniqueReaders?: number | string;
+    readers?: number | string;
     engagedReads?: number;
     engaged?: number;
     avgReadTimeSec?: number;
