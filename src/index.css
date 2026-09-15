@@ -100,6 +100,41 @@
   .np-rich-editor .ProseMirror ul,
   .np-rich-editor .ProseMirror ol { margin: 0 0 12px 18px; }
 
+  .np-inline-image-preview {
+    @apply mx-auto my-5 overflow-hidden rounded-lg bg-white text-left;
+  }
+
+  .np-inline-image-preview-normal {
+    max-width: 720px;
+  }
+
+  .np-inline-image-preview-wide {
+    max-width: 960px;
+  }
+
+  .np-inline-image-preview-full {
+    max-width: none;
+    width: 100%;
+  }
+
+  .np-inline-image-preview img {
+    @apply mx-auto block w-full rounded-lg object-contain;
+  }
+
+  .np-inline-image-preview figcaption {
+    @apply mt-2;
+  }
+
+  .np-media-caption {
+    @apply block text-left text-sm leading-5 text-slate-700 break-words;
+    overflow-wrap: anywhere;
+  }
+
+  .np-media-credit {
+    @apply mt-1 block text-left text-xs leading-5 text-slate-500 break-words;
+    overflow-wrap: anywhere;
+  }
+
   /* 🎛️ Toggle Switch */
   .toggle { @apply relative inline-block w-12 h-6 transition duration-200 ease-in; }
   .toggle input { @apply sr-only; } /* uses built-in utility, no circular apply */

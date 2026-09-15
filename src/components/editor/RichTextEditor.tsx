@@ -967,8 +967,20 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
                               {item.file ? <button type="button" onClick={() => retryGalleryUpload(item)} className="rounded border border-red-200 px-2 py-1 hover:bg-red-50">Retry</button> : null}
                             </div>
                           ) : null}
-                          <input value={safeAttr(item.caption) || ''} onChange={(event) => updateGalleryItem(item.localId, { caption: event.target.value })} placeholder="Caption" aria-label={`Caption for ${alt}`} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-                          <input value={safeAttr(item.credit) || ''} onChange={(event) => updateGalleryItem(item.localId, { credit: event.target.value })} placeholder="Credit" aria-label={`Credit for ${alt}`} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                          <label className="block space-y-1">
+                            <span className="text-xs font-semibold text-slate-700">Caption</span>
+                            <input
+                              value={safeAttr(item.caption) || ''}
+                              onChange={(event) => updateGalleryItem(item.localId, { caption: event.target.value })}
+                              placeholder="Write a concise image caption"
+                              aria-label={`Caption for ${alt}`}
+                              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-xs font-medium text-slate-500">Photo credit</span>
+                            <input value={safeAttr(item.credit) || ''} onChange={(event) => updateGalleryItem(item.localId, { credit: event.target.value })} placeholder="Reuters, PTI, ANI, or leave blank" aria-label={`Photo credit for ${alt}`} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700" />
+                          </label>
                         </div>
                       </div>
                     );

@@ -1,15 +1,20 @@
 import { Node, mergeAttributes, type NodeViewProps } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 
+export type NewsPulseInlineImageLayout = 'normal' | 'wide' | 'full';
+
 export type NewsPulseInlineImageAttrs = {
   mediaId?: string | null;
   src: string;
   alt?: string | null;
   caption?: string | null;
   credit?: string | null;
+  layout?: NewsPulseInlineImageLayout | null;
   width?: number | string | null;
   height?: number | string | null;
 };
+
+const INLINE_IMAGE_LAYOUTS: NewsPulseInlineImageLayout[] = ['normal', 'wide', 'full'];
 
 function safeAttr(value: unknown): string | undefined {
   const text = String(value ?? '').trim();
@@ -20,6 +25,11 @@ function safeDimension(value: unknown): string | undefined {
   const text = safeAttr(value);
   if (!text) return undefined;
   return /^\d+$/.test(text) ? text : undefined;
+}
+
+function normalizeInlineImageLayout(value: unknown): NewsPulseInlineImageLayout {
+  const text = safeAttr(value);
+  return INLINE_IMAGE_LAYOUTS.includes(text as NewsPulseInlineImageLayout) ? text as NewsPulseInlineImageLayout : 'normal';
 }
 
 function stripCreditPrefix(value: string): string {
@@ -46,6 +56,7 @@ function getFigureAttrs(element: HTMLElement): NewsPulseInlineImageAttrs | false
     alt: safeAttr(image?.getAttribute('alt')) || safeAttr(element.getAttribute('data-alt')) || null,
     caption: safeAttr(element.getAttribute('data-caption')) || safeAttr(captionNode?.textContent) || null,
     credit: safeAttr(element.getAttribute('data-credit')) || (creditNode?.textContent ? stripCreditPrefix(creditNode.textContent) : null),
+    layout: normalizeInlineImageLayout(element.getAttribute('data-np-layout')),
     width: safeDimension(element.getAttribute('data-np-width')) || safeDimension(element.getAttribute('data-width')) || safeDimension(image?.getAttribute('width')) || null,
     height: safeDimension(element.getAttribute('data-np-height')) || safeDimension(element.getAttribute('data-height')) || safeDimension(image?.getAttribute('height')) || null,
   };
@@ -56,6 +67,7 @@ function NewsPulseInlineImageView({ node, updateAttributes }: NodeViewProps) {
   const caption = safeAttr(attrs.caption) || '';
   const credit = safeAttr(attrs.credit) || '';
   const alt = safeAttr(attrs.alt) || 'Inline article image';
+  const layout = normalizeInlineImageLayout(attrs.layout);
 
   const editCaption = () => {
     const next = window.prompt('Image caption', caption);
@@ -74,6 +86,7 @@ function NewsPulseInlineImageView({ node, updateAttributes }: NodeViewProps) {
       as="figure"
       data-np-block="inline-image"
       data-np-media-id={safeAttr(attrs.mediaId)}
+      data-np-layout={layout}
       data-np-width={safeDimension(attrs.width)}
       data-np-height={safeDimension(attrs.height)}
       className="np-inline-image my-4 rounded-lg border border-slate-200 bg-slate-50 p-2"
@@ -86,12 +99,18 @@ function NewsPulseInlineImageView({ node, updateAttributes }: NodeViewProps) {
         height={safeDimension(attrs.height)}
         className="mx-auto max-h-[520px] max-w-full rounded-md object-contain"
       />
-      <figcaption data-np-caption="true" className="mt-2 text-center text-sm text-slate-700">
-        {caption || <span className="text-slate-400">No caption</span>}
-      </figcaption>
+      <div className="mt-3 space-y-1 text-left">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Caption</div>
+        <figcaption data-np-caption="true" className="text-sm leading-5 text-slate-800">
+          {caption || <span className="text-slate-400">No caption</span>}
+        </figcaption>
+      </div>
       {credit ? (
-        <div data-np-credit="true" className="mt-1 text-center text-xs uppercase tracking-wide text-slate-500">
-          Credit: {credit}
+        <div className="mt-2 space-y-1 text-left">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Photo credit</div>
+          <div data-np-credit="true" className="text-xs leading-5 text-slate-500 break-words">
+            Credit: {credit}
+          </div>
         </div>
       ) : null}
       <div className="mt-2 flex justify-center gap-2">
@@ -101,6 +120,18 @@ function NewsPulseInlineImageView({ node, updateAttributes }: NodeViewProps) {
         <button type="button" onClick={editCredit} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">
           Edit credit
         </button>
+      </div>
+      <div className="mt-2 flex flex-wrap justify-center gap-2" aria-label="Inline image layout">
+        {INLINE_IMAGE_LAYOUTS.map((nextLayout) => (
+          <button
+            key={nextLayout}
+            type="button"
+            onClick={() => updateAttributes({ layout: nextLayout })}
+            className={`rounded border px-2 py-1 text-xs ${layout === nextLayout ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
+          >
+            {nextLayout === 'full' ? 'Full width' : nextLayout[0].toUpperCase() + nextLayout.slice(1)}
+          </button>
+        ))}
       </div>
     </NodeViewWrapper>
   );
@@ -120,6 +151,7 @@ export const NewsPulseInlineImage = Node.create({
       alt: { default: null },
       caption: { default: null },
       credit: { default: null },
+      layout: { default: 'normal' },
       width: { default: null },
       height: { default: null },
     };
@@ -151,6 +183,7 @@ export const NewsPulseInlineImage = Node.create({
     const mediaId = safeAttr(attrs.mediaId);
     const caption = safeAttr(attrs.caption);
     const credit = safeAttr(attrs.credit);
+    const layout = normalizeInlineImageLayout(attrs.layout);
     const width = safeDimension(attrs.width);
     const height = safeDimension(attrs.height);
 
@@ -159,6 +192,7 @@ export const NewsPulseInlineImage = Node.create({
       mergeAttributes({
         'data-np-block': 'inline-image',
         'data-np-media-id': mediaId,
+        'data-np-layout': layout,
         'data-np-width': width,
         'data-np-height': height,
         class: 'np-inline-image',

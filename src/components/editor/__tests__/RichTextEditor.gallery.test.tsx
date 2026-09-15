@@ -141,6 +141,7 @@ describe('RichTextEditor controlled gallery authoring', () => {
     expect(getHtml()).toContain('data-np-block="gallery"');
     expect(getHtml()).toContain('data-np-media-id="gallery-media-1"');
     expect(getHtml()).toContain('data-np-media-id="gallery-media-2"');
+    expect(galleryFigures(getHtml()).some((figure) => figure.hasAttribute('data-np-layout'))).toBe(false);
   });
 
   it('uploads multiple local images once each before gallery insert', async () => {
@@ -217,7 +218,7 @@ describe('RichTextEditor controlled gallery authoring', () => {
     await chooseGalleryImages('Choose Two Gallery Images');
 
     fireEvent.change(screen.getByLabelText('Caption for gallery-media-1.webp'), { target: { value: 'Caption one' } });
-    fireEvent.change(screen.getByLabelText('Credit for gallery-media-1.webp'), { target: { value: 'PTI' } });
+    fireEvent.change(screen.getByLabelText('Photo credit for gallery-media-1.webp'), { target: { value: 'PTI' } });
     fireEvent.click(screen.getByRole('button', { name: 'Insert Gallery' }));
 
     await waitFor(() => expect(getHtml()).toContain('Caption one'));

@@ -128,6 +128,7 @@ describe('RichTextEditor inline image authoring', () => {
     expect(mocks.uploadInlineImage).toHaveBeenCalledTimes(1);
     expect(mocks.uploadInlineImage).toHaveBeenCalledWith(file);
     expect(figure.getAttribute('data-np-media-id')).toBe('media-paste.jpg');
+    expect(figure.getAttribute('data-np-layout')).toBe('normal');
     expect(figure.getAttribute('data-np-width')).toBe('1200');
     expect(figure.getAttribute('data-np-height')).toBe('800');
     expect(figure.querySelector('img')?.getAttribute('src')).toBe('https://cdn.newspulse.co.in/inline/paste.jpg');
@@ -262,7 +263,34 @@ describe('RichTextEditor inline image authoring', () => {
     expect(mocks.uploadInlineImage).not.toHaveBeenCalled();
     expect(figure.getAttribute('data-np-block')).toBe('inline-image');
     expect(figure.getAttribute('data-np-media-id')).toBe('library-media-1');
+    expect(figure.getAttribute('data-np-layout')).toBe('normal');
     expect(figure.querySelector('img')?.getAttribute('src')).toBe('https://cdn.newspulse.co.in/library/library-image.webp');
+  });
+
+  it('serializes wide layout from the inline image controls', async () => {
+    const { editorElement, getHtml } = renderEditor();
+    fireEvent.paste(editorElement, { clipboardData: clipboardData({ files: [createImageFile('wide.jpg', 'image/jpeg')] }) });
+    await waitForInlineImage(getHtml);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Wide' }));
+
+    await waitFor(() => {
+      const figure = parseHtml(getHtml()).querySelector('figure[data-np-block="inline-image"]') as HTMLElement | null;
+      expect(figure?.getAttribute('data-np-layout')).toBe('wide');
+    });
+  });
+
+  it('serializes full layout from the inline image controls', async () => {
+    const { editorElement, getHtml } = renderEditor();
+    fireEvent.paste(editorElement, { clipboardData: clipboardData({ files: [createImageFile('full.jpg', 'image/jpeg')] }) });
+    await waitForInlineImage(getHtml);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Full width' }));
+
+    await waitFor(() => {
+      const figure = parseHtml(getHtml()).querySelector('figure[data-np-block="inline-image"]') as HTMLElement | null;
+      expect(figure?.getAttribute('data-np-layout')).toBe('full');
+    });
   });
 
   it('renders user-entered ANI credit in serialized markup', async () => {
@@ -288,6 +316,7 @@ describe('RichTextEditor inline image authoring', () => {
 
     expect(html).toContain('data-np-block="inline-image"');
     expect(html).toContain('data-np-media-id="media-42"');
+    expect(html).toContain('data-np-layout="normal"');
     expect(html).toContain('data-np-width="900"');
     expect(html).toContain('data-np-height="600"');
     expect(html).toContain('Scene');
@@ -301,6 +330,7 @@ describe('RichTextEditor inline image authoring', () => {
 
     expect(html).toContain('data-np-block="inline-image"');
     expect(html).toContain('data-np-media-id="image-only"');
+    expect(html).toContain('data-np-layout="normal"');
     expect(html).toContain('src="https://cdn.newspulse.co.in/inline/image-only.jpg"');
     expect(html).not.toContain('data-np-caption="true"');
     expect(html).not.toContain('data-np-credit="true"');
@@ -313,6 +343,31 @@ describe('RichTextEditor inline image authoring', () => {
     expect(html).toContain('Riverfront scene');
     expect(html).toContain('data-np-caption="true"');
     expect(html).not.toContain('data-np-credit="true"');
+  });
+
+  it('defaults missing inline image layout to normal', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="missing-layout"><img src="https://cdn.newspulse.co.in/inline/missing-layout.jpg" alt="Missing layout"></figure>');
+
+    expect(html).toContain('data-np-layout="normal"');
+  });
+
+  it('defaults invalid inline image layout to normal', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="invalid-layout" data-np-layout="float-left"><img src="https://cdn.newspulse.co.in/inline/invalid-layout.jpg" alt="Invalid layout"></figure>');
+
+    expect(html).toContain('data-np-layout="normal"');
+    expect(html).not.toContain('data-np-layout="float-left"');
+  });
+
+  it('reopens and preserves wide inline image layout', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="wide-layout" data-np-layout="wide"><img src="https://cdn.newspulse.co.in/inline/wide-layout.jpg" alt="Wide layout"></figure>');
+
+    expect(html).toContain('data-np-layout="wide"');
+  });
+
+  it('reopens and preserves full inline image layout', () => {
+    const html = serializeContent('<figure data-np-block="inline-image" data-np-media-id="full-layout" data-np-layout="full"><img src="https://cdn.newspulse.co.in/inline/full-layout.jpg" alt="Full layout"></figure>');
+
+    expect(html).toContain('data-np-layout="full"');
   });
 
   it('serializes credit-only controlled markup without a caption block', () => {

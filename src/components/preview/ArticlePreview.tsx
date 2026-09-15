@@ -37,6 +37,70 @@ function looksLikeHtml(input: string): boolean {
   return /<\s*\/?\s*[a-z][\s\S]*>/i.test(input || '');
 }
 
+type InlineImageLayout = 'normal' | 'wide' | 'full';
+
+const INLINE_IMAGE_LAYOUTS: InlineImageLayout[] = ['normal', 'wide', 'full'];
+
+function normalizeInlineImageLayout(value: unknown): InlineImageLayout {
+  const normalized = String(value ?? '').trim();
+  return INLINE_IMAGE_LAYOUTS.includes(normalized as InlineImageLayout) ? normalized as InlineImageLayout : 'normal';
+}
+
+function normalizePhotoCreditDisplay(value: unknown): string {
+  const normalized = String(value ?? '').replace(/^\s*(?:(?:credit|photo(?:\s+credit)?)\s*:\s*)+/i, '').trim();
+  return normalized ? `Photo: ${normalized}` : '';
+}
+
+function renderControlledInlineImageBlocks(html: string): string {
+  if (!html || !/data-np-block=["']inline-image["']/i.test(html)) return html;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('figure[data-np-block="inline-image"]').forEach((figure) => {
+      if (figure.closest('div[data-np-block="gallery"]')) return;
+
+      const image = figure.querySelector('img[src]') as HTMLImageElement | null;
+      if (!image) return;
+
+      const layout = normalizeInlineImageLayout(figure.getAttribute('data-np-layout'));
+      const replacement = doc.createElement('figure');
+      replacement.setAttribute('class', `np-inline-image-preview np-inline-image-preview-${layout}`);
+
+      const nextImage = doc.createElement('img');
+      nextImage.setAttribute('src', image.getAttribute('src') || '');
+      nextImage.setAttribute('alt', image.getAttribute('alt') || '');
+      const width = figure.getAttribute('data-np-width') || image.getAttribute('width');
+      const height = figure.getAttribute('data-np-height') || image.getAttribute('height');
+      if (width) nextImage.setAttribute('width', width);
+      if (height) nextImage.setAttribute('height', height);
+      replacement.appendChild(nextImage);
+
+      const caption = figure.querySelector('[data-np-caption], figcaption')?.textContent?.trim();
+      if (caption) {
+        const captionNode = doc.createElement('figcaption');
+        captionNode.setAttribute('data-np-caption', 'true');
+        captionNode.setAttribute('class', 'np-media-caption');
+        captionNode.textContent = caption;
+        replacement.appendChild(captionNode);
+      }
+
+      const credit = normalizePhotoCreditDisplay(figure.querySelector('[data-np-credit]')?.textContent);
+      if (credit) {
+        const creditNode = doc.createElement('div');
+        creditNode.setAttribute('data-np-credit', 'true');
+        creditNode.setAttribute('class', 'np-media-credit');
+        creditNode.textContent = credit;
+        replacement.appendChild(creditNode);
+      }
+
+      figure.replaceWith(replacement);
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html;
+  }
+}
+
 function renderControlledYouTubeBlocks(html: string): string {
   if (!html || !/data-np-block=["']youtube["']/i.test(html)) return html;
 
@@ -225,13 +289,15 @@ function renderControlledGalleryBlocks(html: string): string {
         const caption = figure.querySelector('[data-np-caption], figcaption')?.textContent?.trim();
         if (caption) {
           const captionNode = doc.createElement('div');
+          captionNode.setAttribute('class', 'np-media-caption');
           captionNode.textContent = caption;
           item.appendChild(captionNode);
         }
 
-        const credit = figure.querySelector('[data-np-credit]')?.textContent?.trim();
+        const credit = normalizePhotoCreditDisplay(figure.querySelector('[data-np-credit]')?.textContent);
         if (credit) {
           const creditNode = doc.createElement('div');
+          creditNode.setAttribute('class', 'np-media-credit');
           creditNode.textContent = credit;
           item.appendChild(creditNode);
         }
@@ -279,7 +345,7 @@ export default function ArticlePreview({
   const safeHtml = useMemo(() => {
     if (!content) return '';
     if (!looksLikeHtml(content)) return '';
-    return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(renderControlledGalleryBlocks(content))))));
+    return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(renderControlledInlineImageBlocks(renderControlledGalleryBlocks(content)))))));
   }, [content]);
 
   const seoDescription = useMemo(() => {
