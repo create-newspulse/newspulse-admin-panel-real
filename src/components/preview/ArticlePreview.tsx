@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { parseNewsPulseFacebookAttrs } from '@/lib/facebook';
 import { parseNewsPulseInstagramAttrs } from '@/lib/instagram';
@@ -22,6 +22,55 @@ export interface ArticlePreviewModel {
   status?: 'draft' | 'scheduled' | 'published';
   scheduledAt?: string;
   tags?: string[];
+}
+
+const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
+let xWidgetsLoadPromise: Promise<void> | null = null;
+
+function getXWidgets() {
+  return (typeof window !== 'undefined' ? (window as any).twttr?.widgets : undefined);
+}
+
+function findXWidgetsScript(): HTMLScriptElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector(`script[src="${X_WIDGETS_SRC}"]`);
+}
+
+function loadXWidgetsScript(): Promise<void> {
+  if (typeof document === 'undefined') return Promise.reject(new Error('Document unavailable'));
+  if (typeof getXWidgets()?.load === 'function') return Promise.resolve();
+  if (xWidgetsLoadPromise && findXWidgetsScript()) return xWidgetsLoadPromise;
+
+  xWidgetsLoadPromise = new Promise<void>((resolve, reject) => {
+    const existing = findXWidgetsScript();
+    const script = existing || document.createElement('script');
+    const onLoad = () => resolve();
+    const onError = () => reject(new Error('X widgets script failed to load'));
+
+    script.addEventListener('load', onLoad, { once: true });
+    script.addEventListener('error', onError, { once: true });
+
+    if (!existing) {
+      script.async = true;
+      script.src = X_WIDGETS_SRC;
+      document.body.appendChild(script);
+    }
+  }).catch((error) => {
+    xWidgetsLoadPromise = null;
+    throw error;
+  });
+
+  return xWidgetsLoadPromise;
+}
+
+function hydrateXEmbeds(container: HTMLElement | null): void {
+  if (!container?.querySelector('blockquote.twitter-tweet')) return;
+  void loadXWidgetsScript()
+    .then(() => {
+      const widgets = getXWidgets();
+      if (typeof widgets?.load === 'function') widgets.load(container);
+    })
+    .catch(() => undefined);
 }
 
 function stripHtml(input: string): string {
@@ -151,24 +200,32 @@ function renderControlledXBlocks(html: string): string {
         return;
       }
 
+      replacement.setAttribute('class', 'np-x-preview');
+
+      const blockquote = doc.createElement('blockquote');
+      blockquote.setAttribute('class', 'twitter-tweet');
+
+      const fallback = doc.createElement('p');
       const label = doc.createElement('strong');
       label.textContent = 'X Post';
-      replacement.appendChild(label);
+      fallback.appendChild(label);
 
       if (embed.username) {
-        replacement.appendChild(doc.createElement('br'));
+        fallback.appendChild(doc.createElement('br'));
         const username = doc.createElement('span');
         username.textContent = `@${embed.username}`;
-        replacement.appendChild(username);
+        fallback.appendChild(username);
       }
 
-      replacement.appendChild(doc.createElement('br'));
+      fallback.appendChild(doc.createElement('br'));
       const link = doc.createElement('a');
       link.setAttribute('href', embed.url);
       link.setAttribute('target', '_blank');
       link.setAttribute('rel', 'noreferrer');
       link.textContent = 'Open post';
-      replacement.appendChild(link);
+      fallback.appendChild(link);
+      blockquote.appendChild(fallback);
+      replacement.appendChild(blockquote);
       node.replaceWith(replacement);
     });
     return doc.body.innerHTML;
@@ -331,6 +388,7 @@ export default function ArticlePreview({
   availableLanguages,
   onSelectLanguage,
 }: ArticlePreviewProps) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const title = (article.title || '').trim() || 'Untitled';
   const slug = (article.slug || '').trim();
   const summary = (article.summary || '').trim();
@@ -347,6 +405,10 @@ export default function ArticlePreview({
     if (!looksLikeHtml(content)) return '';
     return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(renderControlledInlineImageBlocks(renderControlledGalleryBlocks(content)))))));
   }, [content]);
+
+  useEffect(() => {
+    hydrateXEmbeds(contentRef.current);
+  }, [safeHtml]);
 
   const seoDescription = useMemo(() => {
     const base = summary || stripHtml(content);
@@ -420,7 +482,7 @@ export default function ArticlePreview({
               <div className="text-sm font-semibold">Article</div>
             </div>
             <div className="p-4">
-              <div className="prose max-w-none">
+              <div ref={contentRef} className="prose max-w-none">
                 {safeHtml ? (
                   <div dangerouslySetInnerHTML={{ __html: safeHtml }} />
                 ) : (

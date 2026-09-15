@@ -1,9 +1,13 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ArticlePreview from '@/components/preview/ArticlePreview';
+
+const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
 
 afterEach(() => {
   cleanup();
+  document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`).forEach((script) => script.remove());
+  delete (window as any).twttr;
 });
 
 describe('ArticlePreview inline images', () => {
@@ -114,21 +118,97 @@ describe('ArticlePreview inline images', () => {
     expect(container.textContent).not.toContain('data-np-url');
   });
 
-  it('renders a controlled X marker as a safe preview card', () => {
+  it('renders a controlled X marker as an official blockquote embed with fallback', () => {
     const { container } = render(<ArticlePreview article={{
       title: 'X preview',
       content: '<p>Before</p><div data-np-block="x" data-np-post-id="1234567890123456789" data-np-url="https://x.com/newspulse/status/1234567890123456789?s=20"></div><p>After</p>',
     }} />);
 
     const link = screen.getByRole('link', { name: 'Open post' });
+    const blockquote = container.querySelector('blockquote.twitter-tweet');
+    expect(blockquote).not.toBeNull();
     expect(screen.getByText('X Post')).toBeInTheDocument();
     expect(screen.getByText('@newspulse')).toBeInTheDocument();
     expect(link).toHaveAttribute('href', 'https://x.com/newspulse/status/1234567890123456789?s=20');
+    expect(blockquote?.contains(link)).toBe(true);
     expect(container.querySelector('[data-np-block="x"]')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect(container.querySelector('blockquote')).toBeNull();
     expect(container.textContent).not.toContain('data-np-post-id');
     expect(container.textContent).not.toContain('data-np-url');
+  });
+
+  it('uses the official post URL when loading an X preview embed', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Twitter preview',
+      content: '<div data-np-block="x" data-np-post-id="9876543210987654321" data-np-url="https://twitter.com/ANI/status/9876543210987654321"></div>',
+    }} />);
+
+    expect(container.querySelector('blockquote.twitter-tweet a')).toHaveAttribute('href', 'https://twitter.com/ANI/status/9876543210987654321');
+    expect(screen.getByText('@ANI')).toBeInTheDocument();
+  });
+
+  it('does not create an X embed from an invalid controlled URL', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Invalid X preview',
+      content: '<div data-np-block="x" data-np-post-id="1234567890123456789" data-np-url="https://x.com.evil.example/newspulse/status/1234567890123456789"></div>',
+    }} />);
+
+    expect(screen.getByText('X post unavailable')).toBeInTheDocument();
+    expect(container.querySelector('blockquote.twitter-tweet')).toBeNull();
+    expect(document.querySelector(`script[src="${X_WIDGETS_SRC}"]`)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Open post' })).toBeNull();
+  });
+
+  it('keeps X fallback content visible when widgets script has not hydrated', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'X fallback preview',
+      content: '<div data-np-block="x" data-np-post-id="1234567890123456789" data-np-url="https://x.com/newspulse/status/1234567890123456789"></div>',
+    }} />);
+
+    expect(container.querySelector('blockquote.twitter-tweet')).not.toBeNull();
+    expect(screen.getByText('X Post')).toBeInTheDocument();
+    expect(screen.getByText('@newspulse')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', 'https://x.com/newspulse/status/1234567890123456789');
+  });
+
+  it('does not create duplicate X widgets.js loaders for multiple X posts', () => {
+    const content = '<div data-np-block="x" data-np-post-id="111" data-np-url="https://x.com/first/status/111"></div><div data-np-block="x" data-np-post-id="222" data-np-url="https://x.com/second/status/222"></div>';
+
+    const { container } = render(<ArticlePreview article={{ title: 'Multiple X preview', content }} />);
+
+    expect(container.querySelectorAll('blockquote.twitter-tweet')).toHaveLength(2);
+    expect(screen.getByText('@first')).toBeInTheDocument();
+    expect(screen.getByText('@second')).toBeInTheDocument();
+    expect(document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`)).toHaveLength(1);
+  });
+
+  it('hydrates multiple X posts through a single widgets load call', async () => {
+    const load = vi.fn();
+    const content = '<div data-np-block="x" data-np-post-id="111" data-np-url="https://x.com/first/status/111"></div><div data-np-block="x" data-np-post-id="222" data-np-url="https://x.com/second/status/222"></div>';
+
+    render(<ArticlePreview article={{ title: 'Hydrate multiple X preview', content }} />);
+    (window as any).twttr = { widgets: { load } };
+    document.querySelector(`script[src="${X_WIDGETS_SRC}"]`)?.dispatchEvent(new Event('load'));
+
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    expect(document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`)).toHaveLength(1);
+  });
+
+  it('does not load X widgets.js repeatedly on re-render', async () => {
+    const load = vi.fn();
+    const article = {
+      title: 'Stable X preview',
+      content: '<div data-np-block="x" data-np-post-id="1234567890123456789" data-np-url="https://x.com/newspulse/status/1234567890123456789"></div>',
+    };
+    const { rerender } = render(<ArticlePreview article={article} />);
+    (window as any).twttr = { widgets: { load } };
+    document.querySelector(`script[src="${X_WIDGETS_SRC}"]`)?.dispatchEvent(new Event('load'));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+
+    rerender(<ArticlePreview article={{ ...article, summary: 'Updated summary' }} />);
+
+    expect(document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`)).toHaveLength(1);
+    expect(load).toHaveBeenCalledTimes(1);
   });
 
   it('renders a controlled Instagram marker as a safe preview card', () => {

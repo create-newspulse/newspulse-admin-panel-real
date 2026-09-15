@@ -13,7 +13,7 @@ export function sanitizeHtml(html: string): string {
         // Hardened options: allow only a short list of safe tags, limited attributes,
         // block inline styles and event handlers so it's CSP-friendly.
         const config = {
-          ALLOWED_TAGS: ['iframe','a','p','div','span','br','strong','em','ul','ol','li','img','figure','figcaption'],
+          ALLOWED_TAGS: ['iframe','a','p','div','span','br','strong','em','ul','ol','li','img','figure','figcaption','blockquote'],
           ALLOWED_ATTR: ['href','src','alt','title','width','height','allow','allowfullscreen','frameborder','class'],
           FORCE_BODY: true,
           RETURN_DOM: false,
