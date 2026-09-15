@@ -1,28 +1,31 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+
 import AnalyticsDashboard from '@/components/advanced/AnalyticsDashboard';
-import { getAdminAnalyticsAdPerformance, getAdminAnalyticsDashboard, getAdminAnalyticsRevenue } from '@/lib/api/adminAnalytics';
+import { getAdminAnalyticsDashboard, listAdminAnalyticsArticles, listAdminAnalyticsCategories } from '@/lib/api/adminAnalytics';
 
 vi.mock('@/lib/api/adminAnalytics', () => ({
-  getAdminAnalyticsAdPerformance: vi.fn(),
   getAdminAnalyticsDashboard: vi.fn(),
-  getAdminAnalyticsRevenue: vi.fn(),
+  listAdminAnalyticsArticles: vi.fn(),
+  listAdminAnalyticsCategories: vi.fn(),
 }));
 
-function renderDashboard() {
-  return render(
-    <MemoryRouter initialEntries={['/admin/analytics']}>
-      <AnalyticsDashboard />
-    </MemoryRouter>,
-  );
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname}</div>;
 }
 
-function integrationCard(label: string): HTMLElement {
-  const heading = screen.getByText(label);
-  const card = heading.closest('.rounded-lg');
-  if (!card) throw new Error(`Integration card not found: ${label}`);
-  return card as HTMLElement;
+function renderDashboard(initialPath = '/admin/analytics') {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route path="/admin/analytics" element={<><AnalyticsDashboard /><LocationProbe /></>} />
+        <Route path="/admin/analytics/articles" element={<><div>Article Analytics Page</div><LocationProbe /></>} />
+        <Route path="/admin/analytics/categories" element={<><div>Category Analytics Page</div><LocationProbe /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
 }
 
 function metricCard(label: string): HTMLElement {
@@ -32,269 +35,138 @@ function metricCard(label: string): HTMLElement {
   return card as HTMLElement;
 }
 
-function formatDateParam(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function dateRange(days: number) {
-  const dateTo = new Date();
-  const dateFrom = new Date(dateTo);
-  dateFrom.setDate(dateFrom.getDate() - (days - 1));
-  return { dateFrom: formatDateParam(dateFrom), dateTo: formatDateParam(dateTo) };
-}
-
 beforeEach(() => {
   vi.mocked(getAdminAnalyticsDashboard).mockResolvedValue({
     totals: {
-      views: 120,
-      uniqueReaders: 45,
-      engagedReads: 18,
-      avgReadTimeSec: 62,
-    },
-    sources: [{ source: 'Direct', views: 90 }],
-    languages: [{ language: 'en', views: 120 }],
-  });
-  vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValue({
-    connected: true,
-    source: 'Ads Manager',
-    scope: 'lifetime',
-    dateRangeSupported: false,
-    metrics: {
-      impressions: 12345,
-      clicks: 678,
-      ctr: 5.49,
-      totalAds: 42,
-      activeAds: 9,
+      views: 1234,
+      uniqueReaders: 567,
+      engagedReads: 321,
+      avgReadTimeSec: 83,
+      completionRate: 0.74,
     },
   });
-  vi.mocked(getAdminAnalyticsRevenue).mockResolvedValue({
-    connected: true,
-    source: 'Finance Records',
-    metrics: {
-      totalRevenue: 125000,
-      paidAmount: 90000,
-      outstandingAmount: 35000,
-      recordCount: 8,
-    },
+  vi.mocked(listAdminAnalyticsArticles).mockResolvedValue({
+    rows: [
+      { articleId: 'a-low', title: 'Lower Article', views: 10, uniqueReaders: 5 },
+      { articleId: 'a-top', title: 'Most Read Article', views: 99, uniqueReaders: 30 },
+    ],
   });
-  vi.stubGlobal('fetch', vi.fn());
+  vi.mocked(listAdminAnalyticsCategories).mockResolvedValue({
+    rows: [
+      { category: 'sports', views: 25, uniqueReaders: 15 },
+      { category: 'breaking', views: 80, uniqueReaders: 45 },
+    ],
+  });
 });
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-describe('AnalyticsDashboard source wiring', () => {
-  it('keeps Traffic Analytics connected to the existing News Pulse source', async () => {
+describe('AnalyticsDashboard readership overview', () => {
+  it('renders readership metrics only from existing analytics responses', async () => {
     renderDashboard();
 
-    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
-    expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Traffic Analytics')).getByText('News Pulse Analytics')).toBeInTheDocument();
-    expect(within(metricCard('Page Views')).getByText('120')).toBeInTheDocument();
-    expect(within(metricCard('Unique Visitors')).getByText('45')).toBeInTheDocument();
-    expect(screen.queryByText('Connect an analytics provider before refreshing.')).toBeNull();
-    expect(getAdminAnalyticsDashboard).toHaveBeenCalledWith({ range: '24h' });
-  });
-
-  it('shows zero for connected traffic page views and unique visitors', async () => {
-    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({
-      totals: { views: 0, uniqueReaders: 0 },
-      sources: [],
-      languages: [],
-    });
-
-    renderDashboard();
-
-    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
-    expect(within(metricCard('Page Views')).getByText('0')).toBeInTheDocument();
-    expect(within(metricCard('Unique Visitors')).getByText('0')).toBeInTheDocument();
-    expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
-  });
-
-  it('normalizes connected empty traffic responses to zero without manufacturing non-zero counts', async () => {
-    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({ totals: {}, sources: [], languages: [] });
-
-    renderDashboard();
-
-    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
-    expect(within(metricCard('Page Views')).getByText('0')).toBeInTheDocument();
-    expect(within(metricCard('Unique Visitors')).getByText('0')).toBeInTheDocument();
-  });
-
-  it('renders non-zero traffic values from root dashboard fields', async () => {
-    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({
-      pageViews: 1234,
-      uniqueVisitors: 567,
-      sources: [],
-      languages: [],
-    });
-
-    renderDashboard();
-
-    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Readership Analytics' })).toBeInTheDocument();
     expect(within(metricCard('Page Views')).getByText('1,234')).toBeInTheDocument();
-    expect(within(metricCard('Unique Visitors')).getByText('567')).toBeInTheDocument();
+    expect(within(metricCard('Unique Readers')).getByText('567')).toBeInTheDocument();
+    expect(within(metricCard('Engaged Readers')).getByText('321')).toBeInTheDocument();
+    expect(within(metricCard('Average Read Time')).getByText('1m 23s')).toBeInTheDocument();
+    expect(within(metricCard('Completion Rate')).getByText('74%')).toBeInTheDocument();
+    expect(within(metricCard('Top Article')).getByText('Most Read Article (99 views)')).toBeInTheDocument();
+    expect(within(metricCard('Top Category')).getByText('breaking (80 views)')).toBeInTheDocument();
+    expect(screen.getByText('Traffic Analytics')).toBeInTheDocument();
+    expect(screen.getByText('News Pulse Analytics')).toBeInTheDocument();
   });
 
-  it('connects Ad Tracking to Ads Manager when the ad endpoint is connected', async () => {
-    renderDashboard();
-
-    await screen.findByText('Data source: News Pulse Analytics');
-    expect(within(integrationCard('Ad Tracking')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Ad Tracking')).getByText('Ads Manager • Lifetime')).toBeInTheDocument();
-  });
-
-  it('keeps zero ad counters connected and truthful', async () => {
-    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValueOnce({
-      connected: true,
-      source: 'Ads Manager',
-      scope: 'lifetime',
-      dateRangeSupported: false,
-      metrics: { impressions: 0, clicks: 0, ctr: 0, totalAds: 0, activeAds: 0 },
-    });
+  it('shows truthful zero and no-data values when connected readership responses are empty', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockResolvedValueOnce({ totals: {} });
+    vi.mocked(listAdminAnalyticsArticles).mockResolvedValueOnce({ rows: [] });
+    vi.mocked(listAdminAnalyticsCategories).mockResolvedValueOnce({ rows: [] });
 
     renderDashboard();
 
-    expect(await screen.findByText('Data source: News Pulse Analytics')).toBeInTheDocument();
-    const adCard = integrationCard('Ad Tracking');
-    expect(within(adCard).getByText('Connected')).toBeInTheDocument();
-    expect(within(adCard).getByText('Ads Manager • Lifetime • No ad activity yet.')).toBeInTheDocument();
-    expect(within(adCard).queryByText('Not Configured')).toBeNull();
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    expect(within(metricCard('Page Views')).getByText('0')).toBeInTheDocument();
+    expect(within(metricCard('Unique Readers')).getByText('0')).toBeInTheDocument();
+    expect(within(metricCard('Engaged Readers')).getByText('0')).toBeInTheDocument();
+    expect(within(metricCard('Average Read Time')).getByText('0s')).toBeInTheDocument();
+    expect(within(metricCard('Completion Rate')).getByText('0%')).toBeInTheDocument();
+    expect(within(metricCard('Top Article')).getByText('No data yet')).toBeInTheDocument();
+    expect(within(metricCard('Top Category')).getByText('No data yet')).toBeInTheDocument();
   });
 
-  it('renders real Ads Manager metrics and labels them as lifetime in the Ad Performance tab', async () => {
+  it('shows unavailable state without ad or revenue cards when traffic source fails', async () => {
+    vi.mocked(getAdminAnalyticsDashboard).mockRejectedValueOnce(new Error('Traffic offline'));
+
     renderDashboard();
 
-    await screen.findByText('Data source: News Pulse Analytics');
-    fireEvent.click(screen.getByRole('button', { name: /Ad Performance/ }));
-
-    expect(screen.getByText('Ads Manager Performance')).toBeInTheDocument();
-    expect(screen.getByText('Lifetime counters from Ads Manager. Date filters do not apply to these metrics.')).toBeInTheDocument();
-    expect(screen.getByText('12,345')).toBeInTheDocument();
-    expect(screen.getByText('678')).toBeInTheDocument();
-    expect(screen.getByText('5.49%')).toBeInTheDocument();
-    expect(screen.getByText('42')).toBeInTheDocument();
-    expect(screen.getByText('9')).toBeInTheDocument();
-    expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Readership analytics unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Traffic offline')).toBeInTheDocument();
+    expect(screen.queryByText('Ad Tracking')).toBeNull();
+    expect(screen.queryByText('Revenue Data')).toBeNull();
   });
 
-  it('does not apply selected date ranges to lifetime ad counters', async () => {
+  it('maps Last 24h, Last 7 Days, and Last 30 Days to existing readership range params', async () => {
     renderDashboard();
 
-    await screen.findByText('Data source: News Pulse Analytics');
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    expect(getAdminAnalyticsDashboard).toHaveBeenLastCalledWith({ range: '24h' });
     fireEvent.click(screen.getByRole('button', { name: 'Last 7 Days' }));
-
     await waitFor(() => expect(getAdminAnalyticsDashboard).toHaveBeenLastCalledWith({ range: '7d' }));
-    expect(getAdminAnalyticsRevenue).toHaveBeenLastCalledWith(dateRange(7));
-    expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(2);
-    expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith();
-  });
-
-  it('connects Revenue Data to Finance Records when the revenue endpoint is connected', async () => {
-    renderDashboard();
-
-    await screen.findByText('Data source: News Pulse Analytics');
-    expect(within(integrationCard('Revenue Data')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Revenue Data')).getByText('Finance Records')).toBeInTheDocument();
-  });
-
-  it('keeps zero Finance Records connected and truthful', async () => {
-    vi.mocked(getAdminAnalyticsRevenue).mockResolvedValueOnce({
-      connected: true,
-      source: 'Finance Records',
-      metrics: { totalRevenue: 0, paidAmount: 0, outstandingAmount: 0, recordCount: 0 },
-    });
-
-    renderDashboard();
-
-    await screen.findByText('Data source: News Pulse Analytics');
-    const revenueCard = integrationCard('Revenue Data');
-    expect(within(revenueCard).getByText('Connected')).toBeInTheDocument();
-    expect(within(revenueCard).getByText('Finance Records • No revenue records yet.')).toBeInTheDocument();
-    expect(within(revenueCard).queryByText('Not Configured')).toBeNull();
-  });
-
-  it('renders real Finance Records revenue metrics', async () => {
-    renderDashboard();
-
-    await screen.findByText('Data source: News Pulse Analytics');
-    expect(screen.getByText('Total Revenue')).toBeInTheDocument();
-    expect(screen.getByText(/₹\s?1,25,000/)).toBeInTheDocument();
-    expect(screen.getByText(/₹\s?90,000/)).toBeInTheDocument();
-    expect(screen.getByText(/₹\s?35,000/)).toBeInTheDocument();
-    expect(screen.getByText('Revenue Records')).toBeInTheDocument();
-    expect(screen.getByText('8')).toBeInTheDocument();
-  });
-
-  it('passes selected date ranges to revenue only', async () => {
-    renderDashboard();
-
-    await screen.findByText('Data source: News Pulse Analytics');
-    expect(getAdminAnalyticsRevenue).toHaveBeenCalledWith(dateRange(1));
     fireEvent.click(screen.getByRole('button', { name: 'Last 30 Days' }));
-
-    await waitFor(() => expect(getAdminAnalyticsRevenue).toHaveBeenLastCalledWith(dateRange(30)));
-    expect(getAdminAnalyticsDashboard).toHaveBeenLastCalledWith({ range: '30d' });
-    expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith();
+    await waitFor(() => expect(getAdminAnalyticsDashboard).toHaveBeenLastCalledWith({ range: '30d' }));
   });
 
-  it('keeps successful sources connected when one source fails', async () => {
-    vi.mocked(getAdminAnalyticsAdPerformance).mockRejectedValueOnce(new Error('Ads offline'));
-
+  it('maps custom readership range to existing from/to params', async () => {
     renderDashboard();
 
-    expect(await screen.findByText('Some analytics sources are unavailable: Ad Tracking.')).toBeInTheDocument();
-    expect(within(integrationCard('Traffic Analytics')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Revenue Data')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Ad Tracking')).getByText('Error')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    fireEvent.click(screen.getByRole('button', { name: 'Custom Range' }));
+    const inputs = screen.getAllByDisplayValue('');
+    fireEvent.change(inputs[0], { target: { value: '2026-09-01' } });
+    fireEvent.change(inputs[1], { target: { value: '2026-09-16' } });
+
+    await waitFor(() => expect(getAdminAnalyticsDashboard).toHaveBeenLastCalledWith({ range: 'custom', from: '2026-09-01', to: '2026-09-16' }));
+    expect(listAdminAnalyticsArticles).toHaveBeenLastCalledWith({ range: 'custom', from: '2026-09-01', to: '2026-09-16', page: 1, limit: 200 });
+    expect(listAdminAnalyticsCategories).toHaveBeenLastCalledWith({ range: 'custom', from: '2026-09-01', to: '2026-09-16' });
   });
 
-  it('keeps traffic metrics unconfigured when the traffic source is unavailable', async () => {
-    vi.mocked(getAdminAnalyticsDashboard).mockRejectedValueOnce(new Error('Traffic offline'));
-
+  it('navigates to existing Article Analytics page', async () => {
     renderDashboard();
 
-    expect(await screen.findByText('Some analytics sources are unavailable: Traffic Analytics.')).toBeInTheDocument();
-    expect(within(integrationCard('Traffic Analytics')).getByText('Error')).toBeInTheDocument();
-    expect(within(metricCard('Page Views')).getByText('Not configured')).toBeInTheDocument();
-    expect(within(metricCard('Unique Visitors')).getByText('Not configured')).toBeInTheDocument();
-    expect(within(integrationCard('Ad Tracking')).getByText('Connected')).toBeInTheDocument();
-    expect(within(integrationCard('Revenue Data')).getByText('Connected')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    fireEvent.click(screen.getByRole('button', { name: 'Article Analytics' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/admin/analytics/articles');
+    expect(screen.getByText('Article Analytics Page')).toBeInTheDocument();
   });
 
-  it('refreshes traffic, ad tracking, and revenue sources', async () => {
+  it('navigates to existing Category Analytics page', async () => {
     renderDashboard();
 
-    await screen.findByText('Data source: News Pulse Analytics');
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh Data' }));
-
-    await waitFor(() => expect(getAdminAnalyticsDashboard).toHaveBeenCalledTimes(2));
-    expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(2);
-    expect(getAdminAnalyticsRevenue).toHaveBeenCalledTimes(2);
-    expect(fetch).not.toHaveBeenCalled();
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    fireEvent.click(screen.getByRole('button', { name: 'Category Analytics' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/admin/analytics/categories');
+    expect(screen.getByText('Category Analytics Page')).toBeInTheDocument();
   });
 
-  it('does not introduce placeholder or sample values', async () => {
+  it('does not render ad, revenue, finance, or placeholder presentation on the readership page', async () => {
     renderDashboard();
 
-    await screen.findByText('Data source: News Pulse Analytics');
+    await screen.findByRole('heading', { name: 'Readership Analytics' });
+    expect(screen.queryByText('Ad Performance')).toBeNull();
+    expect(screen.queryByText('Ad Tracking')).toBeNull();
+    expect(screen.queryByText('Ad Impressions')).toBeNull();
+    expect(screen.queryByText('Ad Clicks')).toBeNull();
+    expect(screen.queryByText('CTR')).toBeNull();
+    expect(screen.queryByText('Total Ads')).toBeNull();
+    expect(screen.queryByText('Active Ads')).toBeNull();
+    expect(screen.queryByText('Revenue Data')).toBeNull();
+    expect(screen.queryByText('Total Revenue')).toBeNull();
+    expect(screen.queryByText('Paid Amount')).toBeNull();
+    expect(screen.queryByText('Outstanding Amount')).toBeNull();
+    expect(screen.queryByText('Revenue Records')).toBeNull();
     expect(screen.queryByText(/50K|87%|500K|sample|placeholder/i)).toBeNull();
-  });
-
-  it('keeps empty and error states truthful and safe', async () => {
-    vi.mocked(getAdminAnalyticsDashboard).mockRejectedValueOnce(new Error('Traffic offline'));
-    vi.mocked(getAdminAnalyticsAdPerformance).mockRejectedValueOnce(new Error('Ads offline'));
-    vi.mocked(getAdminAnalyticsRevenue).mockRejectedValueOnce(new Error('Revenue offline'));
-
-    renderDashboard();
-
-    expect(await screen.findByText('Analytics unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Analytics sources are unavailable.')).toBeInTheDocument();
   });
 });

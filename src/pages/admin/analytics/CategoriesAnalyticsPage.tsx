@@ -107,8 +107,8 @@ export default function CategoriesAnalyticsPage() {
               className="mt-1 w-full border rounded px-3 py-2 bg-white dark:bg-slate-900"
             >
               <option value="24h">Last 24h</option>
-              <option value="7d">Last 7d</option>
-              <option value="30d">Last 30d</option>
+              <option value="7d">Last 7 Days</option>
+              <option value="30d">Last 30 Days</option>
             </select>
           </div>
 

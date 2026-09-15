@@ -1,6 +1,7 @@
 import React from 'react';
 import toast from 'react-hot-toast';
 
+import AdPerformancePanel from '@/components/ads/AdPerformancePanel';
 import { adminApi, api } from '@/lib/api';
 import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
 import {
@@ -1330,7 +1331,7 @@ function extractAdsList(payload: any): any[] {
 }
 
 export default function AdsManager() {
-  const [tab, setTab] = React.useState<'ads' | 'inquiries' | 'media-kit'>('ads');
+  const [tab, setTab] = React.useState<'ads' | 'inquiries' | 'media-kit' | 'ad-performance'>('ads');
   const { isFounder, user } = useAuth();
 
   type InquiryStatusTab = 'new' | 'read' | 'deleted';
@@ -3119,7 +3120,19 @@ export default function AdsManager() {
         >
           Media Kit
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('ad-performance')}
+          className={
+            'px-3 py-1.5 rounded border text-sm font-semibold ' +
+            (tab === 'ad-performance' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-slate-200')
+          }
+        >
+          Ad Performance
+        </button>
       </div>
+
+      {tab === 'ad-performance' ? <AdPerformancePanel /> : null}
 
       {tab === 'inquiries' ? (
         <div className="space-y-4">
