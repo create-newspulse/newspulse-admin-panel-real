@@ -12,10 +12,12 @@ import toast from 'react-hot-toast';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
+import { extractNewsPulseInstagramFromHtml, parseNewsPulseInstagramUrl, type NewsPulseInstagramEmbed } from '@/lib/instagram';
 import { extractNewsPulseYouTubeFromHtml, parseNewsPulseYouTubeUrl, type NewsPulseYouTubeEmbed } from '@/lib/youtube';
 import { extractNewsPulseXFromHtml, parseNewsPulseXUrl, type NewsPulseXEmbed } from '@/lib/x';
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
+import { NewsPulseInstagram } from './NewsPulseInstagram';
 import { NewsPulseX } from './NewsPulseX';
 import { NewsPulseYouTube } from './NewsPulseYouTube';
 
@@ -203,6 +205,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       InlineImageUploadPlaceholder,
       NewsPulseYouTube,
       NewsPulseX,
+      NewsPulseInstagram,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -249,7 +252,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         }
 
         const html = event.clipboardData?.getData('text/html') || '';
-        if (html && (/<\s*(iframe|script)\b/i.test(html) || /<\s*blockquote\b[^>]*twitter-tweet/i.test(html))) {
+        if (html && (/<\s*(iframe|script)\b/i.test(html) || /<\s*blockquote\b[^>]*(twitter-tweet|instagram-media)/i.test(html))) {
           event.preventDefault();
           const youtubeEmbed = extractNewsPulseYouTubeFromHtml(html);
           if (youtubeEmbed) {
@@ -260,6 +263,12 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
           const xEmbed = extractNewsPulseXFromHtml(html);
           if (xEmbed) {
             insertNewsPulseX(xEmbed);
+            return true;
+          }
+
+          const instagramEmbed = extractNewsPulseInstagramFromHtml(html);
+          if (instagramEmbed) {
+            insertNewsPulseInstagram(instagramEmbed);
             return true;
           }
 
@@ -289,6 +298,13 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         if (xUrl && isSingleClipboardUrl(plainText)) {
           event.preventDefault();
           insertNewsPulseX(xUrl);
+          return true;
+        }
+
+        const instagramUrl = parseNewsPulseInstagramUrl(plainText);
+        if (instagramUrl && isSingleClipboardUrl(plainText)) {
+          event.preventDefault();
+          insertNewsPulseInstagram(instagramUrl);
           return true;
         }
 
@@ -363,6 +379,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       type: 'newsPulseX',
       attrs: {
         postId: embed.postId,
+        url: embed.url,
+      },
+    }).run();
+  };
+
+  const insertNewsPulseInstagram = (embed: NewsPulseInstagramEmbed) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent({
+      type: 'newsPulseInstagram',
+      attrs: {
+        shortcode: embed.shortcode,
         url: embed.url,
       },
     }).run();
@@ -473,6 +500,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     insertNewsPulseX(xUrl);
   };
 
+  const onInstagram = () => {
+    const raw = window.prompt('Instagram post or reel URL');
+    if (raw == null) return;
+    const instagramUrl = parseNewsPulseInstagramUrl(raw);
+    if (!instagramUrl) {
+      toast.error('Enter a valid Instagram post or reel URL.');
+      return;
+    }
+    insertNewsPulseInstagram(instagramUrl);
+  };
+
   const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     if (isInlineImageDropHandled(event.nativeEvent)) return;
     const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
@@ -533,6 +571,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="Link" onClick={onLink} active={editor.isActive('link')} />
         <ToolbarButton editor={editor} label="YouTube" onClick={onYouTube} title="Insert a YouTube video block" />
         <ToolbarButton editor={editor} label="X / Twitter" onClick={onX} title="Insert an X/Twitter post block" />
+        <ToolbarButton editor={editor} label="Instagram" onClick={onInstagram} title="Insert an Instagram post or reel block" />
         <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
         <input

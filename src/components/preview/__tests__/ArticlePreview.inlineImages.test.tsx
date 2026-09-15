@@ -59,4 +59,22 @@ describe('ArticlePreview inline images', () => {
     expect(container.textContent).not.toContain('data-np-post-id');
     expect(container.textContent).not.toContain('data-np-url');
   });
+
+  it('renders a controlled Instagram marker as a safe preview card', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Instagram preview',
+      content: '<p>Before</p><div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div><p>After</p>',
+    }} />);
+
+    const link = screen.getByRole('link', { name: 'Open post' });
+    expect(screen.getByText('Instagram')).toBeInTheDocument();
+    expect(screen.getByText('Post/Reel')).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'https://www.instagram.com/p/C8xY_z1AbCd/');
+    expect(container.querySelector('[data-np-block="instagram"]')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('blockquote')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-shortcode');
+    expect(container.textContent).not.toContain('data-np-url');
+  });
 });
