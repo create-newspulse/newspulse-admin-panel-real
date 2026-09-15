@@ -77,4 +77,19 @@ describe('ArticlePreview inline images', () => {
     expect(container.textContent).not.toContain('data-np-shortcode');
     expect(container.textContent).not.toContain('data-np-url');
   });
+
+  it('renders a controlled Facebook marker as a safe preview card', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Facebook preview',
+      content: '<p>Before</p><div data-np-block="facebook" data-np-url="https://www.facebook.com/newspulse/posts/1234567890123456"></div><p>After</p>',
+    }} />);
+
+    const link = screen.getByRole('link', { name: 'Open post' });
+    expect(screen.getByText('Facebook Post')).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'https://www.facebook.com/newspulse/posts/1234567890123456');
+    expect(container.querySelector('[data-np-block="facebook"]')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-url');
+  });
 });

@@ -12,11 +12,13 @@ import toast from 'react-hot-toast';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
+import { extractNewsPulseFacebookFromHtml, parseNewsPulseFacebookUrl, type NewsPulseFacebookEmbed } from '@/lib/facebook';
 import { extractNewsPulseInstagramFromHtml, parseNewsPulseInstagramUrl, type NewsPulseInstagramEmbed } from '@/lib/instagram';
 import { extractNewsPulseYouTubeFromHtml, parseNewsPulseYouTubeUrl, type NewsPulseYouTubeEmbed } from '@/lib/youtube';
 import { extractNewsPulseXFromHtml, parseNewsPulseXUrl, type NewsPulseXEmbed } from '@/lib/x';
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
+import { NewsPulseFacebook } from './NewsPulseFacebook';
 import { NewsPulseInstagram } from './NewsPulseInstagram';
 import { NewsPulseX } from './NewsPulseX';
 import { NewsPulseYouTube } from './NewsPulseYouTube';
@@ -206,6 +208,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       NewsPulseYouTube,
       NewsPulseX,
       NewsPulseInstagram,
+      NewsPulseFacebook,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -252,7 +255,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         }
 
         const html = event.clipboardData?.getData('text/html') || '';
-        if (html && (/<\s*(iframe|script)\b/i.test(html) || /<\s*blockquote\b[^>]*(twitter-tweet|instagram-media)/i.test(html))) {
+        if (html && (/<\s*(iframe|script)\b/i.test(html) || /<\s*blockquote\b[^>]*(twitter-tweet|instagram-media)/i.test(html) || /<\s*div\b[^>]*fb-post/i.test(html))) {
           event.preventDefault();
           const youtubeEmbed = extractNewsPulseYouTubeFromHtml(html);
           if (youtubeEmbed) {
@@ -269,6 +272,12 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
           const instagramEmbed = extractNewsPulseInstagramFromHtml(html);
           if (instagramEmbed) {
             insertNewsPulseInstagram(instagramEmbed);
+            return true;
+          }
+
+          const facebookEmbed = extractNewsPulseFacebookFromHtml(html);
+          if (facebookEmbed) {
+            insertNewsPulseFacebook(facebookEmbed);
             return true;
           }
 
@@ -305,6 +314,13 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         if (instagramUrl && isSingleClipboardUrl(plainText)) {
           event.preventDefault();
           insertNewsPulseInstagram(instagramUrl);
+          return true;
+        }
+
+        const facebookUrl = parseNewsPulseFacebookUrl(plainText);
+        if (facebookUrl && isSingleClipboardUrl(plainText)) {
+          event.preventDefault();
+          insertNewsPulseFacebook(facebookUrl);
           return true;
         }
 
@@ -390,6 +406,16 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       type: 'newsPulseInstagram',
       attrs: {
         shortcode: embed.shortcode,
+        url: embed.url,
+      },
+    }).run();
+  };
+
+  const insertNewsPulseFacebook = (embed: NewsPulseFacebookEmbed) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent({
+      type: 'newsPulseFacebook',
+      attrs: {
         url: embed.url,
       },
     }).run();
@@ -511,6 +537,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     insertNewsPulseInstagram(instagramUrl);
   };
 
+  const onFacebook = () => {
+    const raw = window.prompt('Facebook post URL');
+    if (raw == null) return;
+    const facebookUrl = parseNewsPulseFacebookUrl(raw);
+    if (!facebookUrl) {
+      toast.error('Enter a valid Facebook post URL.');
+      return;
+    }
+    insertNewsPulseFacebook(facebookUrl);
+  };
+
   const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     if (isInlineImageDropHandled(event.nativeEvent)) return;
     const imageFiles = getImageFilesFromList(event.dataTransfer?.files);
@@ -572,6 +609,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="YouTube" onClick={onYouTube} title="Insert a YouTube video block" />
         <ToolbarButton editor={editor} label="X / Twitter" onClick={onX} title="Insert an X/Twitter post block" />
         <ToolbarButton editor={editor} label="Instagram" onClick={onInstagram} title="Insert an Instagram post or reel block" />
+        <ToolbarButton editor={editor} label="Facebook" onClick={onFacebook} title="Insert a Facebook post block" />
         <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
         <input

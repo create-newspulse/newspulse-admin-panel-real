@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { parseNewsPulseFacebookAttrs } from '@/lib/facebook';
 import { parseNewsPulseInstagramAttrs } from '@/lib/instagram';
 import { parseNewsPulseYouTubeAttrs } from '@/lib/youtube';
 import { parseNewsPulseXAttrs } from '@/lib/x';
@@ -153,6 +154,41 @@ function renderControlledInstagramBlocks(html: string): string {
   }
 }
 
+function renderControlledFacebookBlocks(html: string): string {
+  if (!html || !/data-np-block=["']facebook["']/i.test(html)) return html;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('div[data-np-block="facebook"]').forEach((node) => {
+      const embed = parseNewsPulseFacebookAttrs({
+        url: node.getAttribute('data-np-url'),
+      });
+      const replacement = doc.createElement('div');
+      if (!embed) {
+        replacement.textContent = 'Facebook post unavailable';
+        node.replaceWith(replacement);
+        return;
+      }
+
+      const label = doc.createElement('strong');
+      label.textContent = 'Facebook Post';
+      replacement.appendChild(label);
+
+      replacement.appendChild(doc.createElement('br'));
+      const link = doc.createElement('a');
+      link.setAttribute('href', embed.url);
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noreferrer');
+      link.textContent = 'Open post';
+      replacement.appendChild(link);
+      node.replaceWith(replacement);
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html.replace(/<div\b[^>]*data-np-block=["']facebook["'][\s\S]*?<\/div>/gi, '');
+  }
+}
+
 const LANG_LABEL: Record<PreviewLanguage, string> = {
   en: 'English',
   hi: 'Hindi',
@@ -186,7 +222,7 @@ export default function ArticlePreview({
   const safeHtml = useMemo(() => {
     if (!content) return '';
     if (!looksLikeHtml(content)) return '';
-    return sanitizeHtml(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(content))));
+    return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(content)))));
   }, [content]);
 
   const seoDescription = useMemo(() => {
