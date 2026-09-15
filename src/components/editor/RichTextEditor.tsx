@@ -19,6 +19,12 @@ import { extractNewsPulseXFromHtml, parseNewsPulseXUrl, type NewsPulseXEmbed } f
 import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import { InlineImageUploadPlaceholder, NewsPulseInlineImage, type NewsPulseInlineImageAttrs } from './NewsPulseInlineImage';
 import { NewsPulseFacebook } from './NewsPulseFacebook';
+import {
+  NEWS_PULSE_GALLERY_MAX_ITEMS,
+  NEWS_PULSE_GALLERY_MIN_ITEMS,
+  NewsPulseGallery,
+  type NewsPulseGalleryItem,
+} from './NewsPulseGallery';
 import { NewsPulseInstagram } from './NewsPulseInstagram';
 import { NewsPulseX } from './NewsPulseX';
 import { NewsPulseYouTube } from './NewsPulseYouTube';
@@ -139,6 +145,57 @@ function escapeHtmlAttr(input: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function safeAttr(value: unknown): string | undefined {
+  const text = String(value ?? '').trim();
+  return text || undefined;
+}
+
+type GalleryDraftItem = Partial<NewsPulseGalleryItem> & {
+  localId: string;
+  filename?: string;
+  file?: File;
+  status: 'ready' | 'uploading' | 'failed';
+  error?: string;
+};
+
+function galleryItemKey(item: Pick<GalleryDraftItem, 'localId' | 'mediaId'>): string {
+  return item.mediaId || item.localId;
+}
+
+function isReadyGalleryItem(item: GalleryDraftItem): item is GalleryDraftItem & NewsPulseGalleryItem {
+  return item.status === 'ready' && !!item.mediaId && !!item.src;
+}
+
+function galleryDraftFromItems(items: NewsPulseGalleryItem[]): GalleryDraftItem[] {
+  return items.map((item, index) => ({
+    ...item,
+    localId: item.mediaId || `gallery-item-${index}`,
+    status: 'ready',
+  }));
+}
+
+function galleryItemFromMediaAsset(asset: MediaLibraryAsset): NewsPulseGalleryItem {
+  return {
+    mediaId: asset.id,
+    src: asset.url,
+    alt: asset.filename,
+    caption: null,
+    credit: null,
+  };
+}
+
+function galleryItemFromUploadResult(result: UploadInlineImageResult, file: File): NewsPulseGalleryItem {
+  return {
+    mediaId: result.mediaId,
+    src: result.url,
+    alt: result.alt || file.name,
+    caption: result.caption || null,
+    credit: result.credit || null,
+    width: result.width || null,
+    height: result.height || null,
+  };
+}
+
 const VideoBlock = Node.create({
   name: 'videoBlock',
   group: 'block',
@@ -193,8 +250,15 @@ function ToolbarButton({
 
 export default function RichTextEditor({ value, onChange, placeholder = 'Write article content…', onPendingUploadChange }: RichTextEditorProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingUploadsRef = useRef(0);
   const [pendingUploads, setPendingUploads] = useState(0);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryMediaLibraryOpen, setGalleryMediaLibraryOpen] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryDraftItem[]>([]);
+  const galleryItemsRef = useRef<GalleryDraftItem[]>([]);
+  const [galleryEditRange, setGalleryEditRange] = useState<{ from: number; to: number } | null>(null);
+  const [galleryDragIndex, setGalleryDragIndex] = useState<number | null>(null);
 
   const extensions = useMemo(
     () => [
@@ -209,6 +273,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
       NewsPulseX,
       NewsPulseInstagram,
       NewsPulseFacebook,
+      NewsPulseGallery,
       VideoBlock,
       Placeholder.configure({ placeholder }),
     ],
@@ -355,6 +420,26 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
     setPendingUploadCount(pendingUploadsRef.current + delta);
   };
 
+  useEffect(() => {
+    galleryItemsRef.current = galleryItems;
+  }, [galleryItems]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const onEditGallery = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.editor !== editor || typeof detail.getPos !== 'function') return;
+      const pos = detail.getPos();
+      if (typeof pos !== 'number') return;
+      const nodeSize = Number(detail.nodeSize || 1);
+      setGalleryItems(galleryDraftFromItems(Array.isArray(detail.items) ? detail.items : []));
+      setGalleryEditRange({ from: pos, to: pos + nodeSize });
+      setGalleryOpen(true);
+    };
+    window.addEventListener('np:edit-gallery', onEditGallery);
+    return () => window.removeEventListener('np:edit-gallery', onEditGallery);
+  }, [editor]);
+
   const findUploadPlaceholder = (uploadId: string): { from: number; to: number } | null => {
     if (!editor) return null;
     let found: { from: number; to: number } | null = null;
@@ -419,6 +504,131 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         url: embed.url,
       },
     }).run();
+  };
+
+  const openNewGallery = () => {
+    setGalleryItems([]);
+    setGalleryEditRange(null);
+    setGalleryOpen(true);
+  };
+
+  const closeGallery = () => {
+    setGalleryOpen(false);
+    setGalleryMediaLibraryOpen(false);
+    setGalleryEditRange(null);
+    setGalleryDragIndex(null);
+  };
+
+  const validGalleryItems = galleryItems.filter(isReadyGalleryItem);
+  const galleryUploadCount = galleryItems.filter((item) => item.status === 'uploading').length;
+
+  const addGalleryItems = (nextItems: NewsPulseGalleryItem[]) => {
+    setGalleryItems((current) => {
+      const occupiedCount = current.filter((item) => item.status !== 'failed').length;
+      const availableSlots = NEWS_PULSE_GALLERY_MAX_ITEMS - occupiedCount;
+      if (availableSlots <= 0) {
+        toast.error('Gallery can contain up to 20 images.');
+        return current;
+      }
+
+      const seen = new Set(current.map((item) => item.mediaId).filter(Boolean));
+      const accepted: GalleryDraftItem[] = [];
+      let rejected = 0;
+      for (const item of nextItems) {
+        if (seen.has(item.mediaId)) {
+          rejected += 1;
+          continue;
+        }
+        if (accepted.length >= availableSlots) {
+          rejected += 1;
+          continue;
+        }
+        seen.add(item.mediaId);
+        accepted.push({ ...item, localId: item.mediaId, status: 'ready' });
+      }
+      if (rejected > 0) toast.error('Duplicate images or gallery limit exceeded.');
+      return accepted.length ? [...current, ...accepted] : current;
+    });
+  };
+
+  const uploadGalleryFiles = async (files: File[]) => {
+    const imageFiles = files.filter(isInlineImageFile);
+    if (imageFiles.length !== files.length) toast.error('Only JPEG, PNG, or WebP images can be uploaded inline.');
+    if (imageFiles.length === 0) return;
+
+    const occupiedCount = galleryItemsRef.current.filter((item) => item.status !== 'failed').length;
+    const availableSlots = NEWS_PULSE_GALLERY_MAX_ITEMS - occupiedCount;
+    const acceptedFiles = imageFiles.slice(0, Math.max(0, availableSlots));
+    if (acceptedFiles.length !== imageFiles.length) toast.error('Gallery can contain up to 20 images.');
+    if (acceptedFiles.length === 0) return;
+
+    const uploadItems: GalleryDraftItem[] = acceptedFiles.map((file) => ({
+      localId: `gallery-upload-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      filename: file.name,
+      file,
+      status: 'uploading',
+    }));
+
+    setGalleryItems((current) => [...current, ...uploadItems]);
+    updatePendingUploads(uploadItems.length);
+
+    for (const uploadItem of uploadItems) {
+      try {
+        const result = await uploadInlineImage(uploadItem.file as File);
+        const nextItem = galleryItemFromUploadResult(result, uploadItem.file as File);
+        setGalleryItems((current) => {
+          const duplicate = current.some((item) => item.localId !== uploadItem.localId && item.mediaId === nextItem.mediaId);
+          return current.map((item) => item.localId === uploadItem.localId
+            ? (duplicate
+              ? { ...item, status: 'failed', error: 'Duplicate media item.' }
+              : { ...nextItem, localId: nextItem.mediaId, filename: uploadItem.filename, status: 'ready' })
+            : item);
+        });
+      } catch (error: any) {
+        setGalleryItems((current) => current.map((item) => item.localId === uploadItem.localId
+          ? { ...item, status: 'failed', error: String(error?.message || 'Gallery image upload failed') }
+          : item));
+      } finally {
+        updatePendingUploads(-1);
+      }
+    }
+  };
+
+  const retryGalleryUpload = (item: GalleryDraftItem) => {
+    if (!item.file) return;
+    setGalleryItems((current) => current.filter((currentItem) => currentItem.localId !== item.localId));
+    void uploadGalleryFiles([item.file]);
+  };
+
+  const updateGalleryItem = (localId: string, patch: Partial<NewsPulseGalleryItem>) => {
+    setGalleryItems((current) => current.map((item) => item.localId === localId ? { ...item, ...patch } : item));
+  };
+
+  const removeGalleryItem = (localId: string) => {
+    setGalleryItems((current) => current.filter((item) => item.localId !== localId));
+  };
+
+  const moveGalleryItem = (fromIndex: number, toIndex: number) => {
+    setGalleryItems((current) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= current.length || toIndex >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+  };
+
+  const insertGallery = () => {
+    if (!editor) return;
+    const items = galleryItems.filter(isReadyGalleryItem);
+    if (items.length < NEWS_PULSE_GALLERY_MIN_ITEMS) {
+      toast.error('Add at least 2 images to insert a gallery.');
+      return;
+    }
+    const content = { type: 'newsPulseGallery', attrs: { items } };
+    if (galleryEditRange) editor.chain().focus().insertContentAt(galleryEditRange, content).run();
+    else editor.chain().focus().insertContent(content).run();
+    closeGallery();
   };
 
   const removeUploadPlaceholder = (uploadId: string) => {
@@ -610,6 +820,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         <ToolbarButton editor={editor} label="X / Twitter" onClick={onX} title="Insert an X/Twitter post block" />
         <ToolbarButton editor={editor} label="Instagram" onClick={onInstagram} title="Insert an Instagram post or reel block" />
         <ToolbarButton editor={editor} label="Facebook" onClick={onFacebook} title="Insert a Facebook post block" />
+        <ToolbarButton editor={editor} label="Gallery" onClick={openNewGallery} title="Insert a photo gallery block" />
         <ToolbarButton editor={editor} label="Upload Image" onClick={onChooseLocalImage} title="Upload local image into the article body" />
         <ToolbarButton editor={editor} label="Media Library" onClick={() => setMediaLibraryOpen(true)} title="Insert image or video from Media Library" />
         <input
@@ -685,6 +896,111 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         actionLabel="Insert in Article"
         onClose={() => setMediaLibraryOpen(false)}
         onSelect={insertMediaAsset}
+      />
+
+      {galleryOpen ? (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={closeGallery}>
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Photo Gallery</div>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">Gallery builder</h2>
+                <div className="mt-1 text-sm text-slate-500">{validGalleryItems.length} valid image{validGalleryItems.length === 1 ? '' : 's'} selected</div>
+              </div>
+              <button type="button" onClick={closeGallery} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Close</button>
+            </div>
+
+            <div className="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-3">
+              <button type="button" onClick={() => galleryFileInputRef.current?.click()} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Upload images</button>
+              <button type="button" onClick={() => setGalleryMediaLibraryOpen(true)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Choose from Media Library</button>
+              <input
+                ref={galleryFileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                className="hidden"
+                aria-label="Upload gallery images"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  event.target.value = '';
+                  void uploadGalleryFiles(files);
+                }}
+              />
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto p-5">
+              {galleryItems.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Add 2 to 20 images to build a gallery.</div>
+              ) : (
+                <div className="space-y-3">
+                  {galleryItems.map((item, index) => {
+                    const key = galleryItemKey(item);
+                    const alt = safeAttr(item.alt) || item.filename || 'Gallery image';
+                    return (
+                      <div
+                        key={key}
+                        draggable
+                        onDragStart={() => setGalleryDragIndex(index)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => {
+                          if (galleryDragIndex !== null) moveGalleryItem(galleryDragIndex, index);
+                          setGalleryDragIndex(null);
+                        }}
+                        className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[120px_1fr]"
+                      >
+                        <div className="h-24 overflow-hidden rounded-lg bg-slate-100">
+                          {item.src ? <img src={item.src} alt={alt} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-slate-500">Uploading</div>}
+                        </div>
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0 text-sm font-semibold text-slate-900">{item.filename || item.mediaId || `Image ${index + 1}`}</div>
+                            <div className="flex flex-wrap gap-2">
+                              <button type="button" disabled={index === 0} onClick={() => moveGalleryItem(index, index - 1)} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40">Move up</button>
+                              <button type="button" disabled={index === galleryItems.length - 1} onClick={() => moveGalleryItem(index, index + 1)} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40">Move down</button>
+                              <button type="button" onClick={() => removeGalleryItem(item.localId)} className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">Remove</button>
+                            </div>
+                          </div>
+                          {item.status === 'uploading' ? <div className="text-xs text-amber-700">Uploading...</div> : null}
+                          {item.status === 'failed' ? (
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-red-700">
+                              <span>{item.error || 'Upload failed'}</span>
+                              {item.file ? <button type="button" onClick={() => retryGalleryUpload(item)} className="rounded border border-red-200 px-2 py-1 hover:bg-red-50">Retry</button> : null}
+                            </div>
+                          ) : null}
+                          <input value={safeAttr(item.caption) || ''} onChange={(event) => updateGalleryItem(item.localId, { caption: event.target.value })} placeholder="Caption" aria-label={`Caption for ${alt}`} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                          <input value={safeAttr(item.credit) || ''} onChange={(event) => updateGalleryItem(item.localId, { credit: event.target.value })} placeholder="Credit" aria-label={`Credit for ${alt}`} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-600">Minimum 2 images. Maximum 20 images. Duplicate media IDs are skipped.</div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={closeGallery} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                <button type="button" disabled={validGalleryItems.length < NEWS_PULSE_GALLERY_MIN_ITEMS || galleryUploadCount > 0} onClick={insertGallery} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">Insert Gallery</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <MediaLibrarySelector
+        open={galleryMediaLibraryOpen}
+        mode="image"
+        title="Select Gallery Images"
+        actionLabel="Add to Gallery"
+        multiple
+        maxSelection={Math.max(0, NEWS_PULSE_GALLERY_MAX_ITEMS - galleryItems.filter((item) => item.status !== 'failed').length)}
+        onClose={() => setGalleryMediaLibraryOpen(false)}
+        onSelect={() => undefined}
+        onSelectMultiple={(assets) => {
+          addGalleryItems(assets.map(galleryItemFromMediaAsset));
+          setGalleryMediaLibraryOpen(false);
+        }}
       />
     </div>
   );

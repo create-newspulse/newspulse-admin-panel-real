@@ -189,6 +189,63 @@ function renderControlledFacebookBlocks(html: string): string {
   }
 }
 
+function renderControlledGalleryBlocks(html: string): string {
+  if (!html || !/data-np-block=["']gallery["']/i.test(html)) return html;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('div[data-np-block="gallery"]').forEach((node) => {
+      const figures = Array.from(node.querySelectorAll('figure[data-np-block="inline-image"]'));
+      const replacement = doc.createElement('div');
+      replacement.setAttribute('class', 'np-gallery-preview');
+
+      const validFigures = figures.filter((figure) => figure.querySelector('img[src]'));
+      if (validFigures.length < 2) {
+        replacement.textContent = 'Photo gallery unavailable';
+        node.replaceWith(replacement);
+        return;
+      }
+
+      validFigures.forEach((figure, index) => {
+        const image = figure.querySelector('img[src]') as HTMLImageElement | null;
+        if (!image) return;
+
+        const item = doc.createElement('div');
+        item.setAttribute('class', index === 0 ? 'np-gallery-preview-featured' : 'np-gallery-preview-item');
+
+        const nextImage = doc.createElement('img');
+        nextImage.setAttribute('src', image.getAttribute('src') || '');
+        nextImage.setAttribute('alt', image.getAttribute('alt') || 'Gallery image');
+        const width = figure.getAttribute('data-np-width') || image.getAttribute('width');
+        const height = figure.getAttribute('data-np-height') || image.getAttribute('height');
+        if (width) nextImage.setAttribute('width', width);
+        if (height) nextImage.setAttribute('height', height);
+        item.appendChild(nextImage);
+
+        const caption = figure.querySelector('[data-np-caption], figcaption')?.textContent?.trim();
+        if (caption) {
+          const captionNode = doc.createElement('div');
+          captionNode.textContent = caption;
+          item.appendChild(captionNode);
+        }
+
+        const credit = figure.querySelector('[data-np-credit]')?.textContent?.trim();
+        if (credit) {
+          const creditNode = doc.createElement('div');
+          creditNode.textContent = credit;
+          item.appendChild(creditNode);
+        }
+
+        replacement.appendChild(item);
+      });
+      node.replaceWith(replacement);
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html.replace(/<div\b[^>]*data-np-block=["']gallery["'][\s\S]*?<\/div>/gi, '');
+  }
+}
+
 const LANG_LABEL: Record<PreviewLanguage, string> = {
   en: 'English',
   hi: 'Hindi',
@@ -222,7 +279,7 @@ export default function ArticlePreview({
   const safeHtml = useMemo(() => {
     if (!content) return '';
     if (!looksLikeHtml(content)) return '';
-    return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(content)))));
+    return sanitizeHtml(renderControlledFacebookBlocks(renderControlledInstagramBlocks(renderControlledXBlocks(renderControlledYouTubeBlocks(renderControlledGalleryBlocks(content))))));
   }, [content]);
 
   const seoDescription = useMemo(() => {

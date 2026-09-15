@@ -92,4 +92,21 @@ describe('ArticlePreview inline images', () => {
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).not.toContain('data-np-url');
   });
+
+  it('renders a controlled gallery marker as a safe preview gallery', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Gallery preview',
+      content: '<p>Before</p><div data-np-block="gallery"><figure data-np-block="inline-image" data-np-media-id="media-1" data-np-width="900" data-np-height="600"><img src="https://cdn.newspulse.co.in/inline/one.jpg" alt="One" width="900" height="600"><figcaption data-np-caption="true">Caption one</figcaption><div data-np-credit="true">Credit: PTI</div></figure><figure data-np-block="inline-image" data-np-media-id="media-2"><img src="https://cdn.newspulse.co.in/inline/two.jpg" alt="Two"><figcaption data-np-caption="true">Caption two</figcaption></figure></div><p>After</p>',
+    }} />);
+
+    const images = container.querySelectorAll('.prose img');
+    expect(images).toHaveLength(2);
+    expect(images[0].getAttribute('src')).toBe('https://cdn.newspulse.co.in/inline/one.jpg');
+    expect(screen.getByText('Caption one')).toBeInTheDocument();
+    expect(screen.getByText('Credit: PTI')).toBeInTheDocument();
+    expect(container.querySelector('[data-np-block="gallery"]')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-media-id');
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+  });
 });

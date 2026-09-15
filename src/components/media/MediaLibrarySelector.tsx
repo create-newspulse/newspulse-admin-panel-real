@@ -22,6 +22,9 @@ export type MediaLibrarySelectorProps = {
   actionLabel: string;
   onClose: () => void;
   onSelect: (asset: MediaLibraryAsset) => void;
+  multiple?: boolean;
+  maxSelection?: number;
+  onSelectMultiple?: (assets: MediaLibraryAsset[]) => void;
 };
 
 function typeAllowed(assetType: MediaLibraryAssetType, mode: MediaLibrarySelectorMode) {
@@ -87,12 +90,13 @@ function AssetPreview({ asset, onImagePreviewFailed }: { asset: MediaLibraryAsse
   return <img src={src} alt={asset.filename} className="h-full w-full object-cover" onError={handlePreviewError} />;
 }
 
-export default function MediaLibrarySelector({ open, mode, title, actionLabel, onClose, onSelect }: MediaLibrarySelectorProps) {
+export default function MediaLibrarySelector({ open, mode, title, actionLabel, onClose, onSelect, multiple = false, maxSelection, onSelectMultiple }: MediaLibrarySelectorProps) {
   const [items, setItems] = useState<MediaLibraryAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [failedImagePreviewIds, setFailedImagePreviewIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -122,6 +126,7 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
     if (!open) {
       setSearch('');
       setSelectedId(null);
+      setSelectedIds([]);
       setFailedImagePreviewIds([]);
     }
   }, [open]);
@@ -145,6 +150,27 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
   }, [failedImagePreviewIds, items, mode, search]);
 
   const selectedAsset = filteredItems.find((asset) => asset.id === selectedId) || null;
+  const selectedAssets = multiple ? selectedIds.map((id) => filteredItems.find((asset) => asset.id === id)).filter((asset): asset is MediaLibraryAsset => !!asset) : [];
+
+  function toggleSelectedAsset(asset: MediaLibraryAsset) {
+    if (!multiple) {
+      setSelectedId(asset.id);
+      return;
+    }
+    setSelectedIds((current) => {
+      if (current.includes(asset.id)) return current.filter((id) => id !== asset.id);
+      if (maxSelection && current.length >= maxSelection) return current;
+      return [...current, asset.id];
+    });
+  }
+
+  function confirmSelection() {
+    if (multiple) {
+      if (selectedAssets.length > 0) onSelectMultiple?.(selectedAssets);
+      return;
+    }
+    if (selectedAsset) onSelect(selectedAsset);
+  }
 
   if (!open) return null;
 
@@ -179,13 +205,13 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredItems.map((asset) => {
-                const selected = selectedAsset?.id === asset.id;
+                const selected = multiple ? selectedIds.includes(asset.id) : selectedAsset?.id === asset.id;
                 return (
                   <button
                     key={asset.id}
                     type="button"
-                    onClick={() => setSelectedId(asset.id)}
-                    onDoubleClick={() => onSelect(asset)}
+                    onClick={() => toggleSelectedAsset(asset)}
+                    onDoubleClick={() => multiple ? toggleSelectedAsset(asset) : onSelect(asset)}
                     className={`overflow-hidden rounded-lg border bg-white text-left shadow-sm transition ${selected ? 'border-slate-950 ring-1 ring-slate-950' : 'border-slate-200 hover:border-slate-300'}`}
                   >
                     <div className={`relative aspect-video overflow-hidden ${asset.mediaType === 'video' ? 'bg-slate-950' : 'bg-slate-100'}`}>
@@ -212,10 +238,12 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
 
         <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 text-sm text-slate-600">
-            {selectedAsset ? <span className="truncate">Selected: <span className="font-semibold text-slate-900">{selectedAsset.filename}</span></span> : 'Select an asset to continue.'}
+            {multiple
+              ? (selectedAssets.length > 0 ? <span>{selectedAssets.length} selected</span> : 'Select assets to continue.')
+              : (selectedAsset ? <span className="truncate">Selected: <span className="font-semibold text-slate-900">{selectedAsset.filename}</span></span> : 'Select an asset to continue.')}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
-            {selectedAsset ? (
+            {!multiple && selectedAsset ? (
               <>
                 <button type="button" onClick={() => window.open(selectedAsset.url, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                   <Eye className="h-4 w-4" />
@@ -228,7 +256,7 @@ export default function MediaLibrarySelector({ open, mode, title, actionLabel, o
               </>
             ) : null}
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-            <button type="button" disabled={!selectedAsset || (mode === 'image' && !isValidMediaLibraryImageAsset(selectedAsset)) || (mode === 'video' && !isValidMediaLibraryVideoAsset(selectedAsset))} onClick={() => selectedAsset && onSelect(selectedAsset)} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" disabled={multiple ? selectedAssets.length === 0 : (!selectedAsset || (mode === 'image' && !isValidMediaLibraryImageAsset(selectedAsset)) || (mode === 'video' && !isValidMediaLibraryVideoAsset(selectedAsset)))} onClick={confirmSelection} className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
               {actionLabel}
             </button>
           </div>
