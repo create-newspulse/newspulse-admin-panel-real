@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getAuthToken } from '../../lib/api';
+import { getAdminAnalyticsDashboard, type AnalyticsCommonFilters, type DashboardAnalyticsResponse } from '@/lib/api/adminAnalytics';
 
 type AnalyticsTab = 'overview' | 'ads';
 type DateFilter = 'today' | '7d' | '30d' | 'custom';
@@ -78,16 +78,7 @@ const NOT_CONFIGURED_MESSAGE = 'Connect an approved analytics provider to displa
 const CONNECTED_EMPTY_MESSAGE = 'No analytics data is available for the selected date range.';
 const AD_TRACKING_EMPTY_HEADING = 'Ad tracking is not configured';
 const AD_TRACKING_EMPTY_MESSAGE = 'Advertisement performance will appear here after campaign impression and click tracking is configured. No sample data is being displayed.';
-const envAny = import.meta.env as Record<string, unknown>;
-
-function publicAnalyticsProviderConfigured(): boolean {
-  return [
-    envAny.VITE_ANALYTICS_PROVIDER_CONFIGURED,
-    envAny.VITE_ANALYTICS_TRAFFIC_ENABLED,
-    envAny.VITE_ANALYTICS_AD_TRACKING_ENABLED,
-    envAny.VITE_ANALYTICS_FINANCE_ENABLED,
-  ].some((value) => String(value || '').trim().toLowerCase() === 'true');
-}
+const FIRST_PARTY_TRAFFIC_SOURCE = 'News Pulse Analytics';
 
 const analyticsTabs: ReadonlyArray<{ id: AnalyticsTab; label: string }> = [
   { id: 'overview', label: '📊 Overview' },
@@ -143,6 +134,19 @@ function isRemovedAnalyticsTab(value: string | null): boolean {
 
 function isRealNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function toRealNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function pickFirstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = toRealNumber(value);
+    if (parsed != null) return parsed;
+  }
+  return null;
 }
 
 function formatNumber(value: number | null): string {
@@ -220,17 +224,56 @@ function normalizeReport(payload: Partial<AnalyticsReport> | null | undefined): 
   };
 }
 
+function dashboardRangeParams(dateFilter: DateFilter, customStart: string, customEnd: string): AnalyticsCommonFilters {
+  if (dateFilter === 'today') return { range: '24h' };
+  if (dateFilter === 'custom') return { range: 'custom', from: customStart || undefined, to: customEnd || undefined };
+  return { range: dateFilter };
+}
+
+function mapFirstPartyDashboardReport(payload: DashboardAnalyticsResponse | null | undefined): AnalyticsReport {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const totals = data.totals && typeof data.totals === 'object' ? data.totals : {};
+  const overview: OverviewMetrics = {
+    pageViews: pickFirstNumber(totals.views, totals.totalViews),
+    uniqueVisitors: pickFirstNumber(totals.uniqueReaders, totals.readers),
+    adImpressions: null,
+    adClicks: null,
+    ctr: null,
+    estimatedAdRevenue: null,
+    confirmedRevenue: null,
+  };
+
+  return normalizeReport({
+    analyticsState: 'connected_empty',
+    dataSourceName: FIRST_PARTY_TRAFFIC_SOURCE,
+    lastUpdatedAt: new Date().toISOString(),
+    message: CONNECTED_EMPTY_MESSAGE,
+    permissions: {
+      viewTraffic: true,
+      viewAdPerformance: false,
+      viewRevenue: false,
+      refresh: true,
+      export: false,
+    },
+    integrations: {
+      trafficAnalytics: { status: 'connected', source: FIRST_PARTY_TRAFFIC_SOURCE },
+      adTracking: { status: 'not_connected', source: null },
+      financeData: { status: 'not_connected', source: null },
+    },
+    overview,
+  });
+}
+
 export default function AnalyticsDashboard(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
-  const providerConfigured = publicAnalyticsProviderConfigured();
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('overview');
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [report, setReport] = useState<AnalyticsReport | null>(null);
-  const [analyticsState, setAnalyticsState] = useState<AnalyticsState>(providerConfigured ? 'loading' : 'not_configured');
-  const [loading, setLoading] = useState(providerConfigured);
+  const [analyticsState, setAnalyticsState] = useState<AnalyticsState>('loading');
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -251,15 +294,6 @@ export default function AnalyticsDashboard(): JSX.Element {
 
   const loadReport = useCallback(async (options?: { refresh?: boolean }) => {
     const isRefresh = options?.refresh === true;
-    if (!providerConfigured) {
-      setReport(defaultReport);
-      setAnalyticsState('not_configured');
-      setLoading(false);
-      setRefreshing(false);
-      setError(null);
-      return;
-    }
-
     if (dateValidationError) {
       setLoading(false);
       setRefreshing(false);
@@ -273,35 +307,10 @@ export default function AnalyticsDashboard(): JSX.Element {
     setAnalyticsState('loading');
 
     try {
-      const params = new URLSearchParams({ range: dateFilter });
-      if (dateFilter === 'custom') {
-        if (customStart) params.set('start', customStart);
-        if (customEnd) params.set('end', customEnd);
-      }
-      if (isRefresh) params.set('refresh', '1');
-
-      const token = getAuthToken();
-      const response = await fetch(`/api/admin/analytics/report?${params.toString()}`, {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: {
-          Accept: 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payload?.error || (response.status === 403 ? ACCESS_DENIED_MESSAGE : 'Unable to load analytics data.'));
-      }
-
-      const nextReport = normalizeReport(payload);
+      const nextReport = mapFirstPartyDashboardReport(await getAdminAnalyticsDashboard(dashboardRangeParams(dateFilter, customStart, customEnd)));
       const nextHasOverviewData = Object.values(nextReport.overview).some(isRealNumber);
-      const nextHasAdData = nextReport.adPerformance.campaigns.length > 0
-        || nextReport.adPerformance.devicePerformance.length > 0
-        || nextReport.adPerformance.placementPerformance.length > 0;
       setReport(nextReport);
-      setAnalyticsState(nextHasOverviewData || nextHasAdData ? 'connected_with_data' : 'connected_empty');
+      setAnalyticsState(nextHasOverviewData ? 'connected_with_data' : 'connected_empty');
     } catch (err) {
       setReport(null);
       setAnalyticsState('error');
@@ -310,7 +319,7 @@ export default function AnalyticsDashboard(): JSX.Element {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [customEnd, customStart, dateFilter, dateValidationError, providerConfigured]);
+  }, [customEnd, customStart, dateFilter, dateValidationError]);
 
   useEffect(() => {
     void loadReport();
@@ -323,7 +332,7 @@ export default function AnalyticsDashboard(): JSX.Element {
   const hasCampaignData = currentReport.adPerformance.campaigns.length > 0;
   const hasDevicePerformance = currentReport.adPerformance.devicePerformance.length > 0;
   const hasPlacementPerformance = currentReport.adPerformance.placementPerformance.length > 0;
-  const refreshLocked = !providerConfigured || Boolean(report && !currentReport.permissions.refresh) || Boolean(dateValidationError);
+  const refreshLocked = Boolean(report && !currentReport.permissions.refresh) || Boolean(dateValidationError);
   const refreshLabel = loading ? 'Loading data...' : refreshing ? 'Refreshing data...' : 'Refresh Data';
 
   const overviewCards = useMemo(() => [
@@ -354,7 +363,6 @@ export default function AnalyticsDashboard(): JSX.Element {
         >
           {refreshLabel}
         </button>
-        {!providerConfigured ? <div className="text-sm text-slate-500 dark:text-slate-400">Connect an analytics provider before refreshing.</div> : null}
       </div>
 
       <div className="flex gap-2 border-b border-gray-300 dark:border-gray-600">
