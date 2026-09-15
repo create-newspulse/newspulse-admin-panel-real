@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getAdminAnalyticsDashboard, type AnalyticsCommonFilters, type DashboardAnalyticsResponse } from '@/lib/api/adminAnalytics';
+import {
+  getAdminAnalyticsAdPerformance,
+  getAdminAnalyticsDashboard,
+  getAdminAnalyticsRevenue,
+  type AdPerformanceAnalyticsResponse,
+  type AnalyticsCommonFilters,
+  type DashboardAnalyticsResponse,
+  type RevenueAnalyticsFilters,
+  type RevenueAnalyticsResponse,
+} from '@/lib/api/adminAnalytics';
 
 type AnalyticsTab = 'overview' | 'ads';
 type DateFilter = 'today' | '7d' | '30d' | 'custom';
@@ -10,6 +19,7 @@ type IntegrationStatus = 'connected' | 'not_connected' | 'configuration_required
 type IntegrationState = {
   status: IntegrationStatus;
   source?: string | null;
+  scope?: string | null;
   message?: string | null;
 };
 
@@ -19,8 +29,31 @@ type OverviewMetrics = {
   adImpressions: number | null;
   adClicks: number | null;
   ctr: number | null;
+  totalAds: number | null;
+  activeAds: number | null;
+  totalRevenue: number | null;
+  paidAmount: number | null;
+  outstandingAmount: number | null;
+  revenueRecordCount: number | null;
   estimatedAdRevenue: number | null;
   confirmedRevenue: number | null;
+};
+
+type AdPerformanceSummary = {
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  totalAds: number | null;
+  activeAds: number | null;
+  scope: string | null;
+  dateRangeSupported: boolean;
+};
+
+type RevenueSummary = {
+  totalRevenue: number | null;
+  paidAmount: number | null;
+  outstandingAmount: number | null;
+  recordCount: number | null;
 };
 
 type CampaignPerformance = {
@@ -64,12 +97,24 @@ type AnalyticsReport = {
   };
   overview: OverviewMetrics;
   adPerformance: {
+    summary: AdPerformanceSummary;
     campaigns: CampaignPerformance[];
     devicePerformance: PerformanceBreakdown[];
     placementPerformance: PerformanceBreakdown[];
     recommendations: string[];
   };
+  revenue: {
+    summary: RevenueSummary;
+  };
   message?: string;
+};
+
+type AnalyticsReportPatch = Partial<Omit<AnalyticsReport, 'integrations' | 'permissions' | 'overview' | 'adPerformance' | 'revenue'>> & {
+  integrations?: Partial<AnalyticsReport['integrations']>;
+  permissions?: Partial<AnalyticsReport['permissions']>;
+  overview?: Partial<OverviewMetrics>;
+  adPerformance?: Partial<Omit<AnalyticsReport['adPerformance'], 'summary'>> & { summary?: Partial<AdPerformanceSummary> };
+  revenue?: { summary?: Partial<RevenueSummary> };
 };
 
 const ACCESS_DENIED_MESSAGE = 'Access Denied. Founder permission is required.';
@@ -78,7 +123,12 @@ const NOT_CONFIGURED_MESSAGE = 'Connect an approved analytics provider to displa
 const CONNECTED_EMPTY_MESSAGE = 'No analytics data is available for the selected date range.';
 const AD_TRACKING_EMPTY_HEADING = 'Ad tracking is not configured';
 const AD_TRACKING_EMPTY_MESSAGE = 'Advertisement performance will appear here after campaign impression and click tracking is configured. No sample data is being displayed.';
+const AD_CONNECTED_ZERO_MESSAGE = 'No ad activity yet.';
+const AD_LIFETIME_LABEL = 'Lifetime';
+const REVENUE_CONNECTED_ZERO_MESSAGE = 'No revenue records yet.';
 const FIRST_PARTY_TRAFFIC_SOURCE = 'News Pulse Analytics';
+const ADS_MANAGER_SOURCE = 'Ads Manager';
+const FINANCE_RECORDS_SOURCE = 'Finance Records';
 
 const analyticsTabs: ReadonlyArray<{ id: AnalyticsTab; label: string }> = [
   { id: 'overview', label: '📊 Overview' },
@@ -114,14 +164,37 @@ const defaultReport: AnalyticsReport = {
     adImpressions: null,
     adClicks: null,
     ctr: null,
+    totalAds: null,
+    activeAds: null,
+    totalRevenue: null,
+    paidAmount: null,
+    outstandingAmount: null,
+    revenueRecordCount: null,
     estimatedAdRevenue: null,
     confirmedRevenue: null,
   },
   adPerformance: {
+    summary: {
+      impressions: null,
+      clicks: null,
+      ctr: null,
+      totalAds: null,
+      activeAds: null,
+      scope: null,
+      dateRangeSupported: false,
+    },
     campaigns: [],
     devicePerformance: [],
     placementPerformance: [],
     recommendations: [],
+  },
+  revenue: {
+    summary: {
+      totalRevenue: null,
+      paidAmount: null,
+      outstandingAmount: null,
+      recordCount: null,
+    },
   },
   message: NOT_CONFIGURED_MESSAGE,
 };
@@ -136,6 +209,10 @@ function isRealNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isPositiveNumber(value: unknown): value is number {
+  return isRealNumber(value) && value > 0;
+}
+
 function toRealNumber(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : (typeof value === 'string' && value.trim() ? Number(value) : NaN);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
@@ -147,6 +224,30 @@ function pickFirstNumber(...values: unknown[]): number | null {
     if (parsed != null) return parsed;
   }
   return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function calculateCtr(impressions: number | null, clicks: number | null): number | null {
+  if (!isRealNumber(impressions) || !isRealNumber(clicks)) return null;
+  if (impressions === 0 && clicks === 0) return 0;
+  if (impressions <= 0 || clicks < 0) return null;
+  return (clicks / impressions) * 100;
+}
+
+function formatDateParam(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }
 
 function formatNumber(value: number | null): string {
@@ -195,7 +296,11 @@ function statusClass(status: IntegrationStatus): string {
 }
 
 function integrationDescription(label: 'Traffic Analytics' | 'Ad Tracking' | 'Revenue Data', integration: IntegrationState): string {
-  if (integration.status !== 'not_connected') return integration.source || integration.message || 'Configuration required';
+  if (integration.status === 'connected') {
+    return [integration.source, integration.scope, integration.message].filter(Boolean).join(' • ') || 'Connected';
+  }
+  if (integration.status !== 'not_connected') return integration.message || integration.source || 'Configuration required';
+  if (integration.message) return integration.message;
   if (label === 'Ad Tracking') return 'No advertisement tracking system configured';
   if (label === 'Revenue Data') return 'No revenue data source configured';
   return 'No analytics provider configured';
@@ -220,6 +325,53 @@ function normalizeReport(payload: Partial<AnalyticsReport> | null | undefined): 
     adPerformance: {
       ...defaultReport.adPerformance,
       ...(payload?.adPerformance || {}),
+      summary: {
+        ...defaultReport.adPerformance.summary,
+        ...(payload?.adPerformance?.summary || {}),
+      },
+    },
+    revenue: {
+      ...defaultReport.revenue,
+      ...(payload?.revenue || {}),
+      summary: {
+        ...defaultReport.revenue.summary,
+        ...(payload?.revenue?.summary || {}),
+      },
+    },
+  };
+}
+
+function mergeReport(base: AnalyticsReport, payload: AnalyticsReportPatch): AnalyticsReport {
+  return {
+    ...base,
+    ...payload,
+    integrations: {
+      ...base.integrations,
+      ...(payload.integrations || {}),
+    },
+    permissions: {
+      ...base.permissions,
+      ...(payload.permissions || {}),
+    },
+    overview: {
+      ...base.overview,
+      ...(payload.overview || {}),
+    },
+    adPerformance: {
+      ...base.adPerformance,
+      ...(payload.adPerformance || {}),
+      summary: {
+        ...base.adPerformance.summary,
+        ...(payload.adPerformance?.summary || {}),
+      },
+    },
+    revenue: {
+      ...base.revenue,
+      ...(payload.revenue || {}),
+      summary: {
+        ...base.revenue.summary,
+        ...(payload.revenue?.summary || {}),
+      },
     },
   };
 }
@@ -230,38 +382,123 @@ function dashboardRangeParams(dateFilter: DateFilter, customStart: string, custo
   return { range: dateFilter };
 }
 
-function mapFirstPartyDashboardReport(payload: DashboardAnalyticsResponse | null | undefined): AnalyticsReport {
+function revenueDateParams(dateFilter: DateFilter, customStart: string, customEnd: string): RevenueAnalyticsFilters {
+  if (dateFilter === 'custom') return { dateFrom: customStart || undefined, dateTo: customEnd || undefined };
+
+  const today = new Date();
+  const dateTo = formatDateParam(today);
+  if (dateFilter === 'today') return { dateFrom: dateTo, dateTo };
+
+  const daysBack = dateFilter === '7d' ? 6 : 29;
+  return { dateFrom: formatDateParam(addDays(today, -daysBack)), dateTo };
+}
+
+function mapFirstPartyDashboardReport(payload: DashboardAnalyticsResponse | null | undefined): AnalyticsReportPatch {
   const data = payload && typeof payload === 'object' ? payload : {};
   const totals = data.totals && typeof data.totals === 'object' ? data.totals : {};
-  const overview: OverviewMetrics = {
+  const overview: Partial<OverviewMetrics> = {
     pageViews: pickFirstNumber(totals.views, totals.totalViews),
     uniqueVisitors: pickFirstNumber(totals.uniqueReaders, totals.readers),
-    adImpressions: null,
-    adClicks: null,
-    ctr: null,
-    estimatedAdRevenue: null,
-    confirmedRevenue: null,
   };
 
-  return normalizeReport({
-    analyticsState: 'connected_empty',
+  return {
     dataSourceName: FIRST_PARTY_TRAFFIC_SOURCE,
-    lastUpdatedAt: new Date().toISOString(),
-    message: CONNECTED_EMPTY_MESSAGE,
     permissions: {
       viewTraffic: true,
-      viewAdPerformance: false,
-      viewRevenue: false,
       refresh: true,
-      export: false,
     },
     integrations: {
       trafficAnalytics: { status: 'connected', source: FIRST_PARTY_TRAFFIC_SOURCE },
-      adTracking: { status: 'not_connected', source: null },
-      financeData: { status: 'not_connected', source: null },
     },
     overview,
-  });
+  };
+}
+
+function mapAdPerformanceReport(payload: AdPerformanceAnalyticsResponse | null | undefined): AnalyticsReportPatch {
+  if (!payload?.connected) {
+    return {
+      integrations: {
+        adTracking: { status: 'not_connected', source: null, message: payload?.message || AD_TRACKING_EMPTY_MESSAGE },
+      },
+      permissions: { refresh: true },
+    };
+  }
+
+  const data = asRecord(payload);
+  const metrics = asRecord(payload.metrics);
+  const totals = asRecord(payload.totals);
+  const impressions = pickFirstNumber(data.impressions, metrics.impressions, metrics.totalImpressions, totals.impressions, totals.totalImpressions);
+  const clicks = pickFirstNumber(data.clicks, metrics.clicks, metrics.totalClicks, totals.clicks, totals.totalClicks);
+  const ctr = pickFirstNumber(data.ctr, data.ctrPct, data.clickThroughRate, metrics.ctr, metrics.ctrPct, metrics.clickThroughRate, totals.ctr, totals.ctrPct, totals.clickThroughRate) ?? calculateCtr(impressions, clicks);
+  const totalAds = pickFirstNumber(data.totalAds, data.total, data.count, metrics.totalAds, metrics.total, metrics.count, totals.totalAds, totals.total, totals.count);
+  const activeAds = pickFirstNumber(data.activeAds, data.active, data.activeCount, metrics.activeAds, metrics.active, metrics.activeCount, totals.activeAds, totals.active, totals.activeCount);
+  const hasActivity = [impressions, clicks, totalAds, activeAds].some(isPositiveNumber);
+  const scope = String(payload.scope || '').trim().toLowerCase() === 'lifetime' ? AD_LIFETIME_LABEL : (payload.scope || AD_LIFETIME_LABEL);
+  const dateRangeSupported = payload.dateRangeSupported === true;
+
+  return {
+    permissions: { viewAdPerformance: true, refresh: true },
+    integrations: {
+      adTracking: {
+        status: 'connected',
+        source: payload.source || ADS_MANAGER_SOURCE,
+        scope,
+        message: hasActivity ? null : AD_CONNECTED_ZERO_MESSAGE,
+      },
+    },
+    overview: {
+      adImpressions: impressions,
+      adClicks: clicks,
+      ctr,
+      totalAds,
+      activeAds,
+    },
+    adPerformance: {
+      summary: { impressions, clicks, ctr, totalAds, activeAds, scope, dateRangeSupported },
+    },
+  };
+}
+
+function mapRevenueReport(payload: RevenueAnalyticsResponse | null | undefined): AnalyticsReportPatch {
+  if (!payload?.connected) {
+    return {
+      integrations: {
+        financeData: { status: 'not_connected', source: null, message: payload?.message || 'No revenue data source configured' },
+      },
+      permissions: { refresh: true },
+    };
+  }
+
+  const data = asRecord(payload);
+  const metrics = asRecord(payload.metrics);
+  const totals = asRecord(payload.totals);
+  const totalRevenue = pickFirstNumber(data.totalRevenue, data.revenue, data.amount, metrics.totalRevenue, metrics.revenue, metrics.amount, totals.totalRevenue, totals.revenue, totals.amount);
+  const paidAmount = pickFirstNumber(data.paidAmount, data.paid, data.totalPaid, metrics.paidAmount, metrics.paid, metrics.totalPaid, totals.paidAmount, totals.paid, totals.totalPaid);
+  const outstandingAmount = pickFirstNumber(data.outstandingAmount, data.outstanding, data.totalOutstanding, metrics.outstandingAmount, metrics.outstanding, metrics.totalOutstanding, totals.outstandingAmount, totals.outstanding, totals.totalOutstanding);
+  const recordCount = pickFirstNumber(data.recordCount, data.count, metrics.recordCount, metrics.count, totals.recordCount, totals.count);
+  const hasRevenueRecords = isPositiveNumber(recordCount) || [totalRevenue, paidAmount, outstandingAmount].some(isPositiveNumber);
+
+  return {
+    permissions: { viewRevenue: true, refresh: true },
+    integrations: {
+      financeData: {
+        status: 'connected',
+        source: payload.source || FINANCE_RECORDS_SOURCE,
+        message: hasRevenueRecords ? null : REVENUE_CONNECTED_ZERO_MESSAGE,
+      },
+    },
+    overview: {
+      totalRevenue,
+      paidAmount,
+      outstandingAmount,
+      revenueRecordCount: recordCount,
+      estimatedAdRevenue: totalRevenue,
+      confirmedRevenue: paidAmount,
+    },
+    revenue: {
+      summary: { totalRevenue, paidAmount, outstandingAmount, recordCount },
+    },
+  };
 }
 
 export default function AnalyticsDashboard(): JSX.Element {
@@ -276,6 +513,7 @@ export default function AnalyticsDashboard(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<string[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -298,23 +536,76 @@ export default function AnalyticsDashboard(): JSX.Element {
       setLoading(false);
       setRefreshing(false);
       setError(null);
+      setSourceErrors([]);
       return;
     }
 
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
+    setSourceErrors([]);
     setAnalyticsState('loading');
 
     try {
-      const nextReport = mapFirstPartyDashboardReport(await getAdminAnalyticsDashboard(dashboardRangeParams(dateFilter, customStart, customEnd)));
+      const [trafficResult, adResult, revenueResult] = await Promise.allSettled([
+        getAdminAnalyticsDashboard(dashboardRangeParams(dateFilter, customStart, customEnd)),
+        getAdminAnalyticsAdPerformance(),
+        getAdminAnalyticsRevenue(revenueDateParams(dateFilter, customStart, customEnd)),
+      ]);
+
+      let nextReport = normalizeReport({
+        analyticsState: 'connected_empty',
+        lastUpdatedAt: new Date().toISOString(),
+        message: CONNECTED_EMPTY_MESSAGE,
+        permissions: { refresh: true },
+      });
+      const nextSourceErrors: string[] = [];
+
+      if (trafficResult.status === 'fulfilled') {
+        nextReport = mergeReport(nextReport, mapFirstPartyDashboardReport(trafficResult.value));
+      } else {
+        nextSourceErrors.push('Traffic Analytics');
+        nextReport = mergeReport(nextReport, {
+          integrations: { trafficAnalytics: { status: 'error', source: FIRST_PARTY_TRAFFIC_SOURCE, message: 'Traffic analytics is unavailable.' } },
+        });
+      }
+
+      if (adResult.status === 'fulfilled') {
+        nextReport = mergeReport(nextReport, mapAdPerformanceReport(adResult.value));
+      } else {
+        nextSourceErrors.push('Ad Tracking');
+        nextReport = mergeReport(nextReport, {
+          integrations: { adTracking: { status: 'error', source: ADS_MANAGER_SOURCE, scope: AD_LIFETIME_LABEL, message: 'Ads Manager analytics is unavailable.' } },
+        });
+      }
+
+      if (revenueResult.status === 'fulfilled') {
+        nextReport = mergeReport(nextReport, mapRevenueReport(revenueResult.value));
+      } else {
+        nextSourceErrors.push('Revenue Data');
+        nextReport = mergeReport(nextReport, {
+          integrations: { financeData: { status: 'error', source: FINANCE_RECORDS_SOURCE, message: 'Finance Records analytics is unavailable.' } },
+        });
+      }
+
+      setSourceErrors(nextSourceErrors);
       const nextHasOverviewData = Object.values(nextReport.overview).some(isRealNumber);
+      const hasConnectedSource = Object.values(nextReport.integrations).some((integration) => integration.status === 'connected');
+      const allSourcesFailed = Object.values(nextReport.integrations).every((integration) => integration.status === 'error');
       setReport(nextReport);
-      setAnalyticsState(nextHasOverviewData ? 'connected_with_data' : 'connected_empty');
+      if (allSourcesFailed) {
+        setAnalyticsState('error');
+        setError('Analytics sources are unavailable.');
+      } else if (hasConnectedSource) {
+        setAnalyticsState(nextHasOverviewData ? 'connected_with_data' : 'connected_empty');
+      } else {
+        setAnalyticsState('not_configured');
+      }
     } catch (err) {
       setReport(null);
       setAnalyticsState('error');
       setError(err instanceof Error ? err.message : 'Unable to load analytics data.');
+      setSourceErrors([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -332,6 +623,10 @@ export default function AnalyticsDashboard(): JSX.Element {
   const hasCampaignData = currentReport.adPerformance.campaigns.length > 0;
   const hasDevicePerformance = currentReport.adPerformance.devicePerformance.length > 0;
   const hasPlacementPerformance = currentReport.adPerformance.placementPerformance.length > 0;
+  const adSummary = currentReport.adPerformance.summary;
+  const hasAdSummaryData = [adSummary.impressions, adSummary.clicks, adSummary.ctr, adSummary.totalAds, adSummary.activeAds].some(isRealNumber);
+  const hasAdActivity = [adSummary.impressions, adSummary.clicks, adSummary.totalAds, adSummary.activeAds].some(isPositiveNumber);
+  const adTrackingStatus = currentReport.integrations.adTracking.status;
   const refreshLocked = Boolean(report && !currentReport.permissions.refresh) || Boolean(dateValidationError);
   const refreshLabel = loading ? 'Loading data...' : refreshing ? 'Refreshing data...' : 'Refresh Data';
 
@@ -341,8 +636,12 @@ export default function AnalyticsDashboard(): JSX.Element {
     { label: 'Ad Impressions', value: formatNumber(currentReport.overview.adImpressions), visible: canViewAdPerformance },
     { label: 'Ad Clicks', value: formatNumber(currentReport.overview.adClicks), visible: canViewAdPerformance },
     { label: 'CTR', value: formatPercent(currentReport.overview.ctr), visible: canViewAdPerformance },
-    { label: 'Estimated Ad Revenue', value: canViewRevenue ? formatINR(currentReport.overview.estimatedAdRevenue) : 'Restricted', visible: true },
-    { label: 'Confirmed Revenue', value: canViewRevenue ? formatINR(currentReport.overview.confirmedRevenue) : 'Restricted', visible: true },
+    { label: 'Total Ads', value: formatNumber(currentReport.overview.totalAds), visible: canViewAdPerformance },
+    { label: 'Active Ads', value: formatNumber(currentReport.overview.activeAds), visible: canViewAdPerformance },
+    { label: 'Total Revenue', value: canViewRevenue ? formatINR(currentReport.overview.totalRevenue) : 'Restricted', visible: true },
+    { label: 'Paid Amount', value: canViewRevenue ? formatINR(currentReport.overview.paidAmount) : 'Restricted', visible: true },
+    { label: 'Outstanding Amount', value: canViewRevenue ? formatINR(currentReport.overview.outstandingAmount) : 'Restricted', visible: true },
+    { label: 'Revenue Records', value: canViewRevenue ? formatNumber(currentReport.overview.revenueRecordCount) : 'Restricted', visible: true },
   ], [canViewAdPerformance, canViewRevenue, currentReport.overview, currentReport.permissions.viewTraffic]);
 
   return (
@@ -412,6 +711,12 @@ export default function AnalyticsDashboard(): JSX.Element {
         </div>
       ) : null}
 
+      {analyticsState !== 'error' && sourceErrors.length > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Some analytics sources are unavailable: {sourceErrors.join(', ')}.
+        </div>
+      ) : null}
+
       {dateValidationError ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {dateValidationError}
@@ -466,14 +771,42 @@ export default function AnalyticsDashboard(): JSX.Element {
 
       {analyticsState !== 'loading' && analyticsState !== 'error' && activeTab === 'ads' ? (
         <div className="space-y-6">
-          {analyticsState !== 'not_configured' && !canViewAdPerformance ? (
+          {adTrackingStatus === 'error' ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-red-700">{currentReport.integrations.adTracking.message || 'Ads Manager analytics is unavailable.'}</div>
+          ) : null}
+
+          {adTrackingStatus !== 'not_connected' && adTrackingStatus !== 'error' && !canViewAdPerformance ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-amber-900">{ACCESS_DENIED_MESSAGE}</div>
           ) : null}
 
-          {(analyticsState === 'not_configured' || (canViewAdPerformance && !hasCampaignData && !hasDevicePerformance && !hasPlacementPerformance)) ? (
+          {adTrackingStatus === 'not_connected' ? (
             <div className="rounded-lg border border-slate-200 bg-white p-6 text-slate-600 shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
               <div className="font-semibold text-slate-900 dark:text-white">{AD_TRACKING_EMPTY_HEADING}</div>
               <div className="mt-1 text-sm">{AD_TRACKING_EMPTY_MESSAGE}</div>
+            </div>
+          ) : null}
+
+          {canViewAdPerformance ? (
+            <div className="rounded-lg bg-white p-6 shadow dark:bg-slate-800">
+              <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold">Ads Manager Performance</h3>
+                  <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">Lifetime counters from Ads Manager. Date filters do not apply to these metrics.</div>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">{adSummary.scope || AD_LIFETIME_LABEL}</span>
+              </div>
+
+              {hasAdSummaryData ? (
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded border border-slate-200 p-3 dark:border-slate-700"><div className="text-xs uppercase text-slate-500">Impressions</div><div className="mt-1 text-xl font-semibold">{formatNumber(adSummary.impressions)}</div></div>
+                  <div className="rounded border border-slate-200 p-3 dark:border-slate-700"><div className="text-xs uppercase text-slate-500">Clicks</div><div className="mt-1 text-xl font-semibold">{formatNumber(adSummary.clicks)}</div></div>
+                  <div className="rounded border border-slate-200 p-3 dark:border-slate-700"><div className="text-xs uppercase text-slate-500">CTR</div><div className="mt-1 text-xl font-semibold">{formatPercent(adSummary.ctr)}</div></div>
+                  <div className="rounded border border-slate-200 p-3 dark:border-slate-700"><div className="text-xs uppercase text-slate-500">Total Ads</div><div className="mt-1 text-xl font-semibold">{formatNumber(adSummary.totalAds)}</div></div>
+                  <div className="rounded border border-slate-200 p-3 dark:border-slate-700"><div className="text-xs uppercase text-slate-500">Active Ads</div><div className="mt-1 text-xl font-semibold">{formatNumber(adSummary.activeAds)}</div></div>
+                </div>
+              ) : null}
+
+              {!hasAdActivity ? <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">{AD_CONNECTED_ZERO_MESSAGE}</div> : null}
             </div>
           ) : null}
 

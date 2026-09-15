@@ -103,6 +103,40 @@ export type CategoriesAnalyticsResponse = {
   items?: CategoryAnalyticsRow[];
 };
 
+export type AdPerformanceAnalyticsResponse = {
+  connected?: boolean;
+  source?: string;
+  scope?: string;
+  dateRangeSupported?: boolean;
+  message?: string;
+  metrics?: Record<string, unknown>;
+  totals?: Record<string, unknown>;
+  impressions?: number | string;
+  clicks?: number | string;
+  ctr?: number | string;
+  totalAds?: number | string;
+  activeAds?: number | string;
+  total?: number | string;
+  active?: number | string;
+};
+
+export type RevenueAnalyticsFilters = {
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type RevenueAnalyticsResponse = {
+  connected?: boolean;
+  source?: string;
+  message?: string;
+  metrics?: Record<string, unknown>;
+  totals?: Record<string, unknown>;
+  totalRevenue?: number | string;
+  paidAmount?: number | string;
+  outstandingAmount?: number | string;
+  recordCount?: number | string;
+};
+
 function unwrap<T = any>(raw: any): T {
   // common backend shapes: { ok:true, data }, { success:true, data }, { data }, or plain
   if (raw && typeof raw === 'object') {
@@ -115,6 +149,16 @@ function unwrap<T = any>(raw: any): T {
 export async function getAdminAnalyticsDashboard(filters: AnalyticsCommonFilters = {}) {
   const res = await adminApi.get('/analytics/dashboard', { params: filters });
   return unwrap<DashboardAnalyticsResponse>((res as any)?.data);
+}
+
+export async function getAdminAnalyticsAdPerformance() {
+  const res = await adminApi.get('/analytics/ad-performance');
+  return unwrap<AdPerformanceAnalyticsResponse>((res as any)?.data);
+}
+
+export async function getAdminAnalyticsRevenue(filters: RevenueAnalyticsFilters = {}) {
+  const res = await adminApi.get('/analytics/revenue', { params: filters });
+  return unwrap<RevenueAnalyticsResponse>((res as any)?.data);
 }
 
 export async function listAdminAnalyticsArticles(filters: AnalyticsCommonFilters & { page?: number; limit?: number } = {}) {
