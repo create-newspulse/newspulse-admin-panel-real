@@ -742,6 +742,8 @@ type SponsorAd = {
   startAt?: string | null;
   endAt?: string | null;
   isActive: boolean;
+  impressions?: number | null;
+  clicks?: number | null;
   updatedAt?: string | null;
   createdAt?: string | null;
   productType?: 'STANDARD_AD' | 'SPONSORED_FEATURE' | null;
@@ -1275,10 +1277,17 @@ const emptyForm = (): AdFormState => ({
   linkedSponsoredArticleUrl: '',
 });
 
+function normalizeAdCounter(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function normalizeAd(raw: any): SponsorAd {
   const sponsoredFeature = raw?.sponsoredFeature && typeof raw.sponsoredFeature === 'object'
     ? raw.sponsoredFeature
     : {};
+  const metrics = raw?.metrics && typeof raw.metrics === 'object' ? raw.metrics : {};
+  const analytics = raw?.analytics && typeof raw.analytics === 'object' ? raw.analytics : {};
   const productType = String(raw?.productType ?? raw?.product_type ?? sponsoredFeature?.productType ?? '').trim().toUpperCase();
   const placement = normalizeSponsoredContentPlacement(raw?.placement ?? raw?.sponsoredPlacement ?? sponsoredFeature?.placement);
   return {
@@ -1292,6 +1301,8 @@ function normalizeAd(raw: any): SponsorAd {
     startAt: raw?.startAt ?? raw?.start_at ?? null,
     endAt: raw?.endAt ?? raw?.end_at ?? null,
     isActive: Boolean(raw?.isActive ?? raw?.active ?? false),
+    impressions: normalizeAdCounter(raw?.impressions ?? raw?.impressionCount ?? raw?.totalImpressions ?? metrics?.impressions ?? metrics?.impressionCount ?? metrics?.totalImpressions ?? analytics?.impressions ?? analytics?.totalImpressions),
+    clicks: normalizeAdCounter(raw?.clicks ?? raw?.clickCount ?? raw?.totalClicks ?? metrics?.clicks ?? metrics?.clickCount ?? metrics?.totalClicks ?? analytics?.clicks ?? analytics?.totalClicks),
     updatedAt: raw?.updatedAt ?? raw?.updated ?? null,
     createdAt: raw?.createdAt ?? null,
     productType: productType === SPONSORED_FEATURE_PRODUCT_TYPE ? 'SPONSORED_FEATURE' : 'STANDARD_AD',
@@ -2470,6 +2481,10 @@ export default function AdsManager() {
     }
   }, [slotFilter, activeOnly]);
 
+  const refreshAdPerformanceData = React.useCallback(async () => {
+    await Promise.all([fetchAds(), refreshSponsoredContent()]);
+  }, [fetchAds, refreshSponsoredContent]);
+
   const fetchInquiries = React.useCallback(async (opts: {
     status: InquiryStatusTab;
     page: number;
@@ -3132,7 +3147,17 @@ export default function AdsManager() {
         </button>
       </div>
 
-      {tab === 'ad-performance' ? <AdPerformancePanel /> : null}
+      {tab === 'ad-performance' ? (
+        <AdPerformancePanel
+          ads={ads}
+          sponsoredFeatures={sponsoredFeatures}
+          sponsoredArticles={sponsoredArticleInventory}
+          slotEnabled={slotEnabled}
+          loadingAds={loading}
+          loadingSponsoredContent={sponsoredFeaturesLoading || sponsoredArticlesLoading}
+          onRefreshData={refreshAdPerformanceData}
+        />
+      ) : null}
 
       {tab === 'inquiries' ? (
         <div className="space-y-4">

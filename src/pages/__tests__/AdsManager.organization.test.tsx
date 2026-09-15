@@ -58,6 +58,15 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+function mockAdsManagerRecords(records: any[]) {
+  vi.mocked(adminApi.get).mockImplementation(async (path: string) => {
+    if (path === '/admin/ads') return { data: { ads: records } };
+    if (path === '/admin/ad-settings') return { data: { slotEnabled: { HOME_728x90: true, HOME_RIGHT_300x250: true, ARTICLE_INLINE: true, ARTICLE_END: true, FOOTER_BANNER_728x90: true } } };
+    if (path === '/media-kit') return { data: null };
+    return { data: {} };
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(adminApi.get).mockImplementation(async (path: string) => {
@@ -124,15 +133,113 @@ describe('AdsManager module organization', () => {
 
     expect(await screen.findByRole('heading', { name: 'Ad Performance' })).toBeInTheDocument();
     expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Monitor ad delivery, impressions, clicks, CTR, placements and sponsored campaigns.')).toBeInTheDocument();
+    expect(screen.getByText('Current impression and click counters are lifetime metrics.')).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(within(screen.getByText('Connected source').closest('.rounded') as HTMLElement).getByText('Ads Manager')).toBeInTheDocument();
+    expect(within(screen.getByText('Connected Source').closest('.rounded') as HTMLElement).getByText('Ads Manager')).toBeInTheDocument();
     expect(within(screen.getByText('Scope').closest('.rounded') as HTMLElement).getByText('Lifetime')).toBeInTheDocument();
-    expect(screen.getByText('Date range filters do not apply to these lifetime counters.')).toBeInTheDocument();
-    expect(within(screen.getByText('Impressions').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
-    expect(within(screen.getByText('Clicks').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
-    expect(screen.getByText('0.00%')).toBeInTheDocument();
-    expect(within(screen.getByText('Total Ads').closest('.rounded') as HTMLElement).getByText('5')).toBeInTheDocument();
-    expect(within(screen.getByText('Active Ads').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    const overviewSection = screen.getByLabelText('Ad Performance Overview');
+    expect(within(within(overviewSection).getByText('Impressions').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(within(overviewSection).getByText('Clicks').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(overviewSection).getByText('0.00%')).toBeInTheDocument();
+    expect(within(within(overviewSection).getByText('Total Ads').closest('.rounded') as HTMLElement).getByText('5')).toBeInTheDocument();
+    expect(within(within(overviewSection).getByText('Active Ads').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(within(overviewSection).getByText('Sponsored Features').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(within(within(overviewSection).getByText('Sponsored Articles').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Today|7 Days|30 Days|Custom Range/i })).toBeNull();
+  });
+
+  it('renders lifetime per-ad, placement, campaign, attention, health, and sponsored status from existing Ads Manager records', async () => {
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const olderPast = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    mockAdsManagerRecords([
+      { id: 'ad-hero', slot: 'HOME_728x90', title: 'Hero Banner', imageUrl: 'https://cdn.example/hero.jpg', targetUrl: 'https://sponsor.example', isActive: true, startAt: past, endAt: future, impressions: 1000, clicks: 50 },
+      { id: 'ad-zero', slot: 'HOME_RIGHT_300x250', title: 'Quiet Rail', imageUrl: 'https://cdn.example/rail.jpg', targetUrl: 'https://sponsor.example/rail', isActive: true, startAt: past, endAt: future, impressions: 0, clicks: 0 },
+      { id: 'ad-noclick', slot: 'ARTICLE_END', title: 'Article Ender', imageUrl: 'https://cdn.example/end.jpg', targetUrl: 'https://sponsor.example/end', isActive: true, impressions: 40, clicks: 0 },
+      { id: 'ad-scheduled', slot: 'ARTICLE_INLINE', title: 'Future Inline', imageUrl: 'https://cdn.example/future.jpg', targetUrl: 'https://sponsor.example/future', isActive: true, startAt: future, impressions: 0, clicks: 0 },
+      { id: 'ad-ended', slot: 'FOOTER_BANNER_728x90', title: 'Ended Footer', imageUrl: 'https://cdn.example/footer.jpg', targetUrl: 'https://sponsor.example/footer', isActive: true, endAt: olderPast, impressions: 300, clicks: 30 },
+      { id: 'ad-paused', slot: 'HOME_728x90', title: 'Paused Banner', imageUrl: 'https://cdn.example/paused.jpg', targetUrl: 'https://sponsor.example/paused', isActive: false, impressions: 10, clicks: 1 },
+    ]);
+    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValueOnce({
+      connected: true,
+      source: 'Ads Manager',
+      scope: 'lifetime',
+      dateRangeSupported: false,
+      metrics: { impressions: 1350, clicks: 81, ctr: 6, totalAds: 6, activeAds: 5 },
+    });
+    vi.mocked(listSponsoredFeatures).mockResolvedValue([
+      {
+        id: 'sf-1',
+        headline: 'Sponsored Homepage Lead',
+        sponsorName: 'Pulse Partner',
+        destinationUrl: 'https://partner.example',
+        publicClickTarget: '/news/sponsored-story',
+        isActive: true,
+        comboCampaignIsActive: true,
+        optionalLinkedSponsoredArticleId: 'article-1',
+        linkedSponsoredArticleTitle: 'Sponsored Story',
+      } as any,
+    ]);
+    vi.mocked(listSponsoredArticleInventory).mockResolvedValue([
+      { id: 'article-1', title: 'Sponsored Story', status: 'published', publicUrl: '/news/sponsored-story' },
+    ] as any);
+
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+
+    const perAdSection = await screen.findByLabelText('Per-Ad Performance');
+    expect(await within(perAdSection).findByText('Hero Banner')).toBeInTheDocument();
+    const zeroRow = within(perAdSection).getByText('Quiet Rail').closest('tr') as HTMLElement;
+    expect(within(zeroRow).getAllByText('0').length).toBeGreaterThanOrEqual(2);
+    expect(within(zeroRow).getByText('0.00%')).toBeInTheDocument();
+    expect(within(perAdSection).getByText('Future Inline').closest('tr')).toHaveTextContent('Scheduled');
+    expect(within(perAdSection).getByText('Ended Footer').closest('tr')).toHaveTextContent('Ended');
+    expect(within(perAdSection).getByText('Paused Banner').closest('tr')).toHaveTextContent('Inactive / Off');
+
+    const placementSection = screen.getByLabelText('Placement Performance');
+    const homePlacementRow = within(placementSection).getByText('HOME_728x90').closest('tr') as HTMLElement;
+    expect(within(homePlacementRow).getByText('2')).toBeInTheDocument();
+    expect(within(homePlacementRow).getByText('1,010')).toBeInTheDocument();
+    expect(within(homePlacementRow).getByText('51')).toBeInTheDocument();
+    expect(within(homePlacementRow).getByText('5.05%')).toBeInTheDocument();
+
+    const campaignStatusSection = screen.getByLabelText('Campaign Status');
+    expect(within(campaignStatusSection).getByText('Active').closest('.rounded')).toHaveTextContent('3');
+    expect(within(campaignStatusSection).getByText('Scheduled').closest('.rounded')).toHaveTextContent('1');
+    expect(within(campaignStatusSection).getByText('Ended').closest('.rounded')).toHaveTextContent('1');
+    expect(within(campaignStatusSection).getByText('Inactive / Off').closest('.rounded')).toHaveTextContent('1');
+
+    const topSection = screen.getByLabelText('Top Performing Ads');
+    expect(within(topSection).getByText('Highest impressions')).toBeInTheDocument();
+    expect(within(topSection).getByText('Highest clicks')).toBeInTheDocument();
+    expect(within(topSection).getByText('Highest CTR')).toBeInTheDocument();
+    expect(within(topSection).getAllByText('Hero Banner').length).toBeGreaterThanOrEqual(2);
+
+    const attentionSection = screen.getByLabelText('Needs Attention');
+    expect(within(attentionSection).getByText('Quiet Rail')).toBeInTheDocument();
+    expect(within(attentionSection).getAllByText('Active ad has no recorded impressions.').length).toBeGreaterThan(0);
+    expect(within(attentionSection).getByText('Article Ender')).toBeInTheDocument();
+    expect(within(attentionSection).getByText('Ad has impressions but no recorded clicks.')).toBeInTheDocument();
+
+    const healthSection = screen.getByLabelText('Delivery Health');
+    expect(within(healthSection).getByText('Hero Banner')).toBeInTheDocument();
+    expect(within(healthSection).getAllByText('Healthy').length).toBeGreaterThan(0);
+
+    const sponsoredSection = await screen.findByLabelText('Sponsored Content Status');
+    expect(within(sponsoredSection).getByText('Sponsored Homepage Lead')).toBeInTheDocument();
+    expect(within(sponsoredSection).getByText('Homepage: Homepage ON')).toBeInTheDocument();
+    expect(within(sponsoredSection).getByText('Combo: Combo Campaign active')).toBeInTheDocument();
+    expect(within(sponsoredSection).getByText('Linked article: Sponsored Story')).toBeInTheDocument();
+
+    expect(screen.queryByText('Total Revenue')).toBeNull();
+    expect(screen.queryByText('Paid Amount')).toBeNull();
+    expect(screen.queryByText('Advertiser Leads')).toBeNull();
+    expect(screen.queryByText('Page Views')).toBeNull();
+    expect(adminApi.post).not.toHaveBeenCalled();
+    expect(adminApi.put).not.toHaveBeenCalled();
+    expect(adminApi.patch).not.toHaveBeenCalled();
+    expect(adminApi.delete).not.toHaveBeenCalled();
   });
 
   it('keeps zero ad activity connected and truthful', async () => {
@@ -149,6 +256,7 @@ describe('AdsManager module organization', () => {
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     expect(screen.getByText('No ad activity yet.')).toBeInTheDocument();
+    expect(screen.getByText('No ad performance data yet.')).toBeInTheDocument();
     expect(screen.queryByText(/50K|87%|500K|sample|placeholder/i)).toBeNull();
   });
 
