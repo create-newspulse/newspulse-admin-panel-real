@@ -133,6 +133,7 @@ describe('AdsManager module organization', () => {
 
     expect(await screen.findByRole('heading', { name: 'Ad Performance' })).toBeInTheDocument();
     expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getAdminAnalyticsAdPerformance).mock.calls[0]).toEqual([]);
     expect(screen.getByText('Monitor ad delivery, impressions, clicks, CTR, placements and sponsored campaigns.')).toBeInTheDocument();
     expect(screen.getByText('Current impression and click counters are lifetime metrics.')).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
@@ -146,7 +147,109 @@ describe('AdsManager module organization', () => {
     expect(within(within(overviewSection).getByText('Active Ads').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
     expect(within(within(overviewSection).getByText('Sponsored Features').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
     expect(within(within(overviewSection).getByText('Sponsored Articles').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Today|7 Days|30 Days|Custom Range/i })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Lifetime' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Last 7 Days' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Last 30 Days' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Custom Range' })).toBeInTheDocument();
+  });
+
+  it('loads dated ad performance ranges through the existing helper params', async () => {
+    render(<AdsManager />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(getAdminAnalyticsAdPerformance).mock.calls[0]).toEqual([]);
+
+    const rangeSelect = screen.getByLabelText('Range');
+    fireEvent.change(rangeSelect, { target: { value: 'today' } });
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith({ range: 'today' }));
+
+    fireEvent.change(rangeSelect, { target: { value: '7d' } });
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith({ range: '7d' }));
+
+    fireEvent.change(rangeSelect, { target: { value: '30d' } });
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith({ range: '30d' }));
+
+    fireEvent.change(rangeSelect, { target: { value: 'custom' } });
+    expect(screen.getByText('Select both start and end dates to load a custom range.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Custom start date'), { target: { value: '2026-09-01' } });
+    fireEvent.change(screen.getByLabelText('Custom end date'), { target: { value: '2026-09-16' } });
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith({ range: 'custom', from: '2026-09-01', to: '2026-09-16' }));
+  });
+
+  it('renders dated ad performance from backend range data without mixing in lifetime counters', async () => {
+    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValueOnce({
+      connected: true,
+      source: 'Ads Manager',
+      scope: 'lifetime',
+      metrics: { impressions: 9999, clicks: 999, ctr: 9.99, totalAds: 9, activeAds: 4 },
+    }).mockResolvedValueOnce({
+      connected: true,
+      source: 'Ads Manager',
+      dateRangeSupported: true,
+      metrics: { impressions: 245, clicks: 19, ctr: 7.76, adsWithActivity: 2 },
+      dailyTrend: [
+        { date: '2026-09-15', impressions: 120, clicks: 9, ctr: 7.5 },
+        { date: '2026-09-16', impressions: 125, clicks: 10, ctr: 8 },
+      ],
+      perAd: [
+        { id: 'ad-range-1', title: 'Range Leader', placement: 'HOME_728x90', impressions: 200, clicks: 16, ctr: 8 },
+      ],
+      placementPerformance: [
+        { placement: 'HOME_728x90', adsWithActivity: 1, impressions: 200, clicks: 16, ctr: 8 },
+      ],
+      topByImpressions: [{ id: 'ad-range-1', title: 'Range Leader', impressions: 200, clicks: 16, ctr: 8 }],
+      topByClicks: [{ id: 'ad-range-1', title: 'Range Leader', impressions: 200, clicks: 16, ctr: 8 }],
+      topByCtr: [{ id: 'ad-range-1', title: 'Range Leader', impressions: 200, clicks: 16, ctr: 8 }],
+    });
+
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Range'), { target: { value: '7d' } });
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenLastCalledWith({ range: '7d' }));
+
+    expect(screen.getByText('Historical period sections use dated backend ad-performance records only.')).toBeInTheDocument();
+    expect(within(screen.getByText('Scope').closest('.rounded') as HTMLElement).getByText('Last 7 Days')).toBeInTheDocument();
+    const periodOverview = await screen.findByLabelText('Period Performance Overview');
+    expect(within(within(periodOverview).getByText('Impressions').closest('.rounded') as HTMLElement).getByText('245')).toBeInTheDocument();
+    expect(within(within(periodOverview).getByText('Clicks').closest('.rounded') as HTMLElement).getByText('19')).toBeInTheDocument();
+    expect(within(periodOverview).getByText('7.76%')).toBeInTheDocument();
+    expect(within(within(periodOverview).getByText('Ads With Activity').closest('.rounded') as HTMLElement).getByText('2')).toBeInTheDocument();
+
+    const trendSection = screen.getByLabelText('Daily Performance Trend');
+    expect(within(trendSection).getByText('2026-09-15')).toBeInTheDocument();
+    expect(within(trendSection).getByText('2026-09-16')).toBeInTheDocument();
+    const perAdSection = screen.getByLabelText('Period Per-Ad Performance');
+    expect(within(perAdSection).getByText('Range Leader')).toBeInTheDocument();
+    const placementSection = screen.getByLabelText('Period Placement Performance');
+    expect(within(placementSection).getByText('HOME_728x90')).toBeInTheDocument();
+    const topSection = screen.getByLabelText('Period Top Ads');
+    expect(within(topSection).getByText('Top by Impressions')).toBeInTheDocument();
+    expect(within(topSection).getAllByText('Range Leader').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByLabelText('Ad Performance Overview')).toBeNull();
+  });
+
+  it('keeps dated ad performance failure truthful without fake values', async () => {
+    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValueOnce({
+      connected: true,
+      source: 'Ads Manager',
+      scope: 'lifetime',
+      metrics: { impressions: 0, clicks: 0, ctr: 0, totalAds: 0, activeAds: 0 },
+    }).mockRejectedValueOnce(new Error('range unavailable'));
+
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    await waitFor(() => expect(getAdminAnalyticsAdPerformance).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText('Range'), { target: { value: '30d' } });
+
+    expect(await screen.findByText('range unavailable')).toBeInTheDocument();
+    expect(screen.getByText('No advertisement tracking system configured')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Period Performance Overview')).toBeNull();
+    expect(screen.queryByText(/50K|87%|500K|sample|placeholder/i)).toBeNull();
   });
 
   it('renders lifetime per-ad, placement, campaign, attention, health, and sponsored status from existing Ads Manager records', async () => {

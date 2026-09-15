@@ -126,6 +126,31 @@ export type AdPerformanceAnalyticsResponse = {
   activeAds?: number | string;
   total?: number | string;
   active?: number | string;
+  adsWithActivity?: number | string;
+  daily?: unknown[];
+  dailyTrend?: unknown[];
+  trend?: unknown[];
+  days?: unknown[];
+  ads?: unknown[];
+  perAd?: unknown[];
+  perAds?: unknown[];
+  perAdPerformance?: unknown[];
+  adPerformance?: unknown[];
+  placements?: unknown[];
+  perPlacement?: unknown[];
+  placementPerformance?: unknown[];
+  topAds?: unknown;
+  topByImpressions?: unknown[];
+  topByClicks?: unknown[];
+  topByCtr?: unknown[];
+};
+
+export type AdPerformanceAnalyticsRange = 'today' | '7d' | '30d' | 'custom';
+
+export type AdPerformanceAnalyticsFilters = {
+  range?: AdPerformanceAnalyticsRange;
+  from?: string;
+  to?: string;
 };
 
 export type RevenueAnalyticsFilters = {
@@ -159,8 +184,11 @@ export async function getAdminAnalyticsDashboard(filters: AnalyticsCommonFilters
   return unwrap<DashboardAnalyticsResponse>((res as any)?.data);
 }
 
-export async function getAdminAnalyticsAdPerformance() {
-  const res = await adminApi.get('/analytics/ad-performance');
+export async function getAdminAnalyticsAdPerformance(filters: AdPerformanceAnalyticsFilters = {}) {
+  const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined && value !== ''));
+  const res = Object.keys(params).length
+    ? await adminApi.get('/analytics/ad-performance', { params })
+    : await adminApi.get('/analytics/ad-performance');
   return unwrap<AdPerformanceAnalyticsResponse>((res as any)?.data);
 }
 
