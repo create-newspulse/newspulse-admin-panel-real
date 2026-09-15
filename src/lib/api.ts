@@ -792,17 +792,38 @@ api.revenue = async () => {
     '/revenue'
   ];
   let lastErr: any = null;
+  const toNumber = (value: any, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const recordsCount = (data: any, raw: any) => {
+    const explicit = data.revenueRecords ?? data.recordCount ?? data.recordsCount ?? data.totalRecords ?? data.count;
+    if (explicit !== undefined && explicit !== null) return toNumber(explicit);
+    if (Array.isArray(data.records)) return data.records.length;
+    if (Array.isArray(data.revenueRecords)) return data.revenueRecords.length;
+    if (Array.isArray(raw.records)) return raw.records.length;
+    return 0;
+  };
   for (const p of candidates) {
     try {
       const res = await api.get(p);
       const raw = res.data || {};
       // Unwrap common wrappers
       const data = raw.data || raw.revenue || raw;
+      const adSense = toNumber(data.adsense ?? data.googleAdsense);
+      const affiliates = toNumber(data.affiliates ?? data.affiliate);
+      const sponsors = toNumber(data.sponsors ?? data.sponsor);
+      const total = toNumber(data.total ?? data.totalRevenue, adSense + affiliates + sponsors);
+      const paidAmount = toNumber(data.paidAmount ?? data.paid ?? data.receivedAmount ?? data.collectedAmount);
       const out = {
-        adsense: Number(data.adsense ?? data.googleAdsense ?? 0),
-        affiliates: Number(data.affiliates ?? data.affiliate ?? 0),
-        sponsors: Number(data.sponsors ?? data.sponsor ?? 0),
-        total: Number(data.total ?? (Number(data.adsense || 0) + Number(data.affiliates || 0) + Number(data.sponsors || 0))),
+        adsense: adSense,
+        affiliates,
+        sponsors,
+        total,
+        totalRevenue: total,
+        paidAmount,
+        outstandingAmount: toNumber(data.outstandingAmount ?? data.outstanding ?? data.pendingAmount ?? data.dueAmount, Math.max(total - paidAmount, 0)),
+        revenueRecords: recordsCount(data, raw),
         lastUpdated: data.lastUpdated || raw.lastUpdated || null
       };
       return out;
