@@ -1,8 +1,11 @@
 import { Node, mergeAttributes, type NodeViewProps } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import {
+  FACEBOOK_SHARE_REEL_RESOLVE_ERROR,
   parseNewsPulseFacebookAttrs,
   parseNewsPulseFacebookUrl,
+  parseNewsPulseFacebookShareReelUrl,
+  resolveNewsPulseFacebookShareReelUrl,
   type NewsPulseFacebookEmbed,
 } from '@/lib/facebook';
 
@@ -30,12 +33,24 @@ function NewsPulseFacebookView({ editor, getPos, node, updateAttributes }: NodeV
     editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
   };
 
-  const editUrl = () => {
+  const editUrl = async () => {
     const next = window.prompt('Facebook post URL', embed?.url || safeAttr(attrs.url) || '');
     if (next == null) return;
-    const parsed = parseNewsPulseFacebookUrl(next);
-    if (!parsed) {
+    const direct = parseNewsPulseFacebookUrl(next);
+    if (direct) {
+      updateAttributes({ url: direct.url });
+      return;
+    }
+
+    const share = parseNewsPulseFacebookShareReelUrl(next);
+    if (!share) {
       window.alert('Enter a valid Facebook post URL.');
+      return;
+    }
+
+    const parsed = await resolveNewsPulseFacebookShareReelUrl(share.url);
+    if (!parsed) {
+      window.alert(FACEBOOK_SHARE_REEL_RESOLVE_ERROR);
       return;
     }
     updateAttributes({ url: parsed.url });

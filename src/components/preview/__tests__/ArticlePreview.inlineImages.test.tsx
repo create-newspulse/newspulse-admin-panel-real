@@ -326,6 +326,21 @@ describe('ArticlePreview inline images', () => {
     expect(container.textContent).not.toContain('data-np-url');
   });
 
+  it('renders a controlled Facebook Reel marker as the same safe preview card contract', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Facebook Reel preview',
+      content: '<p>Before</p><div data-np-block="facebook" data-np-url="https://www.facebook.com/reel/1098765432109876"></div><p>After</p>',
+    }} />);
+
+    const link = screen.getByRole('link', { name: 'Open post' });
+    expect(screen.getByText('Facebook Post')).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', 'https://www.facebook.com/reel/1098765432109876');
+    expect(container.querySelector('[data-np-block="facebook"]')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).not.toContain('data-np-url');
+  });
+
   it('renders a controlled gallery marker as a safe preview gallery', () => {
     const { container } = render(<ArticlePreview article={{
       title: 'Gallery preview',

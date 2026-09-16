@@ -12,7 +12,7 @@ import toast from 'react-hot-toast';
 
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 import { uploadInlineImage, type UploadInlineImageResult } from '@/lib/api/media';
-import { extractNewsPulseFacebookFromHtml, parseNewsPulseFacebookUrl, type NewsPulseFacebookEmbed } from '@/lib/facebook';
+import { FACEBOOK_SHARE_REEL_RESOLVE_ERROR, extractNewsPulseFacebookFromHtml, parseNewsPulseFacebookShareReelUrl, parseNewsPulseFacebookUrl, resolveNewsPulseFacebookShareReelUrl, type NewsPulseFacebookEmbed } from '@/lib/facebook';
 import { extractNewsPulseInstagramFromHtml, parseNewsPulseInstagramUrl, type NewsPulseInstagramEmbed } from '@/lib/instagram';
 import { extractNewsPulseYouTubeFromHtml, parseNewsPulseYouTubeUrl, type NewsPulseYouTubeEmbed } from '@/lib/youtube';
 import { extractNewsPulseXFromHtml, parseNewsPulseXUrl, type NewsPulseXEmbed } from '@/lib/x';
@@ -389,6 +389,12 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
           return true;
         }
 
+        if (parseNewsPulseFacebookShareReelUrl(plainText) && isSingleClipboardUrl(plainText)) {
+          event.preventDefault();
+          void insertFacebookFromInput(plainText);
+          return true;
+        }
+
         return false;
       },
       handleDrop: (view, event) => {
@@ -504,6 +510,29 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         url: embed.url,
       },
     }).run();
+  };
+
+  const insertFacebookFromInput = async (raw: string): Promise<boolean> => {
+    const direct = parseNewsPulseFacebookUrl(raw);
+    if (direct) {
+      insertNewsPulseFacebook(direct);
+      return true;
+    }
+
+    const share = parseNewsPulseFacebookShareReelUrl(raw);
+    if (!share) {
+      toast.error('Enter a valid Facebook post URL.');
+      return false;
+    }
+
+    const embed = await resolveNewsPulseFacebookShareReelUrl(share.url);
+    if (!embed) {
+      toast.error(FACEBOOK_SHARE_REEL_RESOLVE_ERROR);
+      return false;
+    }
+
+    insertNewsPulseFacebook(embed);
+    return true;
   };
 
   const openNewGallery = () => {
@@ -750,12 +779,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
   const onFacebook = () => {
     const raw = window.prompt('Facebook post URL');
     if (raw == null) return;
-    const facebookUrl = parseNewsPulseFacebookUrl(raw);
-    if (!facebookUrl) {
-      toast.error('Enter a valid Facebook post URL.');
-      return;
-    }
-    insertNewsPulseFacebook(facebookUrl);
+    void insertFacebookFromInput(raw);
   };
 
   const onEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {

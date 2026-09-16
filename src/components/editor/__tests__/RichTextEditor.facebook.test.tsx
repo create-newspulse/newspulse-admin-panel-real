@@ -28,6 +28,10 @@ const CANONICAL_POSTS_URL = 'https://www.facebook.com/newspulse/posts/1234567890
 const POSTS_SHARE_URL = 'https://www.facebook.com/newspulse/posts/1234567890123456?__cft__[0]=abc&ref=share';
 const PERMALINK_URL = 'https://www.facebook.com/permalink.php?story_fbid=987654321098765&id=1234567890';
 const CANONICAL_PERMALINK_URL = 'https://www.facebook.com/permalink.php?story_fbid=987654321098765&id=1234567890';
+const REEL_URL = 'https://www.facebook.com/reel/1098765432109876?mibextid=abc123';
+const CANONICAL_REEL_URL = 'https://www.facebook.com/reel/1098765432109876';
+const SHARE_REEL_URL = 'https://www.facebook.com/share/r/19jB1vmypX/';
+const SHARE_REEL_ERROR = 'Unable to resolve this Facebook share link. Open the post and try copying the direct Facebook link.';
 
 type ClipboardDataInput = {
   html?: string;
@@ -109,6 +113,16 @@ describe('RichTextEditor controlled Facebook authoring', () => {
     await waitFor(() => expectCanonicalFacebookMarkup(getHtml(), CANONICAL_PERMALINK_URL));
   });
 
+  it('inserts a controlled node from a canonical /reel/ URL toolbar action', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValueOnce(REEL_URL);
+    const { getHtml } = renderEditor();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Facebook' }));
+
+    await waitFor(() => expectCanonicalFacebookMarkup(getHtml(), CANONICAL_REEL_URL));
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', CANONICAL_REEL_URL);
+  });
+
   it('handles share query params without persisting them for /posts/ URLs', async () => {
     const { editorElement, getHtml } = renderEditor();
 
@@ -117,6 +131,53 @@ describe('RichTextEditor controlled Facebook authoring', () => {
     await waitFor(() => expectCanonicalFacebookMarkup(getHtml(), CANONICAL_POSTS_URL));
     expect(getHtml()).not.toContain('__cft__');
     expect(getHtml()).not.toContain('ref=share');
+  });
+
+  it('resolves a Facebook /share/r/ Copy Link URL before inserting the controlled marker', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ canonicalUrl: CANONICAL_REEL_URL }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const { editorElement, getHtml } = renderEditor();
+
+    fireEvent.paste(editorElement, { clipboardData: clipboardData({ text: SHARE_REEL_URL }) });
+
+    await waitFor(() => expectCanonicalFacebookMarkup(getHtml(), CANONICAL_REEL_URL));
+    expect(getHtml()).not.toContain('/share/r/');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/admin-api/admin/articles/media/facebook/resolve', expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+      body: JSON.stringify({ url: SHARE_REEL_URL }),
+    }));
+  });
+
+  it('shows a safe error when a Facebook /share/r/ URL cannot be resolved', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: 'not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.spyOn(window, 'prompt').mockReturnValueOnce(SHARE_REEL_URL);
+    const { getHtml } = renderEditor();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Facebook' }));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(SHARE_REEL_ERROR));
+    expect(getHtml()).not.toContain('data-np-block="facebook"');
+    expect(getHtml()).not.toContain('/share/r/');
+  });
+
+  it('rejects a resolved Facebook share URL when the backend returns an unsupported path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ canonicalUrl: 'https://www.facebook.com/watch/1234567890' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const { editorElement, getHtml } = renderEditor();
+
+    fireEvent.paste(editorElement, { clipboardData: clipboardData({ text: SHARE_REEL_URL }) });
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(SHARE_REEL_ERROR));
+    expect(getHtml()).not.toContain('data-np-block="facebook"');
   });
 
   it.each([
@@ -164,6 +225,13 @@ describe('RichTextEditor controlled Facebook authoring', () => {
 
     expect(html).toBe('<div data-np-block="facebook" data-np-url="https://www.facebook.com/permalink.php?story_fbid=987654321098765&amp;id=1234567890"></div>');
     expectCanonicalFacebookMarkup(html, CANONICAL_PERMALINK_URL);
+  });
+
+  it('serializes canonical Reel marker HTML without changing the stored contract', () => {
+    const html = serializeContent('<div data-np-block="facebook" data-np-url="https://www.facebook.com/reel/1098765432109876"></div>');
+
+    expect(html).toBe('<div data-np-block="facebook" data-np-url="https://www.facebook.com/reel/1098765432109876"></div>');
+    expectCanonicalFacebookMarkup(html, CANONICAL_REEL_URL);
   });
 
   it('rejects invalid canonical markers when reopening draft content', () => {
@@ -229,6 +297,16 @@ describe('RichTextEditor controlled Facebook authoring', () => {
     expect(getHtml()).not.toContain('<script');
     expect(getHtml()).not.toContain('<iframe');
     expect(getHtml()).not.toContain('fb-post');
+  });
+
+  it('updates an existing Facebook block through Change URL', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValueOnce(PERMALINK_URL);
+    const { getHtml } = renderEditor('<div data-np-block="facebook" data-np-url="https://www.facebook.com/newspulse/posts/1234567890123456"></div>');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change URL' }));
+
+    await waitFor(() => expectCanonicalFacebookMarkup(getHtml(), CANONICAL_PERMALINK_URL));
+    expect(getHtml()).not.toContain(CANONICAL_POSTS_URL);
   });
 
   it('removes a controlled Facebook block from the editor', async () => {
