@@ -345,6 +345,25 @@ function getArticleLanguageCodes(a: Article, rows: Article[]): Set<string> {
   return langs;
 }
 
+function formatLanguageNamesForDelete(codes: Set<string>): string {
+  const labels: Record<string, string> = { en: 'English', hi: 'Hindi', gu: 'Gujarati' };
+  const names = ['en', 'hi', 'gu'].filter((code) => codes.has(code)).map((code) => labels[code]);
+  if (!names.length) return 'English, Hindi and Gujarati';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+export function buildManageNewsDeleteConfirmation(a: Article, rows: Article[]): string {
+  const languages = formatLanguageNamesForDelete(getArticleLanguageCodes(a, rows));
+  return [
+    'Delete this story?',
+    '',
+    'This will delete all available language versions of this story',
+    `(${languages}).`,
+  ].join('\n');
+}
+
 export function getArticleLanguageInfo(a: Article, rows: Article[]): ArticleLanguageInfo {
   const langs = getArticleLanguageCodes(a, rows);
   const primary = normalizeArticleLang((a as any)?.lang ?? (a as any)?.language);
@@ -379,6 +398,41 @@ function isAdminArticleDebugEnabled(): boolean {
 function logNewsTableAction(label: string, payload: Record<string, any>): void {
   if (!isAdminArticleDebugEnabled()) return;
   console.log(`[NewsTable] ${label}`, payload);
+}
+
+type DeleteStoryVariables = {
+  id: string;
+  groupKey: string;
+  groupArticleIds: string[];
+};
+
+function removeDeletedStoryFromListResponse(old: any, vars: DeleteStoryVariables): any {
+  if (!old) return old;
+  const rows: any[] | null = Array.isArray(old?.rows)
+    ? old.rows
+    : (Array.isArray(old?.data) ? old.data : null);
+  if (!rows) return old;
+
+  const idSet = new Set(vars.groupArticleIds.map((id) => String(id || '').trim()).filter(Boolean));
+  const groupKey = String(vars.groupKey || '').trim();
+  const nextRows = rows.filter((a) => {
+    const id = getArticleId(a as Article);
+    if (idSet.has(id)) return false;
+    if (groupKey && getManageNewsGroupKey(a as Article) === groupKey) return false;
+    return true;
+  });
+  const removed = rows.length - nextRows.length;
+  if (removed <= 0) return old;
+
+  const next: any = { ...old };
+  if (Array.isArray(old?.rows)) next.rows = nextRows;
+  if (Array.isArray(old?.data)) next.data = nextRows;
+  if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
+  if (typeof old?.pages === 'number' && typeof next.total === 'number') {
+    const limit = Math.max(1, Number(old?.limit || old?.perPage || rows.length || 1));
+    next.pages = Math.max(1, Math.ceil(next.total / limit));
+  }
+  return next;
 }
 
 function getAuthorName(a: Article): string {
@@ -522,10 +576,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
   });
   const mutateDelete = useMutation({
-    mutationFn: deleteArticle,
-    onSuccess: () => toast.success('Deleted'),
+    mutationFn: (vars: DeleteStoryVariables) => deleteArticle(vars.id),
+    onSuccess: (_data, vars) => {
+      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => removeDeletedStoryFromListResponse(old, vars));
+      setSelected((cur) => cur.filter((id) => !vars.groupArticleIds.includes(id)));
+      toast.success('Deleted');
+      qc.invalidateQueries({ queryKey: ['articles'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'analytics', 'articles'] });
+    },
     onError: (err: any) => toast.error(normalizeError(err, 'Delete failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
   });
   const mutatePublish = useMutation({
     mutationFn: (id: string) => publishArticle(id),
@@ -1082,6 +1141,10 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const renderActions = (a: Article) => {
     const st = (a.status ?? 'draft') as ArticleStatus;
     const id = a._id;
+    const group = logicalGroups.find((candidate) => getArticleId(candidate.primary) === id);
+    const groupRows = group?.articles || [a];
+    const groupArticleIds = groupRows.map(getArticleId).filter(Boolean);
+    const groupKey = group?.key || getManageNewsGroupKey(a);
     const baseLogPayload = {
       clickedArticleId: id,
       slug: String(a.slug || ''),
@@ -1210,7 +1273,11 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Delete"
             tone="red"
-            onClick={() => mutateDelete.mutate(id)}
+            onClick={() => {
+              const ok = confirm(buildManageNewsDeleteConfirmation(a, groupRows));
+              if (!ok) return;
+              mutateDelete.mutate({ id, groupKey, groupArticleIds });
+            }}
           />
         )}
 

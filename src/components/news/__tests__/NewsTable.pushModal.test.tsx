@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARTICLE_PUSH_SPAM_WARNING } from '@/lib/pushSendFeedback';
-import { listArticles, publishArticle, requeueArticleTranslations, scheduleArticle, updateArticleStatus } from '@/lib/api/articles';
+import { listAdminAnalyticsArticles } from '@/lib/api/adminAnalytics';
+import { archiveArticle, deleteArticle, listArticles, publishArticle, requeueArticleTranslations, scheduleArticle, updateArticleStatus } from '@/lib/api/articles';
+import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
 import { NewsTable } from '../NewsTable';
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -43,15 +45,22 @@ vi.mock('@/lib/api/articles', () => ({
   requeueArticleTranslations: vi.fn(),
 }));
 
-function renderNewsTable(overrides: Partial<React.ComponentProps<typeof NewsTable>> = {}) {
-  const queryClient = new QueryClient({
+function createTestQueryClient() {
+  return new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
 
-  return render(
+  afterEach(() => {
+    cleanup();
+  });
+}
+
+function renderNewsTable(overrides: Partial<React.ComponentProps<typeof NewsTable>> = {}, queryClient = createTestQueryClient()) {
+
+  const result = render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <NewsTable
@@ -61,6 +70,23 @@ function renderNewsTable(overrides: Partial<React.ComponentProps<typeof NewsTabl
           onCounts={vi.fn()}
           {...overrides}
         />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  return { ...result, queryClient };
+}
+
+function renderNewsTableWithAnalytics(queryClient = createTestQueryClient()) {
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <NewsTable
+          params={{ status: 'all', page: 1, limit: 20, sort: '-updatedAt' }}
+          search=""
+          quickView="all"
+          onCounts={vi.fn()}
+        />
+        <ArticlesAnalyticsPage />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -87,6 +113,9 @@ describe('NewsTable article push modal', () => {
       pages: 1,
     } as any);
     vi.mocked(publishArticle).mockResolvedValue({ ok: true } as any);
+    vi.mocked(archiveArticle).mockResolvedValue({ ok: true } as any);
+    vi.mocked(deleteArticle).mockResolvedValue({ ok: true } as any);
+    vi.mocked(updateArticleStatus).mockResolvedValue({ ok: true } as any);
     vi.mocked(scheduleArticle).mockResolvedValue({ ok: true } as any);
     vi.mocked(requeueArticleTranslations).mockResolvedValue({ ok: true } as any);
   });
@@ -151,6 +180,122 @@ describe('NewsTable article push modal', () => {
     expect(screen.getAllByText('EN+HI+GU')).toHaveLength(2);
     expect(screen.getByText('Showing 1 of 1 loaded')).toBeInTheDocument();
     await waitFor(() => expect(onCounts).toHaveBeenLastCalledWith(expect.objectContaining({ all: 1, published: 1 })));
+  });
+
+  it('deletes one grouped multilingual story with one backend request and removes the logical row after success', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(listArticles)
+      .mockResolvedValueOnce({
+        rows: [
+          { _id: 'gu-1', title: 'Gujarati translation', status: 'published', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'en' },
+          { _id: 'hi-1', title: 'Hindi translation', status: 'published', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'en' },
+          { _id: 'en-source', title: 'Canonical source title', status: 'published', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' },
+        ],
+        total: 3,
+        page: 1,
+        pages: 1,
+      } as any)
+      .mockResolvedValue({ rows: [], total: 0, page: 1, pages: 1 } as any);
+
+    renderNewsTable();
+
+    expect(await screen.findAllByText('Canonical source title')).toHaveLength(2);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+
+    expect(confirmSpy).toHaveBeenCalledWith([
+      'Delete this story?',
+      '',
+      'This will delete all available language versions of this story',
+      '(English, Hindi and Gujarati).',
+    ].join('\n'));
+    await waitFor(() => expect(deleteArticle).toHaveBeenCalledWith('en-source'));
+    expect(deleteArticle).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText('Canonical source title')).not.toBeInTheDocument());
+    await waitFor(() => expect(listArticles).toHaveBeenCalledTimes(2));
+    expect(publishArticle).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('leaves a grouped row intact when deletion fails', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(deleteArticle).mockRejectedValueOnce(new Error('Delete failed'));
+    vi.mocked(listArticles).mockResolvedValueOnce({
+      rows: [
+        { _id: 'en-source', title: 'Deletion failure source', status: 'published', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' },
+        { _id: 'hi-1', title: 'Hindi translation', status: 'published', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'en' },
+        { _id: 'gu-1', title: 'Gujarati translation', status: 'published', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'en' },
+      ],
+      total: 3,
+      page: 1,
+      pages: 1,
+    } as any);
+
+    renderNewsTable();
+
+    expect(await screen.findAllByText('Deletion failure source')).toHaveLength(2);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+
+    await waitFor(() => expect(deleteArticle).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByText('Deletion failure source')).toHaveLength(2);
+    expect(listArticles).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it('refreshes active article analytics so deleted stories do not remain after backend refresh', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(listArticles)
+      .mockResolvedValueOnce({
+        rows: [
+          { _id: 'en-source', title: 'Analytics delete source', status: 'published', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' },
+          { _id: 'hi-1', title: 'Hindi translation', status: 'published', language: 'hi', translationGroupId: 'group-1', sourceLanguage: 'en' },
+          { _id: 'gu-1', title: 'Gujarati translation', status: 'published', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'en' },
+        ],
+        total: 3,
+        page: 1,
+        pages: 1,
+      } as any)
+      .mockResolvedValue({ rows: [], total: 0, page: 1, pages: 1 } as any);
+    vi.mocked(listAdminAnalyticsArticles)
+      .mockResolvedValueOnce({ rows: [{ articleId: 'en-source', title: 'Analytics delete source', views: 25 }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    renderNewsTableWithAnalytics();
+
+    expect(await screen.findByText('ID: en-source')).toBeInTheDocument();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+
+    await waitFor(() => expect(deleteArticle).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listAdminAnalyticsArticles).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('No analytics rows for these filters.')).toBeInTheDocument();
+    expect(screen.queryByText('ID: en-source')).not.toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+
+  it('keeps Archive, Unpublish, Edit, and Push actions on published rows unchanged', async () => {
+    vi.mocked(listArticles).mockResolvedValue({
+      rows: [
+        { _id: 'published-source', title: 'Published action story', slug: 'published-action-story', summary: 'Summary', status: 'published', language: 'en', translationGroupId: 'group-1', sourceLanguage: 'en' },
+      ],
+      total: 1,
+      page: 1,
+      pages: 1,
+    } as any);
+
+    renderNewsTable();
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    expect(navigateMock).toHaveBeenCalledWith('/admin/articles/published-source/edit');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Archive' })[0]);
+    await waitFor(() => expect(archiveArticle).toHaveBeenCalled());
+    expect(vi.mocked(archiveArticle).mock.calls[0][0]).toBe('published-source');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Unpublish' })[0]);
+    await waitFor(() => expect(updateArticleStatus).toHaveBeenCalledWith('published-source', 'draft'));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send Push' })[0]);
+    expect(screen.getByText('Send Article Push?')).toBeInTheDocument();
+    expect(deleteArticle).not.toHaveBeenCalled();
   });
 
   it('searches translated records but displays the source row once', async () => {
