@@ -3,11 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import ArticlePreview from '@/components/preview/ArticlePreview';
 
 const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
+const INSTAGRAM_EMBED_SRC = 'https://www.instagram.com/embed.js';
 
 afterEach(() => {
   cleanup();
   document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`).forEach((script) => script.remove());
+  document.querySelectorAll(`script[src="${INSTAGRAM_EMBED_SRC}"]`).forEach((script) => script.remove());
   delete (window as any).twttr;
+  delete (window as any).instgrm;
 });
 
 describe('ArticlePreview inline images', () => {
@@ -211,22 +214,101 @@ describe('ArticlePreview inline images', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('renders a controlled Instagram marker as a safe preview card', () => {
+  it('renders a controlled Instagram marker as an official embed blockquote with fallback', () => {
     const { container } = render(<ArticlePreview article={{
       title: 'Instagram preview',
       content: '<p>Before</p><div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div><p>After</p>',
     }} />);
 
     const link = screen.getByRole('link', { name: 'Open post' });
+    const blockquote = container.querySelector('.np-instagram-preview blockquote.instagram-media');
+    expect(blockquote).not.toBeNull();
+    expect(blockquote).toHaveAttribute('data-instgrm-permalink', 'https://www.instagram.com/p/C8xY_z1AbCd/');
+    expect(blockquote).toHaveAttribute('data-instgrm-version', '14');
     expect(screen.getByText('Instagram')).toBeInTheDocument();
     expect(screen.getByText('Post/Reel')).toBeInTheDocument();
     expect(link).toHaveAttribute('href', 'https://www.instagram.com/p/C8xY_z1AbCd/');
+    expect(blockquote?.contains(link)).toBe(true);
     expect(container.querySelector('[data-np-block="instagram"]')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect(container.querySelector('blockquote')).toBeNull();
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).not.toContain('data-np-shortcode');
     expect(container.textContent).not.toContain('data-np-url');
+  });
+
+  it.each([
+    ['post', 'p', 'C8xY_z1AbCd'],
+    ['reel', 'reel', 'C8xY-z1AbCd'],
+    ['legacy tv', 'tv', 'C8xY_z1AbCd'],
+  ])('renders a controlled Instagram %s URL as an embed container', (_label, kind, shortcode) => {
+    const url = `https://www.instagram.com/${kind}/${shortcode}/`;
+    const { container } = render(<ArticlePreview article={{
+      title: 'Instagram preview',
+      content: `<div data-np-block="instagram" data-np-shortcode="${shortcode}" data-np-url="${url}"></div>`,
+    }} />);
+
+    expect(container.querySelector('.np-instagram-preview blockquote.instagram-media')).toHaveAttribute('data-instgrm-permalink', url);
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', url);
+  });
+
+  it('does not create an Instagram embed from an invalid controlled URL', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Invalid Instagram preview',
+      content: '<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com.evil.example/p/C8xY_z1AbCd/"></div>',
+    }} />);
+
+    expect(screen.getByText('Instagram post unavailable')).toBeInTheDocument();
+    expect(container.querySelector('blockquote.instagram-media')).toBeNull();
+    expect(document.querySelector(`script[src="${INSTAGRAM_EMBED_SRC}"]`)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Open post' })).toBeNull();
+  });
+
+  it('keeps Instagram fallback content visible when embed.js has not hydrated', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Instagram fallback preview',
+      content: '<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div>',
+    }} />);
+
+    const blockquote = container.querySelector('blockquote.instagram-media');
+    expect(blockquote).not.toBeNull();
+    expect(screen.getByText('Instagram')).toBeInTheDocument();
+    expect(screen.getByText('Post/Reel')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', 'https://www.instagram.com/p/C8xY_z1AbCd/');
+  });
+
+  it('keeps Instagram fallback content visible when embed.js fails to load', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Instagram blocked preview',
+      content: '<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div>',
+    }} />);
+
+    document.querySelector(`script[src="${INSTAGRAM_EMBED_SRC}"]`)?.dispatchEvent(new Event('error'));
+
+    expect(container.querySelector('blockquote.instagram-media')).not.toBeNull();
+    expect(screen.getByText('Instagram')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', 'https://www.instagram.com/p/C8xY_z1AbCd/');
+  });
+
+  it('hydrates Instagram posts through the official embed.js process hook', async () => {
+    const process = vi.fn();
+    (window as any).instgrm = { Embeds: { process } };
+
+    render(<ArticlePreview article={{
+      title: 'Hydrated Instagram preview',
+      content: '<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div>',
+    }} />);
+
+    await waitFor(() => expect(process).toHaveBeenCalledTimes(1));
+    expect(document.querySelector(`script[src="${INSTAGRAM_EMBED_SRC}"]`)).toBeNull();
+  });
+
+  it('does not mutate the canonical Instagram stored marker while rendering preview', () => {
+    const content = '<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div>';
+    const { container } = render(<ArticlePreview article={{ title: 'Stored marker contract', content }} />);
+
+    expect(content).toBe('<div data-np-block="instagram" data-np-shortcode="C8xY_z1AbCd" data-np-url="https://www.instagram.com/p/C8xY_z1AbCd/"></div>');
+    expect(container.querySelector('[data-np-block="instagram"]')).toBeNull();
+    expect(container.querySelector('blockquote.instagram-media')).not.toBeNull();
   });
 
   it('renders a controlled Facebook marker as a safe preview card', () => {

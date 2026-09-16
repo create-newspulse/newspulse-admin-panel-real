@@ -25,15 +25,26 @@ export interface ArticlePreviewModel {
 }
 
 const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
+const INSTAGRAM_EMBED_SRC = 'https://www.instagram.com/embed.js';
 let xWidgetsLoadPromise: Promise<void> | null = null;
+let instagramEmbedLoadPromise: Promise<void> | null = null;
 
 function getXWidgets() {
   return (typeof window !== 'undefined' ? (window as any).twttr?.widgets : undefined);
 }
 
+function getInstagramEmbeds() {
+  return (typeof window !== 'undefined' ? (window as any).instgrm?.Embeds : undefined);
+}
+
 function findXWidgetsScript(): HTMLScriptElement | null {
   if (typeof document === 'undefined') return null;
   return document.querySelector(`script[src="${X_WIDGETS_SRC}"]`);
+}
+
+function findInstagramEmbedScript(): HTMLScriptElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector(`script[src="${INSTAGRAM_EMBED_SRC}"]`);
 }
 
 function loadXWidgetsScript(): Promise<void> {
@@ -63,12 +74,66 @@ function loadXWidgetsScript(): Promise<void> {
   return xWidgetsLoadPromise;
 }
 
+function loadInstagramEmbedScript(): Promise<void> {
+  if (typeof document === 'undefined') return Promise.reject(new Error('Document unavailable'));
+  if (typeof getInstagramEmbeds()?.process === 'function') return Promise.resolve();
+  if (instagramEmbedLoadPromise && findInstagramEmbedScript()) return instagramEmbedLoadPromise;
+
+  instagramEmbedLoadPromise = new Promise<void>((resolve, reject) => {
+    const existing = findInstagramEmbedScript();
+    const script = existing || document.createElement('script');
+    const onLoad = () => resolve();
+    const onError = () => reject(new Error('Instagram embed script failed to load'));
+
+    script.addEventListener('load', onLoad, { once: true });
+    script.addEventListener('error', onError, { once: true });
+
+    if (!existing) {
+      script.async = true;
+      script.src = INSTAGRAM_EMBED_SRC;
+      document.body.appendChild(script);
+    }
+  }).catch((error) => {
+    instagramEmbedLoadPromise = null;
+    throw error;
+  });
+
+  return instagramEmbedLoadPromise;
+}
+
 function hydrateXEmbeds(container: HTMLElement | null): void {
   if (!container?.querySelector('blockquote.twitter-tweet')) return;
   void loadXWidgetsScript()
     .then(() => {
       const widgets = getXWidgets();
       if (typeof widgets?.load === 'function') widgets.load(container);
+    })
+    .catch(() => undefined);
+}
+
+function hydrateInstagramEmbeds(container: HTMLElement | null): void {
+  const blockquotes = Array.from(container?.querySelectorAll('.np-instagram-preview blockquote.instagram-media') || []);
+  if (!blockquotes.length) return;
+
+  let hasValidEmbed = false;
+  blockquotes.forEach((blockquote) => {
+    const link = blockquote.querySelector('a[href]');
+    const embed = parseNewsPulseInstagramAttrs({
+      url: link?.getAttribute('href'),
+    });
+    if (!embed) return;
+
+    blockquote.setAttribute('data-instgrm-permalink', embed.url);
+    blockquote.setAttribute('data-instgrm-version', '14');
+    hasValidEmbed = true;
+  });
+
+  if (!hasValidEmbed) return;
+
+  void loadInstagramEmbedScript()
+    .then(() => {
+      const embeds = getInstagramEmbeds();
+      if (typeof embeds?.process === 'function') embeds.process(container);
     })
     .catch(() => undefined);
 }
@@ -251,22 +316,30 @@ function renderControlledInstagramBlocks(html: string): string {
         return;
       }
 
+      replacement.setAttribute('class', 'np-instagram-preview');
+
+      const blockquote = doc.createElement('blockquote');
+      blockquote.setAttribute('class', 'instagram-media');
+
+      const fallback = doc.createElement('p');
       const label = doc.createElement('strong');
       label.textContent = 'Instagram';
-      replacement.appendChild(label);
+      fallback.appendChild(label);
 
-      replacement.appendChild(doc.createElement('br'));
+      fallback.appendChild(doc.createElement('br'));
       const type = doc.createElement('span');
       type.textContent = 'Post/Reel';
-      replacement.appendChild(type);
+      fallback.appendChild(type);
 
-      replacement.appendChild(doc.createElement('br'));
+      fallback.appendChild(doc.createElement('br'));
       const link = doc.createElement('a');
       link.setAttribute('href', embed.url);
       link.setAttribute('target', '_blank');
       link.setAttribute('rel', 'noreferrer');
       link.textContent = 'Open post';
-      replacement.appendChild(link);
+      fallback.appendChild(link);
+      blockquote.appendChild(fallback);
+      replacement.appendChild(blockquote);
       node.replaceWith(replacement);
     });
     return doc.body.innerHTML;
@@ -408,6 +481,7 @@ export default function ArticlePreview({
 
   useEffect(() => {
     hydrateXEmbeds(contentRef.current);
+    hydrateInstagramEmbeds(contentRef.current);
   }, [safeHtml]);
 
   const seoDescription = useMemo(() => {
