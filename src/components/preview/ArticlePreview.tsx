@@ -348,6 +348,10 @@ function renderControlledInstagramBlocks(html: string): string {
   }
 }
 
+function facebookPluginPostUrl(canonicalUrl: string): string {
+  return `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(canonicalUrl)}&show_text=true&width=500`;
+}
+
 function renderControlledFacebookBlocks(html: string): string {
   if (!html || !/data-np-block=["']facebook["']/i.test(html)) return html;
 
@@ -364,17 +368,33 @@ function renderControlledFacebookBlocks(html: string): string {
         return;
       }
 
+      replacement.setAttribute('class', 'np-facebook-preview');
+
+      const iframe = doc.createElement('iframe');
+      iframe.setAttribute('src', facebookPluginPostUrl(embed.url));
+      iframe.setAttribute('title', embed.kind === 'reel' ? 'Facebook Reel' : 'Facebook Post');
+      iframe.setAttribute('width', '500');
+      iframe.setAttribute('height', '650');
+      iframe.setAttribute('allow', 'encrypted-media; picture-in-picture; web-share');
+      iframe.setAttribute('frameborder', '0');
+      iframe.setAttribute('allowfullscreen', 'true');
+      replacement.appendChild(iframe);
+
+      const fallback = doc.createElement('div');
+      fallback.setAttribute('class', 'np-facebook-preview-fallback');
+
       const label = doc.createElement('strong');
       label.textContent = 'Facebook Post';
-      replacement.appendChild(label);
+      fallback.appendChild(label);
 
-      replacement.appendChild(doc.createElement('br'));
+      fallback.appendChild(doc.createElement('br'));
       const link = doc.createElement('a');
       link.setAttribute('href', embed.url);
       link.setAttribute('target', '_blank');
       link.setAttribute('rel', 'noreferrer');
       link.textContent = 'Open post';
-      replacement.appendChild(link);
+      fallback.appendChild(link);
+      replacement.appendChild(fallback);
       node.replaceWith(replacement);
     });
     return doc.body.innerHTML;

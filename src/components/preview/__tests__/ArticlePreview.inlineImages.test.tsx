@@ -5,6 +5,10 @@ import ArticlePreview from '@/components/preview/ArticlePreview';
 const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
 const INSTAGRAM_EMBED_SRC = 'https://www.instagram.com/embed.js';
 
+function facebookPluginPostUrl(canonicalUrl: string): string {
+  return `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(canonicalUrl)}&show_text=true&width=500`;
+}
+
 afterEach(() => {
   cleanup();
   document.querySelectorAll(`script[src="${X_WIDGETS_SRC}"]`).forEach((script) => script.remove());
@@ -311,34 +315,67 @@ describe('ArticlePreview inline images', () => {
     expect(container.querySelector('blockquote.instagram-media')).not.toBeNull();
   });
 
-  it('renders a controlled Facebook marker as a safe preview card', () => {
+  it('renders a controlled Facebook post marker as a safe plugin iframe with fallback', () => {
+    const canonicalUrl = 'https://www.facebook.com/newspulse/posts/1234567890123456';
     const { container } = render(<ArticlePreview article={{
       title: 'Facebook preview',
-      content: '<p>Before</p><div data-np-block="facebook" data-np-url="https://www.facebook.com/newspulse/posts/1234567890123456"></div><p>After</p>',
+      content: `<p>Before</p><div data-np-block="facebook" data-np-url="${canonicalUrl}"></div><p>After</p>`,
     }} />);
 
     const link = screen.getByRole('link', { name: 'Open post' });
+    const iframe = container.querySelector('.np-facebook-preview iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe).toHaveAttribute('src', facebookPluginPostUrl(canonicalUrl));
+    expect(iframe).toHaveAttribute('title', 'Facebook Post');
     expect(screen.getByText('Facebook Post')).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', 'https://www.facebook.com/newspulse/posts/1234567890123456');
+    expect(link).toHaveAttribute('href', canonicalUrl);
     expect(container.querySelector('[data-np-block="facebook"]')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).not.toContain('data-np-url');
   });
 
-  it('renders a controlled Facebook Reel marker as the same safe preview card contract', () => {
+  it('renders a controlled Facebook permalink marker as a safe plugin iframe', () => {
+    const canonicalUrl = 'https://www.facebook.com/permalink.php?story_fbid=987654321098765&id=1234567890';
+    const { container } = render(<ArticlePreview article={{
+      title: 'Facebook permalink preview',
+      content: `<div data-np-block="facebook" data-np-url="${canonicalUrl.replace(/&/g, '&amp;')}"></div>`,
+    }} />);
+
+    const iframe = container.querySelector('.np-facebook-preview iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe).toHaveAttribute('src', facebookPluginPostUrl(canonicalUrl));
+    expect(screen.getByRole('link', { name: 'Open post' })).toHaveAttribute('href', canonicalUrl);
+    expect(container.querySelector('[data-np-block="facebook"]')).toBeNull();
+  });
+
+  it('renders a controlled Facebook Reel marker as a safe plugin iframe with fallback', () => {
+    const canonicalUrl = 'https://www.facebook.com/reel/1098765432109876';
     const { container } = render(<ArticlePreview article={{
       title: 'Facebook Reel preview',
-      content: '<p>Before</p><div data-np-block="facebook" data-np-url="https://www.facebook.com/reel/1098765432109876"></div><p>After</p>',
+      content: `<p>Before</p><div data-np-block="facebook" data-np-url="${canonicalUrl}"></div><p>After</p>`,
     }} />);
 
     const link = screen.getByRole('link', { name: 'Open post' });
+    const iframe = container.querySelector('.np-facebook-preview iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe).toHaveAttribute('src', facebookPluginPostUrl(canonicalUrl));
+    expect(iframe).toHaveAttribute('title', 'Facebook Reel');
     expect(screen.getByText('Facebook Post')).toBeInTheDocument();
-    expect(link).toHaveAttribute('href', 'https://www.facebook.com/reel/1098765432109876');
+    expect(link).toHaveAttribute('href', canonicalUrl);
     expect(container.querySelector('[data-np-block="facebook"]')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).not.toContain('data-np-url');
+  });
+
+  it('does not create a Facebook plugin iframe from an invalid controlled URL', () => {
+    const { container } = render(<ArticlePreview article={{
+      title: 'Invalid Facebook preview',
+      content: '<div data-np-block="facebook" data-np-url="https://www.facebook.com.evil.example/newspulse/posts/1234567890123456"></div>',
+    }} />);
+
+    expect(screen.getByText('Facebook post unavailable')).toBeInTheDocument();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Open post' })).toBeNull();
   });
 
   it('renders a controlled gallery marker as a safe preview gallery', () => {
