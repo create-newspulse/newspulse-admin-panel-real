@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { adminApiClient } from '@/lib/adminApiClient';
-import { getMarketingWorkspace, MARKETING_SUMMARY_ENDPOINT, MarketingApiError } from '@/lib/api/marketing';
+import { getMarketingWorkspace, MARKETING_SUMMARY_ENDPOINT } from '@/lib/api/marketing';
 
 vi.mock('@/lib/adminApiClient', () => ({
   adminApiClient: {

@@ -1,6 +1,6 @@
 import { Role } from '@/store/auth';
 import {
-  HomeIcon, ShieldCheckIcon, KeyIcon, CpuChipIcon, PresentationChartLineIcon,
+  HomeIcon, ShieldCheckIcon, CpuChipIcon, PresentationChartLineIcon,
   DocumentChartBarIcon, ClipboardDocumentCheckIcon, WrenchIcon, BoltIcon,
   InboxStackIcon, MegaphoneIcon, FolderOpenIcon, GlobeAltIcon
 } from '@heroicons/react/24/outline';

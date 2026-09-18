@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { autoFormatPlainTextToHtml } from '@/lib/richText';
 
 describe('autoFormatPlainTextToHtml', () => {

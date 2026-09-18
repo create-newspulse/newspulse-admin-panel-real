@@ -56,7 +56,7 @@ describe('marketing advertiser rules', () => {
   });
 
   it('creates advertisers as New Lead with a stage timestamp and no sample data', () => {
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue('advertiser-1');
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
     const advertiser = createAdvertiserFromForm({
       ...createEmptyAdvertiserForm(),
       companyName: 'Acme Retail',
@@ -72,7 +72,7 @@ describe('marketing advertiser rules', () => {
   });
 
   it('requires Lost Reason when moving a lead to Lost', () => {
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue('advertiser-2');
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000002');
     const advertiser = createAdvertiserFromForm({
       ...createEmptyAdvertiserForm(),
       companyName: 'Bright Foods',
@@ -90,7 +90,9 @@ describe('marketing advertiser rules', () => {
   });
 
   it('filters advertisers by search and pipeline stage', () => {
-    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('advertiser-3').mockReturnValueOnce('advertiser-4');
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000003')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000004');
     const first = createAdvertiserFromForm({ ...createEmptyAdvertiserForm(), companyName: 'Metro Labs', industry: 'Health', contactPerson: 'Asha', email: 'asha@example.com' });
     const second = createAdvertiserFromForm({ ...createEmptyAdvertiserForm(), companyName: 'Surat Textiles', industry: 'Textiles', contactPerson: 'Hiren', email: 'hiren@example.com' });
     const won = changeAdvertiserStage(second, 'won').advertiser!;

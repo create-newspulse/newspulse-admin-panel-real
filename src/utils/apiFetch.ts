@@ -2,10 +2,7 @@
 
 import { apiUrl, adminUrl, getAuthToken } from '@/lib/api';
 
-type ApiOptions = RequestInit & { headers?: Record<string, string> };
-
-const stripTrailingSlashes = (s: string) => (s || '').replace(/\/+$/, '');
-const ADMIN_API_BASE = stripTrailingSlashes((import.meta.env.VITE_ADMIN_API_BASE || '').toString().trim());
+type ApiOptions = Omit<RequestInit, 'headers'> & { headers?: Record<string, string> };
 
 function resolveUrl(url: string) {
   // Full URLs pass through

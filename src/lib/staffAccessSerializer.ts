@@ -1,6 +1,6 @@
 import type { AdminModuleKey, SpecialRightKey } from '@/lib/adminAccessControl';
 import { ADMIN_MODULES, SPECIAL_RIGHTS } from '@/lib/adminAccessControl';
-import { BACKEND_MODULE_POLICY_KEY_BY_LOCAL, type BackendAdminModulePolicyKey } from '@/lib/adminModulePolicy';
+import { BACKEND_MODULE_POLICY_KEY_BY_LOCAL } from '@/lib/adminModulePolicy';
 
 export type StaffAccessState = 'enabled' | 'disabled' | 'temporary';
 export type StaffAccessTemporaryGrant = {

@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function SettingsWorkspacePlaceholder() {
   return (
     <div className="rounded border border-slate-200 bg-white dark:bg-slate-800 dark:border-slate-700 p-6 shadow-sm">

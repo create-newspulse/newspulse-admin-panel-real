@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Users, LayoutGrid, FileText, PenSquare } from 'lucide-react';
 import { ContactRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { fetchCommunityStats, type CommunityStats } from '@/api/adminCommunityReporterApi';
+import { fetchCommunityStats } from '@/api/adminCommunityReporterApi';
 import { toast } from 'react-hot-toast';
 import { listReporterContacts } from '@/lib/api/reporterDirectory';
 

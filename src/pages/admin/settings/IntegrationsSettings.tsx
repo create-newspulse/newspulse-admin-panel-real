@@ -8,7 +8,7 @@ export default function IntegrationsSettings() {
     (prev, part) => ({ ...prev, integrations: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'analyticsEnabled') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

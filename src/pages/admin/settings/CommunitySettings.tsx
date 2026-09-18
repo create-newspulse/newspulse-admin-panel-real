@@ -8,7 +8,7 @@ export default function CommunitySettings() {
     (prev, part) => ({ ...prev, community: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'reporterPortalEnabled' | 'commentsEnabled') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

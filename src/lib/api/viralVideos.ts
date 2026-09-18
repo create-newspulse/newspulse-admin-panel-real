@@ -473,7 +473,7 @@ export async function listPublicViralVideos(params: { language?: string; categor
   if (params.limit) query.set('limit', String(params.limit));
   const suffix = query.toString() ? `?${query.toString()}` : '';
   const payload = await readPublicJson<any>(`${PUBLIC_VIRAL_VIDEOS_LIST_PATH}${suffix}`);
-  const rows = Array.isArray(payload?.items)
+  const rows: unknown[] = Array.isArray(payload?.items)
     ? payload.items
     : (Array.isArray(payload?.rows) ? payload.rows : []);
   return rows.map(normalizeRecord).filter((item) => item.status === 'published' && item.isActive !== false);

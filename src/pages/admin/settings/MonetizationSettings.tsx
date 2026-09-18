@@ -8,7 +8,7 @@ export default function MonetizationSettings() {
     (prev, part) => ({ ...prev, monetization: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'adsEnabled' | 'sponsorBlocks' | 'membershipEnabled') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

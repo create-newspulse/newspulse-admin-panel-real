@@ -15,7 +15,7 @@ export default function BackupsSettings() {
     return <div className="p-4 rounded border border-red-200 bg-red-50 text-red-800">Founder access required.</div>;
   }
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'enabled') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

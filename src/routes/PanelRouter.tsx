@@ -3,7 +3,6 @@ import AppShell from '@/components/layout/AppShell';
 import { RequireAuth, RequireRole } from '@/routes/guards';
 import QuickCards from '@/components/dashboard/QuickCards';
 import SystemAlerts from '@/components/alerts/SystemAlerts';
-import DraftDeskPage from '@/pages/admin/DraftDeskPage';
 import FeatureTogglesCommunityReporter from '@/pages/founder/FeatureTogglesCommunityReporter';
 import ReporterPortalPreview from '@/pages/founder/ReporterPortalPreview';
 import SiteControls from '@/pages/SiteControls';

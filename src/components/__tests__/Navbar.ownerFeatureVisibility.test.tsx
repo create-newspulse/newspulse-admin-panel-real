@@ -4,9 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Navbar from '@/components/Navbar';
 import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
 
+type NavbarMockUser = {
+  id: string;
+  email: string;
+  role: string;
+  moduleAccess?: string[];
+  staffId?: string;
+};
+
 const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
-  authUser: { id: 'staff-1', email: 'staff-1@example.com', role: 'admin' },
+  authUser: { id: 'staff-1', email: 'staff-1@example.com', role: 'admin' } as NavbarMockUser | null,
 }));
 
 vi.mock('react-hot-toast', () => ({

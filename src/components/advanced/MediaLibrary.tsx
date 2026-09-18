@@ -9,7 +9,6 @@ import {
   Image as ImageIcon,
   Link2,
   List,
-  Pencil,
   RefreshCcw,
   RotateCcw,
   ScanSearch,
@@ -23,7 +22,6 @@ import {
 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { getMediaStatus, type MediaStatus } from '@/lib/api/media';
-import { useAuth } from '@/context/AuthContext';
 
 type MediaType = 'image' | 'video';
 type MediaTab = 'all' | 'photos' | 'videos' | 'trash';
@@ -56,12 +54,6 @@ type BulkUsageCheckResult = {
 type BulkActionResult = {
   message?: string;
   cloudinaryWarning?: string;
-};
-
-type PendingTrashReview = {
-  items: MediaItem[];
-  usage: BulkUsageEntry[];
-  requiresFounderConfirmation: boolean;
 };
 
 type MediaItem = {
@@ -115,7 +107,6 @@ type TimelineYearGroup = {
 const STORAGE_KEY = 'np_admin_media_library_overrides_v2';
 const MEDIA_LIBRARY_LIST_ROUTE = '/uploads';
 const MEDIA_LIBRARY_EFFECTIVE_LIST_ROUTE = '/admin-api/uploads';
-const MEDIA_LIBRARY_STATUS_ROUTE = '/admin-api/media/status';
 const ALLOWED_MEDIA_MIME_TYPES = ['image/jpeg', 'image/png', 'video/mp4'] as const;
 const ALLOWED_MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.mp4'] as const;
 const REJECTED_FORMATS_MESSAGE = 'Only JPG, JPEG, PNG images and MP4 videos are allowed.';
@@ -228,7 +219,7 @@ function normalizeBulkUsageEntry(raw: any): BulkUsageEntry {
 
 function normalizeBulkUsageCheck(payload: any): BulkUsageCheckResult {
   const root = unwrapApiPayload(payload);
-  const rawUsage = Array.isArray(root?.usage)
+  const rawUsage: unknown[] = Array.isArray(root?.usage)
     ? root.usage
     : (Array.isArray(root?.usedMedia) ? root.usedMedia : (Array.isArray(root?.items) ? root.items : []));
   const usage = rawUsage.map(normalizeBulkUsageEntry).filter((entry) => entry.mediaId || entry.articleTitle || entry.urlOrId);
@@ -801,7 +792,6 @@ function PreviewTile({ item, showVideoPlayOverlay = true }: { item: MediaItem; s
   const posterCandidates = generatedPosterUrl
     ? Array.from(new Set([...preview.posterCandidates, generatedPosterUrl]))
     : preview.posterCandidates;
-  const posterCandidatesKey = posterCandidates.join('|');
 
   useEffect(() => {
     setAssetError(false);
@@ -884,7 +874,6 @@ function PreviewTile({ item, showVideoPlayOverlay = true }: { item: MediaItem; s
 }
 
 export default function MediaLibrary(): JSX.Element {
-  const { isFounder } = useAuth();
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);

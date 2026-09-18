@@ -10,7 +10,6 @@ import { apiUrl } from '@/lib/apiBase';
 import api from '@/utils/api';
 import { listArticles } from '@/lib/api/articles';
 import { ARTICLE_CATEGORY_KEYS } from '@/lib/articleCategories';
-import { supportedLanguages } from '@/lib/languageConfig';
 import { getAdminAnalyticsDashboard, type DashboardAnalyticsResponse } from '@/lib/api/adminAnalytics';
 import { ReadershipCards, type ReadershipSummary } from '@/components/analytics/ReadershipCards';
 
@@ -283,10 +282,6 @@ const Dashboard = () => {
         }
 
         const { mapped, recognizedAny } = mapAdminStatsPayload(payload);
-
-        // UX requirement: Dashboard “Languages” card shows supported/configured languages (EN/HI/GU),
-        // not “detected in stories”. Source of truth is the centralized supportedLanguages list.
-        const supportedLanguagesCount = supportedLanguages.length;
 
         // If the backend returns a 200 with an unexpected JSON shape, don't silently render zeros.
         // Fall back to computing counts from the stable /articles list contract.

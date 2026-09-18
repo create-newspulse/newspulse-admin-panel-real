@@ -185,10 +185,6 @@ function previewUrlFor(settings: LiveTvDraft): string {
   return normalized.embedUrl || '';
 }
 
-function isOfflinePlaybackMode(settings: LiveTvDraft): boolean {
-  return !settings.enabled || settings.sourceType === 'MAINTENANCE' || settings.sourceType === 'OFFLINE_REPLAY' || settings.mode === 'Maintenance / Coming Soon' || settings.mode === 'Offline Replay';
-}
-
 function offlineLoopVideoFor(settings: LiveTvDraft): string {
   return String(settings.offlineLoopVideoUrl || settings.offlineLoopVideo || '').trim();
 }

@@ -554,7 +554,7 @@ export default function ReporterContactDirectory() {
       return {
         total: rows.length,
         successCount: Number(result.deletedCount ?? result.deleted ?? 0) || 0,
-        failures: (result.failures || []).map((failure) => ({ reason: failure })) as PromiseRejectedResult[],
+        failures: (result.failures || []).map((failure: unknown) => ({ reason: failure })) as PromiseRejectedResult[],
         failedIds: result.failedIds || [],
         missingIds: result.missingIds || [],
         invalidStateIds: result.invalidStateIds || [],

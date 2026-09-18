@@ -107,7 +107,6 @@ export default function CommunityReporterPage(){
   const [actionId, setActionId] = useState<string|null>(null);
   const [viewMode, setViewMode] = useState<'pending'|'rejected'>('pending');
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | CommunitySubmissionPriority>('ALL');
-  const loadedRef = useRef(false);
   const navigate = useNavigate();
   const { isFounder } = useAuth();
   const notify = useNotify();
@@ -396,8 +395,6 @@ export default function CommunityReporterPage(){
   }
 
   // React Query based loading for submissions with server-side filters.
-  const { isLoading, isError } = (window as any).useQueueQueryHook || {};
-
   // Inline lightweight custom hook behavior without external abstraction.
   const [internalLoading, setInternalLoading] = useState(false);
   async function loadSharedQueueData() {

@@ -8,7 +8,7 @@ export default function PublishingSettings() {
     (prev, part) => ({ ...prev, publishing: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'autoPublishApproved') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

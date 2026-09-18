@@ -7,7 +7,6 @@ import {
   CONTRIBUTOR_DIRECTORY_STORAGE_KEY,
   buildYouthContributorDirectory,
   normalizeYouthPulseSubmission,
-  type YouthPulseContributorDirectoryEntry,
   type YouthPulseContributorMeta,
   type YouthPulseSubmission,
 } from '@/lib/youthPulseCommunity';

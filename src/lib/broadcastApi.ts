@@ -51,18 +51,6 @@ function normalizeTypedItems(type: BroadcastType, items: BroadcastItem[]): Broad
   return (items || []).map((it) => ({ ...it, type: (it as any)?.type || type }));
 }
 
-function normalizeSnapshotItems(snapshot: BroadcastSnapshot, type: BroadcastType): BroadcastItem[] {
-  const raw = snapshot?.itemsLast24h as any;
-  if (Array.isArray(raw)) {
-    return (raw as BroadcastItem[]).filter((it) => (it as any)?.type === type);
-  }
-  if (raw && typeof raw === 'object') {
-    const list = (raw[type] || []) as BroadcastItem[];
-    return normalizeTypedItems(type, list);
-  }
-  return [];
-}
-
 async function legacyGetSettings(opts?: { signal?: AbortSignal }): Promise<BroadcastSettings> {
   // Legacy backend: GET /api/broadcast/settings
   return adminJson<BroadcastSettings>(`${LEGACY_BROADCAST_BASE}/settings`, { method: 'GET', signal: opts?.signal });

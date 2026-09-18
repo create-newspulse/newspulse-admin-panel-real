@@ -10,7 +10,7 @@ export default function FrontendUiSettings() {
     (prev, part) => ({ ...prev, ui: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'showExploreCategories' | 'showCategoryStrip' | 'showTrendingStrip' | 'showLiveUpdatesTicker' | 'showBreakingTicker' | 'showQuickTools' | 'showAppPromo' | 'showFooter') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

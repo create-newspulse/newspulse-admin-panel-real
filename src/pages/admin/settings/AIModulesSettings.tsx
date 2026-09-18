@@ -8,7 +8,7 @@ export default function AIModulesSettings() {
     (prev, part) => ({ ...prev, ai: part }) as SiteSettings
   );
 
-  const onToggle = (key: keyof typeof state) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onToggle = (key: 'editorialAssistant' | 'autoSummaries' | 'contentTagging') => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!state) return;
     setState({ ...state, [key]: e.target.checked } as any);
   };

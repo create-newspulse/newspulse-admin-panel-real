@@ -74,7 +74,6 @@ import {
   logInteraction,
   mapAdsManagerCampaignStatus,
   normalizeMarketingData,
-  parseCurrencyToCents,
   proposalItemInventoryId,
   proposalNeedsDiscountApproval,
   scheduleRenewalFollowUp,
@@ -1296,6 +1295,7 @@ export default function Marketing() {
   }
 
   function renderSection() {
+    void renderProposals;
     if (isLoading) return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">Loading Marketing...</div>;
     if (error) return <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><div>{error}</div><button type="button" onClick={() => loadMarketingData()} className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 dark:bg-red-600 dark:hover:bg-red-500">Retry</button></div>;
     if (activeSection === 'overview') return renderOverview();

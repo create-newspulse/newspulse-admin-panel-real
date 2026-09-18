@@ -51,9 +51,6 @@ import {
   type SpecialRightKey,
 } from '@/lib/adminAccessControl';
 import { useFounderModulePolicy } from '@/hooks/useFounderModulePolicy';
-import {
-  type AdminModulePolicyMap,
-} from '@/lib/adminModulePolicy';
 import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
 import { localSpecialRightKey, localStaffModuleKey } from '@/lib/staffAccessSerializer';
 
@@ -126,18 +123,6 @@ type StaffActionModal =
   | { type: 'archive'; user: TeamUser }
   | { type: 'delete-test'; user: TeamUser }
   | { type: 'mark-test'; user: TeamUser };
-
-const STAFF_CONTROL_TABS: { key: StaffControlTab; label: string }[] = [
-  { key: 'create', label: 'Create Staff Account' },
-  { key: 'registry', label: 'Staff Registry' },
-  { key: 'access', label: 'Staff Access & Special Rights' },
-  { key: 'tasks', label: 'Staff Tasks' },
-  { key: 'account', label: 'Account Control' },
-  { key: 'security', label: 'Security & Sessions' },
-  { key: 'roles', label: 'Role Presets' },
-  { key: 'archived', label: 'Archived / Test Accounts' },
-  { key: 'audit', label: 'Audit Logs' },
-];
 
 const STAFF_DETAILS_TABS: { key: StaffDetailsTab; label: string }[] = [
   { key: 'profile', label: 'Profile' },
