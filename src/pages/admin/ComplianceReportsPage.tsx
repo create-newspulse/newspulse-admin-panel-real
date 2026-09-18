@@ -19,6 +19,15 @@ import {
 const ZERO_NOTE = 'No grievances were received during this reporting month.';
 const NIL_VALUE = 'Nil';
 
+const SRB_REGISTRATION_DETAILS = [
+  { label: 'Organization', value: 'Working Journalist Media Council (WJMC)' },
+  { label: 'Publisher', value: 'News Pulse (Digital)' },
+  { label: 'Status', value: 'Registered' },
+  { label: 'Registration No.', value: 'WJMC/7489/462-26' },
+  { label: 'Issue Date', value: '14 September 2026' },
+  { label: 'Valid Until', value: '14 September 2027' },
+] as const;
+
 const MONTH_OPTIONS = [
   'January',
   'February',
@@ -702,16 +711,6 @@ export default function ComplianceReportsPage() {
                   className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
                 />
               </label>
-
-              <label className="space-y-2 text-sm text-slate-700">
-                <span className="font-medium">Location</span>
-                <input
-                  type="text"
-                  value={complianceSettings.grievanceOfficerLocation}
-                  onChange={handleComplianceSettingsChange('grievanceOfficerLocation')}
-                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
-                />
-              </label>
             </div>
           </section>
 
@@ -751,6 +750,28 @@ export default function ComplianceReportsPage() {
                 />
               </label>
             </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5 xl:col-span-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Level II – Self-Regulatory Body</h3>
+                <p className="mt-1 max-w-3xl text-sm text-slate-500">
+                  News Pulse (Digital) is registered with the Working Journalist Media Council (WJMC) under its Level II Self-Regulatory Body framework for publishers of news.
+                </p>
+              </div>
+              <span className="inline-flex w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                Read-only
+              </span>
+            </div>
+            <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {SRB_REGISTRATION_DETAILS.map((item) => (
+                <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-900">{item.value}</dd>
+                </div>
+              ))}
+            </dl>
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5 xl:col-span-3">
@@ -800,7 +821,7 @@ export default function ComplianceReportsPage() {
             </div>
 
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm text-slate-700">
-              Grievance Officer, Official Grievance Email, and Location are always shown on the public Grievance Redressal page for compliance clarity.
+              Grievance Officer and Official Grievance Email are always shown on the public Grievance Redressal page for compliance clarity.
             </div>
           </section>
         </div>
