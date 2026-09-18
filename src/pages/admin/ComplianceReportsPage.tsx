@@ -3,9 +3,11 @@ import toast from 'react-hot-toast';
 import {
   DEFAULT_COMPLIANCE_SETTINGS,
   getComplianceSettings,
+  renewSrbRegistration,
   updateComplianceSettings,
   type ComplianceSettings,
 } from '@/lib/adminComplianceSettingsApi';
+import { useAuth } from '@/context/AuthContext';
 import {
   createComplianceReport,
   deleteComplianceReport,
@@ -19,14 +21,59 @@ import {
 const ZERO_NOTE = 'No grievances were received during this reporting month.';
 const NIL_VALUE = 'Nil';
 
-const SRB_REGISTRATION_DETAILS = [
-  { label: 'Organization', value: 'Working Journalist Media Council (WJMC)' },
-  { label: 'Publisher', value: 'News Pulse (Digital)' },
-  { label: 'Status', value: 'Registered' },
-  { label: 'Registration No.', value: 'WJMC/7489/462-26' },
-  { label: 'Issue Date', value: '14 September 2026' },
-  { label: 'Valid Until', value: '14 September 2027' },
-] as const;
+type SrbRegistration = ComplianceSettings['srbRegistration'];
+type SrbRegistrationDisplayField = Exclude<keyof SrbRegistration, 'archivedAt'>;
+
+const SRB_REGISTRATION_FIELDS: { key: SrbRegistrationDisplayField; label: string }[] = [
+  { key: 'organization', label: 'Organization' },
+  { key: 'publisher', label: 'Publisher' },
+  { key: 'status', label: 'Status' },
+  { key: 'registrationNumber', label: 'Registration No.' },
+  { key: 'issueDate', label: 'Issue Date' },
+  { key: 'validUntil', label: 'Valid Until' },
+];
+
+function formatSrbDate(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (isoMatch) return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return trimmed;
+  return parsed.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).replace(/\//g, '-');
+}
+
+function formatSrbDisplayValue(field: SrbRegistrationDisplayField, value: string): string {
+  if (field === 'issueDate' || field === 'validUntil') return formatSrbDate(value) || '—';
+  return value || '—';
+}
+
+function srbRegistrationToFormValues(registration: SrbRegistration): SrbRegistration {
+  return {
+    ...registration,
+    issueDate: formatSrbDate(registration.issueDate),
+    validUntil: formatSrbDate(registration.validUntil),
+  };
+}
+
+function srbFormValuesToPayload(values: SrbRegistration): SrbRegistration {
+  const toIsoDate = (value: string) => {
+    const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
+    return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
+  };
+
+  return {
+    ...values,
+    issueDate: toIsoDate(values.issueDate),
+    validUntil: toIsoDate(values.validUntil),
+  };
+}
 
 const MONTH_OPTIONS = [
   'January',
@@ -193,8 +240,11 @@ function reportStatusLabel(status: ComplianceReportStatus): string {
 }
 
 export default function ComplianceReportsPage() {
+  const { user, isFounder } = useAuth();
   const [reports, setReports] = React.useState<ComplianceReportRecord[]>([]);
   const [complianceSettings, setComplianceSettings] = React.useState<ComplianceSettings>(DEFAULT_COMPLIANCE_SETTINGS);
+  const [srbMode, setSrbMode] = React.useState<'view' | 'edit' | 'renew'>('view');
+  const [srbFormValues, setSrbFormValues] = React.useState<SrbRegistration>(DEFAULT_COMPLIANCE_SETTINGS.srbRegistration);
   const [formValues, setFormValues] = React.useState<FormValues>(() => emptyForm());
   const [isLabelManuallyEdited, setIsLabelManuallyEdited] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -205,6 +255,7 @@ export default function ComplianceReportsPage() {
   const [exportingKey, setExportingKey] = React.useState<string | null>(null);
   const [complianceSettingsError, setComplianceSettingsError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const canEditSrbRegistration = isFounder || String(user?.role || '').toLowerCase() === 'founder';
 
   const summary = React.useMemo(() => {
     const published = reports.filter((report) => report.status === 'published').length;
@@ -254,6 +305,11 @@ export default function ComplianceReportsPage() {
       ignore = true;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (srbMode !== 'view') return;
+    setSrbFormValues(srbRegistrationToFormValues(complianceSettings.srbRegistration));
+  }, [complianceSettings.srbRegistration, srbMode]);
 
   React.useEffect(() => {
     setFormValues((current) => {
@@ -360,6 +416,71 @@ export default function ComplianceReportsPage() {
       setIsSavingComplianceSettings(false);
     }
   }, [complianceSettings]);
+
+  const handleSrbFieldChange = React.useCallback(
+    (field: SrbRegistrationDisplayField) =>
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const value = event.target.value;
+        setSrbFormValues((current) => ({ ...current, [field]: value }));
+      },
+    [],
+  );
+
+  const cancelSrbEditing = React.useCallback(() => {
+    setSrbFormValues(srbRegistrationToFormValues(complianceSettings.srbRegistration));
+    setSrbMode('view');
+  }, [complianceSettings.srbRegistration]);
+
+  const startSrbEdit = React.useCallback(() => {
+    setSrbFormValues(srbRegistrationToFormValues(complianceSettings.srbRegistration));
+    setSrbMode('edit');
+  }, [complianceSettings.srbRegistration]);
+
+  const startSrbRenewal = React.useCallback(() => {
+    const current = complianceSettings.srbRegistration;
+    setSrbFormValues({
+      organization: current.organization,
+      publisher: current.publisher,
+      status: current.status || 'Registered',
+      registrationNumber: '',
+      issueDate: '',
+      validUntil: '',
+    });
+    setSrbMode('renew');
+  }, [complianceSettings.srbRegistration]);
+
+  const saveSrbRegistration = React.useCallback(async () => {
+    if (!canEditSrbRegistration || srbMode === 'view') return;
+
+    setIsSavingComplianceSettings(true);
+    setComplianceSettingsError(null);
+    try {
+      const nextSettings: ComplianceSettings = {
+        ...complianceSettings,
+        srbRegistration: srbFormValuesToPayload(srbFormValues),
+        srbRegistrationHistory: complianceSettings.srbRegistrationHistory,
+      };
+      const saved = srbMode === 'renew'
+        ? await renewSrbRegistration(nextSettings)
+        : await updateComplianceSettings(nextSettings);
+      try {
+        const refreshed = await getComplianceSettings();
+        setComplianceSettings(refreshed);
+        setSrbFormValues(srbRegistrationToFormValues(refreshed.srbRegistration));
+      } catch {
+        setComplianceSettings(saved);
+        setSrbFormValues(srbRegistrationToFormValues(saved.srbRegistration));
+      }
+      setSrbMode('view');
+      toast.success(srbMode === 'renew' ? 'SRB registration renewed' : 'SRB registration saved');
+    } catch (err: any) {
+      const message = err?.message || 'Failed to save SRB registration';
+      setComplianceSettingsError(message);
+      toast.error(message);
+    } finally {
+      setIsSavingComplianceSettings(false);
+    }
+  }, [canEditSrbRegistration, complianceSettings, srbFormValues, srbMode]);
 
   const handleEdit = React.useCallback((report: ComplianceReportRecord) => {
     const reportId = getReportId(report);
@@ -757,21 +878,98 @@ export default function ComplianceReportsPage() {
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Level II – Self-Regulatory Body</h3>
                 <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                  News Pulse (Digital) is registered with the Working Journalist Media Council (WJMC) under its Level II Self-Regulatory Body framework for publishers of news.
+                  {complianceSettings.srbRegistration.publisher} is registered with {complianceSettings.srbRegistration.organization} under its Level II Self-Regulatory Body framework for publishers of news.
                 </p>
               </div>
-              <span className="inline-flex w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                Read-only
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${canEditSrbRegistration ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                  {canEditSrbRegistration ? 'Editable' : 'Read-only'}
+                </span>
+                {canEditSrbRegistration && srbMode === 'view' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={startSrbEdit}
+                      className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-white"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startSrbRenewal}
+                      className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Renew / Replace Registration
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
-            <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {SRB_REGISTRATION_DETAILS.map((item) => (
-                <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">{item.value}</dd>
+            {canEditSrbRegistration && srbMode !== 'view' ? (
+              <div className="mt-5 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {SRB_REGISTRATION_FIELDS.map((field) => (
+                    <label key={field.key} className="space-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                      <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">{field.label}</span>
+                      <input
+                        type="text"
+                        value={srbFormValues[field.key]}
+                        onChange={handleSrbFieldChange(field.key)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                      />
+                    </label>
+                  ))}
                 </div>
-              ))}
-            </dl>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelSrbEditing}
+                    disabled={isSavingComplianceSettings}
+                    className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveSrbRegistration()}
+                    disabled={isSavingComplianceSettings}
+                    className="rounded-full bg-slate-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingComplianceSettings ? 'Saving…' : (srbMode === 'renew' ? 'Save Renewal' : 'Save SRB Details')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {SRB_REGISTRATION_FIELDS.map((field) => (
+                  <div key={field.key} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{field.label}</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{formatSrbDisplayValue(field.key, complianceSettings.srbRegistration[field.key])}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {canEditSrbRegistration ? (
+              <details className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-900">SRB Registration History</summary>
+                {complianceSettings.srbRegistrationHistory.length > 0 ? (
+                  <div className="mt-4 grid gap-3">
+                    {complianceSettings.srbRegistrationHistory.map((registration, index) => (
+                      <dl key={`${registration.registrationNumber || 'srb'}-${index}`} className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {SRB_REGISTRATION_FIELDS.map((field) => (
+                          <div key={field.key}>
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{field.label}</dt>
+                            <dd className="mt-1 text-sm font-medium text-slate-900">{formatSrbDisplayValue(field.key, registration[field.key])}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-slate-500">No previous SRB registrations recorded.</p>
+                )}
+              </details>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5 xl:col-span-3">
