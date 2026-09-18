@@ -1,42 +1,49 @@
-Pre-commit secret scanner
-=========================
+# Pre-Commit and Secret Scanning
 
-What it does
-------------
-- Detects likely secrets (API keys, tokens, PEM blocks, long base64/hex strings) in staged files and blocks commits.
-- Skips binary files and files matched by `.secret-scan-allowlist`.
+News Pulse Admin Panel includes repository safeguards intended to reduce accidental secret commits.
 
-Files
------
-- `.git/hooks/pre-commit.ps1` - PowerShell hook used on Windows (Husky and a small batch wrapper call this).
-- `.secret-scan-allowlist` - newline-separated glob patterns to skip (comments start with `#`).
-- `scripts/test-hook.ps1` - local test harness that simulates staged files and runs the hook logic without committing.
-- `.github/workflows/secret-scan.yml` - CI workflow that runs the test harness and gitleaks on PRs/pushes.
+## Current Protection Files
 
-Running locally
----------------
-1. To run the test harness without touching Git:
+The repository currently contains:
 
-   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-hook.ps1
+- `.husky/pre-commit`
+- `.gitleaks.toml`
+- `.secret-scan-allowlist`
+- `.github/workflows/secret-scan-gitleaks.yml`
+- `.github/workflows/secret-scan-windows.yml`
+- `scripts/test-hook.ps1`
 
-2. To test the hook in a real commit flow (will block commits if secrets are detected):
+Keep the allowlist narrow. Prefer removing or masking sensitive content rather than bypassing secret scanning.
 
-   # create a file with a fake secret, stage, and commit
-   echo "api_key = \"sk-...\"" > test-secret.txt
-   git add test-secret.txt
-   git commit -m "test secret"
+## Local Hook Test Harness
 
-Allowlist
----------
-- Add globs to `.secret-scan-allowlist` to skip known safe files (examples: `public/sample.env`, `docs/**`).
-- Keep allowlist minimal — it's a bypass; prefer to fix or mask secrets instead.
+`scripts/test-hook.ps1` is a legacy/local test harness.
 
-CI
---
-- The `secret-scan` GitHub Action runs the `scripts/test-hook.ps1` harness and `gitleaks` on PR and push to `main`.
+At present it references:
 
-Notes for maintainers
----------------------
-- Patterns are stored in a here-string inside the hook for readability and to avoid tricky escaping.
-- If you see false positives, add a targeted allowlist entry or adjust the regex in the hook.
-- Consider installing `PSScriptAnalyzer` in your dev environment for consistent linting of hook scripts.
+`.git/hooks/pre-commit.ps1`
+
+That file is not guaranteed to exist in a normal checkout, so the harness must not currently be treated as proof that the active pre-commit hook passed.
+
+Before relying on this harness, verify or update its implementation against the current Husky hook setup.
+
+## Current Source of Truth
+
+For active commit protection, inspect:
+
+- `.husky/pre-commit`
+- current Git hook configuration
+- current GitHub secret-scan workflows
+
+Do not rely on historical hook documentation when it conflicts with these files.
+
+## Security Rule
+
+Never disable secret scanning simply to make a commit succeed.
+
+If a secret scanner reports a real credential, token, password, private key, or other sensitive value:
+
+1. remove it from tracked content
+2. rotate the credential when appropriate
+3. use environment variables or secret storage
+4. only add a narrowly targeted allowlist rule for verified false positives
