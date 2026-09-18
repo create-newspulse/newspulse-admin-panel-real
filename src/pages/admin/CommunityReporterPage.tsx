@@ -211,7 +211,7 @@ export default function CommunityReporterPage(){
         reporterKey: s.reporterKey || matchedReporter.reporterKey || matchedReporter.id || undefined,
         reporterContributorId: s.reporterContributorId || matchedReporter.contributorId || matchedReporter.id || undefined,
         reporterVerificationLevel: s.reporterVerificationLevel || matchedReporter.verificationLevel || undefined,
-        reporterStatus: s.reporterStatus || matchedReporter.status || undefined,
+        reporterStatus: s.reporterStatus || matchedReporter.status as CommunitySubmission['reporterStatus'] || undefined,
         reporterIdentitySource: s.reporterIdentitySource || matchedReporter.identitySource || undefined,
         reporterEmailVerified: s.reporterEmailVerified ?? matchedReporter.emailVerified ?? undefined,
         reporterAuthStatus: s.reporterAuthStatus || matchedReporter.authStatus || undefined,

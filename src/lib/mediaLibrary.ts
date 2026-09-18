@@ -43,7 +43,7 @@ function isLoopbackHostname(hostname: string): boolean {
 
 function isLiveBrowser(): boolean {
   try {
-    return typeof window !== 'undefined' && window.location?.hostname && !isLoopbackHostname(window.location.hostname);
+    return typeof window !== 'undefined' && Boolean(window.location?.hostname) && !isLoopbackHostname(window.location.hostname);
   } catch {
     return !import.meta.env.DEV;
   }
@@ -246,15 +246,15 @@ export function normalizeMediaLibraryAsset(raw: any): MediaLibraryAsset {
 }
 
 export function getMediaLibraryPreviewUrls(asset: MediaLibraryAsset): string[] {
-  const candidates = asset.mediaType === 'image'
+  const candidates: unknown[] = asset.mediaType === 'image'
     ? [asset.thumbnailUrl, asset.posterUrl, asset.assetUrl, asset.url, asset.secureUrl, ...asset.previewUrls]
     : [asset.thumbnailUrl, asset.posterUrl, ...asset.previewUrls];
   const seen = new Set<string>();
-  return candidates.filter((value) => {
+  return candidates.flatMap((value) => {
     const url = safeText(value);
-    if (!url || seen.has(url) || !isPreviewableAbsoluteUrl(url)) return false;
+    if (!url || seen.has(url) || !isPreviewableAbsoluteUrl(url)) return [];
     seen.add(url);
-    return true;
+    return [url];
   });
 }
 

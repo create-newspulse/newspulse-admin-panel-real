@@ -88,9 +88,13 @@ const staffUser = {
   fullName: 'Reporter One',
   staffId: 'NP-2026-0002',
   role: 'reporter',
+  position: 'Reporter',
+  designation: 'Reporter',
+  accountGroup: 'Staff Account / Newsroom Staff',
   accountStatus: 'active',
   status: 'active',
   isActive: true,
+  accessExpiryDate: '2027-01-01T00:00:00.000Z',
   moduleAccess: ['dashboard'],
   specialRights: [],
 };

@@ -130,7 +130,7 @@ createRoot(rootEl).render(
     <SystemErrorBoundary>
       <Suspense fallback={<div style={{ padding:16 }}>Loading…</div>}>
         <ErrorBoundary title="Application error">
-          <Toaster position="top-right" richColors />
+          <Toaster position="top-right" />
           <App />
         </ErrorBoundary>
       </Suspense>

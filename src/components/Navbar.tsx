@@ -52,7 +52,7 @@ export default function Navbar() {
                 >
                   <span>{icon}</span>
                   <span>{label}</span>
-                  <LockKeyhole aria-label="Locked module" title={reason} className="ml-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                  <LockKeyhole aria-label="Locked module" className="ml-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
                 </button>
               ) : (
                 <NavLink

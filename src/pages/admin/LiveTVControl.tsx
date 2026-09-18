@@ -14,6 +14,9 @@ import {
 } from '@/types/publicSiteSettings';
 
 type LiveTvDraft = PublicSiteSettings['liveTv'] & Record<string, any>;
+type LiveTvMode = PublicSiteSettings['liveTv']['mode'];
+type LiveTvProvider = PublicSiteSettings['liveTv']['provider'];
+type LiveTvLanguage = PublicSiteSettings['liveTv']['language'];
 type LoadState = 'idle' | 'loading' | 'ready' | 'saving' | 'publishing' | 'error';
 type LiveStatus = 'LIVE' | 'AIRA BULLETIN • ON AIR' | 'BREAKING BULLETIN' | 'SPONSORED PROGRAM' | 'REPLAY' | 'OFFLINE' | 'SCHEDULED' | 'COMING SOON';
 type ScheduleStatus = 'Draft' | 'Scheduled' | 'Live' | 'Ended';
@@ -910,34 +913,34 @@ export default function LiveTVControl() {
   };
 
   const handleStartLive = () => {
-    const nextLiveTv = {
+    const nextLiveTv: LiveTvDraft = {
       ...formLiveTv,
       enabled: true,
       showOnHomepage: true,
-      mode: formLiveTv.mode === 'Maintenance / Coming Soon' || formLiveTv.mode === 'Offline Replay' ? 'News Pulse Live' : formLiveTv.mode,
+      mode: (formLiveTv.mode === 'Maintenance / Coming Soon' || formLiveTv.mode === 'Offline Replay' ? 'News Pulse Live' : formLiveTv.mode) as LiveTvMode,
       scheduleStatus: 'Live' as ScheduleStatus,
     };
     void publishSettings(nextLiveTv, 'Live published', 'Live TV started.');
   };
 
   const handleSwitchReplay = () => {
-    const nextLiveTv = { ...formLiveTv, enabled: true, showOnHomepage: true, mode: 'Offline Replay', scheduleStatus: 'Live' as ScheduleStatus };
+    const nextLiveTv: LiveTvDraft = { ...formLiveTv, enabled: true, showOnHomepage: true, mode: 'Offline Replay' as LiveTvMode, scheduleStatus: 'Live' as ScheduleStatus };
     void publishSettings(nextLiveTv, 'Replay activated', 'Offline replay activated.');
   };
 
   const handleMaintenance = () => {
-    const nextLiveTv = { ...formLiveTv, enabled: true, showOnHomepage: true, sourceType: 'MAINTENANCE', mode: 'Maintenance / Coming Soon', scheduleStatus: 'Ended' as ScheduleStatus };
+    const nextLiveTv: LiveTvDraft = { ...formLiveTv, enabled: true, showOnHomepage: true, sourceType: 'MAINTENANCE', mode: 'Maintenance / Coming Soon' as LiveTvMode, scheduleStatus: 'Ended' as ScheduleStatus };
     void publishSettings(nextLiveTv, 'Live stopped', 'Maintenance mode published.');
   };
 
   const handleManualLiveOverride = (sourceType: 'YOUTUBE_LIVE' | 'CUSTOM_EMBED') => {
-    const nextLiveTv = {
+    const nextLiveTv: LiveTvDraft = {
       ...formLiveTv,
       enabled: true,
       showOnHomepage: true,
       sourceType,
-      mode: 'News Pulse Live',
-      provider: sourceType === 'YOUTUBE_LIVE' ? 'YouTube' : 'Custom Embed',
+      mode: 'News Pulse Live' as LiveTvMode,
+      provider: (sourceType === 'YOUTUBE_LIVE' ? 'YouTube' : 'Custom Embed') as LiveTvProvider,
       subtitle: 'LIVE',
       scheduleStatus: 'Live' as ScheduleStatus,
     };
@@ -1143,7 +1146,7 @@ export default function LiveTVControl() {
                   className={fieldClass('mt-2')}
                   value={formLiveTv.mode}
                   onChange={(event) => {
-                    updateLiveTv({ mode: event.target.value });
+                    updateLiveTv({ mode: event.target.value as LiveTvMode });
                     addActivity('Mode changed', `Mode set to ${event.target.value}.`);
                   }}
                 >
@@ -1153,7 +1156,7 @@ export default function LiveTVControl() {
 
               <label className="block text-sm font-semibold text-slate-700">
                 Provider
-                <select className={fieldClass('mt-2')} value={formLiveTv.provider} onChange={(event) => updateLiveTv({ provider: event.target.value })}>
+                <select className={fieldClass('mt-2')} value={formLiveTv.provider} onChange={(event) => updateLiveTv({ provider: event.target.value as LiveTvProvider })}>
                   {LIVE_TV_PROVIDERS.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
                 </select>
               </label>
@@ -1260,7 +1263,7 @@ export default function LiveTVControl() {
 
               <label className="block text-sm font-semibold text-slate-700">
                 Language
-                <select className={fieldClass('mt-2')} value={formLiveTv.language} onChange={(event) => updateLiveTv({ language: event.target.value })}>
+                <select className={fieldClass('mt-2')} value={formLiveTv.language} onChange={(event) => updateLiveTv({ language: event.target.value as LiveTvLanguage })}>
                   {LIVE_TV_LANGUAGES.map((language) => <option key={language} value={language}>{language}</option>)}
                 </select>
               </label>

@@ -64,8 +64,8 @@ export async function fetchCommunityReporterSubmissions(params?: { status?: 'pen
 // New explicit queue fetch with filter parameters passed to backend.
 export async function listCommunityReporterQueue(params: {
   status: 'pending' | 'rejected';
-  priority?: 'FOUNDER_REVIEW' | 'EDITOR_REVIEW' | 'LOW_PRIORITY';
-  risk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'FLAGGED';
+  priority?: 'ALL' | 'FOUNDER_REVIEW' | 'EDITOR_REVIEW' | 'LOW_PRIORITY';
+  risk?: 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'FLAGGED';
   source?: 'community' | 'journalists';
   aiPickOnly?: boolean;
 }) {

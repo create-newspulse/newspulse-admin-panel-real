@@ -110,7 +110,7 @@ const MATCHING_DATA_GROUP_DEFS = [
   { key: 'legal_records', label: 'Legal Records', aliases: ['legal_records', 'legal record', 'legal records', 'legal'] },
 ] as const;
 
-const SAFE_DELETE_SOURCES = new Set([
+const SAFE_DELETE_SOURCES = new Set<string>([
   'contact_messages',
   'newsletter_subscribers',
   'advertise_business_inquiries',
@@ -120,12 +120,12 @@ const SAFE_DELETE_SOURCES = new Set([
   'push_tokens',
 ]);
 
-const SAFE_ANONYMIZE_SOURCES = new Set([
+const SAFE_ANONYMIZE_SOURCES = new Set<string>([
   'comments',
   'polls',
 ]);
 
-const BLOCKED_QUICK_ACTION_SOURCES = new Set([
+const BLOCKED_QUICK_ACTION_SOURCES = new Set<string>([
   'user_account',
   'staff_accounts',
   'admin_accounts',
@@ -358,7 +358,7 @@ function normalizeMatchingDataGroup(input: unknown, index: number): DpdpMatching
 
 function extractMatchingDataGroups(payload: unknown): DpdpMatchingDataGroup[] {
   const groups = extractMatchingGroupInputs(payload).map(normalizeMatchingDataGroup);
-  const knownOrder = new Map(MATCHING_DATA_GROUP_DEFS.map((item, index) => [item.key, index] as const));
+  const knownOrder = new Map<string, number>(MATCHING_DATA_GROUP_DEFS.map((item, index) => [item.key, index] as const));
   return groups.sort((left, right) => {
     const leftIndex = knownOrder.get(left.key) ?? Number.MAX_SAFE_INTEGER;
     const rightIndex = knownOrder.get(right.key) ?? Number.MAX_SAFE_INTEGER;

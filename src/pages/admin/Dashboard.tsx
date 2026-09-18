@@ -23,6 +23,13 @@ type AdminStats = {
   activeCategoriesInUseCount: number;
 };
 
+type MappedAdminStats = Partial<AdminStats> & {
+  categoriesCount?: number;
+  languagesCount?: number;
+  activeUsersCount?: number;
+  aiLogsCount?: number;
+};
+
 function toFiniteNonNegativeNumber(v: unknown): number | null {
   const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() ? Number(v) : NaN);
   if (!Number.isFinite(n)) return null;
@@ -163,7 +170,7 @@ function countDistinctFromRows(rows: Array<any>, field: 'category' | 'language')
 }
 
 function mapAdminStatsPayload(payload: any): {
-  mapped: Partial<AdminStats>;
+  mapped: MappedAdminStats;
   recognizedAny: boolean;
 } {
   const p = payload && typeof payload === 'object' ? payload : {};

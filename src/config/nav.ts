@@ -78,11 +78,12 @@ export function rightNavWithOwnerVisibility(role: Role, visibility: AdminFeature
   return filterNavItemsByOwnerVisibility(rightNav(role), role, visibility);
 }
 
-type NavAccessInput = AdminFeatureVisibilityState | { modulePolicy?: AdminModulePolicyMap; backendAccess?: Partial<Record<AdminModuleKey, AdminEffectiveModuleAccess>>; legacyVisibility?: AdminFeatureVisibilityState };
+type NavAccessOptions = { modulePolicy?: AdminModulePolicyMap; backendAccess?: Partial<Record<AdminModuleKey, AdminEffectiveModuleAccess>>; legacyVisibility?: AdminFeatureVisibilityState };
+type NavAccessInput = AdminFeatureVisibilityState | NavAccessOptions;
 
-function navAccessOptions(input: NavAccessInput) {
-  if ('modulePolicy' in input || 'backendAccess' in input || 'legacyVisibility' in input) return input;
-  return { legacyVisibility: input };
+function navAccessOptions(input: NavAccessInput): NavAccessOptions {
+  if ('modulePolicy' in input || 'backendAccess' in input || 'legacyVisibility' in input) return input as NavAccessOptions;
+  return { legacyVisibility: input as AdminFeatureVisibilityState };
 }
 
 export function leftNavWithAccess(user: any, accessInput: NavAccessInput) {

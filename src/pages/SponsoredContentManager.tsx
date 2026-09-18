@@ -272,7 +272,7 @@ export default function SponsoredContentManager() {
     setEditingId(null);
   }, [imageUploading, saving]);
 
-  const submit = React.useCallback(async (event: React.FormEvent) => {
+  const submit = React.useCallback(async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
 
     const sponsorName = String(form.sponsorName || '').trim();
@@ -286,14 +286,15 @@ export default function SponsoredContentManager() {
     const startAt = fromDatetimeLocalValue(form.startAt);
     const endAt = fromDatetimeLocalValue(form.endAt);
 
-    if (!sponsorName) return toast.error('Sponsor / Brand Name is required');
-    if (!headline) return toast.error('Headline is required');
-    if (!shortSummary) return toast.error('Short Summary is required');
-    if (!ctaText) return toast.error('CTA Text is required');
-    if (!coverImage) return toast.error('Cover Image is required');
-    if (!linkedArticleId && !destinationUrl) return toast.error('Destination URL is required when no Sponsored Article is linked');
+    if (!sponsorName) { toast.error('Sponsor / Brand Name is required'); return; }
+    if (!headline) { toast.error('Headline is required'); return; }
+    if (!shortSummary) { toast.error('Short Summary is required'); return; }
+    if (!ctaText) { toast.error('CTA Text is required'); return; }
+    if (!coverImage) { toast.error('Cover Image is required'); return; }
+    if (!linkedArticleId && !destinationUrl) { toast.error('Destination URL is required when no Sponsored Article is linked'); return; }
     if (startAt && endAt && new Date(startAt).getTime() > new Date(endAt).getTime()) {
-      return toast.error('Start Date & Time must be before End Date & Time');
+      toast.error('Start Date & Time must be before End Date & Time');
+      return;
     }
 
     setSaving(true);

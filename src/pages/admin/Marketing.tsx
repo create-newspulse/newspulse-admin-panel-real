@@ -72,6 +72,7 @@ import {
   hasAdvertiserFormErrors,
   logPromotionChannelActivity,
   logInteraction,
+  markProposalSent,
   mapAdsManagerCampaignStatus,
   normalizeMarketingData,
   proposalItemInventoryId,
@@ -147,13 +148,6 @@ const PIPELINE_FILTERS: Array<{ key: AdvertiserStage | 'all'; label: string }> =
   { key: 'won', label: 'Won' },
   { key: 'lost', label: 'Lost' },
 ];
-
-const EMPTY_SECTIONS: Partial<Record<MarketingSection, { title: string; message: string }>> = {
-  audience: { title: 'Audience data is not connected yet.', message: 'Connect verified analytics to display audience performance.' },
-  promotion: { title: 'No promotion configuration yet.', message: 'Promotion channels will appear here when real configuration exists.' },
-  performance: { title: 'Performance data is not connected yet.', message: 'Campaign and promotion results will appear after verified tracking is connected.' },
-  renewals: { title: 'No renewals due.', message: 'Renewals will appear after real advertiser contracts or campaigns exist.' },
-};
 
 function stageLabel(stage: AdvertiserStage): string {
   return PIPELINE_FILTERS.find((item) => item.key === stage)?.label || stage;
@@ -1309,8 +1303,7 @@ export default function Marketing() {
     if (activeSection === 'promotion') return renderPromotion();
     if (activeSection === 'performance') return renderPerformance();
     if (activeSection === 'renewals') return renderRenewals();
-    const state = EMPTY_SECTIONS[activeSection];
-    return <EmptyState title={state?.title || 'No data yet.'} message={state?.message || 'This Marketing section has no data or configuration yet.'} />;
+    return <EmptyState title="No data yet." message="This Marketing section has no data or configuration yet." />;
   }
 
   return (

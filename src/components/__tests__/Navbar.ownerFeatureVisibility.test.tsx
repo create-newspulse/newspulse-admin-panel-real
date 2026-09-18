@@ -146,8 +146,8 @@ describe('Navbar owner feature visibility', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /add news/i })).toHaveAttribute('aria-disabled', 'true'));
     const addNews = screen.getByRole('button', { name: /add news/i });
     expect(addNews).toHaveAttribute('aria-disabled', 'true');
+    expect(addNews).toHaveAttribute('title', 'This module is currently locked for all staff.');
     expect(within(addNews).getByLabelText('Locked module')).toBeInTheDocument();
-    expect(within(addNews).getByTitle('This module is currently locked for all staff.')).toBeInTheDocument();
     expect(screen.queryByText(/locked/i)).not.toBeInTheDocument();
     fireEvent.click(addNews);
     expect(mocks.toastError).toHaveBeenCalledWith('This module is currently locked for all staff.');

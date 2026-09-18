@@ -308,6 +308,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         },
       },
       handlePaste: (_view, event) => {
+        const pasteEditor = editor;
         const imageFiles = getClipboardImageFiles(event.clipboardData);
         if (imageFiles.length > 0) {
           event.preventDefault();
@@ -347,7 +348,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
           }
 
           const text = textFromRejectedEmbedHtml(html);
-          if (text) editor.chain().focus().insertContent(text).run();
+          if (text && pasteEditor) pasteEditor.chain().focus().insertContent(text).run();
           toast.error('Only supported YouTube URLs can be inserted as video blocks.');
           return true;
         }
@@ -355,7 +356,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Write a
         if (html && htmlHasImage(html)) {
           const cleaned = removeImagesFromHtml(html);
           event.preventDefault();
-          if (cleaned.text || cleaned.html.trim()) editor.chain().focus().insertContent(cleaned.html || cleaned.text).run();
+          if ((cleaned.text || cleaned.html.trim()) && pasteEditor) pasteEditor.chain().focus().insertContent(cleaned.html || cleaned.text).run();
           toast.error('Paste or upload the image file directly. Website image URLs are not imported as inline images.');
           return true;
         }

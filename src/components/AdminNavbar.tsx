@@ -58,7 +58,7 @@ export default function AdminNavbar() {
             onClick={() => toast.error(item.lockedReason || 'Access denied.')}
             className="inline-flex cursor-not-allowed items-center gap-1 text-sm font-medium text-gray-400 transition hover:text-gray-300"
           >
-            <span>{item.icon}</span><span>{item.label}</span><LockKeyhole aria-label="Locked module" title={item.lockedReason || 'Access denied.'} className="ml-0.5 h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+            <span>{item.icon}</span><span>{item.label}</span><LockKeyhole aria-label="Locked module" className="ml-0.5 h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
           </button>
         ) : (
           <NavLink

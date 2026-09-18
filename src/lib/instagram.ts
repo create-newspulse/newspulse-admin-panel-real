@@ -11,6 +11,10 @@ export function isValidInstagramShortcode(value: unknown): value is string {
   return INSTAGRAM_SHORTCODE_RE.test(String(value || '').trim());
 }
 
+function isInstagramPathType(value: string): value is NewsPulseInstagramEmbed['kind'] {
+  return INSTAGRAM_PATH_TYPE_RE.test(value);
+}
+
 function isSupportedInstagramHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return host === 'instagram.com' || host === 'www.instagram.com';
@@ -34,7 +38,7 @@ export function parseNewsPulseInstagramUrl(raw: unknown): NewsPulseInstagramEmbe
   if (parts.length !== 2) return null;
 
   const [kind, shortcode] = parts;
-  if (!INSTAGRAM_PATH_TYPE_RE.test(kind)) return null;
+  if (!isInstagramPathType(kind)) return null;
   if (!isValidInstagramShortcode(shortcode)) return null;
 
   return {

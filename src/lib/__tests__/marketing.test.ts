@@ -35,6 +35,7 @@ import {
   scheduleRenewalFollowUp,
   validateAdvertiserForm,
   type MarketingActor,
+  type AdvertiserFilters,
   type MarketingProposalItem,
 } from '@/lib/marketing';
 
@@ -100,6 +101,9 @@ describe('marketing advertiser rules', () => {
     expect(filterAdvertisers([first, won], 'surat', 'all')).toEqual([won]);
     expect(filterAdvertisers([first, won], '', 'won')).toEqual([won]);
     expect(filterAdvertisers([first, won], 'surat', 'new_lead')).toEqual([]);
+
+    const noFollowUpSearch: AdvertiserFilters = { search: 'surat', stage: 'all', industry: '', salesOwnerId: '', leadSource: '', followUpStatus: 'none', dateFilter: 'all', sort: 'newest' };
+    expect(filterAdvertisers([first, won], noFollowUpSearch, 'all', [])).toEqual([won]);
   });
 
   it('uses the real News Pulse proposal inventory and removes unsupported generic products', () => {

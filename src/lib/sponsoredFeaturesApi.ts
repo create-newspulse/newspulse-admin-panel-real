@@ -39,7 +39,7 @@ export type SponsoredFeatureInput = {
 const SPONSORED_FEATURES_PATH = 'admin/sponsored-features';
 const HOMEPAGE_SPONSORED_FEATURE_KEY = 'HOMEPAGE_SPONSORED_FEATURE';
 
-function normalizeArticleLanguage(article: Article): 'en' | 'hi' | 'gu' {
+function normalizeArticleLanguage(article: Pick<Article, 'language' | 'lang'>): 'en' | 'hi' | 'gu' {
   const raw = String(article.language || article.lang || '').trim().toLowerCase();
   if (raw === 'hi' || raw === 'hindi' || raw === 'in') return 'hi';
   if (raw === 'gu' || raw === 'gujarati') return 'gu';
@@ -63,7 +63,7 @@ function getErrorMessage(error: any, fallback: string): string {
   ).trim() || fallback;
 }
 
-function normalizeStatus(article: Article): string | undefined {
+function normalizeStatus(article: Pick<Article, 'status' | 'state' | 'publishStatus'>): string | undefined {
   const raw = String(article.status || article.state || article.publishStatus || '').trim();
   return raw || undefined;
 }
@@ -79,7 +79,7 @@ function isSponsoredArticleRecord(article: Article): boolean {
   });
 }
 
-function isPublishedArticleRecord(article: Article): boolean {
+function isPublishedArticleRecord(article: { status?: unknown; state?: unknown; publishStatus?: unknown; isPublished?: unknown }): boolean {
   const normalized = String(article.status || article.state || article.publishStatus || '').trim().toLowerCase();
   return article.isPublished === true || normalized === 'published' || normalized === 'live' || normalized === 'public';
 }
@@ -243,5 +243,5 @@ export async function listSponsoredArticleInventory(): Promise<SponsoredArticleO
 
 export async function listEligibleSponsoredArticles(): Promise<SponsoredArticleOption[]> {
   const inventory = await listSponsoredArticleInventory();
-  return inventory.filter((article) => isPublishedArticleRecord(article as Article));
+  return inventory.filter((article) => isPublishedArticleRecord(article));
 }

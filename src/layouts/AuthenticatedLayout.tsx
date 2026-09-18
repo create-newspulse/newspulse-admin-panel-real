@@ -108,7 +108,7 @@ const AuthenticatedLayout: React.FC<AuthenticatedLayoutProps> = ({ children, req
             ⚙️ Settings
           </Link>
           <button
-            onClick={logout}
+            onClick={() => logout()}
             className="w-full text-left text-base text-red-600 hover:bg-red-100 dark:hover:bg-red-800 p-2 rounded-md transition mt-6"
           >
             ➡️ Logout

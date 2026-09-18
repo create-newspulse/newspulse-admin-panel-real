@@ -102,7 +102,7 @@ export default function SafeOwnerZoneAiModelLog(): JSX.Element {
   const {
     canUseDangerActions,
     busy,
-  } = useOutletContext<OwnerZoneShellContext>();
+  } = useOutletContext<OwnerZoneShellContext & { canUseDangerActions?: boolean; busy?: boolean }>();
 
   const isFounder = useMemo(() => String((user as any)?.role || '').toLowerCase() === 'founder', [user]);
 

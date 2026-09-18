@@ -380,7 +380,7 @@ function generateVideoFramePreview(url: string): Promise<string> {
   const promise = new Promise<string>((resolve, reject) => {
     const video = document.createElement('video');
     let settled = false;
-    let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+    let timeoutId: number | undefined;
 
     const finish = (value?: string, error?: unknown) => {
       if (settled) return;
