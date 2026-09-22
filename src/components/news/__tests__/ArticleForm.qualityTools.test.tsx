@@ -71,10 +71,13 @@ vi.mock('@/components/editor/RichTextEditor', () => ({
 }));
 vi.mock('@/components/articles/CoverImageUpload', () => ({ default: () => <div>Cover image upload</div> }));
 vi.mock('@/components/media/MediaLibrarySelector', () => ({ default: () => null }));
-vi.mock('@/components/preview/PreviewModal', () => ({ default: () => null }));
+vi.mock('@/components/preview/PreviewModal', () => ({
+  default: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Article Preview">Preview modal</div> : null,
+}));
 vi.mock('@/components/ui/ConfirmModal', () => ({ default: () => null }));
 
 function renderArticleForm(userRole: 'writer' | 'editor' | 'admin' | 'founder' = 'editor') {
+  mocks.authUser = { ...mocks.authUser, role: userRole };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/admin/add-news']}><ArticleForm mode="create" userRole={userRole} /></MemoryRouter></QueryClientProvider>);
 }
@@ -138,6 +141,159 @@ describe('ArticleForm Quality Tools', () => {
     await waitFor(() => expect(mocks.getMediaStatus).toHaveBeenCalled());
     expect(mocks.apiPost.mock.calls.map(([path]) => path)).not.toContain('/assist/suggest');
     expect(mocks.apiPost.mock.calls.map(([path]) => path)).not.toContain('/assist/suggest/v2');
+  });
+
+  it('defaults new articles to Normal Spotlight Priority', async () => {
+    renderArticleForm('admin');
+
+    const spotlightPrioritySelect = await screen.findByDisplayValue('Normal') as HTMLSelectElement;
+    expect(spotlightPrioritySelect).toHaveValue('normal');
+  });
+
+  it('sends Important Spotlight Priority in the draft payload', async () => {
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+
+    const spotlightPrioritySelect = controlNearLabel<HTMLSelectElement>('Spotlight Priority', 'select');
+    fireEvent.change(spotlightPrioritySelect, { target: { value: 'important' } });
+    expect(spotlightPrioritySelect).toHaveValue('important');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'draft',
+      spotlightPriority: 'important',
+    })));
+  });
+
+  it('sends Top Priority Spotlight Priority in the draft payload', async () => {
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+
+    const spotlightPrioritySelect = controlNearLabel<HTMLSelectElement>('Spotlight Priority', 'select');
+    fireEvent.change(spotlightPrioritySelect, { target: { value: 'top' } });
+    expect(spotlightPrioritySelect).toHaveValue('top');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'draft',
+      spotlightPriority: 'top',
+    })));
+  });
+
+  it('loads existing articles without Spotlight Priority as Normal', async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
+        <ArticleForm
+          mode="edit"
+          id="article-1"
+          userRole="admin"
+          initialValues={{
+            _id: 'article-1',
+            title: 'Existing story',
+            slug: 'existing-story',
+            summary: 'Existing summary',
+            content: 'Existing body content',
+            category: 'national',
+            status: 'draft',
+            language: 'en',
+            lang: 'en',
+          }}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>);
+
+    const spotlightPrioritySelect = await screen.findByDisplayValue('Normal') as HTMLSelectElement;
+    expect(spotlightPrioritySelect).toHaveValue('normal');
+  });
+
+  it('preserves Spotlight Priority when editing another field', async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
+        <ArticleForm
+          mode="edit"
+          id="article-1"
+          userRole="admin"
+          initialValues={{
+            _id: 'article-1',
+            title: 'Existing story',
+            slug: 'existing-story',
+            summary: 'Existing summary',
+            content: 'Existing body content',
+            category: 'national',
+            status: 'draft',
+            language: 'en',
+            lang: 'en',
+            spotlightPriority: 'top',
+          }}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>);
+
+    const spotlightPrioritySelect = await screen.findByDisplayValue('Top Priority') as HTMLSelectElement;
+    expect(spotlightPrioritySelect).toHaveValue('top');
+    fireEvent.change(controlNearLabel<HTMLInputElement>('Title', 'input'), { target: { value: 'Existing story updated' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(updateArticle).toHaveBeenCalledWith('article-1', expect.objectContaining({
+      title: 'Existing story updated',
+      spotlightPriority: 'top',
+    })));
+  });
+
+  it('keeps Spotlight Priority read-only for writer role', async () => {
+    renderArticleForm('writer');
+
+    const spotlightPrioritySelect = await screen.findByDisplayValue('Normal') as HTMLSelectElement;
+    expect(spotlightPrioritySelect).toBeDisabled();
+  });
+
+  it('keeps Preview opening from Add News', async () => {
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+
+    const previewButton = screen.getByRole('button', { name: 'Preview' });
+    await waitFor(() => expect(previewButton).not.toBeDisabled());
+    fireEvent.click(previewButton);
+
+    expect(await screen.findByRole('dialog', { name: 'Article Preview' })).toBeInTheDocument();
+  });
+
+  it('keeps scheduled edits saving through the existing payload', async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
+        <ArticleForm
+          mode="edit"
+          id="article-1"
+          userRole="admin"
+          initialValues={{
+            _id: 'article-1',
+            title: 'Existing story',
+            slug: 'existing-story',
+            summary: 'Existing summary',
+            content: 'Existing body content',
+            category: 'national',
+            status: 'draft',
+            language: 'en',
+            lang: 'en',
+          }}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>);
+
+    const scheduledLocalValue = '2026-10-01T09:30';
+    const scheduledIsoValue = new Date(scheduledLocalValue).toISOString();
+    const statusSelect = await screen.findByDisplayValue('Draft') as HTMLSelectElement;
+    fireEvent.change(statusSelect, { target: { value: 'scheduled' } });
+    fireEvent.change(controlNearLabel<HTMLInputElement>('Schedule (UTC)', 'input'), { target: { value: scheduledLocalValue } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(updateArticle).toHaveBeenCalledWith('article-1', expect.objectContaining({
+      status: 'scheduled',
+      scheduledAt: scheduledIsoValue,
+      publishAt: scheduledIsoValue,
+    })));
   });
 
   it('publishes an English source article through the canonical publish service when Hindi and Gujarati are missing', async () => {

@@ -22,9 +22,12 @@ import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticle
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
+import { useAuth } from '@context/AuthContext';
+import { normalizeRoleId } from '@/lib/adminAccessControl';
 
 type LangCode = 'en' | 'hi' | 'gu';
 type EditorialType = 'editorial' | 'special_story';
+type SpotlightPriority = 'normal' | 'important' | 'top';
 const DEFAULT_CREATE_LANGUAGE: LangCode = 'gu';
 const ARTICLE_LANGUAGE_CODES = ['en', 'hi', 'gu'] as const;
 const ARTICLE_LANGUAGE_LABELS: Record<LangCode, string> = {
@@ -32,6 +35,11 @@ const ARTICLE_LANGUAGE_LABELS: Record<LangCode, string> = {
   hi: 'Hindi',
   gu: 'Gujarati',
 };
+const SPOTLIGHT_PRIORITY_OPTIONS: ReadonlyArray<{ value: SpotlightPriority; label: string }> = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'important', label: 'Important' },
+  { value: 'top', label: 'Top Priority' },
+];
 
 type ArticleLanguageDraft = {
   title: string;
@@ -89,6 +97,13 @@ function createTranslationGroupId(seed: string): string {
 function normalizeEditorialType(input: any): EditorialType {
   const v = String(input || '').trim().toLowerCase();
   return v === 'special_story' ? 'special_story' : 'editorial';
+}
+
+function normalizeSpotlightPriority(input: any): SpotlightPriority {
+  const v = String(input ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (v === 'top' || v === 'top_priority' || v === '2') return 'top';
+  if (v === 'important' || v === '1') return 'important';
+  return 'normal';
 }
 
 function isArticleEditorDebugEnabled(): boolean {
@@ -419,6 +434,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+  const effectiveUserRole = normalizeRoleId(user?.role || userRole);
   // resolve edit id
   const initialEditId = id || articleId || null;
   const [effectiveId, setEffectiveId] = useState<string | null>(initialEditId);
@@ -596,7 +613,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [isBreaking, setIsBreaking] = useState(false);
   const [spotlightEnabled, setSpotlightEnabled] = useState(false);
   const [spotlightPinned, setSpotlightPinned] = useState(false);
-  const [spotlightPriority, setSpotlightPriority] = useState('');
+  const [spotlightPriority, setSpotlightPriority] = useState<SpotlightPriority>('normal');
   const [spotlightExpiryTime, setSpotlightExpiryTime] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
   // ISO string (or empty). Set automatically when publishing if empty.
@@ -628,7 +645,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     isBreaking: boolean;
     spotlightEnabled: boolean;
     spotlightPinned: boolean;
-    spotlightPriority: string;
+    spotlightPriority: SpotlightPriority;
     spotlightExpiryTime: string;
     publishedAt: string;
     state: string;
@@ -659,7 +676,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     isBreaking: false,
     spotlightEnabled: false,
     spotlightPinned: false,
-    spotlightPriority: '',
+    spotlightPriority: 'normal',
     spotlightExpiryTime: '',
     publishedAt: '',
     state: '',
@@ -706,7 +723,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setIsBreaking(false);
     setSpotlightEnabled(false);
     setSpotlightPinned(false);
-    setSpotlightPriority('');
+    setSpotlightPriority('normal');
     setSpotlightExpiryTime('');
     setPublishedAt('');
     setState('');
@@ -754,7 +771,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
       spotlightEnabled: (typeof next?.spotlightEnabled === 'boolean') ? next.spotlightEnabled : spotlightEnabled,
       spotlightPinned: (typeof next?.spotlightPinned === 'boolean') ? next.spotlightPinned : spotlightPinned,
-      spotlightPriority: (next?.spotlightPriority ?? spotlightPriority ?? '').toString(),
+      spotlightPriority: normalizeSpotlightPriority(next?.spotlightPriority ?? spotlightPriority),
       spotlightExpiryTime: (next?.spotlightExpiryTime ?? spotlightExpiryTime ?? '').toString(),
       publishedAt: (next?.publishedAt ?? publishedAt ?? '').toString(),
       state: (next?.state ?? state ?? '').toString(),
@@ -825,7 +842,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       isBreaking: !!s.isBreaking,
       spotlightEnabled: !!s.spotlightEnabled,
       spotlightPinned: !!s.spotlightPinned,
-      spotlightPriority: (s.spotlightPriority || ''),
+      spotlightPriority: normalizeSpotlightPriority(s.spotlightPriority),
       spotlightExpiryTime: (s.spotlightExpiryTime || ''),
       publishedAt: (s.publishedAt || ''),
       state: (s.state || ''),
@@ -1106,11 +1123,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setIsBreaking(!!(src as any).isBreaking || hasBreakingTag0 || incomingCategoryKey === 'breaking');
       setSpotlightEnabled(!!(src as any).spotlightEnabled);
       setSpotlightPinned(!!(src as any).spotlightPinned);
-      setSpotlightPriority(
-        (src as any).spotlightPriority == null || (src as any).spotlightPriority === ''
-          ? ''
-          : String((src as any).spotlightPriority)
-      );
+      setSpotlightPriority(normalizeSpotlightPriority((src as any).spotlightPriority));
       setSpotlightExpiryTime(toDateTimeLocalValue(
         (src as any).spotlightExpiryTime
         || (src as any).spotlightExpiresAt
@@ -1209,7 +1222,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           isBreaking: !!(src as any).isBreaking,
           spotlightEnabled: !!(src as any).spotlightEnabled,
           spotlightPinned: !!(src as any).spotlightPinned,
-          spotlightPriority: (src as any).spotlightPriority == null ? '' : String((src as any).spotlightPriority),
+          spotlightPriority: normalizeSpotlightPriority((src as any).spotlightPriority),
           spotlightExpiryTime: toDateTimeLocalValue(
             (src as any).spotlightExpiryTime
             || (src as any).spotlightExpiresAt
@@ -1705,7 +1718,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         isBreaking: boolean;
         spotlightEnabled: boolean;
         spotlightPinned: boolean;
-        spotlightPriority?: number;
+        spotlightPriority: SpotlightPriority;
         spotlightExpiryTime?: string;
         spotlightExpiresAt?: string;
         state?: string;
@@ -1765,12 +1778,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
         const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
-        const spotlightPriorityNumber = (() => {
-          const raw = String(spotlightPriority || '').trim();
-          if (!raw) return undefined;
-          const parsed = Number(raw);
-          return Number.isFinite(parsed) ? parsed : undefined;
-        })();
+        const spotlightPriorityToSend = normalizeSpotlightPriority(spotlightPriority);
         const spotlightExpiryIso = toIsoDateTime(spotlightExpiryTime);
 
         const geoState = trimOrUndef(state);
@@ -1822,7 +1830,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           isBreaking,
           spotlightEnabled,
           spotlightPinned: spotlightEnabled ? spotlightPinned : false,
-          spotlightPriority: spotlightPriorityNumber,
+          spotlightPriority: spotlightPriorityToSend,
           spotlightExpiryTime: spotlightExpiryIso,
           spotlightExpiresAt: spotlightExpiryIso,
           state: trimOrUndef(state),
@@ -2315,7 +2323,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
@@ -2330,6 +2338,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   // Role gate stays in place; required fields gate controls enable/disable.
   const roleCanPublish = (userRole === 'admin' || userRole === 'founder');
   const canPublish = roleCanPublish && requiredForPublishOk && publishEnabled;
+  const canChangeSpotlightPriority = effectiveUserRole === 'founder' || effectiveUserRole === 'editor' || effectiveUserRole === 'admin';
 
   const publishMissing: string[] = useMemo(() => {
     const missing: string[] = [];
@@ -2352,7 +2361,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -3063,6 +3072,20 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <option value='draft'>Draft</option>
                   <option value='scheduled'>Scheduled</option>
                   {(userRole==='admin'||userRole==='founder') && <option value='published'>Published</option>}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium">Spotlight Priority</label>
+                <select
+                  value={spotlightPriority}
+                  onChange={(e) => setSpotlightPriority(normalizeSpotlightPriority(e.target.value))}
+                  disabled={!canChangeSpotlightPriority}
+                  className="w-full border px-2 py-2 rounded"
+                  title={!canChangeSpotlightPriority ? 'Not authorized to change Spotlight Priority' : undefined}
+                >
+                  {SPOTLIGHT_PRIORITY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">

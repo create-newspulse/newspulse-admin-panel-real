@@ -60,7 +60,7 @@ export interface Article {
   isBreaking?: boolean;
   spotlightEnabled?: boolean;
   spotlightPinned?: boolean;
-  spotlightPriority?: number;
+  spotlightPriority?: 'normal' | 'important' | 'top' | string;
   spotlightExpiryTime?: string;
   spotlightExpiresAt?: string;
   spotlightExpiry?: string;
