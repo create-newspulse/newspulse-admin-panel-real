@@ -11,7 +11,10 @@ export type ArticleCategoryKey =
   | 'web-stories'
   | 'editorial'
   | 'youth-pulse'
-  | 'inspiration-hub';
+  | 'inspiration-hub'
+  | 'faith-culture'
+  | 'pulse-dialogue'
+  | 'tech-gadgets';
 
 export const ARTICLE_CATEGORY_KEYS: readonly ArticleCategoryKey[] = [
   'breaking',
@@ -27,6 +30,9 @@ export const ARTICLE_CATEGORY_KEYS: readonly ArticleCategoryKey[] = [
   'editorial',
   'youth-pulse',
   'inspiration-hub',
+  'faith-culture',
+  'pulse-dialogue',
+  'tech-gadgets',
 ] as const;
 
 export const ARTICLE_CATEGORY_LABELS: Record<ArticleCategoryKey, string> = {
@@ -43,6 +49,9 @@ export const ARTICLE_CATEGORY_LABELS: Record<ArticleCategoryKey, string> = {
   editorial: 'Editorial',
   'youth-pulse': 'Youth Pulse',
   'inspiration-hub': 'Inspiration Hub',
+  'faith-culture': 'Faith & Culture',
+  'pulse-dialogue': 'Pulse Dialogue',
+  'tech-gadgets': 'Tech & Gadgets',
 };
 
 export const ARTICLE_CATEGORY_OPTIONS: ReadonlyArray<{ key: ArticleCategoryKey; label: string }> =
