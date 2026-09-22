@@ -10,18 +10,21 @@ describe('articleCategories', () => {
       'international',
       'business',
       'tech',
+      'tech-gadgets',
       'sports',
       'lifestyle',
+      'faith-culture',
       'glamour',
       'web-stories',
       'editorial',
+      'pulse-dialogue',
       'youth-pulse',
       'inspiration-hub',
-      'faith-culture',
-      'pulse-dialogue',
-      'tech-gadgets',
     ]);
 
+    expect(ARTICLE_CATEGORY_LABELS.tech).toBe('Science & Technology');
+    expect(ARTICLE_CATEGORY_OPTIONS[5]).toEqual({ key: 'tech', label: 'Science & Technology' });
+    expect(ARTICLE_CATEGORY_OPTIONS[6]).toEqual({ key: 'tech-gadgets', label: 'Tech & Gadgets' });
     expect(ARTICLE_CATEGORY_LABELS['faith-culture']).toBe('Faith & Culture');
     expect(ARTICLE_CATEGORY_LABELS['pulse-dialogue']).toBe('Pulse Dialogue');
     expect(ARTICLE_CATEGORY_LABELS['tech-gadgets']).toBe('Tech & Gadgets');

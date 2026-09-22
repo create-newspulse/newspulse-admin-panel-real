@@ -5,16 +5,16 @@ export type ArticleCategoryKey =
   | 'international'
   | 'business'
   | 'tech'
+  | 'tech-gadgets'
   | 'sports'
   | 'lifestyle'
+  | 'faith-culture'
   | 'glamour'
   | 'web-stories'
   | 'editorial'
-  | 'youth-pulse'
-  | 'inspiration-hub'
-  | 'faith-culture'
   | 'pulse-dialogue'
-  | 'tech-gadgets';
+  | 'youth-pulse'
+  | 'inspiration-hub';
 
 export const ARTICLE_CATEGORY_KEYS: readonly ArticleCategoryKey[] = [
   'breaking',
@@ -23,16 +23,16 @@ export const ARTICLE_CATEGORY_KEYS: readonly ArticleCategoryKey[] = [
   'international',
   'business',
   'tech',
+  'tech-gadgets',
   'sports',
   'lifestyle',
+  'faith-culture',
   'glamour',
   'web-stories',
   'editorial',
+  'pulse-dialogue',
   'youth-pulse',
   'inspiration-hub',
-  'faith-culture',
-  'pulse-dialogue',
-  'tech-gadgets',
 ] as const;
 
 export const ARTICLE_CATEGORY_LABELS: Record<ArticleCategoryKey, string> = {
@@ -41,7 +41,7 @@ export const ARTICLE_CATEGORY_LABELS: Record<ArticleCategoryKey, string> = {
   national: 'National',
   international: 'International',
   business: 'Business',
-  tech: 'Tech',
+  tech: 'Science & Technology',
   sports: 'Sports',
   lifestyle: 'Lifestyle',
   glamour: 'Glamour',
