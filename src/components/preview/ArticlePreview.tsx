@@ -4,6 +4,7 @@ import { parseNewsPulseFacebookAttrs } from '@/lib/facebook';
 import { parseNewsPulseInstagramAttrs } from '@/lib/instagram';
 import { parseNewsPulseYouTubeAttrs } from '@/lib/youtube';
 import { parseNewsPulseXAttrs } from '@/lib/x';
+import { PULSE_DIALOGUE_CATEGORY, dialogueFormatLabel, type PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
 
 export type PreviewLanguage = 'en' | 'hi' | 'gu';
 
@@ -22,6 +23,7 @@ export interface ArticlePreviewModel {
   status?: 'draft' | 'scheduled' | 'published';
   scheduledAt?: string;
   tags?: string[];
+  pulseDialogue?: PulseDialogueArticleMetadata;
 }
 
 const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
@@ -486,6 +488,18 @@ export default function ArticlePreview({
   const slug = (article.slug || '').trim();
   const summary = (article.summary || '').trim();
   const category = (article.category || '').trim();
+  const pulseDialogue = category === PULSE_DIALOGUE_CATEGORY ? article.pulseDialogue : undefined;
+  const pulseContributor = pulseDialogue?.contributor;
+  const pulseByline = pulseDialogue?.bylineSnapshot;
+  const pulseName = String(pulseByline?.name || (pulseContributor as any)?.name || (pulseContributor as any)?.canonicalName || '').trim();
+  const pulseDesignation = String(
+    pulseDialogue?.bylineDesignationOverride
+    || pulseByline?.designation
+    || (pulseContributor as any)?.publicDesignation
+    || ''
+  ).trim();
+  const pulseAffiliation = String(pulseByline?.affiliation || (pulseContributor as any)?.affiliation || '').trim();
+  const pulsePhoto = pulseByline?.photo || (pulseContributor as any)?.photo || null;
   const editorialLabel = category === 'editorial'
     ? (article.editorialType === 'special_story' ? 'SPECIAL STORY' : 'EDITORIAL')
     : '';
@@ -567,6 +581,28 @@ export default function ArticlePreview({
         {summary && (
           <div className="text-sm text-slate-700 whitespace-pre-wrap">{summary}</div>
         )}
+
+        {pulseDialogue ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Pulse Dialogue{pulseDialogue.dialogueFormat ? ` - ${dialogueFormatLabel(pulseDialogue.dialogueFormat)}` : ''}
+            </div>
+            {(pulseName || pulseDesignation || pulseAffiliation || pulsePhoto?.url) ? (
+              <div className="flex items-start gap-3">
+                {pulsePhoto?.url ? <img src={pulsePhoto.url} alt="" className="h-14 w-14 rounded-full object-cover" /> : null}
+                <div className="min-w-0">
+                  {pulseName ? <div className="font-semibold text-slate-900">By {pulseName}</div> : null}
+                  {pulseDesignation ? <div className="text-sm text-slate-700">{pulseDesignation}</div> : null}
+                  {pulseAffiliation ? <div className="text-sm text-slate-500">{pulseAffiliation}</div> : null}
+                  {pulseDialogue.series ? <div className="mt-1 text-xs text-slate-500">{pulseDialogue.series}</div> : null}
+                </div>
+              </div>
+            ) : null}
+            {pulseDialogue.contributorDisclosure ? <div className="mt-3 text-sm text-slate-700"><span className="font-medium">Disclosure:</span> {pulseDialogue.contributorDisclosure}</div> : null}
+            {pulseDialogue.editorNote ? <div className="mt-2 text-sm text-slate-700"><span className="font-medium">Editor's Note:</span> {pulseDialogue.editorNote}</div> : null}
+            {pulseDialogue.contributorDisclaimer ? <div className="mt-2 text-xs text-slate-500">{pulseDialogue.contributorDisclaimer}</div> : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -624,6 +660,15 @@ export default function ArticlePreview({
               </div>
             </div>
           )}
+
+          {pulseDialogue?.showAboutContributor && (pulseContributor as any)?.shortBio ? (
+            <div className="rounded-lg border border-slate-200 bg-white">
+              <div className="p-4 border-b border-slate-200">
+                <div className="text-sm font-semibold">About the Contributor</div>
+              </div>
+              <div className="p-4 text-sm text-slate-700 whitespace-pre-wrap">{(pulseContributor as any).shortBio}</div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@
 
 import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
+import type { PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
 
 export interface Article {
   _id: string;
@@ -67,6 +68,7 @@ export interface Article {
   tags?: string[];
   track?: string;
   trackName?: string;
+  pulseDialogue?: PulseDialogueArticleMetadata;
   subCategory?: string;
   subcategory?: string;
   district?: string;

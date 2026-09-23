@@ -23,7 +23,16 @@ import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
 import { useAuth } from '@context/AuthContext';
-import { normalizeRoleId } from '@/lib/adminAccessControl';
+import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
+import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsSection';
+import {
+  EMPTY_PULSE_DIALOGUE_VALUE,
+  PULSE_DIALOGUE_CATEGORY,
+  buildPulseDialoguePayload,
+  normalizePulseDialogueFormValue,
+  type PulseDialogueContributor,
+  type PulseDialogueFormValue,
+} from '@/lib/pulseDialogue';
 
 type LangCode = 'en' | 'hi' | 'gu';
 type EditorialType = 'editorial' | 'special_story';
@@ -436,6 +445,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const effectiveUserRole = normalizeRoleId(user?.role || userRole);
+  const effectiveSpecialRights = useMemo(() => getEffectiveSpecialRights(user), [user]);
   // resolve edit id
   const initialEditId = id || articleId || null;
   const [effectiveId, setEffectiveId] = useState<string | null>(initialEditId);
@@ -478,6 +488,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [category, setCategory] = useState<string>('');
   const [editorialType, setEditorialType] = useState<EditorialType>('editorial');
   const [youthPulseTrack, setYouthPulseTrack] = useState<YouthPulseTrack | ''>('');
+  const [pulseDialogue, setPulseDialogue] = useState<PulseDialogueFormValue>(() => ({ ...EMPTY_PULSE_DIALOGUE_VALUE }));
+  const [selectedPulseContributor, setSelectedPulseContributor] = useState<PulseDialogueContributor | null>(null);
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
@@ -636,6 +648,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     category: string;
     editorialType: EditorialType | '';
     youthPulseTrack: string;
+    pulseDialogue: PulseDialogueFormValue;
     language: string;
     translationGroupId: string;
     status: 'draft' | 'scheduled' | 'published';
@@ -667,6 +680,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     category: '',
     editorialType: '',
     youthPulseTrack: '',
+    pulseDialogue: { ...EMPTY_PULSE_DIALOGUE_VALUE },
     language: DEFAULT_CREATE_LANGUAGE,
     translationGroupId: '',
     status: 'draft',
@@ -715,6 +729,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setCategory('');
     setEditorialType('editorial');
     setYouthPulseTrack('');
+    setPulseDialogue({ ...EMPTY_PULSE_DIALOGUE_VALUE });
+    setSelectedPulseContributor(null);
     setLanguage(DEFAULT_CREATE_LANGUAGE);
     setTranslationGroupId('');
     setStatus('draft');
@@ -762,6 +778,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       category: (next?.category ?? category ?? '').toString(),
       editorialType: (next?.editorialType ?? (category === 'editorial' ? editorialType : '') ?? '').toString() as Snapshot['editorialType'],
       youthPulseTrack: (next?.youthPulseTrack ?? youthPulseTrack ?? '').toString(),
+      pulseDialogue: next?.pulseDialogue ?? pulseDialogue,
       language: (next?.language ?? language ?? '').toString(),
       translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
       status: (next?.status ?? status) as Snapshot['status'],
@@ -833,6 +850,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       category: (s.category || ''),
       editorialType: s.category === 'editorial' ? (s.editorialType || 'editorial') : '',
       youthPulseTrack: (s.youthPulseTrack || ''),
+      pulseDialogue: s.category === PULSE_DIALOGUE_CATEGORY ? normalizePulseDialogueFormValue(s.pulseDialogue) : { ...EMPTY_PULSE_DIALOGUE_VALUE },
       language: (s.language || ''),
       translationGroupId: (s.translationGroupId || ''),
       status: (s.status || 'draft'),
@@ -1104,6 +1122,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setYouthPulseTrack(normalizeYouthPulseTrack(
         String((src as any).track ?? (src as any).subCategory ?? (src as any).subcategory ?? (src as any).trackName ?? '')
       ));
+      const incomingPulseDialogue = normalizePulseDialogueFormValue((src as any).pulseDialogue);
+      setPulseDialogue(incomingPulseDialogue);
+      const incomingContributor = (src as any).pulseDialogue?.contributor || (src as any).pulseDialogue?.publicContributor || null;
+      setSelectedPulseContributor(incomingContributor && typeof incomingContributor === 'object' ? incomingContributor : null);
       setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
       setTranslationGroupId(String((src as any).translationGroupId || ''));
       setTranslationStatus(extractTranslationStatus(src));
@@ -1213,6 +1235,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             ? String(((src as any).category.slug ?? (src as any).category._id ?? '') || '')
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
           editorialType: normalizedCategory === 'editorial' ? normalizeEditorialType((src as any).editorialType) : '',
+          pulseDialogue: normalizedCategory === PULSE_DIALOGUE_CATEGORY ? incomingPulseDialogue : { ...EMPTY_PULSE_DIALOGUE_VALUE },
           language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
@@ -1732,6 +1755,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         imageUrl?: string;
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
+        pulseDialogue?: ReturnType<typeof buildPulseDialoguePayload>;
         tags: string[];
         isSponsored?: boolean;
         sponsored?: boolean;
@@ -1778,6 +1802,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
         const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
+        const pulseDialoguePayload = categoryKey === PULSE_DIALOGUE_CATEGORY ? buildPulseDialoguePayload(pulseDialogue) : undefined;
         const spotlightPriorityToSend = normalizeSpotlightPriority(spotlightPriority);
         const spotlightExpiryIso = toIsoDateTime(spotlightExpiryTime);
 
@@ -1840,6 +1865,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           imageUrl: coverUrl,
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
+          pulseDialogue: pulseDialoguePayload,
           tags: normalizedTags,
           isSponsored: isSponsoredArticle ? true : undefined,
           sponsored: isSponsoredArticle ? true : undefined,
@@ -2106,6 +2132,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         translationGroupId: savedGroupId || translationGroupId,
         coverImage: coverImageUrl,
         coverImagePublicId,
+        pulseDialogue,
         isBreaking,
         publishedAt,
         state,
@@ -2323,7 +2350,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, pulseDialogue, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
@@ -2339,6 +2366,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const roleCanPublish = (userRole === 'admin' || userRole === 'founder');
   const canPublish = roleCanPublish && requiredForPublishOk && publishEnabled;
   const canChangeSpotlightPriority = effectiveUserRole === 'founder' || effectiveUserRole === 'editor' || effectiveUserRole === 'admin';
+  const canManagePulseContributors = effectiveUserRole === 'founder'
+    || effectiveUserRole === 'admin'
+    || effectiveSpecialRights.includes(computedMode === 'edit' ? 'can_edit_news' : 'can_create_news');
 
   const publishMissing: string[] = useMemo(() => {
     const missing: string[] = [];
@@ -2361,7 +2391,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, pulseDialogue, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2671,6 +2701,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     ))}
                   </select>
                 </div>
+              )}
+
+              {category === PULSE_DIALOGUE_CATEGORY && (
+                <PulseDialogueDetailsSection
+                  value={pulseDialogue}
+                  onChange={setPulseDialogue}
+                  selectedContributor={selectedPulseContributor}
+                  onSelectedContributorChange={setSelectedPulseContributor}
+                  canManageContributors={canManagePulseContributors}
+                />
               )}
 
               <div className="pt-2 border-t border-slate-200">
@@ -3234,6 +3274,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           coverImageUrl: coverImageUrl || undefined,
           category,
           editorialType: category === 'editorial' ? editorialType : undefined,
+          pulseDialogue: category === PULSE_DIALOGUE_CATEGORY
+            ? {
+                ...buildPulseDialoguePayload(pulseDialogue),
+                contributor: selectedPulseContributor || undefined,
+              }
+            : undefined,
           language: previewLanguage,
           status,
           scheduledAt,

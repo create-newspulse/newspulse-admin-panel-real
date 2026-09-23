@@ -45,6 +45,18 @@ vi.mock('@/lib/api/articles', () => ({
   listArticlesByTranslationGroupId: mocks.listArticlesByTranslationGroupId,
 }));
 
+vi.mock('@/lib/api/pulseDialogue', () => ({
+  listPulseDialogueContributors: vi.fn(async () => ({
+    items: [{ id: 'contributor-1', canonicalName: 'Guest Writer', publicDesignation: 'Essayist', status: 'active' }],
+    total: 1,
+    page: 1,
+    limit: 20,
+  })),
+  getPulseDialogueContributor: vi.fn(async () => ({ id: 'contributor-1', canonicalName: 'Guest Writer', publicDesignation: 'Essayist', status: 'active' })),
+  createPulseDialogueContributor: vi.fn(),
+  updatePulseDialogueContributor: vi.fn(),
+}));
+
 vi.mock('@/lib/slugAvailability', () => ({
   buildSlugSuggestions: vi.fn((slug: string) => [`${slug}-2`, `${slug}-3`]),
   checkSlugAvailability: mocks.checkSlugAvailability,
@@ -258,6 +270,85 @@ describe('ArticleForm Quality Tools', () => {
     fireEvent.click(previewButton);
 
     expect(await screen.findByRole('dialog', { name: 'Article Preview' })).toBeInTheDocument();
+  });
+
+  it('shows Pulse Dialogue controls only for pulse-dialogue and sends backend payload', async () => {
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+
+    expect(screen.queryByTestId('pulse-dialogue-details')).not.toBeInTheDocument();
+
+    const categorySelect = controlNearLabel<HTMLSelectElement>('Category', 'select');
+    fireEvent.change(categorySelect, { target: { value: 'editorial' } });
+    expect(await screen.findByText('Editorial Type')).toBeInTheDocument();
+    expect(screen.queryByTestId('pulse-dialogue-details')).not.toBeInTheDocument();
+
+    fireEvent.change(categorySelect, { target: { value: 'youth-pulse' } });
+    expect(await screen.findByText('Youth Pulse Track')).toBeInTheDocument();
+    expect(screen.queryByTestId('pulse-dialogue-details')).not.toBeInTheDocument();
+
+    fireEvent.change(categorySelect, { target: { value: 'pulse-dialogue' } });
+    expect(await screen.findByTestId('pulse-dialogue-details')).toBeInTheDocument();
+    expect(screen.queryByText('Editorial Type')).not.toBeInTheDocument();
+    expect(screen.queryByText('Youth Pulse Track')).not.toBeInTheDocument();
+
+    fireEvent.change(controlNearLabel<HTMLSelectElement>('Dialogue Format', 'select'), { target: { value: 'essay' } });
+    fireEvent.click(await screen.findByText('Guest Writer'));
+    fireEvent.change(controlNearLabel<HTMLInputElement>('Series / Column', 'input'), { target: { value: 'Ideas & Society' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'pulse-dialogue',
+      pulseDialogue: expect.objectContaining({
+        contributorId: 'contributor-1',
+        dialogueFormat: 'essay',
+        series: 'Ideas & Society',
+        showAboutContributor: false,
+      }),
+    })));
+  });
+
+  it('preserves Pulse Dialogue metadata when editing another field', async () => {
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
+        <ArticleForm
+          mode="edit"
+          id="article-1"
+          userRole="admin"
+          initialValues={{
+            _id: 'article-1',
+            title: 'Existing Pulse story',
+            slug: 'existing-pulse-story',
+            summary: 'Existing summary',
+            content: 'Existing body content',
+            category: 'pulse-dialogue',
+            status: 'draft',
+            language: 'en',
+            lang: 'en',
+            pulseDialogue: {
+              contributorId: 'contributor-1',
+              dialogueFormat: 'essay',
+              series: 'Ideas & Society',
+              contributor: { id: 'contributor-1', canonicalName: 'Guest Writer', status: 'active' },
+            },
+          }}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>);
+
+    expect(await screen.findByTestId('pulse-dialogue-details')).toBeInTheDocument();
+    fireEvent.change(controlNearLabel<HTMLInputElement>('Title', 'input'), { target: { value: 'Existing Pulse story updated' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => expect(updateArticle).toHaveBeenCalledWith('article-1', expect.objectContaining({
+      title: 'Existing Pulse story updated',
+      pulseDialogue: expect.objectContaining({
+        contributorId: 'contributor-1',
+        dialogueFormat: 'essay',
+        series: 'Ideas & Society',
+      }),
+    })));
   });
 
   it('keeps scheduled edits saving through the existing payload', async () => {
