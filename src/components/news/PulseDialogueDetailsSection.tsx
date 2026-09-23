@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import MediaLibrarySelector, { type MediaLibraryAsset } from '@/components/media/MediaLibrarySelector';
 import {
   CONTRIBUTOR_STATUS_OPTIONS,
-  CONTRIBUTOR_TYPE_OPTIONS,
   DIALOGUE_FORMAT_OPTIONS,
-  contributorTypeLabel,
   getContributorId,
   type ContributorStatus,
   type ContributorType,
@@ -21,6 +18,7 @@ import {
   listPulseDialogueContributors,
   updatePulseDialogueContributor,
 } from '@/lib/api/pulseDialogue';
+import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
 
 type Props = {
@@ -63,7 +61,7 @@ const EMPTY_CONTRIBUTOR_FORM: ContributorFormState = {
   location: '',
   website: '',
   socialLinks: {},
-  status: 'draft',
+  status: 'active',
   internalEmail: '',
   rightsConsent: {},
   internalNotes: '',
@@ -79,12 +77,10 @@ function contributorName(contributor: PulseDialogueContributor | null): string {
 
 function formFromContributor(contributor: PulseDialogueContributor | null): ContributorFormState {
   if (!contributor) return { ...EMPTY_CONTRIBUTOR_FORM, socialLinks: {}, rightsConsent: {} };
-  const contributorType = CONTRIBUTOR_TYPE_OPTIONS.some((item) => item.value === contributor.contributorType)
-    ? contributor.contributorType as ContributorType
-    : 'guest_contributor';
+  const contributorType = contributor.contributorType ? contributor.contributorType as ContributorType : 'guest_contributor';
   const status = CONTRIBUTOR_STATUS_OPTIONS.some((item) => item.value === contributor.status)
     ? contributor.status as ContributorStatus
-    : 'draft';
+    : 'active';
   return {
     id: getContributorId(contributor),
     canonicalName: cleanText(contributor.canonicalName),
@@ -147,7 +143,7 @@ export default function PulseDialogueDetailsSection({
   const [search, setSearch] = useState('');
   const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<ContributorFormState>(() => formFromContributor(null));
-  const [photoPickerOpen, setPhotoPickerOpen] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const selectedContributorId = value.contributorId.trim();
 
@@ -169,7 +165,6 @@ export default function PulseDialogueDetailsSection({
   }, [selectedQuery.data, onSelectedContributorChange]);
 
   const contributors = listQuery.data?.items || [];
-  const inactiveSelected = selectedContributor && cleanText(selectedContributor.status).toLowerCase() !== 'active';
 
   const contributorMutation = useMutation({
     mutationFn: async () => {
@@ -198,18 +193,26 @@ export default function PulseDialogueDetailsSection({
     patchValue({ contributorId: getContributorId(contributor) });
   }
 
-  function chooseContributorPhoto(asset: MediaLibraryAsset) {
-    setForm((current) => ({
-      ...current,
-      photo: { url: asset.url, publicId: asset.id, alt: asset.filename || contributorName(selectedContributor) || null },
-    }));
-    setPhotoPickerOpen(false);
+  async function uploadContributorPhoto(file: File | null) {
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const uploaded = await uploadCoverImage(file);
+      setForm((current) => ({
+        ...current,
+        photo: {
+          url: uploaded.url,
+          publicId: uploaded.publicId || null,
+          alt: current.canonicalName || contributorName(selectedContributor) || file.name || null,
+        },
+      }));
+      toast.success('Contributor photo uploaded');
+    } catch (error: any) {
+      toast.error(normalizeError(error, 'Contributor photo upload failed').message);
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
-
-  const selectedStatusLabel = useMemo(() => {
-    const status = cleanText(selectedContributor?.status) || 'draft';
-    return CONTRIBUTOR_STATUS_OPTIONS.find((item) => item.value === status)?.label || status;
-  }, [selectedContributor?.status]);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3" data-testid="pulse-dialogue-details">
@@ -266,9 +269,8 @@ export default function PulseDialogueDetailsSection({
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-slate-900">{contributorName(contributor) || 'Unnamed contributor'}</span>
-                  <span className="block truncate text-xs text-slate-500">{cleanText(contributor.publicDesignation) || contributorTypeLabel(contributor.contributorType)}</span>
+                  <span className="block truncate text-xs text-slate-500">{cleanText(contributor.publicDesignation) || cleanText(contributor.affiliation)}</span>
                 </span>
-                <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600">{cleanText(contributor.status) || 'draft'}</span>
               </button>
             );
           })}
@@ -304,14 +306,8 @@ export default function PulseDialogueDetailsSection({
               <div className="font-semibold text-slate-900">{contributorName(selectedContributor)}</div>
               {selectedContributor.publicDesignation ? <div className="text-slate-600">{selectedContributor.publicDesignation}</div> : null}
               {selectedContributor.affiliation ? <div className="text-slate-500">{selectedContributor.affiliation}</div> : null}
-              <div className="mt-1 text-xs text-slate-500">Status: {selectedStatusLabel}</div>
             </div>
           </div>
-          {inactiveSelected ? (
-            <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-              This contributor is not active. Backend publish and schedule validation may block this article.
-            </div>
-          ) : null}
         </div>
       ) : null}
 
@@ -357,54 +353,65 @@ export default function PulseDialogueDetailsSection({
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Canonical Name" value={form.canonicalName} onChange={(canonicalName) => setForm((current) => ({ ...current, canonicalName }))} required />
+              <Field label="Contributor Name" value={form.canonicalName} onChange={(canonicalName) => setForm((current) => ({ ...current, canonicalName }))} required />
               <Field label="Public Designation" value={form.publicDesignation} onChange={(publicDesignation) => setForm((current) => ({ ...current, publicDesignation }))} />
-              <Field label="Hindi Display Name" value={form.displayNameHi} onChange={(displayNameHi) => setForm((current) => ({ ...current, displayNameHi }))} />
-              <Field label="Gujarati Display Name" value={form.displayNameGu} onChange={(displayNameGu) => setForm((current) => ({ ...current, displayNameGu }))} />
-              <div>
-                <label className="block text-xs font-medium">Contributor Type</label>
-                <select value={form.contributorType} onChange={(event) => setForm((current) => ({ ...current, contributorType: event.target.value as ContributorType }))} className="w-full border px-2 py-2 rounded">
-                  {CONTRIBUTOR_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium">Status</label>
-                <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as ContributorStatus }))} className="w-full border px-2 py-2 rounded">
-                  {CONTRIBUTOR_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </div>
               <Field label="Affiliation" value={form.affiliation} onChange={(affiliation) => setForm((current) => ({ ...current, affiliation }))} />
-              <Field label="Location" value={form.location} onChange={(location) => setForm((current) => ({ ...current, location }))} />
-              <Field label="Website" value={form.website} onChange={(website) => setForm((current) => ({ ...current, website }))} />
-              <Field label="Internal Contact Email" value={form.internalEmail} onChange={(internalEmail) => setForm((current) => ({ ...current, internalEmail }))} />
-              <Field label="X / Twitter" value={form.socialLinks.x || ''} onChange={(x) => setForm((current) => ({ ...current, socialLinks: { ...current.socialLinks, x } }))} />
-              <Field label="LinkedIn" value={form.socialLinks.linkedin || ''} onChange={(linkedin) => setForm((current) => ({ ...current, socialLinks: { ...current.socialLinks, linkedin } }))} />
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-[auto_1fr] sm:items-start">
-              {form.photo?.url ? <img src={form.photo.url} alt="" className="h-20 w-20 rounded-full object-cover" /> : <div className="h-20 w-20 rounded-full bg-slate-100" />}
+              <div>
+                <div className="mb-1 text-xs font-medium">Photo Preview</div>
+                {form.photo?.url ? <img src={form.photo.url} alt="Photo Preview" className="h-20 w-20 rounded-full object-cover" /> : <div className="h-20 w-20 rounded-full bg-slate-100" aria-label="Photo Preview" />}
+              </div>
               <div>
                 <label className="block text-xs font-medium">Contributor Photo</label>
                 <div className="mt-1 flex flex-wrap gap-2">
-                  <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setPhotoPickerOpen(true)}>Choose from Media Library</button>
+                  <label className="btn-secondary cursor-pointer text-xs px-2 py-1">
+                    {form.photo ? 'Replace Photo' : 'Upload Photo'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      aria-label={form.photo ? 'Replace Photo' : 'Upload Photo'}
+                      disabled={uploadingPhoto}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null;
+                        event.currentTarget.value = '';
+                        void uploadContributorPhoto(file);
+                      }}
+                    />
+                  </label>
                   {form.photo ? <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => setForm((current) => ({ ...current, photo: null }))}>Remove Photo</button> : null}
                 </div>
+                {uploadingPhoto ? <div className="mt-1 text-xs text-slate-500">Uploading photo...</div> : null}
               </div>
             </div>
 
             <div className="mt-3 space-y-3">
               <TextArea label="Short Bio" value={form.shortBio} onChange={(shortBio) => setForm((current) => ({ ...current, shortBio }))} />
-              <div className="rounded-lg border border-slate-200 p-3">
-                <div className="mb-2 text-xs font-medium">Rights / Consent</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Checkbox label="Publication rights confirmed" checked={Boolean(form.rightsConsent.publicationRightsConfirmed)} onChange={(publicationRightsConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, publicationRightsConfirmed } }))} />
-                  <Checkbox label="Profile consent confirmed" checked={Boolean(form.rightsConsent.profileConsentConfirmed)} onChange={(profileConsentConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, profileConsentConfirmed } }))} />
-                  <Checkbox label="Photo usage permission confirmed" checked={Boolean(form.rightsConsent.photoUsagePermissionConfirmed)} onChange={(photoUsagePermissionConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, photoUsagePermissionConfirmed } }))} />
-                  <Checkbox label="Disclosure reviewed" checked={Boolean(form.rightsConsent.disclosureReviewed)} onChange={(disclosureReviewed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, disclosureReviewed } }))} />
+              <details className="rounded-lg border border-slate-200 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-slate-800">Additional / Internal Details</summary>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Field label="Location" value={form.location} onChange={(location) => setForm((current) => ({ ...current, location }))} />
+                  <Field label="Website" value={form.website} onChange={(website) => setForm((current) => ({ ...current, website }))} />
+                  <Field label="Internal Contact Email" value={form.internalEmail} onChange={(internalEmail) => setForm((current) => ({ ...current, internalEmail }))} />
+                  <Field label="X / Twitter" value={form.socialLinks.x || ''} onChange={(x) => setForm((current) => ({ ...current, socialLinks: { ...current.socialLinks, x } }))} />
+                  <Field label="LinkedIn" value={form.socialLinks.linkedin || ''} onChange={(linkedin) => setForm((current) => ({ ...current, socialLinks: { ...current.socialLinks, linkedin } }))} />
                 </div>
-                <TextArea label="Rights Notes" value={cleanText(form.rightsConsent.notes)} onChange={(notes) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, notes } }))} />
-              </div>
-              <TextArea label="Internal Notes" value={form.internalNotes} onChange={(internalNotes) => setForm((current) => ({ ...current, internalNotes }))} />
+                <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                  <div className="mb-2 text-xs font-medium">Rights / Consent</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Checkbox label="Publication rights confirmed" checked={Boolean(form.rightsConsent.publicationRightsConfirmed)} onChange={(publicationRightsConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, publicationRightsConfirmed } }))} />
+                    <Checkbox label="Profile consent confirmed" checked={Boolean(form.rightsConsent.profileConsentConfirmed)} onChange={(profileConsentConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, profileConsentConfirmed } }))} />
+                    <Checkbox label="Photo usage permission confirmed" checked={Boolean(form.rightsConsent.photoUsagePermissionConfirmed)} onChange={(photoUsagePermissionConfirmed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, photoUsagePermissionConfirmed } }))} />
+                    <Checkbox label="Disclosure reviewed" checked={Boolean(form.rightsConsent.disclosureReviewed)} onChange={(disclosureReviewed) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, disclosureReviewed } }))} />
+                  </div>
+                  <TextArea label="Rights Notes" value={cleanText(form.rightsConsent.notes)} onChange={(notes) => setForm((current) => ({ ...current, rightsConsent: { ...current.rightsConsent, notes } }))} />
+                </div>
+                <div className="mt-3">
+                  <TextArea label="Internal Notes" value={form.internalNotes} onChange={(internalNotes) => setForm((current) => ({ ...current, internalNotes }))} />
+                </div>
+              </details>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
@@ -415,14 +422,6 @@ export default function PulseDialogueDetailsSection({
             </div>
           </div>
 
-          <MediaLibrarySelector
-            open={photoPickerOpen}
-            mode="image"
-            title="Choose Contributor Photo"
-            actionLabel="Use Photo"
-            onClose={() => setPhotoPickerOpen(false)}
-            onSelect={chooseContributorPhoto}
-          />
         </div>
       ) : null}
     </div>
