@@ -146,10 +146,12 @@ export default function PulseDialogueDetailsSection({
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const selectedContributorId = value.contributorId.trim();
+  const trimmedSearch = search.trim();
 
   const listQuery = useQuery({
-    queryKey: ['pulse-dialogue', 'contributors', search],
-    queryFn: () => listPulseDialogueContributors({ q: search, limit: 20 }),
+    queryKey: ['pulse-dialogue', 'contributors', trimmedSearch],
+    queryFn: () => listPulseDialogueContributors({ q: trimmedSearch, limit: 20 }),
+    enabled: Boolean(trimmedSearch),
     staleTime: 60 * 1000,
   });
 
@@ -164,7 +166,9 @@ export default function PulseDialogueDetailsSection({
     if (selectedQuery.data) onSelectedContributorChange(selectedQuery.data);
   }, [selectedQuery.data, onSelectedContributorChange]);
 
-  const contributors = listQuery.data?.items || [];
+  const contributors = trimmedSearch
+    ? (listQuery.data?.items || []).filter((contributor) => getContributorId(contributor) !== selectedContributorId)
+    : [];
 
   const contributorMutation = useMutation({
     mutationFn: async () => {
@@ -246,7 +250,9 @@ export default function PulseDialogueDetailsSection({
           aria-label="Search contributors"
         />
         <div className="max-h-44 overflow-auto rounded border border-slate-200 bg-white">
-          {listQuery.isLoading ? (
+          {!trimmedSearch ? (
+            <div className="px-3 py-3 text-xs text-slate-500">Search to find contributors.</div>
+          ) : listQuery.isLoading ? (
             <div className="px-3 py-3 text-xs text-slate-500">Loading contributors...</div>
           ) : contributors.length === 0 ? (
             <div className="px-3 py-3 text-xs text-slate-500">No contributors found.</div>

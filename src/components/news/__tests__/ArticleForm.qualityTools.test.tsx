@@ -293,6 +293,8 @@ describe('ArticleForm Quality Tools', () => {
     expect(screen.queryByText('Youth Pulse Track')).not.toBeInTheDocument();
 
     fireEvent.change(controlNearLabel<HTMLSelectElement>('Dialogue Format', 'select'), { target: { value: 'essay' } });
+    expect(screen.getByText('Search to find contributors.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search contributors'), { target: { value: 'guest' } });
     fireEvent.click(await screen.findByText('Guest Writer'));
     fireEvent.change(controlNearLabel<HTMLInputElement>('Series / Column', 'input'), { target: { value: 'Ideas & Society' } });
 

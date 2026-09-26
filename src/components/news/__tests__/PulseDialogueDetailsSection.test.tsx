@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsSection';
 import { EMPTY_PULSE_DIALOGUE_VALUE, type PulseDialogueFormValue } from '@/lib/pulseDialogue';
@@ -81,16 +81,39 @@ afterEach(() => {
 });
 
 describe('PulseDialogueDetailsSection', () => {
-  it('lists, searches, and selects contributors without exposing status controls', async () => {
-    const { onChange } = renderSection({ selectedContributor: { id: 'c2', _id: 'c2', canonicalName: 'Inactive Writer', status: 'inactive' } });
+  it('searches and selects contributors without dumping or duplicating the selected contributor', async () => {
+    const { onChange } = renderSection({
+      value: { ...EMPTY_PULSE_DIALOGUE_VALUE, contributorId: 'c2' },
+      selectedContributor: { id: 'c2', _id: 'c2', canonicalName: 'Inactive Writer', status: 'inactive' },
+    });
 
-    expect(await screen.findByText('Active Writer')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Active Writer'));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ contributorId: 'c1' }));
+    const searchPrompt = screen.getByText('Search to find contributors.');
+    const results = searchPrompt.parentElement as HTMLElement;
+    expect(mockedList).not.toHaveBeenCalled();
+    expect(screen.getByText('Inactive Writer')).toBeInTheDocument();
+    expect(within(results).queryByText('Inactive Writer')).not.toBeInTheDocument();
+
 
     fireEvent.change(screen.getByLabelText('Search contributors'), { target: { value: 'active' } });
     await waitFor(() => expect(mockedList).toHaveBeenLastCalledWith({ q: 'active', limit: 20 }));
+    expect(await within(results).findByText('Active Writer')).toBeInTheDocument();
+    expect(within(results).queryByText('Inactive Writer')).not.toBeInTheDocument();
+
+    fireEvent.click(within(results).getByText('Active Writer'));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ contributorId: 'c1' }));
     expect(screen.queryByText(/^Status:/i)).not.toBeInTheDocument();
+  });
+
+  it('clears the selected contributor with Change Selection', () => {
+    const { onChange, onSelectedContributorChange } = renderSection({
+      value: { ...EMPTY_PULSE_DIALOGUE_VALUE, contributorId: 'c2' },
+      selectedContributor: { id: 'c2', _id: 'c2', canonicalName: 'Inactive Writer', status: 'inactive' },
+    });
+
+    fireEvent.click(screen.getByText('Change Selection'));
+
+    expect(onSelectedContributorChange).toHaveBeenCalledWith(null);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ contributorId: '' }));
   });
 
   it('creates a contributor with simplified defaults and direct photo upload', async () => {
