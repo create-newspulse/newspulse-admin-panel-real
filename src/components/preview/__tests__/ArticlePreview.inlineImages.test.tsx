@@ -17,6 +17,37 @@ afterEach(() => {
   delete (window as any).instgrm;
 });
 
+describe('ArticlePreview author byline', () => {
+  it('shows only provided public snapshot fields and no empty placeholders', () => {
+    const { rerender } = render(<ArticlePreview article={{
+      title: 'Story', content: 'Body', category: 'regional',
+      authorByline: { enabled: true, snapshot: { name: 'Shailesh Rathod' } },
+    }} />);
+    const byline = screen.getByTestId('author-byline-preview');
+    expect(byline.textContent).toBe('Shailesh Rathod');
+    expect(byline.querySelector('img')).toBeNull();
+    expect(screen.queryByText('private-user-id')).toBeNull();
+    rerender(<ArticlePreview article={{
+      title: 'Story', content: 'Body', category: 'regional',
+      authorByline: { enabled: true, snapshot: {
+        name: 'Shailesh Rathod', publicDesignation: 'Independent Writer', photoUrl: '/uploads/author.jpg', shortBio: 'Regional reporting.',
+      } },
+    }} />);
+    expect(screen.getByText('Independent Writer')).toBeInTheDocument();
+    expect(screen.getByText('Regional reporting.')).toBeInTheDocument();
+    expect(screen.getByTestId('author-byline-preview').querySelector('img')).toHaveAttribute('src', '/uploads/author.jpg');
+  });
+
+  it.each([
+    { category: 'regional', enabled: false },
+    { category: 'pulse-dialogue', enabled: true },
+  ])('hides reporter attribution for %j', ({ category, enabled }) => {
+    render(<ArticlePreview article={{ title: 'Story', content: 'Body', category, authorByline: { enabled, snapshot: { name: 'Shailesh Rathod' } } }} />);
+    expect(screen.queryByTestId('author-byline-preview')).toBeNull();
+    expect(screen.queryByText('Shailesh Rathod')).toBeNull();
+  });
+});
+
 describe('ArticlePreview inline images', () => {
   it('shows no credit text for image-only inline markup', () => {
     render(<ArticlePreview article={{

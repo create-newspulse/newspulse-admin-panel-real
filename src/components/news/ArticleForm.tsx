@@ -25,6 +25,8 @@ import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPuls
 import { useAuth } from '@context/AuthContext';
 import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
 import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsSection';
+import AuthorBylineSection from '@/components/news/AuthorBylineSection';
+import { buildAuthorBylinePayload, restoreAuthorByline, type AuthorByline, type AuthorBylineRequest } from '@/lib/authorByline';
 import {
   EMPTY_PULSE_DIALOGUE_VALUE,
   PULSE_DIALOGUE_CATEGORY,
@@ -490,6 +492,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [youthPulseTrack, setYouthPulseTrack] = useState<YouthPulseTrack | ''>('');
   const [pulseDialogue, setPulseDialogue] = useState<PulseDialogueFormValue>(() => ({ ...EMPTY_PULSE_DIALOGUE_VALUE }));
   const [selectedPulseContributor, setSelectedPulseContributor] = useState<PulseDialogueContributor | null>(null);
+  const [authorByline, setAuthorByline] = useState<AuthorByline>({ enabled: false });
+  const [authorPhotoUploadPending, setAuthorPhotoUploadPending] = useState(false);
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
@@ -627,7 +631,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [spotlightPinned, setSpotlightPinned] = useState(false);
   const [spotlightPriority, setSpotlightPriority] = useState<SpotlightPriority>('normal');
   const [spotlightExpiryTime, setSpotlightExpiryTime] = useState('');
-  const [locationSearch, setLocationSearch] = useState('');
   // ISO string (or empty). Set automatically when publishing if empty.
   const [publishedAt, setPublishedAt] = useState('');
   const [state, setState] = useState('');
@@ -649,6 +652,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     editorialType: EditorialType | '';
     youthPulseTrack: string;
     pulseDialogue: PulseDialogueFormValue;
+    authorByline: AuthorByline;
     language: string;
     translationGroupId: string;
     status: 'draft' | 'scheduled' | 'published';
@@ -681,6 +685,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     editorialType: '',
     youthPulseTrack: '',
     pulseDialogue: { ...EMPTY_PULSE_DIALOGUE_VALUE },
+    authorByline: { enabled: false },
     language: DEFAULT_CREATE_LANGUAGE,
     translationGroupId: '',
     status: 'draft',
@@ -731,6 +736,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setYouthPulseTrack('');
     setPulseDialogue({ ...EMPTY_PULSE_DIALOGUE_VALUE });
     setSelectedPulseContributor(null);
+    setAuthorByline({ enabled: false });
     setLanguage(DEFAULT_CREATE_LANGUAGE);
     setTranslationGroupId('');
     setStatus('draft');
@@ -779,6 +785,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       editorialType: (next?.editorialType ?? (category === 'editorial' ? editorialType : '') ?? '').toString() as Snapshot['editorialType'],
       youthPulseTrack: (next?.youthPulseTrack ?? youthPulseTrack ?? '').toString(),
       pulseDialogue: next?.pulseDialogue ?? pulseDialogue,
+      authorByline: next?.authorByline ?? authorByline,
       language: (next?.language ?? language ?? '').toString(),
       translationGroupId: (next?.translationGroupId ?? translationGroupId ?? '').toString(),
       status: (next?.status ?? status) as Snapshot['status'],
@@ -851,6 +858,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       editorialType: s.category === 'editorial' ? (s.editorialType || 'editorial') : '',
       youthPulseTrack: (s.youthPulseTrack || ''),
       pulseDialogue: s.category === PULSE_DIALOGUE_CATEGORY ? normalizePulseDialogueFormValue(s.pulseDialogue) : { ...EMPTY_PULSE_DIALOGUE_VALUE },
+      authorByline: s.category === PULSE_DIALOGUE_CATEGORY ? { enabled: false } : restoreAuthorByline(s.authorByline),
       language: (s.language || ''),
       translationGroupId: (s.translationGroupId || ''),
       status: (s.status || 'draft'),
@@ -1069,16 +1077,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     return set;
   }, [tags]);
 
-  const locationSearchKey = useMemo(() => String(locationSearch || '').trim().toLowerCase(), [locationSearch]);
-  const filteredDistricts = useMemo(() => {
-    if (!locationSearchKey) return GUJARAT_DISTRICTS;
-    return GUJARAT_DISTRICTS.filter((d) => d.label.toLowerCase().includes(locationSearchKey) || d.slug.includes(locationSearchKey));
-  }, [locationSearchKey]);
-  const filteredCities = useMemo(() => {
-    if (!locationSearchKey) return GUJARAT_CITIES;
-    return GUJARAT_CITIES.filter((c) => c.label.toLowerCase().includes(locationSearchKey) || c.slug.includes(locationSearchKey));
-  }, [locationSearchKey]);
-
   // populate from initialValues first (edit mode)
   useEffect(()=> {
     const src = (computedMode === 'edit') ? (initialValues || data) : null;
@@ -1123,6 +1121,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         String((src as any).track ?? (src as any).subCategory ?? (src as any).subcategory ?? (src as any).trackName ?? '')
       ));
       const incomingPulseDialogue = normalizePulseDialogueFormValue((src as any).pulseDialogue);
+      const incomingAuthorByline = restoreAuthorByline(src.authorByline);
+      setAuthorByline(incomingAuthorByline);
       setPulseDialogue(incomingPulseDialogue);
       const incomingContributor = (src as any).pulseDialogue?.contributor || (src as any).pulseDialogue?.publicContributor || null;
       setSelectedPulseContributor(incomingContributor && typeof incomingContributor === 'object' ? incomingContributor : null);
@@ -1236,6 +1236,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
           editorialType: normalizedCategory === 'editorial' ? normalizeEditorialType((src as any).editorialType) : '',
           pulseDialogue: normalizedCategory === PULSE_DIALOGUE_CATEGORY ? incomingPulseDialogue : { ...EMPTY_PULSE_DIALOGUE_VALUE },
+          authorByline: incomingAuthorByline,
           language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
@@ -1687,11 +1688,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     statusToSend: 'draft'|'scheduled'|'published';
     safeSlug: string;
     wasNew: boolean;
+    authorByline: AuthorByline;
   }>(null);
 
   const mutation = useMutation({
     // desiredStatusOverride lets callers force a specific status (e.g., Publish)
     mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
+      if (category !== PULSE_DIALOGUE_CATEGORY && authorByline.enabled && authorPhotoUploadPending) {
+        throw new Error('Please wait for the author photo upload to finish.');
+      }
       if (inlineImageUploadPending || /data-np-inline-image-uploading/i.test(content)) {
         throw new Error('Please wait for the image upload to finish.');
       }
@@ -1712,7 +1717,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return t ? t : undefined;
       };
 
-      const buildPublicPayload = (opts: { status: PublicArticleStatus; publishedAt?: string; language?: LangCode; draft?: ArticleLanguageDraft }): {
+      const buildPublicPayload = (opts: { status: PublicArticleStatus; publishedAt?: string; language?: LangCode; draft?: ArticleLanguageDraft; newArticle?: boolean; authorAlreadySaved?: boolean }): {
         title: string;
         slug: string;
         summary: string;
@@ -1756,6 +1761,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImageUrl?: string;
         coverImage?: { url: string; publicId?: string };
         pulseDialogue?: ReturnType<typeof buildPulseDialoguePayload>;
+        authorByline?: AuthorBylineRequest;
         tags: string[];
         isSponsored?: boolean;
         sponsored?: boolean;
@@ -1803,6 +1809,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const coverPid = trimOrUndef(coverImagePublicId);
         const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
         const pulseDialoguePayload = categoryKey === PULSE_DIALOGUE_CATEGORY ? buildPulseDialoguePayload(pulseDialogue) : undefined;
+        const authorPayload = categoryKey !== PULSE_DIALOGUE_CATEGORY && !opts.authorAlreadySaved
+          ? buildAuthorBylinePayload(authorByline, opts.newArticle || !effectiveId ? undefined : lastSavedSnapshot.authorByline)
+          : undefined;
         const spotlightPriorityToSend = normalizeSpotlightPriority(spotlightPriority);
         const spotlightExpiryIso = toIsoDateTime(spotlightExpiryTime);
 
@@ -1866,6 +1875,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           coverImageUrl: coverUrl,
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
           pulseDialogue: pulseDialoguePayload,
+          ...(authorPayload ? { authorByline: authorPayload } : {}),
           tags: normalizedTags,
           isSponsored: isSponsoredArticle ? true : undefined,
           sponsored: isSponsoredArticle ? true : undefined,
@@ -1921,7 +1931,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           await updateArticle(idToPublish, draftPayload as any);
         }
 
-        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId };
+        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId, authorByline };
         const published: any = await publishArticle(idToPublish, publishAtToSend);
         return { ...(published as any), __npCreatedId: idToPublish };
       }
@@ -1945,7 +1955,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         statusToSend = statusExplicitlyChanged ? status : (orig as PublicArticleStatus);
       }
 
-      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId };
+      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId, authorByline };
 
       logArticleEditorDebug('submit', {
         kind: saveKindRef.current,
@@ -2022,7 +2032,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const variant = translationVariants[code];
         const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
         const targetId = code === language ? String(activeSavedId || '').trim() : variantId;
-        const draftPayload = buildPublicPayload({ status: 'draft', language: code, draft });
+        const draftPayload = buildPublicPayload({
+          status: 'draft', language: code, draft,
+          newArticle: !targetId,
+          authorAlreadySaved: code === language,
+        });
 
         if (targetId) {
           await updateArticle(targetId, draftPayload as any);
@@ -2133,6 +2147,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImage: coverImageUrl,
         coverImagePublicId,
         pulseDialogue,
+        authorByline: restoreAuthorByline(saved?.authorByline ?? lastSubmitRef.current?.authorByline ?? authorByline),
         isBreaking,
         publishedAt,
         state,
@@ -2322,6 +2337,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         language: target,
         lang: target,
         translationGroupId: gid,
+        ...(categoryKey !== PULSE_DIALOGUE_CATEGORY ? { authorByline: buildAuthorBylinePayload(authorByline) } : {}),
       };
 
       const created: any = await createArticle(payload);
@@ -2350,7 +2366,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, pulseDialogue, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, pulseDialogue, authorByline, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
@@ -2391,7 +2407,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, pulseDialogue, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2669,7 +2685,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 <label className="block text-xs font-medium">Category</label>
                 <select value={category} onChange={e=> setCategory(e.target.value)} className="w-full border px-2 py-2 rounded">
                   <option value="" disabled>Select category…</option>
-                  {ARTICLE_CATEGORY_OPTIONS.map((opt) => (
+                  {ARTICLE_CATEGORY_OPTIONS.filter((opt) =>
+                    (opt.key !== 'breaking' && opt.key !== 'inspiration-hub') ||
+                    (computedMode === 'edit' && opt.key === category)
+                  ).map((opt) => (
                     <option key={opt.key} value={opt.key}>{opt.label}</option>
                   ))}
                 </select>
@@ -2713,6 +2732,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 />
               )}
 
+              {category !== PULSE_DIALOGUE_CATEGORY && (
+                <AuthorBylineSection
+                  key={effectiveId || 'new'}
+                  value={authorByline}
+                  onChange={setAuthorByline}
+                  uploadEnabled={coverUploadEnabled}
+                  uploadStatusText={coverUploadStatusText}
+                  onUploadPendingChange={setAuthorPhotoUploadPending}
+                />
+              )}
+
               <div className="pt-2 border-t border-slate-200">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <div className="text-xs font-medium">Location Tags (Gujarat)</div>
@@ -2726,50 +2756,30 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 </div>
                 {!locationTagsCollapsed && (
                   <>
-                    <input
-                      value={locationSearch}
-                      onChange={(e) => setLocationSearch(e.target.value)}
-                      className="w-full border px-2 py-2 rounded text-sm"
-                      placeholder="Search districts / cities…"
-                    />
-
-                    <div className="mt-2 text-[11px] text-slate-600">Districts</div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {filteredDistricts.map((d) => {
-                        const tag = `district:${d.slug}`;
-                        const selected = selectedDistrictSlugs.has(d.slug);
-                        return (
-                          <button
-                            type="button"
-                            key={d.slug}
-                            onClick={() => toggleGujaratLocationTag(tag)}
-                            className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
-                            title={tag}
-                          >
-                            {d.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-3 text-[11px] text-slate-600">Cities</div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {filteredCities.map((c) => {
-                        const tag = `city:${c.slug}`;
-                        const selected = selectedCitySlugs.has(c.slug);
-                        return (
-                          <button
-                            type="button"
-                            key={c.slug}
-                            onClick={() => toggleGujaratLocationTag(tag)}
-                            className={`px-2 py-1 rounded-full text-xs border ${selected ? 'bg-black text-white' : 'bg-white'}`}
-                            title={tag}
-                          >
-                            {c.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {[
+                      { label: 'District', placeholder: 'Select district...', prefix: 'district', options: GUJARAT_DISTRICTS, selected: selectedDistrictSlugs },
+                      { label: 'Big City', placeholder: 'Select city...', prefix: 'city', options: GUJARAT_CITIES, selected: selectedCitySlugs },
+                    ].map(({ label, placeholder, prefix, options, selected }) => {
+                      const selectionLabel = [...selected].map((slug) => options.find((option) => option.slug === slug)?.label || slug).join(', ');
+                      return (
+                        <div key={prefix} className="mt-3">
+                          <div className="mb-1 text-xs font-medium">{label}</div>
+                          <details>
+                            <summary aria-label={label} title={selectionLabel || placeholder} className="list-inside cursor-pointer truncate rounded border bg-white px-2 py-2 text-sm">
+                              {selectionLabel || placeholder}
+                            </summary>
+                            <div role="group" aria-label={`${label} options`} className="mt-1 max-h-44 overflow-y-auto rounded border border-slate-200 bg-white p-2">
+                              {options.map((option) => (
+                                <label key={option.slug} className="flex cursor-pointer items-center gap-2 px-1 py-1 text-sm">
+                                  <input type="checkbox" value={option.slug} checked={selected.has(option.slug)} onChange={() => toggleGujaratLocationTag(`${prefix}:${option.slug}`)} />
+                                  {option.label}
+                                </label>
+                              ))}
+                            </div>
+                          </details>
+                        </div>
+                      );
+                    })}
 
                     <details className="mt-3">
                       <summary className="text-[11px] text-slate-600 cursor-pointer select-none">Other location fields (optional)</summary>
@@ -3280,6 +3290,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 contributor: selectedPulseContributor || undefined,
               }
             : undefined,
+          authorByline: category !== PULSE_DIALOGUE_CATEGORY ? authorByline : undefined,
           language: previewLanguage,
           status,
           scheduledAt,

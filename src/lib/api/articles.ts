@@ -5,9 +5,11 @@
 import { adminApiClient } from '@/lib/adminApiClient';
 import type { ArticleStatus } from '@/types/articles';
 import type { PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
+import type { AuthorByline } from '@/lib/authorByline';
 
 export interface Article {
   _id: string;
+  authorByline?: AuthorByline;
   title: string;
   slug?: string;
   summary?: string;

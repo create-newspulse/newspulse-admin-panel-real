@@ -5,6 +5,7 @@ import { parseNewsPulseInstagramAttrs } from '@/lib/instagram';
 import { parseNewsPulseYouTubeAttrs } from '@/lib/youtube';
 import { parseNewsPulseXAttrs } from '@/lib/x';
 import { PULSE_DIALOGUE_CATEGORY, dialogueFormatLabel, type PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
+import { validateAuthorPhotoUrl, type AuthorByline } from '@/lib/authorByline';
 
 export type PreviewLanguage = 'en' | 'hi' | 'gu';
 
@@ -24,6 +25,7 @@ export interface ArticlePreviewModel {
   scheduledAt?: string;
   tags?: string[];
   pulseDialogue?: PulseDialogueArticleMetadata;
+  authorByline?: AuthorByline;
 }
 
 const X_WIDGETS_SRC = 'https://platform.twitter.com/widgets.js';
@@ -488,6 +490,13 @@ export default function ArticlePreview({
   const slug = (article.slug || '').trim();
   const summary = (article.summary || '').trim();
   const category = (article.category || '').trim();
+  const authorSnapshot = category !== PULSE_DIALOGUE_CATEGORY && article.authorByline?.enabled
+    ? article.authorByline.snapshot : undefined;
+  let authorPhotoUrl = '';
+  try {
+    validateAuthorPhotoUrl(authorSnapshot?.photoUrl || '');
+    authorPhotoUrl = authorSnapshot?.photoUrl || '';
+  } catch {}
   const pulseDialogue = category === PULSE_DIALOGUE_CATEGORY ? article.pulseDialogue : undefined;
   const pulseContributor = pulseDialogue?.contributor;
   const pulseByline = pulseDialogue?.bylineSnapshot;
@@ -581,6 +590,17 @@ export default function ArticlePreview({
         {summary && (
           <div className="text-sm text-slate-700 whitespace-pre-wrap">{summary}</div>
         )}
+
+        {authorSnapshot?.name ? (
+          <div className="flex items-start gap-3" data-testid="author-byline-preview">
+            {authorPhotoUrl ? <img src={authorPhotoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" /> : null}
+            <div className="min-w-0 break-words">
+              <div className="text-sm font-semibold text-slate-900">{authorSnapshot.name}</div>
+              {authorSnapshot.publicDesignation ? <div className="text-sm text-slate-600">{authorSnapshot.publicDesignation}</div> : null}
+              {authorSnapshot.shortBio ? <div className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{authorSnapshot.shortBio}</div> : null}
+            </div>
+          </div>
+        ) : null}
 
         {pulseDialogue ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
