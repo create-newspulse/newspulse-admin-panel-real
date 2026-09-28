@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Link2 } from 'lucide-react';
 import {
   CONTRIBUTOR_STATUS_OPTIONS,
   DIALOGUE_FORMAT_OPTIONS,
@@ -15,11 +16,14 @@ import {
 import {
   createPulseDialogueContributor,
   getPulseDialogueContributor,
+  getPulseDialogueContributorCapabilities,
   listPulseDialogueContributors,
   updatePulseDialogueContributor,
+  changePulseDialogueContributorSlug,
 } from '@/lib/api/pulseDialogue';
 import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
+import PulseDialogueSeriesSection from './PulseDialogueSeriesSection';
 
 type Props = {
   value: PulseDialogueFormValue;
@@ -43,6 +47,8 @@ type ContributorFormState = {
   website: string;
   socialLinks: Record<string, string>;
   status: ContributorStatus;
+  profileVisible: boolean;
+  slug: string;
   internalEmail: string;
   rightsConsent: PulseDialogueRightsConsent;
   internalNotes: string;
@@ -62,6 +68,8 @@ const EMPTY_CONTRIBUTOR_FORM: ContributorFormState = {
   website: '',
   socialLinks: {},
   status: 'active',
+  profileVisible: false,
+  slug: '',
   internalEmail: '',
   rightsConsent: {},
   internalNotes: '',
@@ -95,6 +103,8 @@ function formFromContributor(contributor: PulseDialogueContributor | null): Cont
     website: cleanText(contributor.website),
     socialLinks: contributor.socialLinks || {},
     status,
+    profileVisible: contributor.profileVisible === true,
+    slug: cleanText(contributor.slug),
     internalEmail: cleanText(contributor.internalEmail),
     rightsConsent: contributor.rightsConsent || {},
     internalNotes: cleanText(contributor.internalNotes),
@@ -120,6 +130,7 @@ function buildContributorPayload(form: ContributorFormState): Partial<PulseDialo
     website: cleanText(form.website) || null,
     socialLinks,
     status: form.status,
+    profileVisible: form.profileVisible,
     internalEmail: cleanText(form.internalEmail) || null,
     rightsConsent: {
       publicationRightsConfirmed: Boolean(form.rightsConsent.publicationRightsConfirmed),
@@ -144,9 +155,30 @@ export default function PulseDialogueDetailsSection({
   const [modalMode, setModalMode] = useState<'create' | 'edit' | null>(null);
   const [form, setForm] = useState<ContributorFormState>(() => formFromContributor(null));
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [editingSlug, setEditingSlug] = useState(false);
+  const [newSlug, setNewSlug] = useState('');
+  const [slugError, setSlugError] = useState('');
 
   const selectedContributorId = value.contributorId.trim();
   const trimmedSearch = search.trim();
+
+  const capabilitiesQuery = useQuery({
+    queryKey: ['pulse-dialogue', 'contributor-capabilities'],
+    queryFn: ({ signal }) => getPulseDialogueContributorCapabilities(signal),
+    enabled: Boolean(modalMode && canManageContributors),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchInterval: 60 * 1000,
+  });
+  const canRenameSlug = canManageContributors && modalMode === 'edit'
+    && capabilitiesQuery.isSuccess && !capabilitiesQuery.isFetching
+    && capabilitiesQuery.data?.slugRename === true;
+
+  useEffect(() => {
+    if (!capabilitiesQuery.isFetching && !canRenameSlug) setEditingSlug(false);
+  }, [canRenameSlug, capabilitiesQuery.isFetching]);
 
   const listQuery = useQuery({
     queryKey: ['pulse-dialogue', 'contributors', trimmedSearch],
@@ -187,6 +219,51 @@ export default function PulseDialogueDetailsSection({
       toast.error(normalizeError(error, 'Contributor save failed').message);
     },
   });
+
+  const slugMutation = useMutation({
+    mutationFn: () => {
+      if (!canRenameSlug) throw new Error('Public URL changes are temporarily unavailable.');
+      return changePulseDialogueContributorSlug(form.id, newSlug.trim());
+    },
+    onSuccess: (contributor) => {
+      if (!contributor.slug) {
+        setSlugError('The server did not return a canonical URL. Close and reopen the contributor to refresh.');
+        return;
+      }
+      setForm((current) => ({ ...current, slug: contributor.slug! }));
+      if (selectedContributor && getContributorId(selectedContributor) === form.id) {
+        onSelectedContributorChange({ ...selectedContributor, slug: contributor.slug });
+      }
+      queryClient.invalidateQueries({ queryKey: ['pulse-dialogue', 'contributors'] });
+      setEditingSlug(false);
+      setSlugError('');
+      toast.success('Public URL updated');
+    },
+    onError: (error) => {
+      const normalized = normalizeError(error, 'Public URL change failed');
+      setSlugError(normalized.status === 409
+        ? 'This public URL is already used or reserved. Choose another slug.'
+        : normalized.status === 400
+          ? 'Invalid public URL slug. Check the slug and try again.'
+          : 'Public URL change failed. Please try again.');
+    },
+  });
+
+  async function editContributor() {
+    if (!selectedContributor || !canManageContributors) return;
+    setLoadingProfile(true);
+    try {
+      const contributor = await getPulseDialogueContributor(getContributorId(selectedContributor));
+      setForm(formFromContributor(contributor));
+      setEditingSlug(false);
+      setSlugError('');
+      setModalMode('edit');
+    } catch {
+      toast.error('Could not load contributor profile. Please try again.');
+    } finally {
+      setLoadingProfile(false);
+    }
+  }
 
   function patchValue(patch: Partial<PulseDialogueFormValue>) {
     onChange({ ...value, ...patch });
@@ -284,10 +361,10 @@ export default function PulseDialogueDetailsSection({
 
         <div className="flex flex-wrap gap-2">
           {canManageContributors && (
-            <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setForm(formFromContributor(null)); setModalMode('create'); }}>Create Contributor</button>
+            <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setForm(formFromContributor(null)); setEditingSlug(false); setSlugError(''); setModalMode('create'); }}>Create Contributor</button>
           )}
           {canManageContributors && selectedContributor && (
-            <button type="button" className="btn-secondary text-xs px-2 py-1" onClick={() => { setForm(formFromContributor(selectedContributor)); setModalMode('edit'); }}>Edit Contributor</button>
+            <button type="button" className="btn-secondary text-xs px-2 py-1" disabled={loadingProfile} onClick={() => void editContributor()}>{loadingProfile ? 'Loading profile...' : 'Edit Contributor'}</button>
           )}
           {selectedContributor && (
             <button
@@ -318,10 +395,7 @@ export default function PulseDialogueDetailsSection({
       ) : null}
 
       <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-medium">Series / Column</label>
-          <input value={value.series} onChange={(event) => patchValue({ series: event.target.value })} className="w-full border px-2 py-2 rounded bg-white" />
-        </div>
+        <PulseDialogueSeriesSection value={value} onChange={onChange} canManage={canManageContributors} />
         <div>
           <label className="block text-xs font-medium">Byline Designation Override</label>
           <input value={value.bylineDesignationOverride} onChange={(event) => patchValue({ bylineDesignationOverride: event.target.value })} className="w-full border px-2 py-2 rounded bg-white" />
@@ -355,14 +429,35 @@ export default function PulseDialogueDetailsSection({
           <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="text-lg font-semibold">{modalMode === 'edit' ? 'Edit Contributor' : 'Create Contributor'}</div>
-              <button type="button" className="btn-secondary text-sm px-2 py-1" onClick={() => setModalMode(null)}>Close</button>
+              <button type="button" className="btn-secondary text-sm px-2 py-1" disabled={slugMutation.isPending || contributorMutation.isPending} onClick={() => setModalMode(null)}>Close</button>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Contributor Name" value={form.canonicalName} onChange={(canonicalName) => setForm((current) => ({ ...current, canonicalName }))} required />
               <Field label="Public Designation" value={form.publicDesignation} onChange={(publicDesignation) => setForm((current) => ({ ...current, publicDesignation }))} />
               <Field label="Affiliation" value={form.affiliation} onChange={(affiliation) => setForm((current) => ({ ...current, affiliation }))} />
+              <label className="block text-xs font-medium">Contributor Status
+                <select aria-label="Contributor Status" value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as ContributorStatus }))} className="w-full border px-2 py-2 rounded bg-white">
+                  {CONTRIBUTOR_STATUS_OPTIONS.filter((option) => option.value !== 'draft' || form.status === 'draft').map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <Checkbox label="Public Profile" checked={form.profileVisible} onChange={(profileVisible) => setForm((current) => ({ ...current, profileVisible }))} />
             </div>
+
+            {form.id ? <div className="mt-3 space-y-2 text-sm">
+              <div className="text-xs font-medium">Public profile URL</div>
+              <div className="break-all" data-testid="contributor-public-url">{form.slug ? `/pulse-dialogue/contributors/${form.slug}` : 'No public URL assigned'}</div>
+              {!canRenameSlug ? <p id="contributor-slug-unavailable" className="text-xs text-slate-600">Public URL changes are temporarily unavailable.</p> : null}
+              {!editingSlug || !canRenameSlug ? <button type="button" className="btn-secondary inline-flex items-center gap-1 px-2 py-1 text-xs" disabled={!canRenameSlug || contributorMutation.isPending} aria-describedby={!canRenameSlug ? 'contributor-slug-unavailable' : undefined} onClick={() => { if (!canRenameSlug) return; setNewSlug(form.slug); setSlugError(''); setEditingSlug(true); }}><Link2 size={14} />Change Public URL</button> : <div className="space-y-2">
+                <Field label="New public URL slug" value={newSlug} onChange={setNewSlug} />
+                <p className="text-xs text-slate-600">Old URLs remain supported. Historical article attribution will not change.</p>
+                {slugError ? <p role="alert" className="text-sm text-red-700">{slugError}</p> : null}
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-primary px-2 py-1 text-xs" disabled={!canRenameSlug || slugMutation.isPending || !newSlug.trim() || newSlug.trim() === form.slug} onClick={() => { if (canRenameSlug) slugMutation.mutate(); }}>{slugMutation.isPending ? 'Changing...' : 'Confirm URL Change'}</button>
+                  <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={slugMutation.isPending} onClick={() => setEditingSlug(false)}>Cancel URL Change</button>
+                </div>
+              </div>}
+            </div> : null}
 
             <div className="mt-3 grid gap-3 sm:grid-cols-[auto_1fr] sm:items-start">
               <div>
@@ -421,8 +516,8 @@ export default function PulseDialogueDetailsSection({
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="btn-secondary px-3 py-1 text-sm" onClick={() => setModalMode(null)}>Cancel</button>
-              <button type="button" className="btn-primary px-3 py-1 text-sm" disabled={contributorMutation.isPending} onClick={() => contributorMutation.mutate()}>
+              <button type="button" className="btn-secondary px-3 py-1 text-sm" disabled={slugMutation.isPending || contributorMutation.isPending} onClick={() => setModalMode(null)}>Cancel</button>
+              <button type="button" className="btn-primary px-3 py-1 text-sm" disabled={contributorMutation.isPending || editingSlug || uploadingPhoto} onClick={() => contributorMutation.mutate()}>
                 {contributorMutation.isPending ? 'Saving...' : 'Save Contributor'}
               </button>
             </div>

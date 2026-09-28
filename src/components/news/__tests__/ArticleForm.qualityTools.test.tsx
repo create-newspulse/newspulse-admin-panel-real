@@ -58,6 +58,11 @@ vi.mock('@/lib/api/pulseDialogue', () => ({
   getPulseDialogueContributor: vi.fn(async () => ({ id: 'contributor-1', canonicalName: 'Guest Writer', publicDesignation: 'Essayist', status: 'active' })),
   createPulseDialogueContributor: vi.fn(),
   updatePulseDialogueContributor: vi.fn(),
+  changePulseDialogueContributorSlug: vi.fn(),
+  listPulseDialogueSeries: vi.fn(async () => ({ items: [{ id: 's1', title: 'Ideas & Society', slug: 'ideas-society' }], total: 1, page: 1, limit: 20 })),
+  getPulseDialogueSeries: vi.fn(),
+  createPulseDialogueSeries: vi.fn(),
+  updatePulseDialogueSeries: vi.fn(),
 }));
 
 vi.mock('@/lib/slugAvailability', () => ({
@@ -539,7 +544,8 @@ describe('ArticleForm Quality Tools', () => {
     expect(screen.getByText('Search to find contributors.')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Search contributors'), { target: { value: 'guest' } });
     fireEvent.click(await screen.findByText('Guest Writer'));
-    fireEvent.change(controlNearLabel<HTMLInputElement>('Series / Column', 'input'), { target: { value: 'Ideas & Society' } });
+    await screen.findByRole('option', { name: 'Ideas & Society' });
+    fireEvent.change(screen.getByLabelText('Series / Column - optional'), { target: { value: 's1' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
 
@@ -549,13 +555,14 @@ describe('ArticleForm Quality Tools', () => {
         contributorId: 'contributor-1',
         dialogueFormat: 'essay',
         series: 'Ideas & Society',
+        seriesSlug: 'ideas-society',
         showAboutContributor: false,
       }),
     })));
     expect(mocks.createArticle.mock.calls[0][0]).not.toHaveProperty('authorByline');
   });
 
-  it('preserves Pulse Dialogue metadata when editing another field', async () => {
+  it.each([false, true])('restores Pulse Dialogue metadata and preserves Phase 1 fields (clear Series: %s)', async (clearSeries) => {
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
       <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
         <ArticleForm
@@ -576,6 +583,10 @@ describe('ArticleForm Quality Tools', () => {
               contributorId: 'contributor-1',
               dialogueFormat: 'essay',
               series: 'Ideas & Society',
+              seriesSlug: 'ideas-society',
+              contributorDisclosure: 'Existing disclosure',
+              contributorDisclaimer: 'Existing disclaimer',
+              editorNote: 'Existing note',
               contributor: { id: 'contributor-1', canonicalName: 'Guest Writer', status: 'active' },
             },
           }}
@@ -584,6 +595,9 @@ describe('ArticleForm Quality Tools', () => {
     </QueryClientProvider>);
 
     expect(await screen.findByTestId('pulse-dialogue-details')).toBeInTheDocument();
+    expect(await screen.findByText('Guest Writer')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Series / Column - optional')).toHaveValue('s1'));
+    if (clearSeries) fireEvent.change(screen.getByLabelText('Series / Column - optional'), { target: { value: '' } });
     fireEvent.change(controlNearLabel<HTMLInputElement>('Title', 'input'), { target: { value: 'Existing Pulse story updated' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
 
@@ -592,7 +606,11 @@ describe('ArticleForm Quality Tools', () => {
       pulseDialogue: expect.objectContaining({
         contributorId: 'contributor-1',
         dialogueFormat: 'essay',
-        series: 'Ideas & Society',
+        series: clearSeries ? null : 'Ideas & Society',
+        seriesSlug: clearSeries ? null : 'ideas-society',
+        contributorDisclosure: 'Existing disclosure',
+        contributorDisclaimer: 'Existing disclaimer',
+        editorNote: 'Existing note',
       }),
     })));
   });

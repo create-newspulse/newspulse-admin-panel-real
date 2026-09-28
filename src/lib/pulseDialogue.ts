@@ -4,6 +4,7 @@ export const CONTRIBUTOR_STATUS_OPTIONS = [
   { value: 'draft', label: 'Draft' },
   { value: 'active', label: 'Active' },
   { value: 'inactive', label: 'Inactive' },
+  { value: 'hidden', label: 'Hidden' },
 ] as const;
 
 export const CONTRIBUTOR_TYPE_OPTIONS = [
@@ -81,6 +82,7 @@ export type PulseDialogueContributor = {
   website?: string | null;
   socialLinks?: Record<string, string> | null;
   status?: ContributorStatus | string | null;
+  profileVisible?: boolean;
   internalEmail?: string | null;
   internalNotes?: string | null;
   rightsConsent?: PulseDialogueRightsConsent | null;
@@ -96,10 +98,20 @@ export type PulseDialogueBylineSnapshot = {
   photo?: PulseDialoguePhoto | null;
 };
 
+export type PulseDialogueSeries = {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string | null;
+  ownerContributorId?: string | null;
+  profileVisible?: boolean;
+};
+
 export type PulseDialogueFormValue = {
   contributorId: string;
   dialogueFormat: DialogueFormat | '';
-  series: string;
+  series: string | null;
+  seriesSlug: string | null;
   bylineDesignationOverride: string;
   contributorDisclosure: string;
   editorNote: string;
@@ -118,6 +130,7 @@ export const EMPTY_PULSE_DIALOGUE_VALUE: PulseDialogueFormValue = {
   contributorId: '',
   dialogueFormat: '',
   series: '',
+  seriesSlug: '',
   bylineDesignationOverride: '',
   contributorDisclosure: '',
   editorNote: '',
@@ -145,7 +158,8 @@ export function normalizePulseDialogueFormValue(input: unknown): PulseDialogueFo
   return {
     contributorId: String(src.contributorId || src.contributor?.id || src.contributor?._id || '').trim(),
     dialogueFormat: DIALOGUE_FORMAT_OPTIONS.some((item) => item.value === dialogueFormat) ? dialogueFormat as DialogueFormat : '',
-    series: String(src.series || '').trim(),
+    series: src.series === null ? null : String(src.series || '').trim(),
+    seriesSlug: src.seriesSlug === null ? null : String(src.seriesSlug || '').trim(),
     bylineDesignationOverride: String(src.bylineDesignationOverride || '').trim(),
     contributorDisclosure: String(src.contributorDisclosure || '').trim(),
     editorNote: String(src.editorNote || '').trim(),
@@ -159,7 +173,14 @@ export function buildPulseDialoguePayload(value: PulseDialogueFormValue): PulseD
   const contributorId = value.contributorId.trim();
   if (contributorId) out.contributorId = contributorId;
   if (value.dialogueFormat) out.dialogueFormat = value.dialogueFormat;
-  for (const key of ['series', 'bylineDesignationOverride', 'contributorDisclosure', 'editorNote', 'contributorDisclaimer'] as const) {
+  if (contributorId && value.series === null && value.seriesSlug === null) {
+    out.series = null;
+    out.seriesSlug = null;
+  } else {
+    if (value.series) out.series = value.series;
+    if (value.seriesSlug) out.seriesSlug = value.seriesSlug;
+  }
+  for (const key of ['bylineDesignationOverride', 'contributorDisclosure', 'editorNote', 'contributorDisclaimer'] as const) {
     const text = String(value[key] || '').trim();
     if (text) out[key] = text;
   }
