@@ -1,4 +1,5 @@
 import { api, apiUrl, adminApi, adminUrl, getAuthToken } from './api';
+import { safeErrorMessage } from './error';
 
 function stripTrailingSlashes(s: string) {
   return (s || '').replace(/\/+$/, '');
@@ -45,13 +46,13 @@ export async function requestPasswordResetOtp(email: string): Promise<OtpRequest
     const res = await api.post(path, { email });
     const data = res.data || {};
     const success = data.success === true || data.ok === true;
-    const message = data.message || (success ? 'OTP sent to your email.' : 'Failed to send OTP email');
+    const message = success ? 'OTP sent to your email.' : safeErrorMessage({ body: data, status: res.status }, 'Failed to send OTP email');
     return { success, message, status: res.status, data };
   } catch (err: any) {
     const status = err?.response?.status;
     const data = err?.response?.data || {};
-    const message = data.message || 'Failed to send OTP email';
-    console.error('[OTP][api][request][error]', { status, data, error: err?.message });
+    const message = safeErrorMessage(err, 'Failed to send OTP email');
+    console.error('[OTP][api][request][error]', { status });
     return { success: false, message, status, data };
   }
 }

@@ -1,5 +1,6 @@
 import adminApi from '@/api/adminApi';
 import { adminUrl } from '@/lib/api';
+import { safeErrorMessage } from '@/lib/error';
 
 type UiNotifyError = { status?: number } & Error;
 
@@ -23,14 +24,7 @@ function readOptionalBoolean(value: unknown): boolean | null {
 
 function mapAdminActionError(err: any, fallback: string): UiNotifyError {
   const status: number | undefined = err?.response?.status;
-  const backendMsg = extractBackendMessage(err?.response?.data);
-
-  let message = backendMsg || err?.message || fallback;
-  if (status === 404) message = backendMsg || 'Backend route not found';
-  if (status === 403) message = backendMsg || 'Not allowed';
-  if (status === 400) message = backendMsg || fallback;
-  if (status === 503) message = 'Backend unavailable (Render restarting)';
-  if (typeof status === 'number' && status >= 500) message = backendMsg || 'Something went wrong. Please try again.';
+  const message = safeErrorMessage(err, fallback);
 
   const out: UiNotifyError = new Error(message) as UiNotifyError;
   out.status = status;
@@ -184,9 +178,7 @@ function logReporterContactsApi(input: {
   try {
     console.info('[reporter-contacts-ui-api]', {
       action: input.action,
-      url: input.url,
       method: input.method,
-      id: input.id ?? null,
       status: input.status ?? null,
       count: input.count ?? null,
     });
@@ -531,13 +523,7 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     if (import.meta.env.DEV) {
       try {
         console.info('[reporter-row-map]', {
-          raw: c,
-          mapped: mappedRow,
-          _id: rootUnderscoreId || null,
-          id: rootId || null,
-          contactId: resolvedContactId || null,
-          reporterId: String(c.reporterId ?? c.userId ?? contributorIdRaw ?? '').trim() || null,
-          email: email || null,
+          hasContactId: Boolean(resolvedContactId),
         });
       } catch {
         // ignore logging failures
@@ -554,10 +540,7 @@ async function fetchReporterContactsFromEndpoint(endpointPath: string, params?: 
     try {
       // eslint-disable-next-line no-console
       console.info('[reporter-contacts-ui] fetch', {
-        url: requestUrl,
-        raw: rawPayload,
         parsedCount: rows.length,
-        parsedStats,
       });
     } catch {
       // ignore logging failures
@@ -1283,7 +1266,7 @@ export async function bulkHideReporterContacts(ids: string[]) {
       try {
         console.info('[reporter-bulk-remove]', {
           requestUrl: url,
-          payload,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1297,7 +1280,7 @@ export async function bulkHideReporterContacts(ids: string[]) {
         console.info('[reporter-bulk-remove]', {
           requestUrl: url,
           responseStatus: res?.status ?? null,
-          payload,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1311,7 +1294,7 @@ export async function bulkHideReporterContacts(ids: string[]) {
         console.info('[reporter-bulk-remove]', {
           requestUrl: url,
           responseStatus: err?.response?.status ?? null,
-          payload,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1358,7 +1341,7 @@ export async function bulkRestoreReporterContacts(args: ReporterContactBulkMutat
       try {
         console.info('[reporter-bulk-restore]', {
           requestUrl: url,
-          payload,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1372,7 +1355,7 @@ export async function bulkRestoreReporterContacts(args: ReporterContactBulkMutat
         console.info('[reporter-bulk-restore]', {
           requestUrl: url,
           responseStatus: res?.status ?? null,
-          payload,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1386,8 +1369,7 @@ export async function bulkRestoreReporterContacts(args: ReporterContactBulkMutat
         console.info('[reporter-bulk-restore]', {
           requestUrl: url,
           responseStatus: err?.response?.status ?? null,
-          payload,
-          responseBody: err?.response?.data ?? null,
+          count: clean.length,
         });
       } catch {
         // ignore logging failures
@@ -1430,7 +1412,7 @@ export async function bulkDeleteReporterContacts(args: {
       try {
         console.info('[reporter-bulk-delete]', {
           requestUrl: url,
-          payload,
+          count: ids.length,
         });
       } catch {
         // ignore logging failures
@@ -1448,7 +1430,7 @@ export async function bulkDeleteReporterContacts(args: {
         console.info('[reporter-bulk-delete]', {
           requestUrl: url,
           responseStatus: res?.status ?? null,
-          payload,
+          count: ids.length,
         });
       } catch {
         // ignore logging failures
@@ -1480,8 +1462,7 @@ export async function bulkDeleteReporterContacts(args: {
         console.info('[reporter-bulk-delete]', {
           requestUrl: url,
           responseStatus: err?.response?.status ?? null,
-          payload,
-          responseBody: err?.response?.data ?? null,
+          count: ids.length,
         });
       } catch {
         // ignore logging failures

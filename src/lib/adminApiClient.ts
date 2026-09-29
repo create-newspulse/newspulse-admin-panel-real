@@ -75,6 +75,7 @@ async function refreshAdminSession(): Promise<string | null> {
       url: authRefreshUrl(),
       method: 'POST',
       withCredentials: true,
+      timeout: 10_000,
       headers: { Accept: 'application/json' },
       data: refreshToken ? { refreshToken } : undefined,
     }).then((response) => {
@@ -155,6 +156,10 @@ adminApiClient.interceptors.response.use(
 
     if (status === 401) {
       try { (error as any).refreshAttempted = !!config.__npRetriedAfterRefresh; } catch {}
+      if (config.__npRetriedAfterRefresh) {
+        clearStoredAdminAuth();
+        try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:logout')); } catch {}
+      }
     }
     if (status === 403) {
       try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('np:ownerkey-required')); } catch {}

@@ -1,5 +1,8 @@
 import React from 'react';
 import toast from 'react-hot-toast';
+import { useAuth } from '@/context/AuthContext';
+import { getEffectiveSpecialRights } from '@/lib/adminAccessControl';
+import Denied from '@/pages/Denied';
 import { ADMIN_API_BASE } from '@/lib/http/adminFetch';
 import {
   clearDpdpPrivacyTestRequests,
@@ -264,33 +267,16 @@ function getLatestCompletionEntry(activityHistory: DpdpActivityEntry[]): DpdpAct
   return null;
 }
 
-function readReviewDraft(id: string): FounderReviewDraft | null {
-  try {
-    const raw = window.localStorage.getItem(`${REVIEW_DRAFT_PREFIX}${id}`);
-    if (!raw) return null;
-    return JSON.parse(raw) as FounderReviewDraft;
-  } catch {
-    return null;
-  }
-}
-
-function writeReviewDraft(id: string, draft: FounderReviewDraft) {
-  try {
-    window.localStorage.setItem(`${REVIEW_DRAFT_PREFIX}${id}`, JSON.stringify(draft));
-  } catch {
-    // ignore localStorage failures
-  }
-}
-
-function clearReviewDraft(id: string) {
-  try {
-    window.localStorage.removeItem(`${REVIEW_DRAFT_PREFIX}${id}`);
-  } catch {
-    // ignore localStorage failures
-  }
-}
-
 export default function DpdpPrivacyRequestsPage() {
+  const { user, isAuthenticated } = useAuth();
+  if (!isAuthenticated || !getEffectiveSpecialRights(user).includes('can_manage_dpdp_privacy_requests')) {
+    return <Denied message="Access Denied. Founder permission is required." />;
+  }
+  return <PrivacyRequestsReview />;
+}
+
+function PrivacyRequestsReview() {
+  const reviewDrafts = React.useRef(new Map<string, FounderReviewDraft>());
   const [requests, setRequests] = React.useState<DpdpPrivacyRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = React.useState<DpdpPrivacyRequest | null>(null);
   const [statusFilter, setStatusFilter] = React.useState<VisibleStatusFilter>('Active');
@@ -303,6 +289,12 @@ export default function DpdpPrivacyRequestsPage() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [showActivity, setShowActivity] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      Object.keys(window.localStorage).filter(key => key.startsWith(REVIEW_DRAFT_PREFIX)).forEach(key => window.localStorage.removeItem(key));
+    } catch {}
+  }, []);
 
   const summary = React.useMemo(() => {
     return SUMMARY_CARD_STATUS_MAP.map((card) => ({
@@ -346,7 +338,7 @@ export default function DpdpPrivacyRequestsPage() {
     if (!selectedRequest) return;
     const id = requestKey(selectedRequest);
     if (!id) return;
-    writeReviewDraft(id, {
+    reviewDrafts.current.set(id, {
       adminNote,
       replyTemplate,
       reviewState,
@@ -365,7 +357,7 @@ export default function DpdpPrivacyRequestsPage() {
       const next = await listDpdpPrivacyRequests('All');
       setRequests(next);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load privacy requests.');
+      setError('Failed to load privacy requests.');
     } finally {
       setIsLoading(false);
     }
@@ -378,7 +370,7 @@ export default function DpdpPrivacyRequestsPage() {
   const hydrateRequest = React.useCallback((request: DpdpPrivacyRequest) => {
     const id = requestKey(request);
     const parsed = parseAdminNote(request.adminNote || '');
-    const draft = id ? readReviewDraft(id) : null;
+    const draft = id ? reviewDrafts.current.get(id) : null;
     setSelectedRequest(request);
     setAdminNote(draft?.adminNote ?? parsed.adminNote);
     setReviewState(draft?.reviewState ?? parsed.reviewState);
@@ -399,7 +391,7 @@ export default function DpdpPrivacyRequestsPage() {
       const detail = await getDpdpPrivacyRequest(id);
       hydrateRequest(detail);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to load privacy request details.');
+      toast.error('Failed to load privacy request details.');
     } finally {
       setIsDetailLoading(false);
     }
@@ -415,6 +407,10 @@ export default function DpdpPrivacyRequestsPage() {
 
   const persistStatusUpdate = async (status: DpdpRequestStatus, options?: { requiresNote?: boolean; requiresReviewCompletion?: boolean; confirmMessage?: string }) => {
     if (!selectedRequest) return;
+    if (selectedRequest.status === 'Pending Email Verification' && (status === 'In Review' || status === 'Completed')) {
+      toast.error('Email verification is required before reviewing or completing this request.');
+      return;
+    }
     const note = adminNote.trim();
     if (options?.requiresNote && !note) {
       toast.error('Admin note is required for this action.');
@@ -441,17 +437,17 @@ export default function DpdpPrivacyRequestsPage() {
 
     setIsSaving(true);
     try {
-      const payloadNote = composeAdminNote(adminNote, reviewState);
+      const payloadNote = composeAdminNote(adminNote, { ...reviewState, emailIdentityVerified: selectedRequest.status !== 'Pending Email Verification' && reviewState.emailIdentityVerified });
       const updated = status === 'Completed'
         ? await completeDpdpPrivacyRequest(id, payloadNote)
         : await updateDpdpPrivacyRequest(id, { status, adminNote: payloadNote });
-      clearReviewDraft(id);
+      reviewDrafts.current.delete(id);
       hydrateRequest(updated);
       setShowActivity(false);
       await loadRequests();
       toast.success(status === 'Completed' ? 'Privacy request marked completed.' : 'Privacy request updated.');
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to update privacy request.');
+      toast.error('Failed to update privacy request.');
     } finally {
       setIsSaving(false);
     }
@@ -478,7 +474,7 @@ export default function DpdpPrivacyRequestsPage() {
       await loadRequests();
       toast.success(message || 'Test privacy requests cleared.');
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to clear test privacy requests.');
+      toast.error('Failed to clear test privacy requests.');
     } finally {
       setIsClearingTestRequests(false);
     }
@@ -595,8 +591,8 @@ export default function DpdpPrivacyRequestsPage() {
               ) : filteredRequests.map((request) => (
                 <tr key={requestKey(request)} className="align-top hover:bg-slate-50">
                   <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{request.requestId || request.referenceId || '-'}</td>
-                  <td className="px-4 py-3 text-slate-700">{request.fullName || '-'}</td>
-                  <td className="px-4 py-3 text-slate-700">{request.email || '-'}</td>
+                  <td className="px-4 py-3 text-slate-700">{request.fullName ? `${request.fullName.slice(0, 1)}***` : '-'}</td>
+                  <td className="px-4 py-3 text-slate-700">{request.email ? `${request.email.slice(0, 1)}***` : '-'}</td>
                   <td className="px-4 py-3 text-slate-700">{request.requestType || '-'}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(request.status)}`}>
@@ -688,7 +684,8 @@ export default function DpdpPrivacyRequestsPage() {
                     <label className="mt-2 flex items-start gap-3 text-sm text-slate-700">
                       <input
                         type="checkbox"
-                        checked={reviewState.emailIdentityVerified}
+                        checked={selectedRequest.status !== 'Pending Email Verification' && reviewState.emailIdentityVerified}
+                        disabled={selectedRequest.status === 'Pending Email Verification'}
                         onChange={(event) => setReviewState((current) => ({ ...current, emailIdentityVerified: event.target.checked }))}
                         className="mt-1"
                       />
@@ -773,7 +770,7 @@ export default function DpdpPrivacyRequestsPage() {
               <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
                 <button
                   type="button"
-                  disabled={isSaving || isDetailLoading || selectedRequest.status === 'In Review'}
+                  disabled={isSaving || isDetailLoading || selectedRequest.status === 'In Review' || selectedRequest.status === 'Pending Email Verification'}
                   onClick={() => void persistStatusUpdate('In Review', { confirmMessage: 'Move this privacy request to In Review?' })}
                   className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -781,7 +778,7 @@ export default function DpdpPrivacyRequestsPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={isSaving || isDetailLoading}
+                  disabled={isSaving || isDetailLoading || selectedRequest.status === 'Pending Email Verification'}
                   onClick={() => void persistStatusUpdate('Completed', { requiresNote: true, requiresReviewCompletion: true, confirmMessage: 'Mark this privacy request as completed?' })}
                   className="rounded-md border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >

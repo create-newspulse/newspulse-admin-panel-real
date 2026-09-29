@@ -6,6 +6,10 @@ import { hasLikelyAdminSession } from '@/lib/api';
 import { ADMIN_API_BASE } from '@/lib/http/adminFetch';
 import { clearAdminEffectiveAccessCache } from '@/hooks/useAdminEffectiveAccess';
 import { clearAdminFeatureVisibilityCache } from '@/hooks/useAdminFeatureVisibility';
+import { useQueryClient } from '@tanstack/react-query';
+import { clearOwnerUnlockToken } from '@/lib/http';
+import { useOwnerKeyStore } from '@/lib/ownerKeyStore';
+import { useAuth as useLegacyAuth, useAuthZ } from '@/store/auth';
 
 type User = { id: string; _id?: string; email: string; name?: string; role?: string; avatar?: string; bio?: string; [key: string]: any };
 
@@ -45,6 +49,7 @@ export interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
@@ -77,6 +82,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const clearAuthSession = useCallback(() => {
+    queryClient.clear();
+    clearOwnerUnlockToken();
+    useOwnerKeyStore.getState().lock();
+    useLegacyAuth.getState().clear();
+    useAuthZ.getState().setUser(null);
+    useAuthZ.getState().setToken(null);
     clearAdminEffectiveAccessCache();
     clearAdminFeatureVisibilityCache();
     setAuthToken(null);
@@ -90,7 +101,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try { localStorage.removeItem('np_admin_access_token'); } catch {}
     try { localStorage.removeItem('np_token'); } catch {}
     try { localStorage.removeItem('adminToken'); } catch {}
-  }, []);
+    try {
+      Object.keys(localStorage).filter(key => key.startsWith('np:dpdp-founder-review:')).forEach(key => localStorage.removeItem(key));
+      Object.keys(sessionStorage).filter(key => key.startsWith('cr:') || key === 'np_admin_password_changed').forEach(key => sessionStorage.removeItem(key));
+    } catch {}
+  }, [queryClient]);
 
   // Dev-only logging to debug role-gating issues
   useEffect(() => {
@@ -113,7 +128,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('[Auth] login request', {
         baseURL: adminApi.defaults.baseURL,
         path: LOGIN_PATH,
-        email: trimmedEmail,
       });
     }
     try {
@@ -134,7 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         !!data.accessToken;
 
       if (!successFlag) {
-        if (import.meta.env.DEV) console.warn('[Auth] unexpected login response shape', data);
+        if (import.meta.env.DEV) console.warn('[Auth] unexpected login response shape');
         return false;
       }
 
@@ -170,11 +184,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Persist minimal auth info
       try {
-        const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: normalizedUser.email, role: '', ts: Date.now() };
+        const persistPayload = { ts: Date.now() };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
-        if (import.meta.env.DEV) console.debug('[Auth] persistence write', persistPayload);
+        if (import.meta.env.DEV) console.debug('[Auth] persistence write');
       } catch { /* ignore quota errors */ }
-      if (import.meta.env.DEV) console.log('[Auth] login success', data);
+      if (import.meta.env.DEV) console.log('[Auth] login success');
 
       // After login, immediately refetch /me to get the authoritative role/profile.
       // This must work even if we're currently on /login (cookie-based auth).
@@ -192,7 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsSessionRejected(false);
           setUser(refreshed);
           try {
-            const persistPayload = { token: tokenVal ? String(tokenVal).replace(/^Bearer\s+/i, '') : null, refreshToken: refreshTokenVal ? String(refreshTokenVal).replace(/^Bearer\s+/i, '') : null, email: refreshed.email, role: refreshed.role, ts: Date.now() };
+            const persistPayload = { ts: Date.now() };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
           } catch {}
         } else {
@@ -211,11 +225,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         err?.isOffline === true ||
         err?.code === 'BACKEND_OFFLINE' ||
         (!err?.response && !status && (/network\s*error/i.test(String(err?.message || '')) || /err_connection_refused/i.test(String(err?.message || ''))));
-      const msg =
-        err?.response?.data?.message
-        || err?.response?.data?.error
-        || err?.response?.data?.details
-        || (offline ? 'Backend offline' : (status === 401 ? 'Invalid email or password' : 'Login failed. Please try again.'));
+      const msg = offline ? 'Backend offline' : status === 429
+        ? 'Too many login attempts. Please try again later.'
+        : 'Login failed. Please try again.';
       // Invalid credentials -> keep UX calm and let login page show a friendly message.
       if (status === 401) {
         if (import.meta.env.DEV) {
@@ -227,17 +239,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (import.meta.env.DEV) {
         console.error('[Auth] Login error', {
           status,
-          data: err?.response?.data,
-          message: err?.message,
-          surfacedMessage: msg,
           baseURL: adminApi.defaults.baseURL,
           path: LOGIN_PATH,
         });
       }
 
-      // Server errors should surface the real backend message to the UI.
       if (typeof status === 'number' && status >= 500) {
-        const e = new Error(msg || 'Server error. Check backend logs.');
+        const e = new Error(msg);
         (e as any).status = status;
         throw e;
       }
@@ -252,6 +260,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw e;
     } finally {
       setIsLoading(false);
+      setIsSessionResolved(true);
     }
   }, [clearAuthSession]);
 
@@ -306,6 +315,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setAuthToken(normalized);
             try { localStorage.setItem('admin_token', normalized); } catch {}
           }
+          if (!localStorage.getItem('admin_refresh_token') && parsed.refreshToken) {
+            try { localStorage.setItem('admin_refresh_token', String(parsed.refreshToken).replace(/^Bearer\s+/i, '')); } catch {}
+          }
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ts: parsed.ts || Date.now() })); } catch {}
           // Only seed a user stub if we have a real session signal (token or cookie-session marker).
           // This prevents ProtectedRoute from rendering protected pages with no auth.
           const hasTokenNow = !!localStorage.getItem('admin_token');
@@ -315,8 +328,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       }
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed', e);
+    } catch {
+      if (import.meta.env.DEV) console.warn('[Auth] localStorage hydration failed');
     } finally {
       setIsReady(true);
       if (import.meta.env.DEV) console.debug('[Auth] hydration complete', {
@@ -411,11 +424,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsSessionRejected(false);
         setUser(restored);
         try {
-          const persistPayload = { token: token, email: restored.email, role: restored.role, ts: Date.now() };
+          const persistPayload = { ts: Date.now() };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(persistPayload));
           if (import.meta.env.DEV) console.debug('[Auth] restore persistence write', {
             tokenPresent: Boolean(token),
-            email: restored.email,
             role: restored.role,
           });
         } catch {}
@@ -437,7 +449,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else if (import.meta.env.DEV && st !== 404) {
         clearAuthSession();
         outcome = st === 500 ? 'server-error' : 'request-failure';
-        console.warn('[Auth] session restore failed', st, e?.message);
+        console.warn('[Auth] session restore failed', { status: st });
       } else {
         clearAuthSession();
         outcome = 'request-failure';

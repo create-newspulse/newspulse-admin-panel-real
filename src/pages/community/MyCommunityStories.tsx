@@ -366,7 +366,7 @@ const MyCommunityStoriesPage: React.FC = () => {
 
       setStories(mapped);
     } catch (err: any) {
-      console.error('Failed to load community stories', err);
+      console.error('Failed to load community stories', { status: err?.response?.status });
       setError('Failed to load community stories.');
       setStories([]);
     } finally {

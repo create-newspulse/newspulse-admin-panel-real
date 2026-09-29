@@ -227,14 +227,10 @@ export function logAdsInquiriesDiagnostic(action: string, detail: {
     // eslint-disable-next-line no-console
     console.warn('[AdsManager:api]', {
       action,
-      adminApiTarget: getAdsInquiriesAdminApiTarget(),
-      requestUrl: detail.url,
       requestMethod: detail.method,
       responseStatus: detail.status,
       code: detail.code,
       source: detail.source,
-      message: detail.message,
-      raw: detail.raw,
     });
   } catch {
     // ignore

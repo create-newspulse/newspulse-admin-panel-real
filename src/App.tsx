@@ -334,7 +334,7 @@ function App() {
               <Route path="/broadcast-center" element={<Navigate to="/admin/broadcast-center" replace />} />
 
               {/* Community Reporter Queue & Detail */}
-              <Route path="/admin/community-reporter" element={<ProtectedRoute><CommunityReporterPage /></ProtectedRoute>} />
+              <Route path="/admin/community-reporter" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterPage /></AdminModuleRoute>} />
               {/* New canonical community reporter queue route (founder/admin view) */}
               <Route path="/community/reporter" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterPage /></AdminModuleRoute>} />
               <Route path="/admin/community-reporter-queue" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterPage /></AdminModuleRoute>} />
@@ -346,7 +346,7 @@ function App() {
               <Route path="/community/youth-pulse-queue" element={<Navigate to="/community/reporter" replace />} />
               <Route path="/community/youth-pulse" element={<Navigate to="/community/reporter" replace />} />
               <Route path="/community/youth-pulse-contributors" element={<ProtectedRoute><LockCheckWrapper><YouthPulseContributorDirectory /></LockCheckWrapper></ProtectedRoute>} />
-              <Route path="/admin/community-reporter/:id" element={<ProtectedRoute><CommunityReporterDetailPage /></ProtectedRoute>} />
+              <Route path="/admin/community-reporter/:id" element={<AdminModuleRoute moduleKey="community_reporter_queue"><CommunityReporterDetailPage /></AdminModuleRoute>} />
               {/* Community Reporter – Submit Story (admin + public alias) */}
               <Route path="/admin/community/submit" element={<ProtectedRoute><LockCheckWrapper><CommunitySubmitRedirect /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/community/submit" element={<ProtectedRoute><LockCheckWrapper><CommunitySubmitRedirect /></LockCheckWrapper></ProtectedRoute>} />
@@ -358,9 +358,9 @@ function App() {
               {/* Legacy path-param variant retained for backward compatibility: redirect to query style */}
               <Route path="/community/reporter-stories/:reporterKey" element={<Navigate replace to="/community/reporter-stories" />} />
               {/* Reporter Contact Directory (founder/admin only) */}
-              <Route path="/community/reporter-contacts" element={<ProtectedRoute><LockCheckWrapper><ReporterContactDirectory /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/community/reporter-contacts" element={<RequireRole allow={['founder', 'admin']}><LockCheckWrapper><ReporterContactDirectory /></LockCheckWrapper></RequireRole>} />
               {/* Journalist Applications (founder/admin only) */}
-              <Route path="/community/journalist-applications" element={<ProtectedRoute><LockCheckWrapper><JournalistApplications /></LockCheckWrapper></ProtectedRoute>} />
+              <Route path="/community/journalist-applications" element={<RequireRole allow={['founder', 'admin']}><LockCheckWrapper><JournalistApplications /></LockCheckWrapper></RequireRole>} />
               {/* Reporter Portal (admin + public alias) */}
               <Route path="/admin/community/portal" element={<AdminModuleRoute moduleKey="reporter_portal_admin"><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/admin/reporter-portal-admin" element={<AdminModuleRoute moduleKey="reporter_portal_admin"><LockCheckWrapper><ReporterPortal /></LockCheckWrapper></AdminModuleRoute>} />

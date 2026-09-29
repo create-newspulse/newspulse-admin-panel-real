@@ -67,11 +67,7 @@ export default function SimpleLogin() {
           // auth layer can't detect them unless we set a localStorage marker.
           // Persist a minimal marker to unlock hasLikelyAdminSession().
           try {
-            const data = await res.clone().json().catch(() => null);
-            const u = (data && (data.user || data.data?.user || data.data)) || data;
-            const email = u?.email ? String(u.email) : undefined;
-            const role = u?.role ? String(u.role) : undefined;
-            localStorage.setItem('newsPulseAdminAuth', JSON.stringify({ ts: Date.now(), email, role }));
+            localStorage.setItem('newsPulseAdminAuth', JSON.stringify({ ts: Date.now() }));
           } catch {
             // If storage fails, still attempt restoreSession.
           }
@@ -98,7 +94,7 @@ export default function SimpleLogin() {
     e.preventDefault();
     setLoading(true);
     if (import.meta.env.DEV) {
-      console.debug('🔐 SimpleLogin submit', { email });
+      console.debug('🔐 SimpleLogin submit');
     }
     try {
       const ok = await login(email, password);
@@ -118,7 +114,6 @@ export default function SimpleLogin() {
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
       const status = err?.status ?? err?.response?.status;
-      const backendMsg = err?.message || err?.response?.data?.message || err?.response?.data?.error;
 
       // Treat 401 as a normal invalid-credentials outcome (no scary console noise).
       if (status === 401) {
@@ -126,7 +121,7 @@ export default function SimpleLogin() {
         return;
       }
 
-      if (import.meta.env.DEV) console.error('❌ Login exception:', err);
+      if (import.meta.env.DEV) console.error('❌ Login exception:', { status });
 
       const offline =
         err?.isOffline === true ||
@@ -134,17 +129,13 @@ export default function SimpleLogin() {
         (!err?.response && !status && (/network\s*error/i.test(String(err?.message || '')) || /err_connection_refused/i.test(String(err?.message || ''))));
 
       if (typeof status === 'number' && status >= 500) {
-        toast.error(
-          backendMsg
-            ? `Server error. Check backend logs. ${backendMsg}`
-            : 'Server error. Check backend logs.'
-        );
+        toast.error('Login failed. Please try again later.');
         return;
       }
 
       // Fail-safe: only show toast for network errors if we truly cannot reach backend
       if (offline) setBackendOffline(true);
-      toast.error(offline ? 'Backend offline. Start backend on :5000.' : (backendMsg || 'Network error - could not reach login API'));
+      toast.error(offline ? 'Backend offline. Start backend on :5000.' : status === 429 ? 'Too many login attempts. Please try again later.' : 'Login failed. Please try again.');
     } finally { setLoading(false); }
   };
 

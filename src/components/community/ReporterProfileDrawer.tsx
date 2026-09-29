@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminApi from '@/api/adminApi';
-import { adminUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { updateReporterStatus } from '@/lib/api/communityAdmin';
 import {
@@ -217,38 +216,6 @@ export default function ReporterProfileDrawer({
   useEffect(() => {
     if (!open || !profile || !isLocalhostRuntime()) return;
     console.info('[reporter-drawer]', {
-      reporterId: profile.reporterId,
-      rawProfile: profile.rawProfile,
-      normalizedProfile: profile,
-      resolvedHeader: {
-        displayName: profile.displayName,
-        status: profile.statusLabel,
-        reporterType: profile.reporterTypeLabel,
-        verification: profile.verificationLabel,
-        email: profile.email || '—',
-        phone: profile.phone || '—',
-        location: profile.locationSummary,
-      },
-      resolvedContact: {
-        email: profile.contact.email || '—',
-        phone: profile.contact.phone || '—',
-        whatsapp: profile.contact.whatsapp || '—',
-        portalAuth: profile.contact.portalAuthLabel,
-        authProvider: profile.contact.authProvider || '—',
-        lastLoginAt: profile.contact.lastLoginAt || '—',
-      },
-      resolvedCoverage: {
-        beats: profile.beats,
-        area: profile.area || '—',
-        areaType: profile.areaType || '—',
-        city: profile.city || '—',
-        district: profile.district || '—',
-        state: profile.state || '—',
-        country: profile.country || '—',
-        coverageScope: profile.coverageScope || '—',
-        coverageLanguage: profile.coverageLanguage,
-        specialization: profile.specialization || '—',
-      },
       storiesCount: storyRows.length,
       notesCount: hasValue(profile.notes) ? 1 : 0,
       tasksCount: taskItems.length,
@@ -258,26 +225,8 @@ export default function ReporterProfileDrawer({
 
   useEffect(() => {
     if (!open || !profile || !reporter || !isLocalhostRuntime()) return;
-    const raw = asRecord(profile.rawProfile);
-    const phoneCandidates = buildPrivateAdminPhoneCandidates(reporter, raw);
     console.info('[reporter-contact-ui-phone]', {
-      reporterId: profile.reporterId,
-      email: profile.contact.email || profile.email || null,
-      listRow: reporter,
-      profilePayload: profile.rawProfile,
-      candidatePhoneFields: phoneCandidates,
-      phone: raw.phone ?? reporter.phone ?? null,
-      rawPhone: raw.rawPhone ?? raw.phoneRaw ?? reporter.phoneRaw ?? null,
-      phoneE164: raw.phoneE164 ?? raw.phone?.e164 ?? null,
-      phoneValue: raw.phone?.value ?? raw.phone?.raw ?? null,
-      phoneNumber: raw.phoneNumber ?? raw.contactPhoneNumber ?? raw.phone?.number ?? null,
-      phoneFull: raw.phoneFull ?? raw.contactPhoneFull ?? raw.unmaskedPhone ?? raw.originalPhone ?? raw.phone?.full ?? null,
-      phoneCountryCode: raw.phoneCountryCode ?? raw.countryCode ?? raw.phone?.countryCode ?? null,
-      mobile: raw.mobile ?? raw.mobileNumber ?? raw.reporterMobile ?? raw.contact?.mobile ?? raw.profile?.mobile ?? null,
-      contactNumber: raw.contactNumber ?? raw.contact?.phoneNumber ?? null,
-      maskedPhone: raw.maskedPhone ?? raw.phoneMasked ?? raw.safePhone ?? raw.displayPhone ?? null,
-      phonePreview: raw.phonePreview ?? raw.summaryPhone ?? raw.previewPhone ?? raw.contact?.phonePreview ?? raw.profile?.phonePreview ?? null,
-      resolvedPhone: profile.contact.phone || 'Not provided',
+      hasPhone: Boolean(profile.contact.phone),
     });
   }, [open, profile, reporter]);
 
@@ -969,22 +918,6 @@ function buildMissingFieldItems(input: {
   return items;
 }
 
-function buildPrivateAdminPhoneCandidates(reporter: ReporterContact, raw: Record<string, any> = {}) {
-  const directPhoneCandidates = PHONE_DIRECT_PRIORITY_GROUPS.flatMap((paths) => collectCandidateStrings(reporter, raw, [...paths]));
-  const previewPhoneCandidates = collectCandidateStrings(reporter, raw, [
-    'maskedPhone',
-    'phoneMasked',
-    'safePhone',
-    'displayPhone',
-    'phonePreview',
-    'summaryPhone',
-    'previewPhone',
-    'contact.phonePreview',
-    'profile.phonePreview',
-  ]);
-  return [...directPhoneCandidates, ...previewPhoneCandidates.filter((value) => !directPhoneCandidates.includes(value))];
-}
-
 function buildPrivateAdminWhatsappCandidates(reporter: ReporterContact, raw: Record<string, any> = {}) {
   return collectCandidateStrings(reporter, raw, [
     'whatsapp',
@@ -1224,9 +1157,7 @@ async function loadReporterContactDetail(reporter: ReporterContact | null) {
       try {
         console.info('[reporter-contacts-ui-api]', {
           action: 'detail',
-          url: adminUrl(path),
           method: 'GET',
-          id,
           status: res?.status ?? null,
           count: payload ? 1 : 0,
         });
@@ -1240,9 +1171,7 @@ async function loadReporterContactDetail(reporter: ReporterContact | null) {
       try {
         console.info('[reporter-contacts-ui-api]', {
           action: 'detail',
-          url: adminUrl(path),
           method: 'GET',
-          id,
           status: lastError?.response?.status ?? null,
           count: null,
         });

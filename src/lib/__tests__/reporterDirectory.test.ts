@@ -17,6 +17,19 @@ vi.mock('@/lib/api', () => ({
 import { bulkDeleteReporterContacts } from '../api/reporterDirectory';
 
 describe('bulkDeleteReporterContacts', () => {
+  it('does not log selected identities or rejected backend payloads', async () => {
+    const marker = 'synthetic-private-marker';
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      postMock.mockRejectedValueOnce({ response: { status: 500, data: { message: marker } } });
+      await bulkDeleteReporterContacts({ ids: [marker], emails: [marker], confirmPermanentDelete: true }).catch(() => undefined);
+      expect(info.mock.calls.length).toBeGreaterThan(0);
+      expect(JSON.stringify(info.mock.calls).includes(marker)).toBe(false);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   beforeEach(() => {
     postMock.mockReset();
   });

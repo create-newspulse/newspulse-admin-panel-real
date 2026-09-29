@@ -372,7 +372,6 @@ export default function ReporterContactDirectory() {
 
     if (isLocalhostRuntime()) {
       console.info('[ReporterContactDirectory] cleared stale URL search filter', {
-        staleQuery: urlQuery,
         backendRowCount: reporters.length,
       });
     }
@@ -441,9 +440,7 @@ export default function ReporterContactDirectory() {
 
     if (isLocalhostRuntime()) {
       console.info(`[reporter-bulk-${action}]`, {
-        selectedRows,
-        ids,
-        payload,
+        count: ids.length,
       });
     }
 
@@ -467,22 +464,16 @@ export default function ReporterContactDirectory() {
 
       if (isLocalhostRuntime()) {
         console.info('[ReporterContactDirectory] rebuild result', {
-          requestUrl: result.requestUrl || '',
           statusCode: result.statusCode ?? null,
-          responseBody: result.responseBody ?? null,
-          endpointUsed: result.endpointUsed || '',
           postRebuildActiveCount: snapshot.active.rows?.length ?? snapshot.active.items?.length ?? 0,
           postRebuildRemovedCount: snapshot.removed.rows?.length ?? snapshot.removed.items?.length ?? 0,
-          postRebuildRequestUrl: snapshot.current.requestTrace?.requestUrl || '',
         });
       }
     },
     onError: (error: any) => {
       if (isLocalhostRuntime()) {
         console.info('[ReporterContactDirectory] rebuild failed', {
-          requestUrl: error?.requestUrl || '',
           statusCode: error?.statusCode ?? error?.status ?? null,
-          responseBody: error?.responseBody ?? error?.response?.data ?? null,
         });
       }
       toast.error(error?.message || 'Failed to rebuild directory');
@@ -589,22 +580,15 @@ export default function ReporterContactDirectory() {
       view: directoryView,
       activeCount,
       removedCount,
-      stats: summary,
       itemCount: currentItemCount,
       visibleCount: sortedRows.length,
-      requestUrl: requestTrace.requestUrl || '',
-      queryParams: requestTrace.queryParams || {},
-      viewStats: returnedStats ?? null,
-      activeFilters,
     });
   }, [activeCount, activeFilters, currentItemCount, directoryView, removedCount, requestTrace, returnedStats, sortedRows.length, summary]);
 
   useEffect(() => {
     if (!isLocalhostRuntime() || !latestRebuildResult) return;
     console.info('[ReporterContactDirectory] latest rebuild summary', {
-      rebuildApiUrl: latestRebuildResult.requestUrl || '',
       rebuildStatusCode: latestRebuildResult.statusCode ?? null,
-      rebuildResponseBody: latestRebuildResult.responseBody ?? null,
       refetchedRowCount: requestTrace?.responseRowCount ?? reporters.length,
     });
   }, [latestRebuildResult, reporters.length, requestTrace?.responseRowCount]);
@@ -643,10 +627,7 @@ export default function ReporterContactDirectory() {
       else next.add(id);
       if (isLocalhostRuntime() && directoryView === 'active') {
         console.info('[reporter-active-selection]', {
-          rawRow: row,
-          normalizedRow,
-          contactId: id,
-          selectedIds: Array.from(next),
+          selectedCount: next.size,
         });
       }
       return next;
@@ -660,10 +641,7 @@ export default function ReporterContactDirectory() {
       const next = new Set(selectableRows.map((row) => row.contactId));
       if (isLocalhostRuntime() && directoryView === 'active') {
         console.info('[reporter-active-selection]', {
-          rawRow: null,
-          normalizedRow: selectableRows,
-          contactId: null,
-          selectedIds: Array.from(next),
+          selectedCount: next.size,
         });
       }
       return next;

@@ -105,8 +105,9 @@ function normalizeBackendAccess(raw: unknown, user: any, modulePolicy: AdminModu
   const addEntry = (moduleKey: AdminModuleKey, entry: any) => {
     if (!ADMIN_MODULES.some((item) => item.key === moduleKey)) return;
     const policyState = normalizePolicyState(entry?.policyState ?? entry?.globalPolicy ?? entry?.globalState ?? entry?.policy) || modulePolicy[moduleKey]?.state || DEFAULT_ADMIN_MODULE_POLICY[moduleKey]?.state || 'founder_only';
-    const reasonCode = normalizeReasonCode(entry?.reasonCode ?? entry?.reason) || (entry?.allowed === false ? resolveAdminModuleAccess(user, moduleKey, { modulePolicy }).reasonCode : 'ALLOWED');
-    const allowed = entry?.allowed === true || reasonCode === 'ALLOWED';
+    const candidateReason = normalizeReasonCode(entry?.reasonCode ?? entry?.reason) || (entry?.allowed === false ? resolveAdminModuleAccess(user, moduleKey, { modulePolicy }).reasonCode : 'ALLOWED');
+    const reasonCode = entry?.allowed === false && candidateReason === 'ALLOWED' ? 'STAFF_ACCESS_DISABLED' : candidateReason;
+    const allowed = entry?.allowed !== false && (entry?.allowed === true || reasonCode === 'ALLOWED');
     const visible = entry?.visible !== false && policyState !== 'hidden';
     next[moduleKey] = {
       moduleKey,

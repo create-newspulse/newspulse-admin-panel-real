@@ -54,6 +54,14 @@ afterEach(() => {
 });
 
 describe('useAdminEffectiveAccess', () => {
+  it.each([undefined, 'ALLOWED'])('never overrides an explicit backend denial with reason %s', async reasonCode => {
+    const payload = accessPayload(false);
+    (payload.access.effectiveModuleAccess.addNews as any).reasonCode = reasonCode;
+    mocks.api.mockResolvedValueOnce(payload);
+    render(<AccessProbe user={{ id: 'synthetic-staff', role: 'admin', moduleAccess: ['add_news'] }} />);
+    await waitFor(() => expect(screen.getByTestId('add-news')).toHaveTextContent(/^locked:/));
+  });
+
   it('loads current-user effective access from /access/me and normalizes canonical module keys', async () => {
     mocks.api.mockResolvedValueOnce(accessPayload(true));
 

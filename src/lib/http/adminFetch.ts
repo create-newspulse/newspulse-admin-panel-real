@@ -1,4 +1,5 @@
 import { getAuthToken, hasLikelyAdminSession } from '@/lib/api';
+import { safeErrorMessage } from '@/lib/error';
 
 function stripTrailingSlashes(s: string): string {
   return (s || '').replace(/\/+$/, '');
@@ -187,17 +188,6 @@ async function readBody(res: Response): Promise<unknown> {
   }
 }
 
-function errorMessage(body: unknown, fallback: string): string {
-  if (!body) return fallback;
-  if (typeof body === 'string') return body;
-  if (typeof body === 'object') {
-    const anyBody: any = body as any;
-    const msg = anyBody?.message || anyBody?.error || anyBody?.details;
-    if (typeof msg === 'string' && msg.trim()) return msg;
-  }
-  return fallback;
-}
-
 export type AdminFetchOptions = RequestInit & {
   json?: unknown;
 };
@@ -291,8 +281,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
   const token = getAuthToken();
   if (import.meta.env.DEV) {
     console.log('[adminFetch]', {
-      path,
-      url,
+      method: init.method || 'GET',
       hasToken: !!token,
       hasAuthHeader: headers.has('Authorization'),
     });
@@ -312,7 +301,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     const now = Date.now();
     if (now - last401Warn > WARN_THROTTLE_MS) {
       last401Warn = now;
-      console.warn('[adminFetch] Missing token for', path);
+      console.warn('[adminFetch] Missing token');
     }
   }
 
@@ -342,13 +331,8 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
       const method = (init?.method || 'GET').toString().toUpperCase();
       console.error('[adminFetch] fetch failed', {
         method,
-        path,
-        normalizedPath,
-        url,
-        base: BASE,
         baseIsAbsolute: BASE_IS_ABSOLUTE_ORIGIN,
         forceSameOriginProxy,
-        message: e?.message,
       });
     } catch {}
 
@@ -356,13 +340,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     notifyBackendOfflineOnce();
     if (import.meta.env.DEV) {
       try {
-        const origin = typeof window !== 'undefined' ? window.location.origin : '(no-window)';
-        console.warn('[adminFetch] Network error', {
-          path,
-          url,
-          origin,
-          message: e?.message,
-        });
+        console.warn('[adminFetch] Network error');
       } catch {}
     }
     throw new AdminApiError(
@@ -437,11 +415,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
 
     if (res.status === 401 && import.meta.env.DEV) {
       try {
-        const ctype = res.headers.get('content-type') || '';
-        const bodyPreview = ctype.includes('application/json')
-          ? await res.clone().json().catch(() => null)
-          : await res.clone().text().catch(() => '');
-        console.warn('[adminFetch] 401 Unauthorized', { path, url, shouldLogout, body: bodyPreview });
+        console.warn('[adminFetch] 401 Unauthorized', { shouldLogout });
       } catch {}
     }
 
@@ -449,6 +423,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
       authBlockedUntil = Date.now() + AUTH_BLOCK_MS;
       try {
         localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_refresh_token');
         localStorage.removeItem('newsPulseAdminAuth');
         // legacy cleanup
         localStorage.removeItem('adminToken');
@@ -460,7 +435,7 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     }
     if (res.status === 404 && import.meta.env.DEV) {
       try {
-        console.warn('[adminFetch] 404 Not Found', { path, url });
+        console.warn('[adminFetch] 404 Not Found');
       } catch {}
     }
     if (res.status === 403 && typeof window !== 'undefined') {
@@ -480,7 +455,7 @@ export async function adminJson<T = any>(path: string, init: AdminFetchOptions =
 
   if (!res.ok) {
     const body = await readBody(res);
-    const msg = errorMessage(body, `HTTP ${res.status} ${res.statusText}`);
+    const msg = safeErrorMessage({ status: res.status, body }, `Request failed (HTTP ${res.status}). Please try again.`);
     const p = adminApiPath(path);
     const errUrl = /^https?:\/\//i.test(p) ? p : `${BASE}${p}`;
     const bodyCode = body && typeof body === 'object' ? String((body as any)?.code || '').trim() : '';

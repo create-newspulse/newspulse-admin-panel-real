@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { safeErrorMessage } from '@/lib/error';
 import { requestPasswordResetOtp, verifyPasswordOtp, resetPasswordWithOtp, resetPasswordWithToken, type OtpRequestResult } from '@/lib/adminApi';
 import { toast } from 'sonner';
 import PasswordStrength from './PasswordStrength';
@@ -14,30 +15,36 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
   const [resetToken, setResetToken] = useState('');
   const emailValid = useMemo(() => /.+@.+\..+/.test(email.trim()), [email]);
 
+  useEffect(() => {
+    if (open) return;
+    setStep(1);
+    setEmail('');
+    setOtp('');
+    setPw('');
+    setPw2('');
+    setResetToken('');
+    setShowPw(false);
+  }, [open]);
+
   if (!open) return null;
 
   const requestOtp = async () => {
     if (!emailValid || loading) return;
-    console.log('[OTP][request] Sending OTP for', email);
+    console.log('[OTP][request] Sending OTP');
     setLoading(true);
     try {
       const result: OtpRequestResult = await requestPasswordResetOtp(email);
-      console.log('[OTP][request][result]', result);
+      console.log('[OTP][request][result]', { success: result.success });
       if (result.success) {
-        toast.success(result.message || 'OTP sent to your email.');
-        const devCode = result.data?.devCode;
-        if (devCode) {
-          setOtp(String(devCode));
-          toast.message('Dev OTP (local only)', { description: String(devCode) });
-        }
+        toast.success('OTP sent to your email.');
         setStep(2);
       } else {
-        toast.error(result.message || 'Failed to send OTP email');
+        toast.error(safeErrorMessage(result, 'Failed to send OTP email'));
         // Do NOT advance step on failure
       }
     } catch (e: any) {
-      console.error('[OTP][error][request][catch]', { error: e?.message, stack: e?.stack });
-      toast.error(e?.message || 'Failed to send OTP email');
+      console.error('[OTP][error][request][catch]', { status: e?.response?.status });
+      toast.error(safeErrorMessage(e, 'Failed to send OTP email'));
     } finally {
       setLoading(false);
     }
@@ -45,17 +52,17 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
 
   const verifyOtp = async () => {
     if (!otp || loading) return;
-    console.log('[OTP][verify] email=', email, 'otp=', otp);
+    console.log('[OTP][verify]');
     setLoading(true);
     try {
       const data: any = await verifyPasswordOtp(email, otp);
-      console.log('[OTP][verify][response]', data);
+      console.log('[OTP][verify][response]');
       if (data?.resetToken) setResetToken(String(data.resetToken));
       toast.success('OTP verified');
       setStep(3);
     } catch (e: any) {
-      console.error('[OTP][error][verify]', e);
-      toast.error(e?.response?.data?.message || 'Invalid OTP');
+      console.error('[OTP][error][verify]', { status: e?.response?.status });
+      toast.error(safeErrorMessage(e, 'Invalid OTP'));
     } finally {
       setLoading(false);
     }
@@ -63,7 +70,7 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
 
   const resetPw = async () => {
     if (loading) return;
-    console.log('[OTP][reset] email=', email, 'using', resetToken ? 'resetToken' : 'otp');
+    console.log('[OTP][reset]');
     setLoading(true);
     try {
       if (pw !== pw2) { toast.error('Passwords do not match'); return; }
@@ -75,8 +82,8 @@ export default function OtpModal({ open, onClose }:{ open:boolean; onClose:()=>v
       toast.success('Password updated');
       onClose();
     } catch (e: any) {
-      console.error('[OTP][error][reset]', e);
-      toast.error(e?.response?.data?.message || 'Reset failed');
+      console.error('[OTP][error][reset]', { status: e?.response?.status });
+      toast.error(safeErrorMessage(e, 'Reset failed'));
     } finally {
       setLoading(false);
     }

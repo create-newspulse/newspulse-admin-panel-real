@@ -122,7 +122,7 @@ function isAdminArticleDebugEnabled(): boolean {
 
 function logAdminArticleRequest(label: string, payload: Record<string, any>): void {
   if (!isAdminArticleDebugEnabled()) return;
-  console.log(`[articles.api] ${label}`, payload);
+  console.log(`[articles.api] ${label}`, { payloadKeys: Object.keys(payload.payload || {}) });
 }
 
 function normalizeArticleLanguage<T>(input: T): T {

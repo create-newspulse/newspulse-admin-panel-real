@@ -27,12 +27,8 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
   const { isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession } = useAuth();
   const requestedRestoreRef = useRef(false);
 
-  // Per spec: only protect /admin/* routes.
-  const isAdminArea = (location.pathname || '').startsWith('/admin');
-
   // If authenticated but missing role (partial hydrate), try a restore once.
   useEffect(() => {
-    if (!isAdminArea) return;
     if (!isReady || isRestoring || isLoading) return;
     if (isAuthenticated && user && !user.role && !requestedRestoreRef.current) {
       requestedRestoreRef.current = true;
@@ -40,11 +36,7 @@ export function RequireRole({ allow, children }: PropsWithChildren<{ allow: Role
         restoreSession();
       } catch {}
     }
-  }, [isAdminArea, isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession]);
-
-  if (!isAdminArea) {
-    return <>{children}</>;
-  }
+  }, [isAuthenticated, user, isReady, isRestoring, isLoading, restoreSession]);
 
   if (!isReady || isRestoring) {
     return <AdminBootstrapLoader />;

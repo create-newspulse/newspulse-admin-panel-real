@@ -163,4 +163,26 @@ describe('adminApiClient authentication', () => {
     expect(mocks.refreshRequest).not.toHaveBeenCalled();
     expect(mocks.setAuthToken).not.toHaveBeenCalledWith(null);
   });
+
+  it('clears a revoked session when the single retried request is also rejected', async () => {
+    mocks.getAuthToken.mockReturnValue('synthetic-expired');
+    localStorage.setItem('admin_refresh_token', 'synthetic-refresh');
+    localStorage.setItem('newsPulseAdminAuth', JSON.stringify({ ts: Date.now() }));
+    const logoutListener = vi.fn();
+    window.addEventListener('np:logout', logoutListener);
+    try {
+      mocks.dispatch.mockRejectedValue(axiosError(401));
+      mocks.refreshRequest.mockResolvedValueOnce({ data: { accessToken: 'synthetic-renewed' } });
+      await expect(adminApiClient.get('seo/audit/history')).rejects.toMatchObject({ response: { status: 401 } });
+      expect(mocks.refreshRequest).toHaveBeenCalledTimes(1);
+      expect(mocks.refreshRequest).toHaveBeenCalledWith(expect.objectContaining({ timeout: 10_000 }));
+      expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+      expect(mocks.setAuthToken).toHaveBeenLastCalledWith(null);
+      expect(localStorage.getItem('admin_refresh_token')).toBeNull();
+      expect(localStorage.getItem('newsPulseAdminAuth')).toBeNull();
+      expect(logoutListener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('np:logout', logoutListener);
+    }
+  });
 });

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { RequireRole } from '@/routes/guards';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AdminModuleRoute from '@/components/AdminModuleRoute';
 
@@ -56,6 +57,45 @@ afterEach(() => {
 });
 
 describe('AdminModuleRoute auth/access readiness', () => {
+  it.each(['founder', 'admin', 'editor'])('enforces contact-directory roles on Community paths for %s', role => {
+    mocks.auth.user = { id: 'synthetic-user', role };
+    render(<MemoryRouter initialEntries={['/community/reporter-contacts']}><Routes>
+      <Route path="/community/reporter-contacts" element={<RequireRole allow={['founder', 'admin']}><div>Private Directory</div></RequireRole>} />
+      <Route path="/unauthorized" element={<div>Denied Directory</div>} />
+    </Routes></MemoryRouter>);
+    if (role === 'editor') {
+      expect(screen.queryByText('Private Directory')).not.toBeInTheDocument();
+      expect(screen.getByText('Denied Directory')).toBeInTheDocument();
+    } else {
+      expect(screen.getByText('Private Directory')).toBeInTheDocument();
+    }
+  });
+
+  it.each(['community_reporter_queue', 'dpdp_privacy_requests'])('honors backend denial for %s even with a local grant', moduleKey => {
+    mocks.auth.user = { id: 'synthetic-staff', role: 'editor', moduleAccess: [moduleKey] };
+    mocks.effectiveAccess.backendAccess = {
+      [moduleKey]: { moduleKey, visible: true, allowed: false, policyState: 'founder_only', reasonCode: 'FOUNDER_ONLY', reason: 'Access Denied. Founder permission is required.' },
+    };
+    renderRoute(moduleKey);
+    expect(screen.queryByText('Protected Founder Content')).not.toBeInTheDocument();
+    expect(screen.getByText('Access Denied. Founder permission is required.')).toBeInTheDocument();
+  });
+
+  it.each(['community_reporter_queue', 'dpdp_privacy_requests'])('preserves Founder access to %s', moduleKey => {
+    mocks.auth.user = { id: 'synthetic-founder', role: 'founder' };
+    renderRoute(moduleKey);
+    expect(screen.getByText('Protected Founder Content')).toBeInTheDocument();
+  });
+
+  it('preserves backend-authorized staff access to the reporter queue', () => {
+    mocks.auth.user = { id: 'synthetic-staff', role: 'editor' };
+    mocks.effectiveAccess.backendAccess = {
+      community_reporter_queue: { moduleKey: 'community_reporter_queue', visible: true, allowed: true, policyState: 'available', reasonCode: 'ALLOWED' },
+    };
+    renderRoute('community_reporter_queue');
+    expect(screen.getByText('Protected Founder Content')).toBeInTheDocument();
+  });
+
   it('does not treat authenticated-but-unresolved user profile as Access Denied', () => {
     mocks.auth.user = { id: '', email: 'founder@newspulse.co.in', role: '' };
 
