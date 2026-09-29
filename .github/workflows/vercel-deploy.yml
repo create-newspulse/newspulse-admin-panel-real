@@ -12,17 +12,23 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Install Vercel CLI
+        run: npm install --global vercel@61.0.0
       - name: Pull Vercel Env
-        uses: vercel/actions/pull@v1
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          org-id: ${{ secrets.VERCEL_ORG_ID }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: vercel pull --yes --environment=${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }} --token="$VERCEL_TOKEN"
+      - name: Build
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: vercel build ${{ github.ref == 'refs/heads/main' && '--prod' || '' }} --token="$VERCEL_TOKEN"
       - name: Deploy
-        uses: vercel/actions/deploy@v1
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          # change if your app is in a subfolder:
-          working-directory: ./
-          prod: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: vercel deploy --prebuilt ${{ github.ref == 'refs/heads/main' && '--prod' || '' }} --token="$VERCEL_TOKEN"
