@@ -44,6 +44,8 @@ export type SponsoredFeaturePerformanceRecord = {
   publicClickTarget?: string | null;
   isActive?: boolean;
   comboCampaignIsActive?: boolean;
+  comboLabel?: string;
+  isComboActive?: boolean;
   optionalLinkedSponsoredArticleId?: string | null;
   linkedSponsoredArticleTitle?: string | null;
   linkedSponsoredArticleUrl?: string | null;
@@ -63,15 +65,15 @@ type CampaignStatus = 'Active' | 'Scheduled' | 'Ended' | 'Inactive / Off';
 type StatusFilter = 'all' | 'Active' | 'Scheduled' | 'Ended' | 'Inactive / Off';
 type SortKey = 'impressions' | 'clicks' | 'ctr';
 type RangeMode = 'lifetime' | 'today' | '7d' | '30d' | 'custom';
-type TrendRow = { date: string; impressions: number; clicks: number; ctr: number };
-type PeriodAdRow = { id: string; title: string; placement: string; status?: string | null; impressions: number; clicks: number; ctr: number };
-type PeriodPlacementRow = { placement: string; adsWithActivity: number; impressions: number; clicks: number; ctr: number };
+type TrendRow = { date: string; impressions: number | null; clicks: number | null; ctr: number | null };
+type PeriodAdRow = { id: string; title: string; placement: string; status?: string | null; impressions: number | null; clicks: number | null; ctr: number | null };
+type PeriodPlacementRow = { placement: string; adsWithActivity: number | null; impressions: number | null; clicks: number | null; ctr: number | null };
 
 type PeriodReport = {
-  impressions: number;
-  clicks: number;
-  ctr: number;
-  adsWithActivity: number;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  adsWithActivity: number | null;
   dailyTrend: TrendRow[];
   perAds: PeriodAdRow[];
   placements: PeriodPlacementRow[];
@@ -86,9 +88,9 @@ type AdPerformanceRow = {
   placement: string;
   status: CampaignStatus;
   isActive: boolean;
-  impressions: number;
-  clicks: number;
-  ctr: number;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
   schedule: string;
   startAt?: string | null;
   endAt?: string | null;
@@ -100,9 +102,9 @@ type PlacementPerformanceRow = {
   placement: string;
   ads: number;
   activeAds: number;
-  impressions: number;
-  clicks: number;
-  ctr: number;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
 };
 
 const ADS_MANAGER_SOURCE = 'Ads Manager';
@@ -147,19 +149,20 @@ function arrayFrom(...values: unknown[]): unknown[] {
   return [];
 }
 
-function calculateCtr(impressions: number | null | undefined, clicks: number | null | undefined): number {
-  const safeImpressions = numberOrZero(impressions);
-  const safeClicks = numberOrZero(clicks);
+function calculateCtr(impressions: number | null | undefined, clicks: number | null | undefined): number | null {
+  const safeImpressions = toRealNumber(impressions);
+  const safeClicks = toRealNumber(clicks);
+  if (safeImpressions == null || safeClicks == null) return null;
   if (safeImpressions <= 0) return 0;
   return (safeClicks / safeImpressions) * 100;
 }
 
 function formatNumber(value: number | null): string {
-  return value != null ? value.toLocaleString('en-IN') : 'Not configured';
+  return value != null ? value.toLocaleString('en-IN') : 'Not reported';
 }
 
 function formatPercent(value: number | null): string {
-  return value != null ? `${value.toFixed(2)}%` : 'Not configured';
+  return value != null ? `${value.toFixed(2)}%` : 'Not reported';
 }
 
 function safeDateLabel(value?: string | null): string {
@@ -215,13 +218,14 @@ function hasDestination(record: AdPerformanceAdRecord): boolean {
   return Boolean(String(record.targetUrl || '').trim());
 }
 
-function mapAdPerformance(payload: AdPerformanceAnalyticsResponse | null | undefined): { connected: boolean; source: string; message: string | null; summary: AdPerformanceSummary; period: PeriodReport } {
+function mapAdPerformance(payload: AdPerformanceAnalyticsResponse | null | undefined, isPeriod = false): { connected: boolean; periodUnsupported: boolean; source: string; message: string | null; summary: AdPerformanceSummary; period: PeriodReport } {
   const source = payload?.source || ADS_MANAGER_SOURCE;
-  const scope = String(payload?.scope || '').trim().toLowerCase() === 'lifetime' ? LIFETIME_SCOPE : LIFETIME_SCOPE;
+  const scope = LIFETIME_SCOPE;
 
   if (!payload?.connected) {
     return {
       connected: false,
+      periodUnsupported: false,
       source,
       message: payload?.message || 'No advertisement tracking system configured',
       summary: { impressions: null, clicks: null, ctr: null, totalAds: null, activeAds: null, scope },
@@ -240,14 +244,15 @@ function mapAdPerformance(payload: AdPerformanceAnalyticsResponse | null | undef
 
   return {
     connected: true,
+    periodUnsupported: isPeriod && (payload.dateRangeSupported === false || String(payload.scope || '').trim().toLowerCase() === 'lifetime'),
     source,
     message: null,
     summary: {
-      impressions: impressions ?? 0,
-      clicks: clicks ?? 0,
+      impressions,
+      clicks,
       ctr,
-      totalAds: totalAds ?? 0,
-      activeAds: activeAds ?? 0,
+      totalAds,
+      activeAds,
       scope,
     },
     period: mapPeriodPerformance(payload),
@@ -260,8 +265,8 @@ function emptyPeriodReport(): PeriodReport {
 
 function mapTrendRow(raw: unknown): TrendRow {
   const row = asRecord(raw);
-  const impressions = numberOrZero(row.impressions ?? row.totalImpressions);
-  const clicks = numberOrZero(row.clicks ?? row.totalClicks);
+  const impressions = toRealNumber(row.impressions ?? row.totalImpressions);
+  const clicks = toRealNumber(row.clicks ?? row.totalClicks);
   return {
     date: String(row.date ?? row.day ?? row.key ?? '').trim() || '-',
     impressions,
@@ -272,8 +277,8 @@ function mapTrendRow(raw: unknown): TrendRow {
 
 function mapPeriodAdRow(raw: unknown): PeriodAdRow {
   const row = asRecord(raw);
-  const impressions = numberOrZero(row.impressions ?? row.totalImpressions);
-  const clicks = numberOrZero(row.clicks ?? row.totalClicks);
+  const impressions = toRealNumber(row.impressions ?? row.totalImpressions);
+  const clicks = toRealNumber(row.clicks ?? row.totalClicks);
   return {
     id: String(row.id ?? row.adId ?? row._id ?? row.key ?? row.title ?? '').trim(),
     title: String(row.title ?? row.adTitle ?? row.name ?? row.id ?? row.adId ?? 'Untitled ad').trim(),
@@ -287,11 +292,11 @@ function mapPeriodAdRow(raw: unknown): PeriodAdRow {
 
 function mapPeriodPlacementRow(raw: unknown): PeriodPlacementRow {
   const row = asRecord(raw);
-  const impressions = numberOrZero(row.impressions ?? row.totalImpressions);
-  const clicks = numberOrZero(row.clicks ?? row.totalClicks);
+  const impressions = toRealNumber(row.impressions ?? row.totalImpressions);
+  const clicks = toRealNumber(row.clicks ?? row.totalClicks);
   return {
     placement: String(row.placement ?? row.slot ?? row.placementKey ?? row.key ?? 'Unassigned').trim() || 'Unassigned',
-    adsWithActivity: numberOrZero(row.adsWithActivity ?? row.activeAds ?? row.ads ?? row.count),
+    adsWithActivity: toRealNumber(row.adsWithActivity ?? row.activeAds ?? row.ads ?? row.count),
     impressions,
     clicks,
     ctr: pickFirstNumber(row.ctr, row.ctrPct, row.clickThroughRate) ?? calculateCtr(impressions, clicks),
@@ -299,7 +304,7 @@ function mapPeriodPlacementRow(raw: unknown): PeriodPlacementRow {
 }
 
 function mapTopGroup(value: unknown): PeriodAdRow[] {
-  return arrayFrom(value).map(mapPeriodAdRow).filter((row) => row.impressions > 0 || row.clicks > 0 || row.ctr > 0).slice(0, 5);
+  return arrayFrom(value).map(mapPeriodAdRow).filter((row) => numberOrZero(row.impressions) > 0 || numberOrZero(row.clicks) > 0 || numberOrZero(row.ctr) > 0).slice(0, 5);
 }
 
 function mapPeriodPerformance(payload: AdPerformanceAnalyticsResponse): PeriodReport {
@@ -310,10 +315,12 @@ function mapPeriodPerformance(payload: AdPerformanceAnalyticsResponse): PeriodRe
   const perAds = arrayFrom(data.perAd, data.perAds, data.perAdPerformance, data.adPerformance, data.ads).map(mapPeriodAdRow);
   const dailyTrend = arrayFrom(data.dailyTrend, data.daily, data.trend, data.days).map(mapTrendRow);
   const placements = arrayFrom(data.placementPerformance, data.perPlacement, data.placements).map(mapPeriodPlacementRow);
-  const impressions = pickFirstNumber(data.impressions, metrics.impressions, metrics.totalImpressions, totals.impressions, totals.totalImpressions) ?? 0;
-  const clicks = pickFirstNumber(data.clicks, metrics.clicks, metrics.totalClicks, totals.clicks, totals.totalClicks) ?? 0;
+  const impressions = pickFirstNumber(data.impressions, metrics.impressions, metrics.totalImpressions, totals.impressions, totals.totalImpressions);
+  const clicks = pickFirstNumber(data.clicks, metrics.clicks, metrics.totalClicks, totals.clicks, totals.totalClicks);
   const adsWithActivity = pickFirstNumber(data.adsWithActivity, metrics.adsWithActivity, totals.adsWithActivity)
-    ?? perAds.filter((row) => row.impressions > 0 || row.clicks > 0).length;
+    ?? (perAds.length && perAds.every((row) => row.impressions != null && row.clicks != null)
+      ? perAds.filter((row) => numberOrZero(row.impressions) > 0 || numberOrZero(row.clicks) > 0).length
+      : null);
 
   return {
     impressions,
@@ -333,8 +340,8 @@ function toRows(records: AdPerformanceAdRecord[]): AdPerformanceRow[] {
   return records
     .filter((record) => !isSponsoredFeatureAd(record))
     .map((record) => {
-      const impressions = numberOrZero(record.impressions);
-      const clicks = numberOrZero(record.clicks);
+      const impressions = toRealNumber(record.impressions);
+      const clicks = toRealNumber(record.clicks);
       return {
         id: record.id,
         title: adTitle(record),
@@ -358,33 +365,33 @@ function groupByPlacement(rows: AdPerformanceRow[]): PlacementPerformanceRow[] {
   for (const row of rows) {
     const existing = grouped.get(row.placement) || { placement: row.placement, ads: 0, activeAds: 0, impressions: 0, clicks: 0, ctr: 0 };
     existing.ads += 1;
-    if (row.isActive) existing.activeAds += 1;
-    existing.impressions += row.impressions;
-    existing.clicks += row.clicks;
+    if (row.status === 'Active') existing.activeAds += 1;
+    existing.impressions = existing.impressions != null && row.impressions != null ? existing.impressions + row.impressions : null;
+    existing.clicks = existing.clicks != null && row.clicks != null ? existing.clicks + row.clicks : null;
     existing.ctr = calculateCtr(existing.impressions, existing.clicks);
     grouped.set(row.placement, existing);
   }
-  return [...grouped.values()].sort((left, right) => right.impressions - left.impressions || right.clicks - left.clicks || left.placement.localeCompare(right.placement));
+  return [...grouped.values()].sort((left, right) => (right.impressions ?? -1) - (left.impressions ?? -1) || (right.clicks ?? -1) - (left.clicks ?? -1) || left.placement.localeCompare(right.placement));
 }
 
 function sortRows(rows: AdPerformanceRow[], sortKey: SortKey): AdPerformanceRow[] {
   return [...rows].sort((left, right) => {
-    const diff = right[sortKey] - left[sortKey];
+    const diff = (right[sortKey] ?? -1) - (left[sortKey] ?? -1);
     if (diff !== 0) return diff;
     return left.title.localeCompare(right.title);
   });
 }
 
 function topRows(rows: AdPerformanceRow[], sortKey: SortKey): AdPerformanceRow[] {
-  return sortRows(rows.filter((row) => row[sortKey] > 0), sortKey).slice(0, 5);
+  return sortRows(rows.filter((row) => numberOrZero(row[sortKey]) > 0), sortKey).slice(0, 5);
 }
 
 function buildNeedsAttention(rows: AdPerformanceRow[]): Array<{ id: string; title: string; message: string }> {
   const now = Date.now();
   const items: Array<{ id: string; title: string; message: string }> = [];
   for (const row of rows) {
-    if (row.isActive && row.impressions === 0) items.push({ id: `${row.id}:impressions`, title: row.title, message: 'Active ad has no recorded impressions.' });
-    if (row.impressions > 0 && row.clicks === 0) items.push({ id: `${row.id}:clicks`, title: row.title, message: 'Ad has impressions but no recorded clicks.' });
+    if (row.status === 'Active' && row.impressions === 0) items.push({ id: `${row.id}:impressions`, title: row.title, message: 'Active ad has no recorded impressions.' });
+    if (numberOrZero(row.impressions) > 0 && row.clicks === 0) items.push({ id: `${row.id}:clicks`, title: row.title, message: 'Ad has impressions but no recorded clicks.' });
     const endTime = dateTime(row.endAt);
     if (row.isActive && endTime != null && endTime < now) items.push({ id: `${row.id}:schedule`, title: row.title, message: 'Schedule has ended.' });
   }
@@ -484,7 +491,7 @@ export default function AdPerformancePanel({
         Object.keys(filters).length ? getAdminAnalyticsAdPerformance(filters) : getAdminAnalyticsAdPerformance(),
         onRefreshData ? Promise.resolve(onRefreshData()).catch(() => undefined) : Promise.resolve(undefined),
       ]);
-      setReport(mapAdPerformance(payload));
+      setReport(mapAdPerformance(payload, Boolean(filters.range)));
     } catch (err) {
       setReport(mapAdPerformance(null));
       setError(err instanceof Error ? err.message : 'Ads Manager analytics is unavailable.');
@@ -516,13 +523,13 @@ export default function AdPerformancePanel({
   const deliveryHealth = React.useMemo(() => buildDeliveryHealth(rows, slotEnabled), [rows, slotEnabled]);
   const activeSponsoredFeatureCount = sponsoredFeatures.filter((feature) => feature.isActive).length;
   const eligibleSponsoredArticleCount = sponsoredArticles.filter((article) => isSponsoredArticleLive(article.status)).length;
-  const activeComboCount = sponsoredFeatures.filter((feature) => feature.isActive && feature.comboCampaignIsActive !== false && feature.optionalLinkedSponsoredArticleId).length;
+  const activeComboCount = sponsoredFeatures.filter((feature) => feature.isComboActive).length;
   const hasAdActivity = [summary.impressions, summary.clicks, summary.totalAds, summary.activeAds].some((value) => typeof value === 'number' && value > 0);
   const topImpressions = React.useMemo(() => topRows(rows, 'impressions'), [rows]);
   const topClicks = React.useMemo(() => topRows(rows, 'clicks'), [rows]);
   const topCtr = React.useMemo(() => topRows(rows, 'ctr'), [rows]);
   const hasTopPerformers = topImpressions.length > 0 || topClicks.length > 0 || topCtr.length > 0;
-  const hasPeriodActivity = period.impressions > 0 || period.clicks > 0 || period.adsWithActivity > 0;
+  const hasPeriodActivity = numberOrZero(period.impressions) > 0 || numberOrZero(period.clicks) > 0 || numberOrZero(period.adsWithActivity) > 0;
   const hasPeriodTopAds = period.topByImpressions.length > 0 || period.topByClicks.length > 0 || period.topByCtr.length > 0;
 
   return (
@@ -537,7 +544,7 @@ export default function AdPerformancePanel({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={report.connected ? 'rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700' : 'rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600'}>
-              {report.connected ? 'Connected' : 'Not Configured'}
+              {report.connected ? 'API connected' : 'Not Configured'}
             </span>
             <button type="button" onClick={() => void loadPerformance()} disabled={loading || loadingAds || loadingSponsoredContent || Boolean(customError)} className="px-3 py-1.5 rounded border text-sm disabled:opacity-60">
               {loading || loadingAds || loadingSponsoredContent ? 'Loading...' : 'Refresh'}
@@ -567,7 +574,7 @@ export default function AdPerformancePanel({
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
           <div className="rounded border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Connected Source</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">API Source</div>
             <div className="mt-1 font-semibold text-slate-900 dark:text-white">{report.source}</div>
           </div>
           <div className="rounded border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
@@ -590,7 +597,7 @@ export default function AdPerformancePanel({
         </div>
       ) : null}
 
-      {report.connected && isLifetime ? (
+      {report.connected && isLifetime && !loading ? (
         <LifetimePerformance
           summary={summary}
           sponsoredFeatures={sponsoredFeatures}
@@ -613,7 +620,13 @@ export default function AdPerformancePanel({
         />
       ) : null}
 
-      {report.connected && !isLifetime && !customError ? (
+      {report.connected && !isLifetime && !loading && report.periodUnsupported ? (
+        <div role="status" className="border rounded p-4 bg-white dark:bg-slate-900 text-sm text-slate-600 dark:text-slate-300">
+          Date-range performance is not supported by this response. Use Lifetime for available counters.
+        </div>
+      ) : null}
+
+      {report.connected && !isLifetime && !loading && !report.periodUnsupported && !customError ? (
         <PeriodPerformance period={period} hasActivity={hasPeriodActivity} hasTopAds={hasPeriodTopAds} />
       ) : null}
 
@@ -665,7 +678,7 @@ function LifetimePerformance(props: {
           {metricCard('Sponsored Features', props.sponsoredFeatures.length.toLocaleString('en-IN'))}
           {metricCard('Sponsored Articles', props.sponsoredArticles.length.toLocaleString('en-IN'))}
         </div>
-        {!props.hasAdActivity ? <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">{NO_AD_ACTIVITY_MESSAGE}</div> : null}
+        {!props.hasAdActivity ? <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">{props.summary.impressions === 0 && props.summary.clicks === 0 ? NO_AD_ACTIVITY_MESSAGE : 'Ad activity counters not reported.'}</div> : null}
       </section>
 
       <section className="border rounded p-4 bg-white dark:bg-slate-900" aria-label="Per-Ad Performance">
@@ -934,9 +947,9 @@ function CurrentStatusSections(props: {
                 <div className="font-semibold text-slate-900 dark:text-white">{title}</div>
                 <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2 dark:text-slate-300">
                   <div>Homepage: {feature.isActive ? 'Homepage ON' : 'Homepage OFF'}</div>
-                  <div>Combo: {feature.comboCampaignIsActive === false ? 'Combo Campaign off' : 'Combo Campaign active'}</div>
+                  <div>Combo: {feature.comboLabel || 'Combo bundle inactive'}</div>
                   <div>Linked article: {feature.linkedSponsoredArticleTitle || feature.optionalLinkedSponsoredArticleId || 'None'}</div>
-                  <div className="break-all">Click target: {feature.publicClickTarget || feature.destinationUrl || feature.linkedSponsoredArticleUrl || '-'}</div>
+                  <div className="break-all">Click target: {feature.publicClickTarget || '-'}</div>
                 </div>
               </div>
             );

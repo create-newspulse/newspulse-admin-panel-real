@@ -1278,6 +1278,7 @@ const emptyForm = (): AdFormState => ({
 });
 
 function normalizeAdCounter(value: unknown): number | null {
+  if (value == null || (typeof value === 'string' && !value.trim())) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
@@ -1354,6 +1355,8 @@ export default function AdsManager() {
   const [inquirySearch, setInquirySearch] = React.useState('');
 
   const [ads, setAds] = React.useState<SponsorAd[]>([]);
+  const [performanceAds, setPerformanceAds] = React.useState<SponsorAd[]>([]);
+  const [performanceAdsLoading, setPerformanceAdsLoading] = React.useState(false);
   const [sponsoredFeatures, setSponsoredFeatures] = React.useState<SponsoredFeatureInventoryRecord[]>([]);
   const [sponsoredFeaturesLoading, setSponsoredFeaturesLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -2144,11 +2147,11 @@ export default function AdsManager() {
     const linkedArticle = linkedId ? sponsoredArticleById.get(linkedId) : null;
     const linkedUrl = String(form.linkedSponsoredArticleUrl || linkedArticle?.publicUrl || '').trim();
     const destinationUrl = String(form.destinationUrl || '').trim();
-    if (linkedId && linkedArticle && isSponsoredArticleLiveStatus(linkedArticle.status)) {
+    if (form.comboCampaignIsActive && linkedId && linkedArticle && isSponsoredArticleLiveStatus(linkedArticle.status)) {
       return linkedUrl || destinationUrl || null;
     }
     return destinationUrl || null;
-  }, [form.destinationUrl, form.linkedSponsoredArticleId, form.linkedSponsoredArticleUrl, sponsoredArticleById]);
+  }, [form.comboCampaignIsActive, form.destinationUrl, form.linkedSponsoredArticleId, form.linkedSponsoredArticleUrl, sponsoredArticleById]);
 
   React.useEffect(() => {
     setAdImagePreviewBroken(false);
@@ -2482,8 +2485,20 @@ export default function AdsManager() {
   }, [slotFilter, activeOnly]);
 
   const refreshAdPerformanceData = React.useCallback(async () => {
-    await Promise.all([fetchAds(), refreshSponsoredContent()]);
-  }, [fetchAds, refreshSponsoredContent]);
+    setPerformanceAdsLoading(true);
+    try {
+      const [res] = await Promise.all([
+        adminApi.get('/admin/ads', { params: {} }),
+        refreshSponsoredContent(),
+      ]);
+      setPerformanceAds(extractAdsList(res?.data).map(normalizeAd).filter((ad) => Boolean(ad.id)));
+    } catch (err: any) {
+      setPerformanceAds([]);
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to load ad performance inventory');
+    } finally {
+      setPerformanceAdsLoading(false);
+    }
+  }, [refreshSponsoredContent]);
 
   const fetchInquiries = React.useCallback(async (opts: {
     status: InquiryStatusTab;
@@ -3149,11 +3164,22 @@ export default function AdsManager() {
 
       {tab === 'ad-performance' ? (
         <AdPerformancePanel
-          ads={ads}
-          sponsoredFeatures={sponsoredFeatures}
+          ads={performanceAds}
+          sponsoredFeatures={sponsoredFeatures.map((feature) => {
+            const commercialState = getSponsoredFeatureCommercialState(
+              feature,
+              sponsoredArticleById.get(feature.optionalLinkedSponsoredArticleId || ''),
+            );
+            return {
+              ...feature,
+              comboLabel: commercialState.comboLabel,
+              isComboActive: commercialState.comboLabel === 'Combo Campaign active',
+              publicClickTarget: commercialState.publicClickTarget,
+            };
+          })}
           sponsoredArticles={sponsoredArticleInventory}
           slotEnabled={slotEnabled}
-          loadingAds={loading}
+          loadingAds={performanceAdsLoading}
           loadingSponsoredContent={sponsoredFeaturesLoading || sponsoredArticlesLoading}
           onRefreshData={refreshAdPerformanceData}
         />
@@ -4572,7 +4598,7 @@ export default function AdsManager() {
               <th className="text-left p-2">Schedule</th>
               <th className="text-left p-2">Priority</th>
               <th className="text-left p-2">Updated</th>
-              <th className="text-left p-2">Preview</th>
+              <th className="text-left p-2">Thumbnail</th>
               <th className="text-left p-2">Actions</th>
             </tr>
           </thead>
@@ -4633,7 +4659,7 @@ export default function AdsManager() {
                           )}
                         </div>
                         {isBrokenImage ? (
-                          <span className="text-[11px] text-red-700">Image URL invalid</span>
+                          <span className="text-[11px] text-red-700">Image failed to load</span>
                         ) : (
                           <span className="text-[11px] text-slate-500">{isSponsoredFeatureAd(ad) ? 'Sponsored Feature' : 'Click target'}</span>
                         )}
@@ -4889,7 +4915,7 @@ export default function AdsManager() {
                           />
                         )}
                       </div>
-                      <div className="text-xs text-slate-500">Preview</div>
+                      <div className="text-xs text-slate-500">Image thumbnail</div>
                     </div>
                   ) : null}
                 </div>
@@ -4945,15 +4971,15 @@ export default function AdsManager() {
                   </div>
                 )}
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">{form.mode === 'sponsored-feature' ? 'Optional priority' : 'Priority'}</label>
+                {form.mode === 'standard-ad' ? <div className="space-y-1">
+                  <label className="text-sm font-medium">Priority</label>
                   <input
                     type="number"
                     className="w-full border rounded px-2 py-2"
                     value={form.priority}
                     onChange={(e) => setForm(prev => ({ ...prev, priority: e.target.value }))}
                   />
-                </div>
+                </div> : null}
 
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Active On/Off</label>
@@ -5024,7 +5050,7 @@ export default function AdsManager() {
 
               {/* Preview */}
               <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950">
-                <div className="text-sm font-medium mb-2">Preview</div>
+                <div className="text-sm font-medium mb-2">Creative thumbnail (not public layout)</div>
                 <div className="flex items-center gap-3">
                   <div className="w-[240px] h-[80px] bg-white dark:bg-slate-900 border rounded overflow-hidden flex items-center justify-center">
                     {form.imageUrl.trim() ? (

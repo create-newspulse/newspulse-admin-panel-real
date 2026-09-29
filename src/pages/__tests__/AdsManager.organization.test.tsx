@@ -1,18 +1,25 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import appSource from '../../App.tsx?raw';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import AdsManager from '@/pages/AdsManager';
-import { adminApi } from '@/lib/api';
+import AdminModuleRoute from '@/components/AdminModuleRoute';
+import { adminApi, api } from '@/lib/api';
 import { getAdminAnalyticsAdPerformance } from '@/lib/api/adminAnalytics';
 import { getAdInquiriesUnreadCount, listAdInquiries } from '@/lib/adsInquiriesApi';
-import { listSponsoredArticleInventory, listSponsoredFeatures } from '@/lib/sponsoredFeaturesApi';
+import { listSponsoredArticleInventory, listSponsoredFeatures, saveSponsoredFeature } from '@/lib/sponsoredFeaturesApi';
 
 vi.mock('react-hot-toast', () => ({
   default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ isFounder: true, user: { role: 'founder', specialRights: ['ads', 'ads_manager', 'media_kit'] } }),
+  useAuth: () => ({ isFounder: true, isAuthenticated: true, isReady: true, isRestoring: false, isLoading: false, user: { role: 'founder', specialRights: ['ads', 'ads_manager', 'media_kit'] } }),
+}));
+
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({
+  useAdminEffectiveAccess: () => ({ isLoading: false }),
 }));
 
 vi.mock('@/lib/sponsoredFeaturesApi', () => ({
@@ -48,7 +55,7 @@ vi.mock('@/lib/api/adminAnalytics', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
-  api: { post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn() },
   adminApi: {
     get: vi.fn(),
     post: vi.fn(),
@@ -69,6 +76,7 @@ function mockAdsManagerRecords(records: any[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.get).mockResolvedValue({ data: { mediaKit: { title: 'Saved Media Kit' } } });
   vi.mocked(adminApi.get).mockImplementation(async (path: string) => {
     if (path === '/admin/ads') return { data: { ads: [] } };
     if (path === '/admin/ad-settings') return { data: { slotEnabled: {} } };
@@ -78,6 +86,7 @@ beforeEach(() => {
   vi.mocked(getAdInquiriesUnreadCount).mockResolvedValue(0);
   vi.mocked(listAdInquiries).mockResolvedValue({ items: [], total: 0, source: 'mock', raw: {} });
   vi.mocked(listSponsoredFeatures).mockResolvedValue([]);
+  vi.mocked(saveSponsoredFeature).mockResolvedValue([]);
   vi.mocked(listSponsoredArticleInventory).mockResolvedValue([]);
   vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValue({
     connected: true,
@@ -93,6 +102,46 @@ afterEach(() => {
 });
 
 describe('AdsManager module organization', () => {
+  it.each(['/admin/ads', '/admin/ads-manager'])('keeps the guarded Ads Manager route loadable: %s', async (path) => {
+    expect(appSource).toContain(`path="${path}" element={<AdminModuleRoute moduleKey="ads_manager"><LockCheckWrapper><AdsManager /></LockCheckWrapper></AdminModuleRoute>}`);
+    render(<MemoryRouter initialEntries={[path]}><Routes>
+      <Route path={path} element={<AdminModuleRoute moduleKey="ads_manager"><AdsManager /></AdminModuleRoute>} />
+    </Routes></MemoryRouter>);
+    expect(await screen.findByRole('heading', { name: 'Ads Manager' })).toBeInTheDocument();
+    await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: {} }));
+  });
+
+  it.each([true, false])('previews the saved destination with Combo enabled=%s', async (comboCampaignIsActive) => {
+    vi.mocked(listSponsoredFeatures).mockResolvedValue([{
+      id: 'feature-preview', headline: 'Preview Feature', sponsorName: 'Preview Sponsor',
+      internalCampaignName: 'Preview Campaign', shortSummary: 'Preview Summary', ctaText: 'Read more',
+      placement: 'homepage_sponsored_feature',
+      destinationUrl: 'https://sponsor.example/fallback', coverImage: 'https://cdn.example/cover.jpg',
+      isActive: true, comboCampaignIsActive, optionalLinkedSponsoredArticleId: 'article-preview',
+      linkedSponsoredArticleTitle: 'Preview Article', linkedSponsoredArticleUrl: '/news/preview-article',
+    } as any]);
+    vi.mocked(listSponsoredArticleInventory).mockResolvedValue([{
+      id: 'article-preview', title: 'Preview Article', status: 'published', publicUrl: '/news/preview-article',
+    }]);
+
+    render(<AdsManager />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Sponsored Feature' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByRole('option', { name: 'Preview Article (published)' });
+    expect(within(dialog).queryByRole('spinbutton')).toBeNull();
+    const expectedTarget = comboCampaignIsActive ? '/news/preview-article' : 'https://sponsor.example/fallback';
+    expect(within(dialog).getAllByText(expectedTarget)).toHaveLength(2);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Sponsored Feature' }));
+    await waitFor(() => expect(saveSponsoredFeature).toHaveBeenCalledWith({
+      sponsorName: 'Preview Sponsor', headline: 'Preview Feature', shortSummary: 'Preview Summary',
+      ctaText: 'Read more', coverImage: 'https://cdn.example/cover.jpg', destinationUrl: 'https://sponsor.example/fallback',
+      linkedSponsoredArticleId: 'article-preview', linkedSponsoredArticleTitle: 'Preview Article',
+      linkedSponsoredArticleUrl: '/news/preview-article', isActive: true, comboCampaignIsActive,
+      startAt: null, endAt: null, internalCampaignName: 'Preview Campaign',
+    }, 'feature-preview'));
+    expect(vi.mocked(saveSponsoredFeature).mock.calls[0][0]).not.toHaveProperty('priority');
+  });
+
   it('keeps existing tab order and renders the existing Ads tab actions and sections', async () => {
     render(<AdsManager />);
 
@@ -103,6 +152,87 @@ describe('AdsManager module organization', () => {
     expect(screen.getByRole('heading', { name: 'Sponsored Content' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Ad Placements' })).toBeInTheDocument();
     await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: {} }));
+  });
+
+  it('keeps supported display priority editable and labels thumbnails truthfully', async () => {
+    vi.mocked(adminApi.post).mockResolvedValue({ data: { ad: { id: 'new-display', slot: 'HOME_728x90', title: 'Display Sponsor', isActive: true } } });
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Ad' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'HOME_728x90' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Sponsor: ACME'), { target: { value: 'Display Sponsor' } });
+    const urls = within(dialog).getAllByPlaceholderText('https://...');
+    fireEvent.change(urls[0], { target: { value: 'https://cdn.example/display.jpg' } });
+    fireEvent.change(urls[1], { target: { value: 'https://sponsor.example/display' } });
+    fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '7' } });
+    expect(within(dialog).getByRole('spinbutton')).toHaveValue(7);
+    expect(within(dialog).getByText('Creative thumbnail (not public layout)')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Ad' }));
+    await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', {
+      slot: 'HOME_728x90', title: 'Display Sponsor', imageUrl: 'https://cdn.example/display.jpg',
+      targetUrl: 'https://sponsor.example/display', clickable: true, isClickable: true, priority: 7,
+      startAt: null, endAt: null, isActive: true, active: true, productType: 'STANDARD_AD',
+    }));
+  });
+
+  it('keeps lifetime inventory independent of Ads-tab slot and active filters', async () => {
+    const records = [
+      { id: 'home', slot: 'HOME_728x90', title: 'Home record', isActive: true, impressions: 10, clicks: 1 },
+      { id: 'footer', slot: 'FOOTER_BANNER_728x90', title: 'Off footer record', isActive: false, impressions: 20, clicks: 2 },
+      { id: 'home-off', slot: 'HOME_728x90', title: 'Off home record', isActive: false, impressions: 30, clicks: 3 },
+    ];
+    vi.mocked(adminApi.get).mockImplementation(async (path, config) => {
+      if (path !== '/admin/ads') return { data: { slotEnabled: {} } };
+      const params = config?.params || {};
+      return { data: { ads: records.filter((ad) => (!params.slot || ad.slot === params.slot) && (params.active !== 'true' || ad.isActive)) } };
+    });
+    render(<AdsManager />);
+    await screen.findByText('Off footer record');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'HOME_728x90' } });
+    await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: { slot: 'HOME_728x90' } }));
+    expect(await screen.findByText('Off home record')).toBeInTheDocument();
+    expect(screen.queryByText('Off footer record')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Active only'));
+    await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: { slot: 'HOME_728x90', active: 'true' } }));
+    expect(await screen.findByText('Home record')).toBeInTheDocument();
+    expect(screen.queryByText('Off home record')).toBeNull();
+    expect(screen.queryByText('Off footer record')).toBeNull();
+    vi.mocked(adminApi.get).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    const section = await screen.findByLabelText('Per-Ad Performance');
+    expect(await within(section).findByText('Off footer record')).toBeInTheDocument();
+    expect(within(section).getByText('Off home record')).toBeInTheDocument();
+    expect(within(section).getByText('Home record')).toBeInTheDocument();
+    expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: {} });
+    fireEvent.click(screen.getByRole('button', { name: 'Ads' }));
+    expect(screen.getByRole('combobox')).toHaveValue('HOME_728x90');
+    expect(screen.getByLabelText('Active only')).toBeChecked();
+    expect(screen.getByText('Home record')).toBeInTheDocument();
+    expect(screen.queryByText('Off home record')).toBeNull();
+    expect(screen.queryByText('Off footer record')).toBeNull();
+  });
+
+  it.each([
+    ['live', true, 'published', '', '', true, 'cover.jpg', 'Combo Campaign active', '1'],
+    ['off', false, 'published', '', '', true, 'cover.jpg', 'Combo bundle ready', '0'],
+    ['scheduled', true, 'published', '2999-01-01T00:00:00Z', '', true, 'cover.jpg', 'Combo bundle ready', '0'],
+    ['expired', true, 'published', '', '2000-01-01T00:00:00Z', true, 'cover.jpg', 'Combo bundle ready', '0'],
+    ['draft article', true, 'draft', '', '', true, 'cover.jpg', 'Combo bundle inactive', '0'],
+    ['combo disabled', true, 'published', '', '', false, 'cover.jpg', 'Combo Campaign off', '0'],
+    ['missing image', true, 'published', '', '', true, '', 'Combo bundle ready', '0'],
+  ])('uses saved-card combo eligibility in performance: %s', async (_name, isActive, status, startAt, endAt, comboCampaignIsActive, coverImage, label, count) => {
+    vi.mocked(listSponsoredFeatures).mockResolvedValue([{
+      id: 'combo-status', headline: 'Status Feature', isActive, startAt, endAt, comboCampaignIsActive, coverImage,
+      destinationUrl: 'https://sponsor.example', optionalLinkedSponsoredArticleId: 'status-article',
+      linkedSponsoredArticleUrl: '/news/status-article',
+    } as any]);
+    vi.mocked(listSponsoredArticleInventory).mockResolvedValue([{ id: 'status-article', title: 'Status Article', status: String(status) }]);
+    render(<AdsManager />);
+    await screen.findByRole('button', { name: 'Edit Sponsored Feature' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    const section = await screen.findByLabelText('Sponsored Content Status');
+    expect(await within(section).findByText(`Combo: ${label}`)).toBeInTheDocument();
+    expect(within(section).getByText('Active combos').parentElement).toHaveTextContent(String(count));
   });
 
   it('keeps the Ad Inquiries tab rendering the existing inquiry component path', async () => {
@@ -123,6 +253,9 @@ describe('AdsManager module organization', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Media Kit' }));
 
     expect(await screen.findByText('Internal / Confidential')).toBeInTheDocument();
+    expect(await screen.findByText('Source: Saved')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Saved Media Kit' })).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith('/admin/media-kit');
     expect(screen.getByRole('button', { name: /Refresh|Loading/ })).toBeInTheDocument();
   });
 
@@ -136,8 +269,8 @@ describe('AdsManager module organization', () => {
     expect(vi.mocked(getAdminAnalyticsAdPerformance).mock.calls[0]).toEqual([]);
     expect(screen.getByText('Monitor ad delivery, impressions, clicks, CTR, placements and sponsored campaigns.')).toBeInTheDocument();
     expect(screen.getByText('Current impression and click counters are lifetime metrics.')).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(within(screen.getByText('Connected Source').closest('.rounded') as HTMLElement).getByText('Ads Manager')).toBeInTheDocument();
+    expect(screen.getByText('API connected')).toBeInTheDocument();
+    expect(within(screen.getByText('API Source').closest('.rounded') as HTMLElement).getByText('Ads Manager')).toBeInTheDocument();
     expect(within(screen.getByText('Scope').closest('.rounded') as HTMLElement).getByText('Lifetime')).toBeInTheDocument();
     const overviewSection = screen.getByLabelText('Ad Performance Overview');
     expect(within(within(overviewSection).getByText('Impressions').closest('.rounded') as HTMLElement).getByText('0')).toBeInTheDocument();
@@ -277,6 +410,7 @@ describe('AdsManager module organization', () => {
         headline: 'Sponsored Homepage Lead',
         sponsorName: 'Pulse Partner',
         destinationUrl: 'https://partner.example',
+        coverImage: 'https://cdn.example/feature.jpg',
         publicClickTarget: '/news/sponsored-story',
         isActive: true,
         comboCampaignIsActive: true,
@@ -343,6 +477,15 @@ describe('AdsManager module organization', () => {
     expect(adminApi.put).not.toHaveBeenCalled();
     expect(adminApi.patch).not.toHaveBeenCalled();
     expect(adminApi.delete).not.toHaveBeenCalled();
+
+    const filters = within(perAdSection).getAllByRole('combobox');
+    fireEvent.change(filters[0], { target: { value: 'Inactive / Off' } });
+    expect(within(perAdSection).getByText('Paused Banner')).toBeInTheDocument();
+    expect(within(perAdSection).queryByText('Hero Banner')).toBeNull();
+    fireEvent.change(filters[0], { target: { value: 'all' } });
+    fireEvent.change(filters[1], { target: { value: 'FOOTER_BANNER_728x90' } });
+    expect(within(perAdSection).getByText('Ended Footer')).toBeInTheDocument();
+    expect(within(perAdSection).queryByText('Hero Banner')).toBeNull();
   });
 
   it('keeps zero ad activity connected and truthful', async () => {
@@ -357,13 +500,14 @@ describe('AdsManager module organization', () => {
     render(<AdsManager />);
     fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(await screen.findByText('API connected')).toBeInTheDocument();
     expect(screen.getByText('No ad activity yet.')).toBeInTheDocument();
     expect(screen.getByText('No ad performance data yet.')).toBeInTheDocument();
     expect(screen.queryByText(/50K|87%|500K|sample|placeholder/i)).toBeNull();
   });
 
-  it('renders connected missing ad counters as zeroes instead of Not configured', async () => {
+  it('distinguishes missing connected counters from measured zeroes', async () => {
+    mockAdsManagerRecords([{ id: 'unknown', slot: 'HOME_728x90', title: 'Unknown counters', isActive: true }]);
     vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValueOnce({
       connected: true,
       source: 'Ads Manager',
@@ -375,10 +519,48 @@ describe('AdsManager module organization', () => {
     render(<AdsManager />);
     fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
 
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
-    expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByText('0.00%')).toBeInTheDocument();
-    expect(screen.queryByText('Not configured')).toBeNull();
-    expect(screen.getByText('No ad activity yet.')).toBeInTheDocument();
+    const overview = await screen.findByLabelText('Ad Performance Overview');
+    expect(within(overview).getAllByText('Not reported')).toHaveLength(5);
+    expect(screen.getByText('API connected')).toBeInTheDocument();
+    const section = screen.getByLabelText('Per-Ad Performance');
+    const row = await within(section).findByText('Unknown counters');
+    expect(within(row.closest('tr') as HTMLElement).getAllByText('Not reported')).toHaveLength(3);
+    expect(screen.queryByText('Active ad has no recorded impressions.')).toBeNull();
+    expect(screen.queryByText('No ad activity yet.')).toBeNull();
+    expect(screen.getByText('Ad activity counters not reported.')).toBeInTheDocument();
+  });
+
+  it.each([
+    { dateRangeSupported: false },
+    { dateRangeSupported: true, scope: 'lifetime' },
+  ])('does not label unsupported/lifetime responses as dated metrics: %j', async (capability) => {
+    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValue({
+      connected: true, ...capability, metrics: { impressions: 987654, clicks: 12345 },
+    });
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    await screen.findByLabelText('Ad Performance Overview');
+    fireEvent.change(screen.getByLabelText('Range'), { target: { value: '7d' } });
+    expect(await screen.findByText('Date-range performance is not supported by this response. Use Lifetime for available counters.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Period Performance Overview')).toBeNull();
+    expect(screen.queryByText('9,87,654')).toBeNull();
+    expect(screen.getByText('API connected')).toBeInTheDocument();
+  });
+
+  it('keeps missing period counters distinct from explicit zeroes', async () => {
+    vi.mocked(getAdminAnalyticsAdPerformance).mockResolvedValue({
+      connected: true, dateRangeSupported: true, metrics: { clicks: 0 },
+      perAd: [{ id: 'partial', title: 'Partial period', clicks: 0 }],
+    });
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ad Performance' }));
+    await screen.findByLabelText('Ad Performance Overview');
+    fireEvent.change(screen.getByLabelText('Range'), { target: { value: 'today' } });
+    const section = await screen.findByLabelText('Period Performance Overview');
+    expect(within(section).getAllByText('Not reported')).toHaveLength(3);
+    expect(within(section).getByText('Clicks').parentElement).toHaveTextContent('0');
+    const row = within(screen.getByLabelText('Period Per-Ad Performance')).getByText('Partial period').closest('tr') as HTMLElement;
+    expect(within(row).getAllByText('Not reported')).toHaveLength(2);
+    expect(within(row).getByText('0')).toBeInTheDocument();
   });
 });
