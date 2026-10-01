@@ -858,6 +858,13 @@ function slotLabel(slot: string): string {
   return SLOT_LABELS[slot] || slot;
 }
 
+function displayCreativeSize(slot: string): { width: number; height: number } | null {
+  const canonical = canonicalSlot(slot);
+  if (!SLOT_OPTIONS.some((option) => option === canonical)) return null;
+  const dimensions = /_(\d+)x(\d+)$/.exec(canonical);
+  return dimensions ? { width: Number(dimensions[1]), height: Number(dimensions[2]) } : null;
+}
+
 function isLegacySlot(slot: string): boolean {
   return canonicalSlot(slot) === 'HOME_RIGHT_RAIL' || slotLabel(slot).includes('(legacy)');
 }
@@ -2100,6 +2107,53 @@ export default function AdsManager() {
   const [adImageUploadProgress, setAdImageUploadProgress] = React.useState<number | null>(null);
   const [hostingExternalImage, setHostingExternalImage] = React.useState(false);
   const [adImagePreviewBroken, setAdImagePreviewBroken] = React.useState(false);
+  const [originalCreative, setOriginalCreative] = React.useState<{ slot: string; imageUrl: string } | null>(null);
+  const [creativeUploaded, setCreativeUploaded] = React.useState(false);
+  const [creativeMeasurement, setCreativeMeasurement] = React.useState<{
+    source: string | File; previewUrl: string; width: number; height: number; failed: boolean;
+  } | null>(null);
+  const requiredCreativeSize = form.mode === 'standard-ad' ? displayCreativeSize(form.slot) : null;
+  const hasCreativeRequirement = requiredCreativeSize !== null;
+  const creativeSource = adImageFile || form.imageUrl.trim();
+  const currentMeasurement = creativeMeasurement?.source === creativeSource ? creativeMeasurement : null;
+  const creativeUnchanged = Boolean(editingId && originalCreative
+    && originalCreative.slot === canonicalSlot(form.slot)
+    && originalCreative.imageUrl === form.imageUrl.trim() && !adImageFile && !creativeUploaded);
+  const creativeMismatch = Boolean(requiredCreativeSize && currentMeasurement && !currentMeasurement.failed
+    && currentMeasurement.width * requiredCreativeSize.height !== currentMeasurement.height * requiredCreativeSize.width);
+  const creativeSaveError = requiredCreativeSize && !creativeUnchanged
+    ? (creativeMismatch ? 'Creative size mismatch. Select an image matching the placement aspect ratio.'
+      : currentMeasurement?.failed ? 'Unable to verify creative dimensions. Select a readable image before saving.'
+        : !currentMeasurement ? 'Wait for creative dimensions to be verified before saving.'
+          : adImageFile ? 'Upload the selected creative before saving.' : null)
+    : null;
+
+  React.useEffect(() => {
+    setCreativeMeasurement(null);
+    if (!modalOpen || !hasCreativeRequirement || !creativeSource) return;
+    const previewUrl = typeof creativeSource === 'string' ? creativeSource : URL.createObjectURL(creativeSource);
+    const image = new Image();
+    let cancelled = false;
+    const finish = (failed: boolean) => {
+      if (cancelled) return;
+      window.clearTimeout(timeout);
+      setCreativeMeasurement({
+        source: creativeSource, previewUrl, width: image.naturalWidth, height: image.naturalHeight,
+        failed: failed || !image.naturalWidth || !image.naturalHeight,
+      });
+    };
+    const timeout = window.setTimeout(() => finish(true), 10000);
+    image.onload = () => finish(false);
+    image.onerror = () => finish(true);
+    image.src = previewUrl;
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      if (typeof creativeSource !== 'string') URL.revokeObjectURL(previewUrl);
+    };
+  }, [modalOpen, creativeSource, hasCreativeRequirement]);
 
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [brokenImageByAdId, setBrokenImageByAdId] = React.useState<Record<string, boolean>>({});
@@ -2212,6 +2266,10 @@ export default function AdsManager() {
     try {
       const url = await uploadAdImage(f);
       setForm((prev) => ({ ...prev, imageUrl: url }));
+      if (hasCreativeRequirement) {
+        setCreativeUploaded(true);
+        setAdImageFile(null);
+      }
       toast.success('Image uploaded');
     } catch (err: any) {
       const msg =
@@ -2225,7 +2283,7 @@ export default function AdsManager() {
       setAdImageUploading(false);
       setAdImageUploadProgress(null);
     }
-  }, [adImageFile, uploadAdImage]);
+  }, [adImageFile, uploadAdImage, hasCreativeRequirement]);
 
   const isExternalImageUrl = React.useCallback((url: string) => {
     const u = String(url || '').trim();
@@ -2273,6 +2331,7 @@ export default function AdsManager() {
   }, [loadSponsoredArticles, loadSponsoredFeatures]);
 
   const buildAdPayloadFromForm = React.useCallback((draft: AdFormState) => {
+    if (creativeSaveError) throw new Error(creativeSaveError);
     const priorityNum = Number(draft.priority);
     if (!Number.isFinite(priorityNum)) {
       throw new Error('Priority must be a number');
@@ -2320,7 +2379,7 @@ export default function AdsManager() {
       active: Boolean(draft.isActive),
       productType: 'STANDARD_AD',
     };
-  }, []);
+  }, [creativeSaveError]);
 
   const hostExternalImageNow = React.useCallback(async () => {
     if (!editingId) return;
@@ -2353,6 +2412,8 @@ export default function AdsManager() {
 
   const openCreate = () => {
     setEditingId(null);
+    setOriginalCreative(null);
+    setCreativeUploaded(false);
     setForm(emptyForm());
     setAdImageFile(null);
     setAdImageUploading(false);
@@ -2381,6 +2442,8 @@ export default function AdsManager() {
 
   const openEdit = (ad: SponsorAd) => {
     setEditingId(ad.id);
+    setOriginalCreative({ slot: canonicalSlot(ad.slot), imageUrl: (ad.imageUrl || '').trim() });
+    setCreativeUploaded(false);
     const isSponsored = isSponsoredFeatureAd(ad);
     const clickable = isSponsored ? true : (typeof ad.clickable === 'boolean' ? ad.clickable : Boolean((ad.targetUrl || '').toString().trim()));
     setForm({
@@ -4834,6 +4897,11 @@ export default function AdsManager() {
                           ))}
                         </select>
                       )}
+                      {requiredCreativeSize ? (
+                        <div className="text-xs text-slate-600 dark:text-slate-300">
+                          Required creative size: {requiredCreativeSize.width} × {requiredCreativeSize.height} px
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="space-y-1">
@@ -4863,7 +4931,7 @@ export default function AdsManager() {
                       <button
                         type="button"
                         className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
-                        disabled={saving || hostingExternalImage || !editingId}
+                        disabled={saving || hostingExternalImage || !editingId || Boolean(creativeSaveError)}
                         onClick={() => void hostExternalImageNow()}
                         title={editingId ? 'Ask backend to re-host this image' : 'Create the ad first, then you can host the image'}
                       >
@@ -5049,6 +5117,45 @@ export default function AdsManager() {
                   </div>
 
               {/* Preview */}
+              {requiredCreativeSize ? (
+                <section aria-label="Placement preview" className="space-y-2 text-sm">
+                  <div className="font-medium">Placement preview: {slotLabel(String(form.slot))}</div>
+                  <div
+                    data-testid="ad-placement-frame"
+                    className="relative bg-slate-100 dark:bg-slate-900 border rounded overflow-hidden"
+                    style={{
+                      aspectRatio: `${requiredCreativeSize.width} / ${requiredCreativeSize.height}`,
+                      width: '100%',
+                      maxWidth: Math.min(480, requiredCreativeSize.width, 300 * requiredCreativeSize.width / requiredCreativeSize.height),
+                    }}
+                  >
+                    {creativeSource && !currentMeasurement?.failed ? (
+                      <img
+                        src={currentMeasurement?.previewUrl || (typeof creativeSource === 'string' ? creativeSource : undefined)}
+                        alt="Creative in selected placement"
+                        className="absolute inset-0 w-full h-full object-contain"
+                      />
+                    ) : null}
+                  </div>
+                  {currentMeasurement && !currentMeasurement.failed ? (
+                    <div>{adImageFile ? 'Selected' : 'Uploaded'} creative: {currentMeasurement.width} × {currentMeasurement.height} px</div>
+                  ) : creativeSource ? (
+                    <div role="status">{currentMeasurement?.failed ? 'Unable to verify creative dimensions.' : 'Checking creative dimensions...'}</div>
+                  ) : null}
+                  {creativeMismatch ? (
+                    <div role="alert" className="text-sm text-red-700 dark:text-red-400">
+                      <div className="font-medium">Creative size mismatch</div>
+                      <div>This placement requires a {requiredCreativeSize.width} × {requiredCreativeSize.height} aspect ratio.</div>
+                      <div>Selected creative is {currentMeasurement?.width} × {currentMeasurement?.height}.</div>
+                    </div>
+                  ) : null}
+                  {creativeUnchanged && (creativeMismatch || currentMeasurement?.failed) ? (
+                    <div className="text-xs text-amber-700 dark:text-amber-400">Existing creative unchanged. Other edits can still be saved.</div>
+                  ) : creativeSaveError && creativeSource ? (
+                    <div className="text-xs text-red-700 dark:text-red-400">{creativeSaveError}</div>
+                  ) : null}
+                </section>
+              ) : null}
               <div className="border rounded p-3 bg-slate-50 dark:bg-slate-950">
                 <div className="text-sm font-medium mb-2">Creative thumbnail (not public layout)</div>
                 <div className="flex items-center gap-3">
@@ -5097,7 +5204,7 @@ export default function AdsManager() {
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-blue-600 text-white"
-                  disabled={saving}
+                  disabled={saving || Boolean(creativeSaveError)}
                 >
                   {saving ? 'Saving…' : (form.mode === 'sponsored-feature' ? (editingId ? 'Save Sponsored Feature' : 'Create Sponsored Feature') : (editingId ? 'Save Changes' : 'Create Ad'))}
                 </button>

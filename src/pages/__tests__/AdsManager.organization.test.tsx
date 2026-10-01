@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import appSource from '../../App.tsx?raw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -65,6 +65,27 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+function mockCreativeImage(width = 728, height = 90, fails = false) {
+  vi.stubGlobal('Image', class {
+    naturalWidth = width;
+    naturalHeight = height;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(_value: string) { queueMicrotask(() => fails ? this.onerror?.() : this.onload?.()); }
+  });
+}
+
+function openDisplayCreate(slot: string, imageUrl = 'https://cdn.example/display.jpg') {
+  fireEvent.click(screen.getByRole('button', { name: 'Create Ad' }));
+  const dialog = screen.getByRole('dialog');
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: slot } });
+  fireEvent.change(within(dialog).getByPlaceholderText('e.g. Sponsor: ACME'), { target: { value: 'Display Sponsor' } });
+  const urls = within(dialog).getAllByPlaceholderText('https://...');
+  fireEvent.change(urls[0], { target: { value: imageUrl } });
+  fireEvent.change(urls[1], { target: { value: 'https://sponsor.example/display' } });
+  return dialog;
+}
+
 function mockAdsManagerRecords(records: any[]) {
   vi.mocked(adminApi.get).mockImplementation(async (path: string) => {
     if (path === '/admin/ads') return { data: { ads: records } };
@@ -76,6 +97,7 @@ function mockAdsManagerRecords(records: any[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockCreativeImage();
   vi.mocked(api.get).mockResolvedValue({ data: { mediaKit: { title: 'Saved Media Kit' } } });
   vi.mocked(adminApi.get).mockImplementation(async (path: string) => {
     if (path === '/admin/ads') return { data: { ads: [] } };
@@ -99,6 +121,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('AdsManager module organization', () => {
@@ -167,12 +190,236 @@ describe('AdsManager module organization', () => {
     fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '7' } });
     expect(within(dialog).getByRole('spinbutton')).toHaveValue(7);
     expect(within(dialog).getByText('Creative thumbnail (not public layout)')).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Ad' }));
     await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', {
       slot: 'HOME_728x90', title: 'Display Sponsor', imageUrl: 'https://cdn.example/display.jpg',
       targetUrl: 'https://sponsor.example/display', clickable: true, isClickable: true, priority: 7,
       startAt: null, endAt: null, isActive: true, active: true, productType: 'STANDARD_AD',
     }));
+  });
+
+  it('rejects a 728x90 creative for the billboard before create', async () => {
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Ad' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'HOME_BILLBOARD_970x250' } });
+    fireEvent.change(within(dialog).getAllByPlaceholderText('https://...')[0], { target: { value: 'https://cdn.example/banner.jpg' } });
+    expect(within(dialog).getByText('Required creative size: 970 × 250 px')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Uploaded creative: 728 × 90 px')).toBeInTheDocument();
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Creative size mismatch');
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(adminApi.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['HOME_728x90', 728, 90],
+    ['FOOTER_BANNER_728x90', 728, 90],
+    ['HOME_BILLBOARD_970x250', 970, 250],
+    ['HOME_RIGHT_300x250', 300, 250],
+    ['HOME_LEFT_300x250', 300, 250],
+    ['HOME_RIGHT_300x600', 300, 600],
+    ['HOME_LEFT_300x600', 300, 600],
+  ])('uses canonical requirements and an undistorted frame for %s', async (slot, width, height) => {
+    mockCreativeImage(Number(width), Number(height));
+    vi.mocked(adminApi.post).mockResolvedValue({ data: {} });
+    render(<AdsManager />);
+    const dialog = openDisplayCreate(String(slot));
+    expect(within(dialog).getByText(`Required creative size: ${width} × ${height} px`)).toBeInTheDocument();
+    expect(await within(dialog).findByText(`Uploaded creative: ${width} × ${height} px`)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+    const frame = within(dialog).getByTestId('ad-placement-frame');
+    expect(frame).toHaveStyle({ aspectRatio: `${width} / ${height}`, width: '100%' });
+    expect(frame.querySelector('img')).toHaveClass('object-contain');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Ad' }));
+    await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', expect.objectContaining({ slot })));
+  });
+
+  it.each([
+    ['HOME_728x90', 1456, 180],
+    ['FOOTER_BANNER_728x90', 1456, 180],
+    ['HOME_BILLBOARD_970x250', 1940, 500],
+    ['HOME_RIGHT_300x250', 600, 500],
+    ['HOME_LEFT_300x600', 600, 1200],
+  ])('accepts exact 2x aspect ratio for %s', async (slot, width, height) => {
+    mockCreativeImage(Number(width), Number(height));
+    render(<AdsManager />);
+    const dialog = openDisplayCreate(String(slot));
+    await within(dialog).findByText(`Uploaded creative: ${width} × ${height} px`);
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeEnabled();
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+  });
+
+  it('uses exact integer aspect ratios without a rounding tolerance', async () => {
+    mockCreativeImage(970, 251);
+    render(<AdsManager />);
+    const dialog = openDisplayCreate('HOME_BILLBOARD_970x250');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Selected creative is 970 × 251.');
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+  });
+
+  it.each(['LIVE_UPDATE_SPONSOR', 'BREAKING_SPONSOR', 'ARTICLE_INLINE', 'ARTICLE_END'])('does not add image-size rules to %s', async (slot) => {
+    mockCreativeImage(0, 0, true);
+    vi.mocked(adminApi.post).mockResolvedValue({ data: {} });
+    render(<AdsManager />);
+    const dialog = openDisplayCreate(slot);
+    expect(within(dialog).queryByLabelText('Placement preview')).toBeNull();
+    expect(within(dialog).queryByText(/Required creative size/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Ad' }));
+    await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', expect.objectContaining({ slot })));
+  });
+
+  it.each([false, true])('allows unchanged legacy creative edits, including failed image load=%s', async (fails) => {
+    mockCreativeImage(728, 90, fails);
+    const record = {
+      id: 'legacy', slot: 'HOME_BILLBOARD_970x250', title: 'Legacy Billboard',
+      imageUrl: 'https://cdn.example/legacy.jpg', targetUrl: 'https://sponsor.example',
+      clickable: true, priority: 7, isActive: true,
+      startAt: '2026-09-01T08:30:00.000Z', endAt: '2026-11-01T18:15:00.000Z',
+    };
+    mockAdsManagerRecords([record]);
+    vi.mocked(adminApi.put).mockResolvedValue({ data: { ad: record } });
+    render(<AdsManager />);
+    const row = (await screen.findByText('Legacy Billboard')).closest('tr')!;
+    expect(screen.getByRole('columnheader', { name: 'Thumbnail' })).toBeInTheDocument();
+    expect(within(row).getByRole('img')).toHaveAttribute('src', record.imageUrl);
+    fireEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByText('Existing creative unchanged. Other edits can still be saved.')).toBeInTheDocument();
+    const scheduleInputs = dialog.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
+    expect(new Date(scheduleInputs[0].value).toISOString()).toBe(record.startAt);
+    expect(new Date(scheduleInputs[1].value).toISOString()).toBe(record.endAt);
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. Sponsor: ACME'), { target: { value: 'Updated title' } });
+    fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '9' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(adminApi.put).toHaveBeenCalledWith('/admin/ads/legacy', {
+      slot: record.slot, title: 'Updated title', imageUrl: record.imageUrl,
+      targetUrl: record.targetUrl, clickable: true, isClickable: true, priority: 9,
+      startAt: record.startAt, endAt: record.endAt, isActive: true, active: true, productType: 'STANDARD_AD',
+    }));
+    expect(adminApi.patch).not.toHaveBeenCalled();
+    expect(adminApi.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(['placement', 'creative'])('blocks changed %s on an existing ad, including the hosting save path', async (change) => {
+    const record = {
+      id: 'existing', slot: 'HOME_728x90', title: 'Existing Banner',
+      imageUrl: 'https://cdn.example/original.jpg', targetUrl: 'https://sponsor.example', isActive: true,
+    };
+    mockAdsManagerRecords([record]);
+    render(<AdsManager />);
+    fireEvent.click(within((await screen.findByText(record.title)).closest('tr')!).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByText('Uploaded creative: 728 × 90 px');
+    if (change === 'placement') {
+      fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'HOME_BILLBOARD_970x250' } });
+    } else {
+      mockCreativeImage(300, 250);
+      fireEvent.change(within(dialog).getAllByPlaceholderText('https://...')[0], { target: { value: 'https://cdn.example/replacement.jpg' } });
+    }
+    await within(dialog).findByRole('alert');
+    expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Host this image' })).toBeDisabled();
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(adminApi.put).not.toHaveBeenCalled();
+    if (change === 'placement') {
+      fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: record.slot } });
+      expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    } else {
+      mockCreativeImage();
+      fireEvent.change(within(dialog).getAllByPlaceholderText('https://...')[0], { target: { value: 'https://cdn.example/correct.jpg' } });
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toBeEnabled());
+      vi.mocked(adminApi.put).mockResolvedValue({ data: { ad: record } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
+      await waitFor(() => expect(adminApi.put).toHaveBeenCalledWith('/admin/ads/existing', expect.objectContaining({ imageUrl: 'https://cdn.example/correct.jpg' })));
+    }
+  });
+
+  it('blocks an unreadable new creative without treating it as valid', async () => {
+    mockCreativeImage(0, 0, true);
+    render(<AdsManager />);
+    const dialog = openDisplayCreate('HOME_728x90');
+    await within(dialog).findByText('Unable to verify creative dimensions.');
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(adminApi.post).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale image loads and blocks save while the replacement is loading', async () => {
+    const pending: Array<{ naturalWidth: number; naturalHeight: number; onload: (() => void) | null }> = [];
+    vi.stubGlobal('Image', class {
+      naturalWidth = 728;
+      naturalHeight = 90;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) { pending.push(this); }
+    });
+    render(<AdsManager />);
+    const dialog = openDisplayCreate('HOME_728x90');
+    const staleLoad = pending[0].onload!;
+    await act(async () => staleLoad());
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeEnabled();
+    fireEvent.change(within(dialog).getAllByPlaceholderText('https://...')[0], { target: { value: 'https://cdn.example/replacement.jpg' } });
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    await act(async () => staleLoad());
+    expect(within(dialog).queryByText('Uploaded creative: 728 × 90 px')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    pending[1].naturalWidth = 970;
+    pending[1].naturalHeight = 250;
+    await act(async () => pending[1].onload?.());
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Selected creative is 970 × 250.');
+    expect(adminApi.post).not.toHaveBeenCalled();
+  });
+
+  it('measures a selected file, then rechecks the uploaded URL before create', async () => {
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:local-creative');
+      static revokeObjectURL = revokeObjectURL;
+    });
+    vi.mocked(api.post).mockResolvedValue({ data: { hostedUrl: 'https://cdn.example/uploaded.jpg' } });
+    vi.mocked(adminApi.post).mockResolvedValue({ data: {} });
+    render(<AdsManager />);
+    const dialog = openDisplayCreate('HOME_728x90');
+    await within(dialog).findByText('Uploaded creative: 728 × 90 px');
+    const file = new File(['image'], 'banner.png', { type: 'image/png' });
+    fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await within(dialog).findByText('Selected creative: 728 × 90 px');
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    expect(within(dialog).getByRole('img', { name: 'Creative in selected placement' })).toHaveAttribute('src', 'blob:local-creative');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Upload Image' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeEnabled());
+    expect(api.post).toHaveBeenCalledWith('/ads/upload-image', expect.any(FormData), expect.any(Object));
+    expect((vi.mocked(api.post).mock.calls[0][1] as FormData).get('file')).toBe(file);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-creative');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Ad' }));
+    await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', expect.objectContaining({ imageUrl: 'https://cdn.example/uploaded.jpg' })));
+  });
+
+  it('does not exempt a replacement upload when hosting returns the original legacy URL', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:replacement-creative');
+      static revokeObjectURL = vi.fn();
+    });
+    const record = {
+      id: 'same-url', slot: 'HOME_BILLBOARD_970x250', title: 'Legacy Upload',
+      imageUrl: 'https://cdn.example/legacy.jpg', targetUrl: 'https://sponsor.example', isActive: true,
+    };
+    mockAdsManagerRecords([record]);
+    vi.mocked(api.post).mockResolvedValue({ data: { hostedUrl: record.imageUrl } });
+    render(<AdsManager />);
+    fireEvent.click(within((await screen.findByText(record.title)).closest('tr')!).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByText('Existing creative unchanged. Other edits can still be saved.');
+    fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(['image'], 'wrong.png', { type: 'image/png' })] } });
+    await within(dialog).findByText('Selected creative: 728 × 90 px');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Upload Image' }));
+    await within(dialog).findByText('Uploaded creative: 728 × 90 px');
+    expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(within(dialog).queryByText('Existing creative unchanged. Other edits can still be saved.')).toBeNull();
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(adminApi.put).not.toHaveBeenCalled();
   });
 
   it('keeps lifetime inventory independent of Ads-tab slot and active filters', async () => {
