@@ -217,6 +217,7 @@ describe('AdsManager module organization', () => {
     ['HOME_728x90', 728, 90],
     ['FOOTER_BANNER_728x90', 728, 90],
     ['HOME_BILLBOARD_970x250', 970, 250],
+    ['TOP_HOME_BILLBOARD_970x250', 970, 250],
     ['HOME_RIGHT_300x250', 300, 250],
     ['HOME_LEFT_300x250', 300, 250],
     ['HOME_RIGHT_300x600', 300, 600],
@@ -240,6 +241,7 @@ describe('AdsManager module organization', () => {
     ['HOME_728x90', 1456, 180],
     ['FOOTER_BANNER_728x90', 1456, 180],
     ['HOME_BILLBOARD_970x250', 1940, 500],
+    ['TOP_HOME_BILLBOARD_970x250', 1940, 500],
     ['HOME_RIGHT_300x250', 600, 500],
     ['HOME_LEFT_300x600', 600, 1200],
   ])('accepts exact 2x aspect ratio for %s', async (slot, width, height) => {
@@ -257,6 +259,28 @@ describe('AdsManager module organization', () => {
     const dialog = openDisplayCreate('HOME_BILLBOARD_970x250');
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Selected creative is 970 × 251.');
     expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+  });
+
+  it('rejects a 728x90 creative for the new TOP_HOME_BILLBOARD_970x250 slot', async () => {
+    mockCreativeImage(728, 90);
+    render(<AdsManager />);
+    const dialog = openDisplayCreate('TOP_HOME_BILLBOARD_970x250');
+    expect(within(dialog).getByText('Required creative size: 970 × 250 px')).toBeInTheDocument();
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Selected creative is 728 × 90.');
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+  });
+
+  it('keeps TOP_HOME_BILLBOARD_970x250 as a distinct product from HOME_728x90 and HOME_BILLBOARD_970x250', async () => {
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Ad' }));
+    const dialog = screen.getByRole('dialog');
+    const options = Array.from(within(dialog).getByRole('combobox').querySelectorAll('option'))
+      .map((option) => (option as HTMLOptionElement).value);
+    expect(options).toContain('HOME_728x90');
+    expect(options).toContain('HOME_BILLBOARD_970x250');
+    expect(options).toContain('TOP_HOME_BILLBOARD_970x250');
+    // Exact, separate slot IDs - no normalization/collapsing onto an existing slot.
+    expect(new Set(options).size).toBe(options.length);
   });
 
   it.each(['LIVE_UPDATE_SPONSOR', 'BREAKING_SPONSOR', 'ARTICLE_INLINE', 'ARTICLE_END'])('does not add image-size rules to %s', async (slot) => {
@@ -504,6 +528,34 @@ describe('AdsManager module organization', () => {
     expect(screen.getByRole('heading', { name: 'Saved Media Kit' })).toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/admin/media-kit');
     expect(screen.getByRole('button', { name: /Refresh|Loading/ })).toBeInTheDocument();
+  });
+
+  it('adds a separate Top Home Billboard 970x250 Media Kit product without altering existing prices', async () => {
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Media Kit' }));
+    await screen.findByText('Internal / Confidential');
+
+    const newCardHeading = await screen.findByText('Top Home Billboard 970×250 (Premium)');
+    const newCard = newCardHeading.closest('div.rounded.border') as HTMLElement;
+    expect(within(newCard).getByText('TOP_HOME_BILLBOARD_970x250')).toBeInTheDocument();
+    expect(within(newCard).getByText('₹900')).toBeInTheDocument();
+    expect(within(newCard).getByText('₹5,350')).toBeInTheDocument();
+    expect(within(newCard).getByText('₹10,800')).toBeInTheDocument();
+    expect(within(newCard).getByText('₹18,900')).toBeInTheDocument();
+
+    // Existing premium billboard remains present, separate, and unchanged.
+    const existingHeading = screen.getByText('Home Billboard 970×250 (Premium)');
+    const existingCard = existingHeading.closest('div.rounded.border') as HTMLElement;
+    expect(within(existingCard).getByText('HOME_BILLBOARD_970x250')).toBeInTheDocument();
+    expect(within(existingCard).getByText('₹900')).toBeInTheDocument();
+    expect(within(existingCard).getByText('₹5,350')).toBeInTheDocument();
+    expect(within(existingCard).getByText('₹10,800')).toBeInTheDocument();
+    expect(within(existingCard).getByText('₹18,900')).toBeInTheDocument();
+
+    // Unrelated existing product prices are untouched.
+    const bannerHeading = screen.getByText('Home Banner 728×90');
+    const bannerCard = bannerHeading.closest('div.rounded.border') as HTMLElement;
+    expect(within(bannerCard).getByText('₹500')).toBeInTheDocument();
   });
 
   it('renders the new Ad Performance tab from the existing ad-performance helper', async () => {

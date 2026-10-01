@@ -49,6 +49,7 @@ type AdSlot =
   | 'HOME_RIGHT_300x600'
   | 'HOME_LEFT_300x600'
   | 'HOME_BILLBOARD_970x250'
+  | 'TOP_HOME_BILLBOARD_970x250'
   | 'LIVE_UPDATE_SPONSOR'
   | 'BREAKING_SPONSOR'
   | 'HOME_RIGHT_RAIL'
@@ -203,6 +204,7 @@ const MEDIA_KIT_RATE_CARD_GROUPS: readonly MediaKitRateCardGroup[] = [
       'HOME_LEFT_300x600',
       'HOME_RIGHT_300x600',
       'HOME_BILLBOARD_970x250',
+      'TOP_HOME_BILLBOARD_970x250',
     ],
   },
   {
@@ -553,6 +555,13 @@ function defaultMediaKit(): MediaKitDoc {
         specs: ['970×250 image'],
       }, { preserveExplicitDerived: false }),
       normalizeRateCard({
+        placementKey: 'TOP_HOME_BILLBOARD_970x250',
+        placementLabel: 'Top Home Billboard 970×250 (Premium)',
+        prices: { day: 900 },
+        includes: ['Premium top-home billboard placement', 'One linked destination'],
+        specs: ['970×250 image'],
+      }, { preserveExplicitDerived: false }),
+      normalizeRateCard({
         placementKey: 'LIVE_UPDATE_SPONSOR',
         placementLabel: 'Live Update Sponsor (Sponsored by <Brand>)',
         prices: { day: 700 },
@@ -776,6 +785,7 @@ const PLACEMENT_SLOT_OPTIONS = [
   'HOME_RIGHT_300x600',
   'HOME_LEFT_300x600',
   'HOME_BILLBOARD_970x250',
+  'TOP_HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
   'BREAKING_SPONSOR',
   'ARTICLE_INLINE',
@@ -791,6 +801,7 @@ const SLOT_OPTIONS = [
   'HOME_RIGHT_300x600',
   'HOME_LEFT_300x600',
   'HOME_BILLBOARD_970x250',
+  'TOP_HOME_BILLBOARD_970x250',
   'LIVE_UPDATE_SPONSOR',
   'BREAKING_SPONSOR',
   'ARTICLE_INLINE',
@@ -808,6 +819,7 @@ const SLOT_LABELS: Record<string, string> = {
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page)',
   HOME_LEFT_300x600: 'Home Left Rail 300×600 (Half Page)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Premium)',
+  TOP_HOME_BILLBOARD_970x250: 'Top Home Billboard 970×250 (Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Sponsored by <Brand>)',
   BREAKING_SPONSOR: 'Breaking Sponsor (Sponsored by <Brand>)',
   ARTICLE_INLINE: 'Article Inline',
@@ -819,6 +831,7 @@ const SLOT_DROPDOWN_HINT_LABELS: Record<string, string> = {
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_LEFT_300x600: 'Home Left Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Billboard / Premium)',
+  TOP_HOME_BILLBOARD_970x250: 'Top Home Billboard 970×250 (Billboard / Premium)',
   LIVE_UPDATE_SPONSOR: 'Live Update Sponsor (Ticker / “Sponsored by Brand”)',
   BREAKING_SPONSOR: 'Breaking Sponsor (Breaking ticker / “Sponsored by Brand”)',
 };
@@ -845,6 +858,7 @@ function canonicalSlot(value: unknown): string {
   if (normalized === 'HOME_RIGHT_300X600') return 'HOME_RIGHT_300x600';
   if (normalized === 'HOME_LEFT_300X600') return 'HOME_LEFT_300x600';
   if (normalized === 'HOME_BILLBOARD_970X250') return 'HOME_BILLBOARD_970x250';
+  if (normalized === 'TOP_HOME_BILLBOARD_970X250') return 'TOP_HOME_BILLBOARD_970x250';
   if (normalized === 'LIVE_UPDATE_SPONSOR') return 'LIVE_UPDATE_SPONSOR';
   if (normalized === 'BREAKING_SPONSOR') return 'BREAKING_SPONSOR';
   if (normalized === 'HOME_RIGHT_RAIL') return 'HOME_RIGHT_RAIL';
