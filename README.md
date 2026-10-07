@@ -110,6 +110,33 @@ Open: `http://localhost:5173`
 
 Default frontend dev port in this repo is `5173`.
 
+### Modern Add/Edit: Faith & Culture topic
+
+The current Add News page (`/admin/add-news`) and Edit News page
+(`/admin/articles/:id/edit`) use [ArticleForm](src/components/news/ArticleForm.tsx).
+For `faith-culture`, Publishing Settings includes an optional **Faith & Culture
+Topic** native selector below Category and the other category-specific controls.
+The seven exact codes and labels are defined in
+[faithCultureTopics.ts](src/lib/faithCultureTopics.ts); only codes are sent as `topic`.
+
+- Blank is allowed for drafts, publishing, and translation generation.
+- Unchanged or unrecognized stored values are omitted from updates and preserved
+  by the backend. Selecting another topic sends its code; explicitly clearing an
+  existing topic sends `topic: null`.
+- Leaving Faith resets the local selector and omits `topic`. Returning restores
+  only a valid last-saved Faith topic; otherwise the selector starts blank.
+- Explicit existing source-article/source-language metadata makes the topic
+  read-only on translated children. No language or group-membership heuristic is
+  used. When that metadata is absent, backend HTTP 409 remains visible through
+  the existing save/autosave error handling.
+- Topic changes participate in saved/dirty snapshots and the existing 30-second
+  autosave (after the first manual save). Publish still saves before its separate
+  status request. New linked drafts receive a recognized topic; existing linked
+  drafts do not receive topic updates from the source editor's secondary saves.
+
+The separate legacy `/edit/:id` route remains reachable and does not have this
+selector. Normal list editing uses the modern route above.
+
 ### Manage News Module
 
 The admin UI provides a full Manage News panel at `/admin/manage-news` (protected route). An alias is also available at `/manage-news` for convenience. It includes:

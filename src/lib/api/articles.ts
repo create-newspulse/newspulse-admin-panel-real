@@ -34,6 +34,7 @@ export interface Article {
   coverImage?: string | { url: string; publicId?: string };
   category?: string;
   editorialType?: 'editorial' | 'special_story' | string;
+  topic?: string | null;
   status?: ArticleStatus;
   // Some backends use alternate fields instead of `status`.
   state?: string;

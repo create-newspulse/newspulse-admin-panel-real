@@ -22,6 +22,7 @@ import { ARTICLE_CATEGORY_OPTIONS, isAllowedArticleCategoryKey, normalizeArticle
 import { generateArticleSlug } from '@/lib/articleSlug';
 import { stripHtmlToText } from '@/lib/richText';
 import { YOUTH_PULSE_TRACK_OPTIONS, YOUTH_PULSE_TRACK_LABELS, normalizeYouthPulseTrack, type YouthPulseTrack } from '@/lib/youthPulseTracks';
+import { FAITH_CULTURE_TOPIC_OPTIONS, isFaithCultureTopic } from '@/lib/faithCultureTopics';
 import { useAuth } from '@context/AuthContext';
 import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
 import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsSection';
@@ -468,9 +469,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   });
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
-  const [autoSlug, setAutoSlug] = useState(true);
+  const [autoSlug, setAutoSlug] = useState(!initialEditId);
   const [summary, setSummary] = useState('');
-  const [autoSummary, setAutoSummary] = useState(true);
+  const [autoSummary, setAutoSummary] = useState(!initialEditId);
   const [content, setContent] = useState('');
   const [languageDrafts, setLanguageDrafts] = useState<Record<LangCode, ArticleLanguageDraft>>({
     en: { ...EMPTY_LANGUAGE_DRAFT },
@@ -490,6 +491,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [category, setCategory] = useState<string>('');
   const [editorialType, setEditorialType] = useState<EditorialType>('editorial');
   const [youthPulseTrack, setYouthPulseTrack] = useState<YouthPulseTrack | ''>('');
+  // undefined preserves stored metadata; null is an intentional clear. Keep unknown stored strings unchanged.
+  const [faithTopic, setFaithTopic] = useState<string | null | undefined>(undefined);
   const [pulseDialogue, setPulseDialogue] = useState<PulseDialogueFormValue>(() => ({ ...EMPTY_PULSE_DIALOGUE_VALUE }));
   const [selectedPulseContributor, setSelectedPulseContributor] = useState<PulseDialogueContributor | null>(null);
   const [authorByline, setAuthorByline] = useState<AuthorByline>({ enabled: false });
@@ -651,6 +654,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     category: string;
     editorialType: EditorialType | '';
     youthPulseTrack: string;
+    faithTopic?: string | null;
     pulseDialogue: PulseDialogueFormValue;
     authorByline: AuthorByline;
     language: string;
@@ -684,6 +688,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     category: '',
     editorialType: '',
     youthPulseTrack: '',
+    faithTopic: undefined,
     pulseDialogue: { ...EMPTY_PULSE_DIALOGUE_VALUE },
     authorByline: { enabled: false },
     language: DEFAULT_CREATE_LANGUAGE,
@@ -734,6 +739,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setCategory('');
     setEditorialType('editorial');
     setYouthPulseTrack('');
+    setFaithTopic(undefined);
     setPulseDialogue({ ...EMPTY_PULSE_DIALOGUE_VALUE });
     setSelectedPulseContributor(null);
     setAuthorByline({ enabled: false });
@@ -784,6 +790,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       category: (next?.category ?? category ?? '').toString(),
       editorialType: (next?.editorialType ?? (category === 'editorial' ? editorialType : '') ?? '').toString() as Snapshot['editorialType'],
       youthPulseTrack: (next?.youthPulseTrack ?? youthPulseTrack ?? '').toString(),
+      faithTopic: next && 'faithTopic' in next
+        ? next.faithTopic
+        : category === 'faith-culture'
+          ? (faithTopic === undefined && lastSavedSnapshot.category === 'faith-culture' ? lastSavedSnapshot.faithTopic : faithTopic)
+          : undefined,
       pulseDialogue: next?.pulseDialogue ?? pulseDialogue,
       authorByline: next?.authorByline ?? authorByline,
       language: (next?.language ?? language ?? '').toString(),
@@ -857,6 +868,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       category: (s.category || ''),
       editorialType: s.category === 'editorial' ? (s.editorialType || 'editorial') : '',
       youthPulseTrack: (s.youthPulseTrack || ''),
+      faithTopic: s.category === 'faith-culture' ? s.faithTopic : undefined,
       pulseDialogue: s.category === PULSE_DIALOGUE_CATEGORY ? normalizePulseDialogueFormValue(s.pulseDialogue) : { ...EMPTY_PULSE_DIALOGUE_VALUE },
       authorByline: s.category === PULSE_DIALOGUE_CATEGORY ? { enabled: false } : restoreAuthorByline(s.authorByline),
       language: (s.language || ''),
@@ -1102,7 +1114,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       setTitle(src.title || '');
       setSlug(src.slug || '');
+      setAutoSlug(!src.slug);
       setSummary((src as any).summary || '');
+      setAutoSummary(!src.summary);
       setContent((src as any).content ?? (src as any).body ?? '');
       // Backward compat: category might be stored as a string OR object.
       // Normalize to string slug/_id only; never store the object.
@@ -1120,6 +1134,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setYouthPulseTrack(normalizeYouthPulseTrack(
         String((src as any).track ?? (src as any).subCategory ?? (src as any).subcategory ?? (src as any).trackName ?? '')
       ));
+      const incomingFaithTopic = normalizedCategory === 'faith-culture' ? src.topic : undefined;
+      setFaithTopic(incomingFaithTopic);
       const incomingPulseDialogue = normalizePulseDialogueFormValue((src as any).pulseDialogue);
       const incomingAuthorByline = restoreAuthorByline(src.authorByline);
       setAuthorByline(incomingAuthorByline);
@@ -1235,6 +1251,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             ? String(((src as any).category.slug ?? (src as any).category._id ?? '') || '')
             : (typeof (src as any).category === 'string' ? (src as any).category : ''),
           editorialType: normalizedCategory === 'editorial' ? normalizeEditorialType((src as any).editorialType) : '',
+          faithTopic: incomingFaithTopic,
           pulseDialogue: normalizedCategory === PULSE_DIALOGUE_CATEGORY ? incomingPulseDialogue : { ...EMPTY_PULSE_DIALOGUE_VALUE },
           authorByline: incomingAuthorByline,
           language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
@@ -1381,6 +1398,32 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
     return normalizeLang(language);
   }, [currentArticleRecord, language]);
+
+  const faithTopicReadOnly = useMemo(() => {
+    if (!effectiveId || !currentArticleRecord) return false;
+    const sourceId = String(translationSourceArticle?._id || translationSourceArticle?.id || '').trim();
+    if (sourceId) return sourceId !== effectiveId;
+    // Use only explicit backend source metadata, not the translation UI's inferred source language.
+    const sourceLanguage = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
+    const recordLanguage = String(currentArticleRecord.lang ?? currentArticleRecord.language ?? '').trim().toLowerCase();
+    return !!sourceLanguage && isLangCode(recordLanguage) && sourceLanguage !== recordLanguage;
+  }, [effectiveId, currentArticleRecord, translationSourceArticle, translationGroupPayload]);
+
+  useEffect(() => {
+    if (faithTopicReadOnly && category === 'faith-culture') {
+      setFaithTopic(lastSavedSnapshot.category === 'faith-culture' ? lastSavedSnapshot.faithTopic : undefined);
+    }
+  }, [faithTopicReadOnly, category, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic]);
+
+  function buildFaithTopicPayload(newArticle = !effectiveId): Pick<Article, 'topic'> {
+    if (category !== 'faith-culture') return {};
+    if (!newArticle && (faithTopicReadOnly || (
+      lastSavedSnapshot.category === 'faith-culture' && faithTopic === lastSavedSnapshot.faithTopic
+    ))) return {};
+    if (isFaithCultureTopic(faithTopic)) return { topic: faithTopic };
+    if (!newArticle && faithTopic === null) return { topic: null };
+    return {};
+  }
 
   const translationVariants = useMemo(() => {
     const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
@@ -1688,6 +1731,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     statusToSend: 'draft'|'scheduled'|'published';
     safeSlug: string;
     wasNew: boolean;
+    category: string;
+    faithTopic?: string | null;
     authorByline: AuthorByline;
   }>(null);
 
@@ -1726,6 +1771,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         category?: string;
         postType?: string;
         editorialType?: EditorialType;
+        topic?: string | null;
         track?: string;
         trackName?: string;
         subCategory?: string;
@@ -1843,6 +1889,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           content: draft.content,
           category: categoryKey || undefined,
           editorialType: categoryKey === 'editorial' ? editorialType : undefined,
+          // Existing linked drafts inherit topic changes from their source, not secondary updates.
+          ...(opts.language && !opts.newArticle ? {} : buildFaithTopicPayload(opts.newArticle || !effectiveId)),
           track: youthTrack || undefined,
           trackName: youthTrack ? YOUTH_PULSE_TRACK_LABELS[youthTrack] : undefined,
           subCategory: youthTrack || undefined,
@@ -1931,7 +1979,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           await updateArticle(idToPublish, draftPayload as any);
         }
 
-        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId, authorByline };
+        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId, category, faithTopic: buildSnapshot().faithTopic, authorByline };
         const published: any = await publishArticle(idToPublish, publishAtToSend);
         return { ...(published as any), __npCreatedId: idToPublish };
       }
@@ -1955,7 +2003,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         statusToSend = statusExplicitlyChanged ? status : (orig as PublicArticleStatus);
       }
 
-      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId, authorByline };
+      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId, category, faithTopic: buildSnapshot().faithTopic, authorByline };
 
       logArticleEditorDebug('submit', {
         kind: saveKindRef.current,
@@ -2143,6 +2191,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setLastSavedSnapshot(buildSnapshot({
         slug: safeSlug,
         status: statusToSend,
+        category: lastSubmitRef.current?.category ?? category,
+        faithTopic: lastSubmitRef.current?.faithTopic,
         translationGroupId: savedGroupId || translationGroupId,
         coverImage: coverImageUrl,
         coverImagePublicId,
@@ -2327,6 +2377,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         content,
         category: categoryKey,
         editorialType: categoryKey === 'editorial' ? editorialType : undefined,
+        ...buildFaithTopicPayload(true),
         track: categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) || undefined : undefined,
         trackName: categoryKey === 'youth-pulse' && normalizeYouthPulseTrack(youthPulseTrack)
           ? YOUTH_PULSE_TRACK_LABELS[normalizeYouthPulseTrack(youthPulseTrack) as YouthPulseTrack]
@@ -2366,7 +2417,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, pulseDialogue, authorByline, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, faithTopic, faithTopicReadOnly, pulseDialogue, authorByline, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl, mutation.isPending]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
@@ -2407,7 +2458,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, faithTopic, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
     return currentHash !== lastSavedHash;
@@ -2683,7 +2734,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium">Category</label>
-                <select value={category} onChange={e=> setCategory(e.target.value)} className="w-full border px-2 py-2 rounded">
+                <select value={category} onChange={e=> {
+                  const nextCategory = e.target.value;
+                  setCategory(nextCategory);
+                  setFaithTopic(nextCategory === 'faith-culture' && lastSavedSnapshot.category === 'faith-culture' && isFaithCultureTopic(lastSavedSnapshot.faithTopic)
+                    ? lastSavedSnapshot.faithTopic
+                    : undefined);
+                }} className="w-full border px-2 py-2 rounded">
                   <option value="" disabled>Select category…</option>
                   {ARTICLE_CATEGORY_OPTIONS.filter((opt) =>
                     (opt.key !== 'breaking' && opt.key !== 'inspiration-hub') ||
@@ -2719,6 +2776,45 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {category === 'faith-culture' && (
+                <div>
+                  <label htmlFor="faith-culture-topic" className="block text-xs font-medium">Faith &amp; Culture Topic</label>
+                  <select
+                    id="faith-culture-topic"
+                    value={faithTopic ?? ''}
+                    disabled={faithTopicReadOnly}
+                    aria-describedby={faithTopicReadOnly ? 'faith-culture-topic-source-note' : undefined}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value && !isFaithCultureTopic(value)) {
+                        toast.error('Select a supported Faith & Culture topic.');
+                        return;
+                      }
+                      setFaithTopic(value || null);
+                    }}
+                    className="w-full border px-2 py-2 rounded"
+                  >
+                    <option value="">Select topic</option>
+                    {faithTopic && !isFaithCultureTopic(faithTopic) ? (
+                      <option value={faithTopic} disabled>Unrecognized saved topic (unchanged)</option>
+                    ) : null}
+                    {FAITH_CULTURE_TOPIC_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  {faithTopic && !isFaithCultureTopic(faithTopic) ? (
+                    <div className="mt-1 text-[11px] text-slate-600">
+                      Saved topic: {faithTopic}. Kept unchanged unless you select a topic or choose Select topic to clear it.
+                    </div>
+                  ) : null}
+                  {faithTopicReadOnly ? (
+                    <div id="faith-culture-topic-source-note" className="mt-1 text-[11px] text-slate-600">
+                      Faith &amp; Culture Topic is managed from the source article.
+                    </div>
+                  ) : null}
                 </div>
               )}
 
