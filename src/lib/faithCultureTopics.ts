@@ -1,6 +1,6 @@
 export const FAITH_CULTURE_TOPIC_OPTIONS = [
   { value: 'faith-spiritual-life', label: 'Faith & Spiritual Life' },
-  { value: 'living-heritage', label: 'Living Heritage & Oral Traditions' },
+  { value: 'living-heritage', label: 'Living Heritage & Traditions' },
   { value: 'food-agricultural-heritage', label: 'Food & Agricultural Heritage' },
   { value: 'architecture-art-public-heritage', label: 'Architecture, Art & Public Heritage' },
   { value: 'community-social-traditions', label: 'Community & Social Traditions' },

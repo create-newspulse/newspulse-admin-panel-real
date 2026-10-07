@@ -69,7 +69,7 @@ vi.mock('@/components/ui/ConfirmModal', () => ({ default: () => null }));
 
 const approvedTopics = [
   { value: 'faith-spiritual-life', label: 'Faith & Spiritual Life' },
-  { value: 'living-heritage', label: 'Living Heritage & Oral Traditions' },
+  { value: 'living-heritage', label: 'Living Heritage & Traditions' },
   { value: 'food-agricultural-heritage', label: 'Food & Agricultural Heritage' },
   { value: 'architecture-art-public-heritage', label: 'Architecture, Art & Public Heritage' },
   { value: 'community-social-traditions', label: 'Community & Social Traditions' },
@@ -245,7 +245,7 @@ describe('ArticleForm Faith & Culture topic selector', () => {
   it.each([false, true])('hydrates the canonical topic and starts clean (API load: %s)', async (loadFromApi) => {
     const { onDirtyChange } = renderForm(sourceArticle, loadFromApi);
     await waitFor(() => expect(topicSelect()).toHaveValue('living-heritage'));
-    expect(within(topicSelect()).getByRole('option', { selected: true })).toHaveTextContent('Living Heritage & Oral Traditions');
+    expect(within(topicSelect()).getByRole('option', { selected: true })).toHaveTextContent('Living Heritage & Traditions');
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
     expect(mocks.updateArticle).not.toHaveBeenCalled();
   });
