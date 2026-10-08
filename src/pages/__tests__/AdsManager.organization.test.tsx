@@ -124,6 +124,187 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('Category top banner inventory', () => {
+  const slot = 'CATEGORY_TOP_970x90';
+  const label = 'Category Top Banner 970×90 (All Categories; Excludes Home)';
+  const existingSlots = [
+    'HOME_728x90', 'FOOTER_BANNER_728x90', 'HOME_RIGHT_300x250', 'HOME_LEFT_300x250',
+    'HOME_RIGHT_300x600', 'HOME_LEFT_300x600', 'HOME_BILLBOARD_970x250',
+    'TOP_HOME_BILLBOARD_970x250', 'LIVE_UPDATE_SPONSOR', 'BREAKING_SPONSOR',
+    'ARTICLE_INLINE', 'ARTICLE_END',
+  ];
+
+  it('adds exactly one single-slot option without renaming or aliasing existing products', async () => {
+    render(<AdsManager />);
+    await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ad-settings'));
+    const filter = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(Array.from(filter.options, (option) => option.value).sort()).toEqual(['ALL', slot, ...existingSlots].sort());
+    expect(within(filter).getByRole('option', { name: label })).toHaveValue(slot);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Ad' }));
+    const selector = within(screen.getByRole('dialog')).getByRole('combobox') as HTMLSelectElement;
+    expect(selector.multiple).toBe(false);
+    expect(Array.from(selector.options, (option) => option.value).sort()).toEqual(['', slot, ...existingSlots].sort());
+    expect(within(selector).getByRole('option', { name: label })).toHaveValue(slot);
+    expect(adminApi.post).not.toHaveBeenCalled();
+    expect(adminApi.put).not.toHaveBeenCalled();
+    expect(adminApi.patch).not.toHaveBeenCalled();
+  });
+
+  it.each([[728, 90], [970, 250], [970, 91]])('rejects a %sx%s creative for the category slot', async (width, height) => {
+    mockCreativeImage(width, height);
+    render(<AdsManager />);
+    const dialog = openDisplayCreate(slot);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(`Selected creative is ${width} × ${height}.`);
+    expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(adminApi.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['create', true], ['create', false], ['edit', true], ['edit', false],
+  ] as const)('preserves the scalar slot and campaign fields on %s with clickable=%s', async (mode, clickable) => {
+    mockCreativeImage(970, 90);
+    const record = {
+      id: 'category', slot: 'CATEGORY_TOP_970X90', title: 'Display Sponsor',
+      imageUrl: 'https://cdn.example/display.jpg', targetUrl: 'https://sponsor.example/display',
+      clickable: true, priority: 7, isActive: false,
+      startAt: '2026-10-01T08:30:00.000Z', endAt: '2026-11-01T18:15:00.000Z',
+    };
+    mockAdsManagerRecords(mode === 'edit' ? [record] : []);
+    vi.mocked(adminApi.post).mockResolvedValue({ data: {} });
+    vi.mocked(adminApi.put).mockResolvedValue({ data: {} });
+    render(<AdsManager />);
+    if (mode === 'edit') {
+      const row = (await screen.findByText(record.title)).closest('tr')!;
+      expect(within(row).getByText(label)).toBeInTheDocument();
+      fireEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    } else {
+      openDisplayCreate(slot);
+    }
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('combobox')).toHaveValue(slot);
+    if (mode === 'create') {
+      fireEvent.change(within(dialog).getByRole('spinbutton'), { target: { value: '7' } });
+      fireEvent.click(within(dialog).getByText('Is Active').previousElementSibling!);
+    }
+    const schedules = dialog.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
+    if (mode === 'edit') {
+      expect(new Date(schedules[0].value).toISOString()).toBe(record.startAt);
+      expect(new Date(schedules[1].value).toISOString()).toBe(record.endAt);
+    } else {
+      fireEvent.change(schedules[0], { target: { value: '2026-10-01T14:00' } });
+      fireEvent.change(schedules[1], { target: { value: '2026-11-01T23:45' } });
+    }
+    if (!clickable) fireEvent.click(within(dialog).getByText('Clickable', { exact: true }).previousElementSibling!);
+    const payload = {
+      slot, title: record.title, imageUrl: record.imageUrl,
+      targetUrl: clickable ? record.targetUrl : null, clickable, isClickable: clickable,
+      priority: 7, startAt: new Date(schedules[0].value).toISOString(), endAt: new Date(schedules[1].value).toISOString(),
+      isActive: false, active: false, productType: 'STANDARD_AD',
+    };
+    const save = within(dialog).getByRole('button', { name: mode === 'edit' ? 'Save Changes' : 'Create Ad' });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    if (mode === 'edit') {
+      await waitFor(() => expect(adminApi.put).toHaveBeenCalledWith('/admin/ads/category', payload));
+      expect(adminApi.post).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(adminApi.post).toHaveBeenCalledWith('/admin/ads', payload));
+      expect(adminApi.put).not.toHaveBeenCalled();
+    }
+    expect(adminApi.patch).not.toHaveBeenCalled();
+    expect(adminApi.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([slot, 'HOME_728x90', 'TOP_HOME_BILLBOARD_970x250', 'HOME_BILLBOARD_970x250'])('filters %s without reassigning campaigns', async (selectedSlot) => {
+    const records = [slot, 'HOME_728x90', 'TOP_HOME_BILLBOARD_970x250', 'HOME_BILLBOARD_970x250']
+      .map((recordSlot) => ({ id: recordSlot, slot: recordSlot, title: `Campaign ${recordSlot}`, isActive: true }));
+    mockAdsManagerRecords(records);
+    render(<AdsManager />);
+    await screen.findByText(`Campaign ${slot}`);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: selectedSlot } });
+    await waitFor(() => expect(adminApi.get).toHaveBeenCalledWith('/admin/ads', { params: { slot: selectedSlot } }));
+    expect(await screen.findByText(`Campaign ${selectedSlot}`)).toBeInTheDocument();
+    for (const record of records.filter((record) => record.slot !== selectedSlot)) {
+      expect(screen.queryByText(record.title)).toBeNull();
+    }
+    expect(adminApi.post).not.toHaveBeenCalled();
+    expect(adminApi.put).not.toHaveBeenCalled();
+    expect(adminApi.patch).not.toHaveBeenCalled();
+  });
+
+  it.each(['boolean', 'enabled', 'isEnabled'] as const)('preserves all placement flags with %s values and a partial save response', async (shape) => {
+    const shapeValue = (value: boolean) => shape === 'boolean' ? value : { [shape]: value };
+    const existingFlags = Object.fromEntries(existingSlots.map((key, index) => [key, shapeValue(index % 2 === 0)]));
+    const flags = shape === 'boolean' ? existingFlags : { ...existingFlags, [slot]: shapeValue(false) };
+    vi.mocked(adminApi.get).mockImplementation(async (path: string) => path === '/admin/ad-settings'
+      ? { data: { slotEnabled: flags } } : { data: { ads: [] } });
+    vi.mocked(adminApi.put).mockImplementation(async (_path, payload: any) => ({ data: { slotEnabled: { [slot]: payload.slotEnabled[slot] } } }));
+    render(<AdsManager />);
+    const card = screen.getByText(slot).parentElement!.parentElement!;
+    const toggle = within(card).getByRole('button', { name: 'OFF' });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    const assertExistingFlags = () => {
+      existingSlots.forEach((key, index) => {
+        const existingCard = screen.getByText(key).parentElement!.parentElement!;
+        expect(within(existingCard).getByRole('button', { name: index % 2 === 0 ? 'ON' : 'OFF' })).toBeEnabled();
+      });
+    };
+    assertExistingFlags();
+    expect(adminApi.put).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(adminApi.put).toHaveBeenCalledWith('/admin/ad-settings', {
+      slotEnabled: { ...existingFlags, [slot]: shapeValue(true) },
+    }));
+    const enabledToggle = await within(card).findByRole('button', { name: 'ON' });
+    assertExistingFlags();
+    fireEvent.click(enabledToggle);
+    await waitFor(() => expect(adminApi.put).toHaveBeenLastCalledWith('/admin/ad-settings', {
+      slotEnabled: { ...existingFlags, [slot]: shapeValue(false) },
+    }));
+    await within(card).findByRole('button', { name: 'OFF' });
+    assertExistingFlags();
+    expect(adminApi.patch).not.toHaveBeenCalled();
+  });
+
+  it('toggles only the category campaign without changing Home campaigns or placements', async () => {
+    const category = { id: 'category', slot, title: 'Category campaign', isActive: false };
+    mockAdsManagerRecords([category, { id: 'home', slot: 'HOME_728x90', title: 'Home campaign', isActive: true }]);
+    vi.mocked(adminApi.patch).mockResolvedValue({ data: { ad: { ...category, isActive: true } } });
+    render(<AdsManager />);
+    const row = (await screen.findByText(category.title)).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'OFF' }));
+    await waitFor(() => expect(adminApi.patch).toHaveBeenCalledExactlyOnceWith('/admin/ads/category/toggle', { isActive: true }));
+    expect(await within(row).findByRole('button', { name: 'ON' })).toBeEnabled();
+    expect(within(screen.getByText('Home campaign').closest('tr')!).getByRole('button', { name: 'ON' })).toBeEnabled();
+    expect(adminApi.put).not.toHaveBeenCalled();
+    expect(adminApi.post).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('shows category-only pricing in Display Slots with saved override=%s', async (savedOverride) => {
+    if (savedOverride) vi.mocked(api.get).mockResolvedValue({ data: { mediaKit: {
+      title: 'Saved Media Kit', rateCards: [{ placementKey: slot, placementLabel: label,
+        prices: { day: 800, week: 4600, month: 16000 }, rate15Days: 9000 }],
+    } } });
+    render(<AdsManager />);
+    fireEvent.click(screen.getByRole('button', { name: 'Media Kit' }));
+    const heading = await screen.findByText(label);
+    const card = heading.closest('div.rounded.border') as HTMLElement;
+    expect(within(card).getByText(slot)).toBeInTheDocument();
+    const displayGroup = screen.getByText('Display Slots').parentElement!.parentElement!;
+    expect(displayGroup).toContainElement(card);
+    const prices = savedOverride ? ['₹800', '₹4,600', '₹9,000', '₹16,000'] : ['₹700', '₹4,200', '₹8,400', '₹14,700'];
+    for (const price of prices) expect(within(card).getByText(price)).toBeInTheDocument();
+    if (!savedOverride) {
+      expect(within(card).getByText('All Categories; Excludes Home')).toBeInTheDocument();
+      expect(within(card).getByText('Specs: 970×90 image')).toBeInTheDocument();
+      expect(within(card).getByText('One linked destination')).toBeInTheDocument();
+    }
+    expect(adminApi.put).not.toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+});
+
 describe('AdsManager module organization', () => {
   it.each(['/admin/ads', '/admin/ads-manager'])('keeps the guarded Ads Manager route loadable: %s', async (path) => {
     expect(appSource).toContain(`path="${path}" element={<AdminModuleRoute moduleKey="ads_manager"><LockCheckWrapper><AdsManager /></LockCheckWrapper></AdminModuleRoute>}`);
@@ -215,6 +396,7 @@ describe('AdsManager module organization', () => {
 
   it.each([
     ['HOME_728x90', 728, 90],
+    ['CATEGORY_TOP_970x90', 970, 90],
     ['FOOTER_BANNER_728x90', 728, 90],
     ['HOME_BILLBOARD_970x250', 970, 250],
     ['TOP_HOME_BILLBOARD_970x250', 970, 250],
@@ -239,6 +421,7 @@ describe('AdsManager module organization', () => {
 
   it.each([
     ['HOME_728x90', 1456, 180],
+    ['CATEGORY_TOP_970x90', 1940, 180],
     ['FOOTER_BANNER_728x90', 1456, 180],
     ['HOME_BILLBOARD_970x250', 1940, 500],
     ['TOP_HOME_BILLBOARD_970x250', 1940, 500],
@@ -360,10 +543,10 @@ describe('AdsManager module organization', () => {
     }
   });
 
-  it('blocks an unreadable new creative without treating it as valid', async () => {
+  it.each(['HOME_728x90', 'CATEGORY_TOP_970x90'])('blocks an unreadable new creative for %s without treating it as valid', async (slot) => {
     mockCreativeImage(0, 0, true);
     render(<AdsManager />);
-    const dialog = openDisplayCreate('HOME_728x90');
+    const dialog = openDisplayCreate(slot);
     await within(dialog).findByText('Unable to verify creative dimensions.');
     expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
     fireEvent.submit(dialog.querySelector('form')!);
@@ -396,7 +579,11 @@ describe('AdsManager module organization', () => {
     expect(adminApi.post).not.toHaveBeenCalled();
   });
 
-  it('measures a selected file, then rechecks the uploaded URL before create', async () => {
+  it.each([
+    ['HOME_728x90', 728],
+    ['CATEGORY_TOP_970x90', 970],
+  ])('measures a selected file for %s, then rechecks the uploaded URL before create', async (slot, width) => {
+    mockCreativeImage(Number(width), 90);
     const revokeObjectURL = vi.fn();
     vi.stubGlobal('URL', class extends URL {
       static createObjectURL = vi.fn(() => 'blob:local-creative');
@@ -405,11 +592,11 @@ describe('AdsManager module organization', () => {
     vi.mocked(api.post).mockResolvedValue({ data: { hostedUrl: 'https://cdn.example/uploaded.jpg' } });
     vi.mocked(adminApi.post).mockResolvedValue({ data: {} });
     render(<AdsManager />);
-    const dialog = openDisplayCreate('HOME_728x90');
-    await within(dialog).findByText('Uploaded creative: 728 × 90 px');
+    const dialog = openDisplayCreate(String(slot));
+    await within(dialog).findByText(`Uploaded creative: ${width} × 90 px`);
     const file = new File(['image'], 'banner.png', { type: 'image/png' });
     fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [file] } });
-    await within(dialog).findByText('Selected creative: 728 × 90 px');
+    await within(dialog).findByText(`Selected creative: ${width} × 90 px`);
     expect(within(dialog).getByRole('button', { name: 'Create Ad' })).toBeDisabled();
     expect(within(dialog).getByRole('img', { name: 'Creative in selected placement' })).toHaveAttribute('src', 'blob:local-creative');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Upload Image' }));
@@ -556,6 +743,9 @@ describe('AdsManager module organization', () => {
     const bannerHeading = screen.getByText('Home Banner 728×90');
     const bannerCard = bannerHeading.closest('div.rounded.border') as HTMLElement;
     expect(within(bannerCard).getByText('₹500')).toBeInTheDocument();
+    expect(within(bannerCard).getByText('₹3,000')).toBeInTheDocument();
+    expect(within(bannerCard).getByText('₹6,000')).toBeInTheDocument();
+    expect(within(bannerCard).getByText('₹10,500')).toBeInTheDocument();
   });
 
   it('renders the new Ad Performance tab from the existing ad-performance helper', async () => {

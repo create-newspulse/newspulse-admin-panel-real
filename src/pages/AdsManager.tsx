@@ -43,6 +43,7 @@ import {
 
 type AdSlot =
   | 'HOME_728x90'
+  | 'CATEGORY_TOP_970x90'
   | 'FOOTER_BANNER_728x90'
   | 'HOME_RIGHT_300x250'
   | 'HOME_LEFT_300x250'
@@ -198,6 +199,7 @@ const MEDIA_KIT_RATE_CARD_GROUPS: readonly MediaKitRateCardGroup[] = [
     description: 'Homepage and layout ad inventory with image creatives.',
     keys: [
       'HOME_728x90',
+      'CATEGORY_TOP_970x90',
       'FOOTER_BANNER_728x90',
       'HOME_LEFT_300x250',
       'HOME_RIGHT_300x250',
@@ -513,6 +515,14 @@ function defaultMediaKit(): MediaKitDoc {
         specs: ['728×90 image'],
       }, { preserveExplicitDerived: false }),
       normalizeRateCard({
+        placementKey: 'CATEGORY_TOP_970x90',
+        placementLabel: 'Category Top Banner 970×90 (All Categories; Excludes Home)',
+        prices: { day: 700, week: 4200, month: 14700 },
+        rate15Days: 8400,
+        includes: ['All Categories; Excludes Home', 'One linked destination'],
+        specs: ['970×90 image'],
+      }),
+      normalizeRateCard({
         placementKey: 'FOOTER_BANNER_728x90',
         placementLabel: 'Footer Banner 728×90',
         prices: { day: 500 },
@@ -779,6 +789,7 @@ const SPONSORED_FEATURE_PLACEMENTS: Array<{ value: SponsoredContentPlacement; la
 // Slots that have placement toggles in the UI.
 const PLACEMENT_SLOT_OPTIONS = [
   'HOME_728x90',
+  'CATEGORY_TOP_970x90',
   'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
   'HOME_LEFT_300x250',
@@ -795,6 +806,7 @@ const PLACEMENT_SLOT_OPTIONS = [
 // Slots selectable in the UI (dropdown + filter). Legacy slots are intentionally hidden.
 const SLOT_OPTIONS = [
   'HOME_728x90',
+  'CATEGORY_TOP_970x90',
   'FOOTER_BANNER_728x90',
   'HOME_RIGHT_300x250',
   'HOME_LEFT_300x250',
@@ -813,6 +825,7 @@ type PlacementFieldShape = 'boolean' | 'enabled' | 'isEnabled';
 
 const SLOT_LABELS: Record<string, string> = {
   HOME_728x90: 'Home Banner 728×90',
+  CATEGORY_TOP_970x90: 'Category Top Banner 970×90 (All Categories; Excludes Home)',
   FOOTER_BANNER_728x90: 'Footer Banner 728×90',
   HOME_RIGHT_300x250: 'Home Right Rail 300×250',
   HOME_LEFT_300x250: 'Home Left Rail 300×250',
@@ -828,6 +841,7 @@ const SLOT_LABELS: Record<string, string> = {
 };
 
 const SLOT_DROPDOWN_HINT_LABELS: Record<string, string> = {
+  CATEGORY_TOP_970x90: 'Category Top Banner 970×90 (All Categories; Excludes Home)',
   HOME_RIGHT_300x600: 'Home Right Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_LEFT_300x600: 'Home Left Rail 300×600 (Half Page / Premium Sidebar)',
   HOME_BILLBOARD_970x250: 'Home Billboard 970×250 (Billboard / Premium)',
@@ -852,6 +866,7 @@ function canonicalSlot(value: unknown): string {
     .trim();
   // Preserve exact backend enum casing (note the lowercase 'x').
   if (normalized === 'HOME_728X90') return 'HOME_728x90';
+  if (normalized === 'CATEGORY_TOP_970X90') return 'CATEGORY_TOP_970x90';
   if (normalized === 'FOOTER_BANNER_728X90') return 'FOOTER_BANNER_728x90';
   if (normalized === 'HOME_RIGHT_300X250') return 'HOME_RIGHT_300x250';
   if (normalized === 'HOME_LEFT_300X250') return 'HOME_LEFT_300x250';
