@@ -1,5 +1,6 @@
 import React from 'react';
 import toast from 'react-hot-toast';
+import { Wand2 } from 'lucide-react';
 
 import AdPerformancePanel from '@/components/ads/AdPerformancePanel';
 import { adminApi, api } from '@/lib/api';
@@ -892,6 +893,56 @@ function displayCreativeSize(slot: string): { width: number; height: number } | 
   if (!SLOT_OPTIONS.some((option) => option === canonical)) return null;
   const dimensions = /_(\d+)x(\d+)$/.exec(canonical);
   return dimensions ? { width: Number(dimensions[1]), height: Number(dimensions[2]) } : null;
+}
+
+const AUTO_FIT_SLOTS: readonly AdSlot[] = [
+  'HOME_728x90', 'FOOTER_BANNER_728x90', 'CATEGORY_TOP_970x90',
+  'HOME_LEFT_300x250', 'HOME_RIGHT_300x250', 'HOME_RIGHT_RAIL',
+  'HOME_LEFT_300x600', 'HOME_RIGHT_300x600',
+  'HOME_BILLBOARD_970x250', 'TOP_HOME_BILLBOARD_970x250',
+  'ARTICLE_INLINE', 'ARTICLE_END',
+];
+
+function autoFitCreativeSize(slot: string): { width: number; height: number } | null {
+  if (!AUTO_FIT_SLOTS.includes(canonicalSlot(slot) as AdSlot)) return null;
+  return ['HOME_RIGHT_RAIL', 'ARTICLE_INLINE', 'ARTICLE_END'].includes(canonicalSlot(slot))
+    ? { width: 300, height: 250 } : displayCreativeSize(slot);
+}
+
+type PreparedAdCreative = {
+  requestId: number;
+  source: string | File;
+  hostedUrl: string;
+  slot: string;
+  width: number;
+  height: number;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  originalImageUrl: string | null;
+  warnings: string[];
+  verified: boolean;
+  failed: boolean;
+  accepted: boolean;
+};
+
+function autoFitErrorMessage(error: any): string {
+  const body = error?.response?.data;
+  const code = String(body?.code || body?.error?.code || (typeof body?.error === 'string' ? body.error : '') || error?.code || '').toUpperCase();
+  const status = Number(error?.response?.status || 0);
+  if (/LOW_SOURCE_RESOLUTION|SOURCE_TOO_SMALL/.test(code)) return 'This image is too small for this ad placement. Please use a higher-resolution image.';
+  if (/URL|PRIVATE|SSRF|BLOCKED_HOST/.test(code)) return 'This image URL cannot be used.';
+  if (/TYPE|FORMAT|MIME/.test(code) || status === 415) return 'Use JPEG, PNG, WebP, or GIF.';
+  if (/TOO_LARGE|OVERSIZED|SIZE_LIMIT|PIXEL_LIMIT/.test(code) || status === 413) return 'This image is too large to prepare. Please use a smaller file or lower-resolution image.';
+  if (status === 401) return 'Your session has expired. Please sign in again.';
+  if (status === 403) return 'You do not have permission to prepare this image.';
+  return 'Unable to prepare this image. Please try again. Your current form has been kept.';
+}
+
+function autoFitWarningText(warning: unknown): string {
+  const value = typeof warning === 'string' ? warning : String((warning as any)?.message || (warning as any)?.code || '');
+  if (/ANIMAT|MULTI.?PAGE|STATIC/i.test(value)) return 'Animated or multipage source was converted to a static creative.';
+  if (!value || value.length > 300 || /stack|\bat\s+\S+\s*\(|\r|\n/i.test(value)) return 'The image provider returned a preparation warning. Review the prepared creative before using it.';
+  return value;
 }
 
 function isLegacySlot(slot: string): boolean {
@@ -2138,24 +2189,51 @@ export default function AdsManager() {
   const [adImagePreviewBroken, setAdImagePreviewBroken] = React.useState(false);
   const [originalCreative, setOriginalCreative] = React.useState<{ slot: string; imageUrl: string } | null>(null);
   const [creativeUploaded, setCreativeUploaded] = React.useState(false);
+  const [preparedCreative, setPreparedCreative] = React.useState<PreparedAdCreative | null>(null);
+  const [acceptedPreparation, setAcceptedPreparation] = React.useState<PreparedAdCreative | null>(null);
+  const [autoFitting, setAutoFitting] = React.useState(false);
+  const [autoFitError, setAutoFitError] = React.useState<string | null>(null);
+  const autoFitRequestRef = React.useRef(0);
   const [creativeMeasurement, setCreativeMeasurement] = React.useState<{
     source: string | File; previewUrl: string; width: number; height: number; failed: boolean;
   } | null>(null);
-  const requiredCreativeSize = form.mode === 'standard-ad' ? displayCreativeSize(form.slot) : null;
+  const autoFitSize = form.mode === 'standard-ad' ? autoFitCreativeSize(form.slot) : null;
+  const requiredCreativeSize = form.mode === 'standard-ad'
+    ? displayCreativeSize(form.slot) || (acceptedPreparation ? autoFitSize : null)
+    : null;
   const hasCreativeRequirement = requiredCreativeSize !== null;
   const creativeSource = adImageFile || form.imageUrl.trim();
+  const preparedCreativeStale = Boolean(preparedCreative && preparedCreative.slot !== canonicalSlot(form.slot));
+  const acceptedCreativeStale = Boolean(acceptedPreparation && creativeSource === acceptedPreparation.hostedUrl
+    && acceptedPreparation.slot !== canonicalSlot(form.slot));
   const currentMeasurement = creativeMeasurement?.source === creativeSource ? creativeMeasurement : null;
   const creativeUnchanged = Boolean(editingId && originalCreative
     && originalCreative.slot === canonicalSlot(form.slot)
     && originalCreative.imageUrl === form.imageUrl.trim() && !adImageFile && !creativeUploaded);
   const creativeMismatch = Boolean(requiredCreativeSize && currentMeasurement && !currentMeasurement.failed
     && currentMeasurement.width * requiredCreativeSize.height !== currentMeasurement.height * requiredCreativeSize.width);
-  const creativeSaveError = requiredCreativeSize && !creativeUnchanged
+  const creativeSaveError = autoFitting ? 'Wait for Auto Fit to finish before saving.'
+    : preparedCreativeStale || acceptedCreativeStale ? 'The prepared creative belongs to another slot. Auto Fit again for the selected slot or choose a new source.'
+    : preparedCreative && !preparedCreative.accepted ? 'Use or discard the prepared creative before saving.'
+    : requiredCreativeSize && !creativeUnchanged
     ? (creativeMismatch ? 'Creative size mismatch. Select an image matching the placement aspect ratio.'
       : currentMeasurement?.failed ? 'Unable to verify creative dimensions. Select a readable image before saving.'
         : !currentMeasurement ? 'Wait for creative dimensions to be verified before saving.'
           : adImageFile ? 'Upload the selected creative before saving.' : null)
     : null;
+
+  React.useEffect(() => {
+    autoFitRequestRef.current += 1;
+    setAutoFitting(false);
+    setAutoFitError(null);
+    setAcceptedPreparation((previous) => modalOpen && form.mode === 'standard-ad' && creativeSource === previous?.hostedUrl ? previous : null);
+    setPreparedCreative((previous) => {
+      if (!modalOpen || form.mode !== 'standard-ad' || !previous) return null;
+      if (previous.accepted) return creativeSource === previous.hostedUrl ? previous : null;
+      return previous.slot === canonicalSlot(form.slot) && previous.source === creativeSource ? previous : null;
+    });
+    return () => { autoFitRequestRef.current += 1; };
+  }, [modalOpen, form.mode, form.slot, creativeSource]);
 
   React.useEffect(() => {
     setCreativeMeasurement(null);
@@ -2313,6 +2391,70 @@ export default function AdsManager() {
       setAdImageUploadProgress(null);
     }
   }, [adImageFile, uploadAdImage, hasCreativeRequirement]);
+
+  const prepareAdCreative = async () => {
+    if (!autoFitSize || autoFitting || saving || adImageUploading || hostingExternalImage) return;
+    const source = acceptedPreparation && creativeSource === acceptedPreparation.hostedUrl
+      ? acceptedPreparation.source : creativeSource;
+    if (!source) return;
+    const selectedSlot = canonicalSlot(form.slot);
+    let requestBody: FormData | { slot: string; imageUrl: string; fit: string };
+    if (typeof source === 'string') {
+      try {
+        const url = new URL(source);
+        if (url.protocol !== 'https:' || url.username || url.password) throw new Error();
+      } catch {
+        setAutoFitError('This image URL cannot be used.');
+        return;
+      }
+      requestBody = { slot: selectedSlot, imageUrl: source, fit: 'cover' };
+    } else {
+      requestBody = new FormData();
+      requestBody.append('file', source);
+      requestBody.append('slot', selectedSlot);
+      requestBody.append('fit', 'cover');
+    }
+    const requestId = ++autoFitRequestRef.current;
+    setAutoFitting(true);
+    setAutoFitError(null);
+    try {
+      const response = await api.post('/ads/upload-image', requestBody);
+      if (requestId !== autoFitRequestRef.current) return;
+      const result = response?.data?.data || response?.data;
+      const hostedUrl = String(result?.hostedUrl || '').trim();
+      const parsedUrl = new URL(hostedUrl, window.location.origin);
+      const width = Number(result?.width ?? autoFitSize.width);
+      const height = Number(result?.height ?? autoFitSize.height);
+      if (!hostedUrl || !/^https?:$/.test(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password
+        || (result?.slot && result.slot !== selectedSlot) || (result?.fit && result.fit !== 'cover')
+        || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
+        || width * autoFitSize.height !== height * autoFitSize.width) {
+        setAutoFitError('The prepared image does not match the selected slot. Please try Auto Fit again.');
+        return;
+      }
+      const dimension = (value: unknown) => Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
+      const rawWarnings = result?.warnings == null ? [] : (Array.isArray(result.warnings) ? result.warnings : [result.warnings]);
+      setPreparedCreative({
+        requestId, source, hostedUrl: parsedUrl.href, slot: selectedSlot, width, height,
+        sourceWidth: dimension(result?.sourceWidth), sourceHeight: dimension(result?.sourceHeight),
+        originalImageUrl: String(result?.originalImageUrl || (typeof source === 'string' ? source : '')).trim() || null,
+        warnings: rawWarnings.map(autoFitWarningText), verified: false, failed: false, accepted: false,
+      });
+    } catch (error) {
+      if (requestId === autoFitRequestRef.current) setAutoFitError(autoFitErrorMessage(error));
+    } finally {
+      if (requestId === autoFitRequestRef.current) setAutoFitting(false);
+    }
+  };
+
+  const acceptPreparedCreative = () => {
+    if (!preparedCreative || !preparedCreative.verified || preparedCreative.failed || preparedCreativeStale || autoFitting) return;
+    setForm((previous) => ({ ...previous, imageUrl: preparedCreative.hostedUrl }));
+    setAdImageFile(null);
+    setCreativeUploaded(true);
+    setAcceptedPreparation({ ...preparedCreative, accepted: true });
+    setPreparedCreative({ ...preparedCreative, accepted: true });
+  };
 
   const isExternalImageUrl = React.useCallback((url: string) => {
     const u = String(url || '').trim();
@@ -4986,7 +5128,7 @@ export default function AdsManager() {
                     <button
                       type="button"
                       className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
-                      disabled={adImageUploading || !adImageFile}
+                      disabled={adImageUploading || autoFitting || !adImageFile}
                       onClick={() => void handleUploadSelectedImage()}
                       title="Upload selected image"
                     >
@@ -4996,6 +5138,73 @@ export default function AdsManager() {
                     </button>
                     <span className="text-xs text-slate-500">Or paste a URL above</span>
                   </div>
+
+                  {autoFitSize ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                        disabled={!creativeSource || autoFitting || adImageUploading || hostingExternalImage || saving}
+                        onClick={() => void prepareAdCreative()}
+                        title="Auto Fit to Selected Slot"
+                      >
+                        <Wand2 size={16} aria-hidden="true" />
+                        {autoFitting ? 'Preparing Creative...' : 'Auto Fit to Selected Slot'}
+                      </button>
+                      <span className="text-xs text-slate-500">Target: {autoFitSize.width} × {autoFitSize.height} px</span>
+                    </div>
+                  ) : null}
+                  {autoFitError ? <div role="alert" className="mt-2 text-sm text-red-700 dark:text-red-400">{autoFitError}</div> : null}
+                  {acceptedCreativeStale && !preparedCreativeStale ? <div role="alert" className="mt-2 text-sm text-red-700 dark:text-red-400">Slot changed. Auto Fit again for the selected slot or choose a new source.</div> : null}
+                  {preparedCreative ? (
+                    <section aria-label="Prepared Creative" className="mt-4 space-y-2 min-w-0">
+                      <h3 className="text-sm font-semibold">Prepared Creative</h3>
+                      <div
+                        className="relative border rounded overflow-hidden bg-slate-100 dark:bg-slate-900"
+                        style={{ aspectRatio: `${preparedCreative.width} / ${preparedCreative.height}`, width: '100%', maxWidth: Math.min(480, preparedCreative.width, 300 * preparedCreative.width / preparedCreative.height) }}
+                      >
+                        <img
+                          src={preparedCreative.hostedUrl}
+                          alt="Prepared ad creative"
+                          className="absolute inset-0 w-full h-full object-contain"
+                          onLoad={(event) => {
+                            const image = event.currentTarget;
+                            const dimensions = autoFitCreativeSize(preparedCreative.slot)!;
+                            const valid = image.naturalWidth > 0 && image.naturalHeight > 0
+                              && image.naturalWidth * dimensions.height === image.naturalHeight * dimensions.width;
+                            setPreparedCreative((previous) => previous?.requestId === preparedCreative.requestId
+                              ? { ...previous, verified: valid, failed: !valid, ...(valid ? { width: image.naturalWidth, height: image.naturalHeight } : {}) } : previous);
+                          }}
+                          onError={() => setPreparedCreative((previous) => previous?.requestId === preparedCreative.requestId
+                            ? { ...previous, verified: false, failed: true } : previous)}
+                        />
+                      </div>
+                      <div className="text-xs space-y-1 break-words">
+                        <div>Original: {preparedCreative.sourceWidth && preparedCreative.sourceHeight ? `${preparedCreative.sourceWidth} × ${preparedCreative.sourceHeight}` : 'Dimensions not provided'}</div>
+                        <div>Prepared: {preparedCreative.width} × {preparedCreative.height}</div>
+                        <div>Slot: {slotLabel(preparedCreative.slot)}</div>
+                        {preparedCreative.originalImageUrl ? <div className="break-all">Original image: {preparedCreative.originalImageUrl}</div> : null}
+                      </div>
+                      {preparedCreative.warnings.map((warning, index) => (
+                        <div key={index} role="status" className="text-sm text-amber-800 dark:text-amber-300">{warning}</div>
+                      ))}
+                      {preparedCreative.failed ? <div role="alert" className="text-sm text-red-700 dark:text-red-400">The prepared image could not be verified for this slot. Please try Auto Fit again.</div> : null}
+                      {preparedCreativeStale ? <div role="alert" className="text-sm text-red-700 dark:text-red-400">Slot changed. Auto Fit again for the selected slot or choose a new source.</div> : null}
+                      {preparedCreative.accepted ? (
+                        <div className="text-sm">{preparedCreativeStale ? 'Prepared creative is no longer valid for this slot.' : 'Prepared creative selected.'}</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+                            disabled={!preparedCreative.verified || preparedCreative.failed || preparedCreativeStale || autoFitting}
+                            onClick={acceptPreparedCreative}
+                          >Use Prepared Creative</button>
+                          <button type="button" className="px-3 py-1.5 rounded border text-sm" onClick={() => setPreparedCreative(acceptedPreparation)}>Discard Preview</button>
+                        </div>
+                      )}
+                    </section>
+                  ) : null}
 
                   {form.imageUrl ? (
                     <div className="mt-2 flex items-center gap-3">
