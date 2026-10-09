@@ -110,6 +110,40 @@ Open: `http://localhost:5173`
 
 Default frontend dev port in this repo is `5173`.
 
+### Ads Manager: automatic creative preparation
+
+For supported display slots, choosing a mismatched JPEG/PNG/WebP/GIF file or
+entering an HTTPS image URL automatically prepares a creative through the existing
+`POST /api/ads/upload-image` backend endpoint (via the Admin API proxy), using
+`slot` and `fit=cover`. URL entry is debounced; preparation never saves a campaign.
+Files whose aspect ratio already matches keep the normal **Upload Image** flow.
+
+Supported sizes and slots:
+
+- 728 x 90: `HOME_728x90`, `FOOTER_BANNER_728x90`
+- 970 x 90: `CATEGORY_TOP_970x90`
+- 300 x 250: `HOME_LEFT_300x250`, `HOME_RIGHT_300x250`, `ARTICLE_INLINE`,
+  `ARTICLE_END`, and existing `HOME_RIGHT_RAIL` edits
+- 300 x 600: `HOME_LEFT_300x600`, `HOME_RIGHT_300x600`
+- 970 x 250: `HOME_BILLBOARD_970x250`, `TOP_HOME_BILLBOARD_970x250`
+
+The prepared hosted image becomes the campaign creative and placement preview.
+Original dimensions/source metadata remain separate from prepared dimensions;
+backend warnings stay visible. The actual final image must pass aspect-ratio
+validation before **Create Ad** or **Save Changes** is enabled. Preparation errors
+leave the draft intact and offer **Retry Auto Fit**.
+
+Changing slots with a newly supplied source invalidates the derivative and
+prepares for the new supported slot from the retained original file/URL. Opening
+an existing campaign for editing does not transform its saved image; supplying a
+new source opts into preparation. `BREAKING_SPONSOR` and `LIVE_UPDATE_SPONSOR`
+retain their existing behavior without invented dimensions. Campaign activation,
+placement toggles, schedules, priorities, and pricing are not changed by preparation.
+
+Focused regression tests: `npx vitest run src/pages/__tests__/AdsManager.organization.test.tsx`.
+Use only a local/dev backend for manual checks; see
+[dev/prod separation](docs/DEV_PROD_BACKEND_DB_SEPARATION.md).
+
 ### Modern Add/Edit: Faith & Culture topic
 
 The current Add News page (`/admin/add-news`) and Edit News page
