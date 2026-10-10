@@ -86,6 +86,7 @@ import { ChangePasswordSettingsRedirect, FounderMyAccount, StaffMyAccount } from
 import Aira from '@pages/admin/Aira';
 import YouthPulse from '@pages/admin/YouthPulse';
 import Editorial from '@pages/admin/Editorial';
+import TrendingTopics from '@pages/admin/TrendingTopics';
 import DraftDeskPage from '@pages/admin/DraftDeskPage';
 import DraftWorkspacePage from '@pages/admin/DraftWorkspacePage';
 import MyCommunityStories from '@pages/community/MyCommunityStories';
@@ -502,6 +503,7 @@ function App() {
               <Route path="/admin/aira" element={<AdminModuleRoute moduleKey="aira"><Aira /></AdminModuleRoute>} />
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
               <Route path="/admin/editorial" element={<AdminModuleRoute moduleKey="editorial"><Editorial /></AdminModuleRoute>} />
+              <Route path="/admin/editorial/trending-topics" element={<AdminModuleRoute moduleKey="editorial"><FounderRoute><TrendingTopics /></FounderRoute></AdminModuleRoute>} />
 
               {/* Legacy Safe Owner Zone v5 routes: redirect to canonical /admin/safe-owner-zone */}
               <Route path="/safeownerzone" element={<Navigate to="/admin/safe-owner-zone" replace />} />
@@ -574,4 +576,3 @@ function App() {
 }
 
 export default App;
-

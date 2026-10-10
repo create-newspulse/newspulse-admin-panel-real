@@ -110,6 +110,26 @@ Open: `http://localhost:5173`
 
 Default frontend dev port in this repo is `5173`.
 
+### Editorial Trending Topics
+
+Founder accounts can open **Editorial > Trending Topics** at
+`/admin/editorial/trending-topics`. Existing Editorial article workflows are unchanged.
+One topic contains Gujarati, Hindi, and English names/descriptions. Enter exact
+`News.tags` values one per line; topic membership does not use article category or
+`News.topic`. Optional pins select published CMS News stories without editing them.
+
+Changes require an explicit Save. New topics default to Active OFF; the canonical
+slug becomes read-only after creation. Dates are entered in the displayed browser
+timezone and sent as UTC timestamps. Clearing expiry sends `null`. Lower Order
+numbers appear earlier. An active future topic is scheduled; an active expired
+topic leaves the strip but keeps its archive/detail available. Deactivate makes
+it unavailable publicly without deleting it.
+
+The Admin client uses `/admin-api/admin/topics` (backend `/api/admin/topics`):
+GET/POST on the collection and GET/PATCH on individual topics. Backend validation
+and Founder authorization remain authoritative. This UI does not configure the
+public-site Trending Strip switch or deploy the separate backend/public website.
+
 ### Ads Manager: automatic creative preparation
 
 For supported display slots, choosing a mismatched JPEG/PNG/WebP/GIF file or

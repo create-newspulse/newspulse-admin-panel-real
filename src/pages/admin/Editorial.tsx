@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 
+import { useAuth } from '@/context/AuthContext';
 import { listArticles, type Article } from '@/lib/api/articles';
 
 const STATUSES = [
@@ -16,6 +17,7 @@ function getArticleStatus(article: Article): string {
 }
 
 export default function Editorial() {
+	const { isAuthenticated, isFounder } = useAuth();
 	const articlesQuery = useQuery({
 		queryKey: ['editorial-desk', 'articles'],
 		queryFn: () => listArticles({ category: 'editorial', status: 'all', page: 1, limit: 250, sort: '-updatedAt' }),
@@ -74,8 +76,13 @@ export default function Editorial() {
 					<div className="text-sm font-semibold text-slate-900">View Public Editorial Page</div>
 					<div className="mt-1 text-xs text-slate-600">Open the live Editorial page.</div>
 				</a>
+				{isAuthenticated && isFounder && (
+					<Link className="rounded-lg border border-slate-200 bg-white p-4 hover:bg-slate-50" to="/admin/editorial/trending-topics">
+						<div className="text-sm font-semibold text-slate-900">Trending Topics</div>
+						<div className="mt-1 text-xs text-slate-600">Manage multilingual topics, article tags, schedules, and pinned stories.</div>
+					</Link>
+				)}
 			</div>
 		</div>
 	);
 }
-
