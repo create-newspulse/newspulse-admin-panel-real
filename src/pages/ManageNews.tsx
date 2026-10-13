@@ -18,7 +18,6 @@ import { usePublishFlag } from '@/context/PublishFlagContext';
 import { useAuth } from '@/context/AuthContext';
 import { useDebounce } from '@/hooks/useDebounce';
 import { ARTICLE_CATEGORY_LABELS, isAllowedArticleCategoryKey } from '@/lib/articleCategories';
-import PulseDialogueCurationSection from '@/components/news/PulseDialogueCurationSection';
 
 // Status tabs metadata
 const STATUS_TABS: { value: 'all' | ArticleStatus; label: string }[] = [
@@ -309,8 +308,6 @@ export default function ManageNews() {
           </div>
         </div>
       </div>
-
-      <PulseDialogueCurationSection />
 
       <div ref={quickViewsStickyRef}>
         <QuickViewsBar
