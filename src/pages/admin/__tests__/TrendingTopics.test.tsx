@@ -9,6 +9,7 @@ import FounderRoute from '@/components/FounderRoute';
 import AdminModuleRoute from '@/components/AdminModuleRoute';
 import type { adminApiClient } from '@/lib/adminApiClient';
 import type { Article } from '@/lib/api/articles';
+import { refreshArticleQueries } from '@/lib/articleLifecycle';
 import type { CreateEditorialTopicPayload, EditorialTopic, UpdateEditorialTopicPayload } from '@/lib/api/trendingTopics';
 
 const mocks = vi.hoisted(() => ({
@@ -46,6 +47,7 @@ const makeTopic = (overrides: Partial<EditorialTopic> = {}): EditorialTopic => (
 });
 let topics: EditorialTopic[];
 let news: Article[];
+const queryClients: QueryClient[] = [];
 
 function listResponse(page = 1, limit = 20) {
   const items = topics.slice((page - 1) * limit, page * limit);
@@ -102,6 +104,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  queryClients.splice(0).forEach((queryClient) => queryClient.clear());
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -109,7 +112,8 @@ afterEach(() => {
 
 function renderRoute(initialPath = path) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  queryClients.push(queryClient);
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
@@ -121,11 +125,13 @@ function renderRoute(initialPath = path) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 async function loadedPage() {
-  renderRoute();
+  const mounted = renderRoute();
   await waitFor(() => expect(screen.queryByText('Loading topics...')).not.toBeInTheDocument());
+  return mounted;
 }
 
 async function createForm() {
@@ -148,6 +154,10 @@ function fillForm() {
   fireEvent.change(screen.getByLabelText('Canonical Slug *', { exact: false }), { target: { value: 'new-topic' } });
   fireEvent.change(screen.getByLabelText('Article Tags *', { exact: false }), { target: { value: ' topic:navratri-2026 \ntopic:navratri-2026\n Festival ' } });
   fireEvent.change(screen.getByLabelText('Starts At *'), { target: { value: '2030-10-15T09:30' } });
+}
+
+function setTopicTags(tags: string[]) {
+  fireEvent.change(screen.getByLabelText('Article Tags *', { exact: false }), { target: { value: tags.join('\n') } });
 }
 
 function expectNoWrites() {
@@ -568,6 +578,7 @@ describe('Trending Topics CMS News pin', () => {
       { _id: '000000000000000000000203', title: 'Archived candidate', status: 'archived' },
     );
     await createForm();
+    setTopicTags(['topic:navratri-2026']);
     fireEvent.click(screen.getByRole('button', { name: 'Choose pinned story' }));
     await screen.findByRole('option', { name: /Published festival story/ });
     expect(screen.queryByRole('option', { name: /Invalid reference|Draft candidate|Archived candidate/ })).not.toBeInTheDocument();
@@ -577,6 +588,7 @@ describe('Trending Topics CMS News pin', () => {
 
   it('shows search failures and retries without a mutation', async () => {
     await createForm();
+    setTopicTags(['topic:navratri-2026']);
     client.get.mockRejectedValueOnce({ response: { status: 503 } });
     fireEvent.click(screen.getByRole('button', { name: 'Choose pinned story' }));
     await screen.findByText(/Published CMS News stories could not be loaded/);
@@ -588,10 +600,11 @@ describe('Trending Topics CMS News pin', () => {
 
   it('paginates the published News selector without changing topic or article data', async () => {
     await createForm();
+    setTopicTags(['topic:navratri-2026']);
     client.get.mockResolvedValueOnce({ data: { items: news, total: 21, page: 1, limit: 20 } });
     fireEvent.click(screen.getByRole('button', { name: 'Choose pinned story' }));
     await screen.findByRole('option', { name: /Published festival story/ });
-    client.get.mockResolvedValueOnce({ data: { items: [{ _id: '000000000000000000000222', title: 'Next published story', language: 'hi', status: 'published' }], total: 21, page: 2, limit: 20 } });
+    client.get.mockResolvedValueOnce({ data: { items: [{ _id: '000000000000000000000222', title: 'Next published story', language: 'hi', status: 'published', tags: ['topic:navratri-2026'] }], total: 21, page: 2, limit: 20 } });
     fireEvent.click(screen.getByRole('button', { name: 'Next stories' }));
     await screen.findByRole('option', { name: /Next published story \| hi \| published/ });
     expect(client.get).toHaveBeenLastCalledWith('articles', { params: { q: undefined, status: 'published', page: 2, limit: 20, sort: '-publishedAt' } });
@@ -605,6 +618,148 @@ describe('Trending Topics CMS News pin', () => {
     await screen.findByText(/saved CMS News reference could not be loaded/);
     expect(screen.getByRole('button', { name: 'Clear pinned story' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Pinned Story' })).toHaveTextContent(newsId);
+    expectNoWrites();
+  });
+});
+
+describe('Trending article eligibility', () => {
+  it('matches exact topic tags across real categories without offering case or substring matches', async () => {
+    news = [
+      { ...news[0], title: 'Faith story', category: 'faith-culture', tags: ['navratri-2026'] },
+      { _id: '000000000000000000000202', title: 'Technology story', category: 'tech', status: 'published', tags: ['navratri-2026'] },
+      { _id: '000000000000000000000203', title: 'Wrong case', status: 'published', tags: ['Navratri-2026'] },
+      { _id: '000000000000000000000204', title: 'Substring only', status: 'published', tags: ['navratri-2026-extra'] },
+      { _id: '000000000000000000000205', title: 'Category is not membership', category: 'navratri-2026', status: 'published', tags: [] },
+    ];
+    await createForm();
+    setTopicTags(['navratri-2026']);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose pinned story' }));
+    await screen.findByRole('option', { name: /Faith story/ });
+    expect(screen.getByRole('option', { name: /Technology story/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Wrong case|Substring only|Category is not membership/ })).not.toBeInTheDocument();
+    expect(news[0].category).toBe('faith-culture');
+    expect(news[1].category).toBe('tech');
+    expectNoWrites();
+  });
+
+  const invalidPins: Array<{ reason: string; changes: Record<string, unknown> }> = [
+    { reason: 'removed tag', changes: { tags: [] } },
+    { reason: 'case mismatch', changes: { tags: ['TOPIC:NAVRATRI-2026'] } },
+    { reason: 'substring only', changes: { tags: ['topic:navratri-2026-extra'] } },
+    { reason: 'unpublished', changes: { status: 'draft' } },
+    { reason: 'scheduled', changes: { status: 'scheduled' } },
+    { reason: 'soft deleted', changes: { status: 'deleted' } },
+    { reason: 'deleted marker', changes: { deletedAt: '2020-01-01T00:00:00.000Z' } },
+    { reason: 'locked', changes: { locked: true } },
+    { reason: 'workflow locked', changes: { workflow: { locked: true } } },
+    { reason: 'private flag', changes: { isPrivate: true } },
+    { reason: 'private visibility', changes: { visibility: 'PRIVATE' } },
+    ...['publishedAt', 'publishAt', 'scheduledAt', 'embargoUntil'].map((field) => ({
+      reason: `future ${field}`, changes: { [field]: '2999-01-01T00:00:00.000Z' },
+    })),
+    { reason: 'workflow embargo', changes: { workflow: { embargoUntil: '2999-01-01T00:00:00.000Z' } } },
+  ];
+
+  it.each(invalidPins)('does not present an invalid pinned story as eligible: $reason', async ({ changes }) => {
+    topics[0].pinnedArticleId = newsId;
+    news[0] = { ...news[0], category: 'faith-culture', ...changes };
+    await loadedPage();
+    await screen.findByText(/Pin is not eligible/);
+    expect(screen.queryByText('Eligible pin reference')).not.toBeInTheDocument();
+    expect(screen.getByText(newsId, { exact: true })).toBeInTheDocument();
+    expect(topics[0].pinnedArticleId).toBe(newsId);
+    expect(news[0].category).toBe('faith-culture');
+    expectNoWrites();
+  });
+
+  it('uses the existing display clock for pin time gates without polling or changing publication', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    topics[0].pinnedArticleId = newsId;
+    news[0].publishedAt = '2030-01-01T00:00:02.000Z';
+    renderRoute();
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/Pin is not eligible/)).toBeInTheDocument();
+    const reads = [...client.get.mock.calls];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText('Eligible pin reference')).toBeInTheDocument();
+    expect(client.get.mock.calls).toEqual(reads);
+    expect(news[0]).toMatchObject({ status: 'published', publishedAt: '2030-01-01T00:00:02.000Z' });
+    expectNoWrites();
+  });
+
+  it('refreshes pin eligibility after tag removal, Unpublish, Delete and authoritative Restore', async () => {
+    topics[0].pinnedArticleId = newsId;
+    news[0] = { ...news[0], category: 'faith-culture', publishedAt: '2020-01-01T00:00:00.000Z' };
+    const { queryClient } = await loadedPage();
+    await screen.findByText('Eligible pin reference');
+    for (const changes of [
+      { tags: [] },
+      { tags: ['topic:navratri-2026'], status: 'draft' as const },
+      { status: 'deleted' as const, deletedAt: '2020-02-01T00:00:00.000Z' },
+      { status: 'draft' as const, deletedAt: null },
+    ]) {
+      news[0] = { ...news[0], ...changes };
+      await act(async () => { await refreshArticleQueries(queryClient, false); });
+      await screen.findByText(/Pin is not eligible/);
+      expect(screen.queryByText('Eligible pin reference')).not.toBeInTheDocument();
+    }
+    news[0] = { ...news[0], status: 'published', deletedAt: null };
+    await act(async () => { await refreshArticleQueries(queryClient); });
+    await screen.findByText('Eligible pin reference');
+    expect(news).toHaveLength(1);
+    expect(news[0]).toMatchObject({ _id: newsId, category: 'faith-culture', publishedAt: '2020-01-01T00:00:00.000Z' });
+    expect(topics[0].pinnedArticleId).toBe(newsId);
+    expectNoWrites();
+  });
+
+  it('refreshes candidate lifecycle eligibility without creating or changing a story', async () => {
+    news[0] = { ...news[0], status: 'draft', category: 'tech' };
+    const { queryClient } = await loadedPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Topic' }));
+    setTopicTags(['topic:navratri-2026']);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose pinned story' }));
+    await screen.findByLabelText('Published CMS News story');
+    expect(screen.queryByRole('option', { name: /Published festival story/ })).not.toBeInTheDocument();
+    for (const status of ['published', 'draft', 'deleted', 'draft', 'published'] as const) {
+      news[0] = { ...news[0], status };
+      await act(async () => { await refreshArticleQueries(queryClient, false); });
+      await waitFor(() => expect(screen.queryByText('Loading published stories...')).not.toBeInTheDocument());
+      if (status === 'published') await screen.findByRole('option', { name: /Published festival story/ });
+      else expect(screen.queryByRole('option', { name: /Published festival story/ })).not.toBeInTheDocument();
+    }
+    expect(news).toHaveLength(1);
+    expect(news[0].category).toBe('tech');
+    expectNoWrites();
+  });
+
+  it('rechecks unsaved topic tag edits without clearing the pin or rewriting either category', async () => {
+    topics[0].pinnedArticleId = newsId;
+    news[0].category = 'faith-culture';
+    await editForm();
+    const picker = screen.getByRole('region', { name: 'Pinned Story' });
+    await within(picker).findByText('Published festival story | gu | published');
+    setTopicTags(['different-tag']);
+    await within(picker).findByText(/does not have an exact topic tag/);
+    expect(within(picker).getByText(newsId)).toBeInTheDocument();
+    setTopicTags(['topic:navratri-2026']);
+    await waitFor(() => expect(within(picker).queryByText(/does not have an exact topic tag/)).not.toBeInTheDocument());
+    expect(news[0].category).toBe('faith-culture');
+    expectNoWrites();
+  });
+
+  it('does not retain an eligible pin label after an authoritative read fails or the article disappears', async () => {
+    topics[0].pinnedArticleId = newsId;
+    const { queryClient } = await loadedPage();
+    await screen.findByText('Eligible pin reference');
+    news = [];
+    await act(async () => {
+      await expect(refreshArticleQueries(queryClient)).rejects.toMatchObject({ response: { status: 404 } });
+    });
+    await screen.findByText(/Pin eligibility could not be verified/);
+    expect(screen.queryByText('Eligible pin reference')).not.toBeInTheDocument();
+    expect(topics[0].pinnedArticleId).toBe(newsId);
     expectNoWrites();
   });
 });

@@ -1018,7 +1018,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     for (const raw of (Array.isArray(list) ? list : [])) {
       const cleaned = String(raw || '').trim();
       if (!cleaned) continue;
-      const key = normalizeTagKey(cleaned);
+      const key = cleaned;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(cleaned);

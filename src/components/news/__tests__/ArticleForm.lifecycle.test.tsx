@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Article, ListResponse } from '@/lib/api/articles';
@@ -127,6 +127,66 @@ afterEach(() => {
   clients.splice(0).forEach((client) => client.clear());
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('Trending tag membership through Save Update', () => {
+  it.each([
+    ['faith-culture', 'navratri-2026'],
+    ['tech', 'ai-2026'],
+  ])('adds and removes an exact Trending tag without changing the %s story or its publication', async (category, tag) => {
+    const otherTag = tag.toUpperCase();
+    const originalTags = ['local-news', otherTag];
+    const { client } = renderForm({ ...source, category, tags: originalTags });
+    const pinKey = ['articles', 'trending-pin', source._id];
+    const candidatesKey = ['articles', 'trending-candidates', '', 1];
+    client.setQueryData(pinKey, { ...stored });
+    client.setQueryData(candidatesKey, { rows: [{ ...stored }] });
+
+    const input = screen.getByPlaceholderText('Type and press Enter');
+    fireEvent.change(input, { target: { value: tag } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled());
+    expect(mocks.update.mock.calls[0]).toEqual([source._id, expect.objectContaining({
+      category, tags: [...originalTags, tag],
+    })]);
+    expect(stored).toMatchObject({ category, status: 'published', publishedAt: originalPublishedAt, tags: [...originalTags, tag] });
+    expect(client.getQueryData(['articles', 'one', source._id])).toMatchObject({
+      category, status: 'published', publishedAt: originalPublishedAt, tags: [...originalTags, tag],
+    });
+    expect(client.getQueryState(pinKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(candidatesKey)?.isInvalidated).toBe(true);
+
+    const chip = screen.getByText(tag, { exact: true }).closest('span');
+    if (!chip) throw new Error('Trending tag chip not found');
+    fireEvent.click(within(chip).getByRole('button'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledTimes(2));
+    expect(mocks.update.mock.calls[1]).toEqual([source._id, expect.objectContaining({ category, tags: originalTags })]);
+    for (const [, payload] of mocks.update.mock.calls) {
+      expect(payload).not.toHaveProperty('status');
+      expect(payload).not.toHaveProperty('publishedAt');
+    }
+    expect(stored).toMatchObject({ _id: source._id, category, status: 'published', publishedAt: originalPublishedAt, tags: originalTags });
+    expect(client.getQueryData(['articles', 'one', source._id])).toMatchObject({ category, tags: originalTags });
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.translations).not.toHaveBeenCalled();
+  });
+
+  it('retains case-distinct saved Trending tags when hydrating and saving another edit', async () => {
+    const tags = ['navratri-2026', 'Navratri-2026', 'topic:Navratri-2026'];
+    renderForm({ ...source, category: 'faith-culture', tags });
+    for (const tag of tags) expect(screen.getByText(tag, { exact: true })).toBeInTheDocument();
+    fireEvent.change(titleInput(), { target: { value: 'Same story, updated headline' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({ category: 'faith-culture', tags });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('Founder Edit Published - Save Update', () => {

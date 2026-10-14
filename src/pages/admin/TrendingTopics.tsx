@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import Switch from '@/components/settings/Switch';
@@ -67,55 +68,95 @@ function topicState(topic: EditorialTopic, now: number): string {
   return 'Eligible for Trending Strip';
 }
 
-function PinnedStoryPicker({ value, onChange, disabled }: {
+type TrendingArticle = Article & {
+  locked?: boolean;
+  isPrivate?: boolean;
+  visibility?: string;
+  embargoUntil?: string | null;
+  workflow?: Article['workflow'] & { embargoUntil?: string | null };
+};
+
+function pinnedStoryIssue(article: TrendingArticle, articleTags: readonly string[]): string | null {
+  if (article.status !== 'published' || article.deletedAt != null) {
+    return 'This story is no longer published or has been deleted.';
+  }
+  if (!article.tags?.some((tag) => articleTags.includes(tag))) {
+    return 'This story does not have an exact topic tag.';
+  }
+  // Match the confirmed Backend pin gate; public language-edition resolution stays server-owned.
+  const dates = [article.publishedAt, article.publishAt, article.scheduledAt, article.embargoUntil, article.workflow?.embargoUntil];
+  const now = Date.now();
+  if (article.locked === true || article.workflow?.locked === true || article.isPrivate === true
+    || /^private$/i.test(article.visibility || '')
+    || dates.some((date) => date != null && !(Date.parse(date) <= now))) {
+    return 'This story is not publicly eligible.';
+  }
+  return null;
+}
+
+function usePinnedStory(id: string | null) {
+  return useQuery({
+    queryKey: ['articles', 'trending-pin', id],
+    queryFn: async (): Promise<TrendingArticle> => {
+      if (!id) throw new Error('Missing CMS News reference');
+      const article = await getArticle(id);
+      if (!isNewsId(article._id) || article._id !== id) throw new Error('Invalid CMS News reference');
+      return article;
+    },
+    enabled: !!id,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+function PinnedStoryStatus({ id, articleTags }: { id: string; articleTags: readonly string[] }) {
+  const pin = usePinnedStory(id);
+  const issue = pin.data ? pinnedStoryIssue(pin.data, articleTags) : null;
+  const checking = pin.isPending || pin.isFetching;
+  return <>
+    <div>{id}</div>
+    <p role={!checking && (pin.isError || issue) ? 'alert' : 'status'} className="mt-1 text-xs">
+      {checking ? 'Checking pin eligibility...'
+        : pin.isError ? 'Pin eligibility could not be verified. Reopen the topic to retry.'
+          : issue ? `Pin is not eligible. ${issue}` : 'Eligible pin reference'}
+    </p>
+  </>;
+}
+
+function PinnedStoryPicker({ value, articleTags, onChange, disabled }: {
   value: string | null;
+  articleTags: readonly string[];
   onChange: (id: string | null) => void;
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [attempt, setAttempt] = useState(0);
-  const [selected, setSelected] = useState<Article | null>(null);
-  const [pinError, setPinError] = useState('');
+  const [request, setRequest] = useState<{ q: string | undefined; page: number } | null>(null);
+  const pin = usePinnedStory(value);
+  const selected = pin.data;
+  const pinIssue = selected ? pinnedStoryIssue(selected, articleTags) : null;
 
   useEffect(() => {
-    let cancelled = false;
-    setSelected(null);
-    setPinError('');
-    if (value) {
-      getArticle(value).then((article) => {
-        if (!isNewsId(article._id) || article._id !== value) throw new Error('Invalid CMS News reference');
-        if (!cancelled) setSelected(article);
-      }).catch(() => {
-        if (!cancelled) setPinError('The saved CMS News reference could not be loaded. Keep it for backend validation or clear the pin.');
-      });
-    }
-    return () => { cancelled = true; };
-  }, [value]);
-
-  useEffect(() => {
+    setRequest(null);
     if (!open) return;
-    let cancelled = false;
-    setLoading(true);
-    setError('');
-    setArticles([]);
-    const timer = window.setTimeout(() => {
-      listArticles({ q: search.trim() || undefined, status: 'published', page, limit: 20, sort: '-publishedAt' })
-        .then((result) => {
-          if (cancelled) return;
-          setArticles(result.rows.filter((article) => isNewsId(article._id) && article.status === 'published'));
-          setPages(result.pages);
-        }).catch((failure: unknown) => {
-          if (!cancelled) setError(normalizeError(failure, 'Published CMS News stories could not be loaded. Please retry.').message);
-        }).finally(() => { if (!cancelled) setLoading(false); });
-    }, 250);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [open, search, page, attempt]);
+    const timer = window.setTimeout(() => setRequest({ q: search.trim() || undefined, page }), 250);
+    return () => window.clearTimeout(timer);
+  }, [open, search, page]);
+
+  const candidates = useQuery({
+    queryKey: ['articles', 'trending-candidates', request?.q || '', request?.page ?? 1],
+    queryFn: () => listArticles({ q: request?.q, status: 'published', page: request?.page ?? 1, limit: 20, sort: '-publishedAt' }),
+    enabled: open && !!request,
+    staleTime: 0,
+    retry: false,
+  });
+  const loading = !request || candidates.isPending || candidates.isFetching;
+  const error = request && candidates.isError
+    ? normalizeError(candidates.error, 'Published CMS News stories could not be loaded. Please retry.').message : '';
+  const pages = candidates.data?.pages ?? 1;
+  const articles = (candidates.data?.rows ?? [])
+    .filter((article) => isNewsId(article._id) && !pinnedStoryIssue(article, articleTags));
 
   return (
     <section className="space-y-2 rounded border border-slate-200 p-3" aria-label="Pinned Story">
@@ -124,11 +165,12 @@ function PinnedStoryPicker({ value, onChange, disabled }: {
         <div className="space-y-1 text-sm">
           <div>{selected ? `${selected.title} | ${selected.language || selected.lang || 'Language unavailable'} | ${selected.status || 'Status unavailable'}` : 'CMS News reference'}</div>
           <div className="break-all font-mono">{value}</div>
-          {selected && selected.status !== 'published' && <p role="alert">This story is no longer published. Clear or replace the pin before saving.</p>}
+          {pin.isFetching ? <p role="status">Checking pin eligibility...</p>
+            : pin.isError ? <p role="alert" className="text-sm text-amber-800">The saved CMS News reference could not be loaded. Keep it for backend validation or clear the pin.</p>
+              : pinIssue && <p role="alert">{pinIssue} Clear or replace the pin before saving.</p>}
           <button type="button" className={buttonClass} disabled={disabled} onClick={() => onChange(null)}>Clear pinned story</button>
         </div>
       ) : <p className="text-sm text-slate-500">No pinned story</p>}
-      {pinError && <p role="alert" className="text-sm text-amber-800">{pinError}</p>}
       <button type="button" className={buttonClass} disabled={disabled} onClick={() => setOpen(!open)}>{open ? 'Close story search' : 'Choose pinned story'}</button>
       {open && (
         <div className="space-y-2">
@@ -136,7 +178,7 @@ function PinnedStoryPicker({ value, onChange, disabled }: {
             <input className={inputClass} value={search} disabled={disabled} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search title or slug" />
           </label>
           {loading && <p role="status">Loading published stories...</p>}
-          {error && <div role="alert" className={errorClass}>{error} <button type="button" className={buttonClass} onClick={() => setAttempt(attempt + 1)}>Retry story search</button></div>}
+          {error && <div role="alert" className={errorClass}>{error} <button type="button" className={buttonClass} onClick={() => void candidates.refetch()}>Retry story search</button></div>}
           {!loading && !error && (
             <>
               <label className="block text-sm">Published CMS News story
@@ -148,7 +190,7 @@ function PinnedStoryPicker({ value, onChange, disabled }: {
                   {articles.map((article) => <option key={article._id} value={article._id}>{article.title} | {article.language || article.lang || 'Language unavailable'} | {article.status} | {article._id}</option>)}
                 </select>
               </label>
-              {!articles.length && <p>No published stories found on this page.</p>}
+              {!articles.length && <p>No eligible stories match this topic on this page.</p>}
               <div className="flex items-center gap-2">
                 <button type="button" className={buttonClass} disabled={disabled || page <= 1} onClick={() => setPage(page - 1)}>Previous stories</button>
                 <span className="text-sm">Page {page} of {Math.max(1, pages)}</span>
@@ -158,7 +200,7 @@ function PinnedStoryPicker({ value, onChange, disabled }: {
           )}
         </div>
       )}
-      <p className="text-xs text-slate-500">Only CMS News IDs are selected here. The backend checks public eligibility and matching article tags. Selecting a story never edits it.</p>
+      <p className="text-xs text-slate-500">Only CMS News IDs with an exact topic tag and eligible publication state are selected here. The backend validates pins and public language editions. Membership never changes category, and selecting a story never edits or copies it.</p>
     </section>
   );
 }
@@ -178,6 +220,7 @@ function TopicEditor({ id, onCancel, onSaved }: {
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const articleTags = [...new Set(form.articleTags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean))];
 
   useEffect(() => {
     if (!id) return;
@@ -204,7 +247,6 @@ function TopicEditor({ id, onCancel, onSaved }: {
       if (!form.name[code].trim()) nextErrors[`name.${code}`] = `${label} Name is required.`;
     }
     if (!form.slug.trim()) nextErrors.slug = 'Canonical Slug is required.';
-    const articleTags = [...new Set(form.articleTags.split(/\r?\n/).map((tag) => tag.trim()).filter(Boolean))];
     if (!articleTags.length) nextErrors.articleTags = 'At least one article tag is required.';
     else if (articleTags.length > 20 || articleTags.some((tag) => tag.length > 120 || /[\u0000-\u001f\u007f*]/.test(tag))) {
       nextErrors.articleTags = 'Use up to 20 exact tags, at most 120 characters each, without wildcards or control characters.';
@@ -274,7 +316,7 @@ function TopicEditor({ id, onCancel, onSaved }: {
               <span className="mt-1 block text-xs font-normal text-slate-500">One exact News.tags value per line (up to 20). Spaces around tags and duplicates are removed on Save. This does not modify any article.</span>
             </label>
             {fieldError('articleTags')}
-            <PinnedStoryPicker value={form.pinnedArticleId} disabled={saving} onChange={(pinnedArticleId) => setForm({ ...form, pinnedArticleId })} />
+            <PinnedStoryPicker value={form.pinnedArticleId} articleTags={articleTags} disabled={saving} onChange={(pinnedArticleId) => setForm({ ...form, pinnedArticleId })} />
             <p className="text-sm">Times use your browser timezone: <strong>{timezone}</strong>. Saved timestamps are converted to UTC.</p>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -401,7 +443,7 @@ function TrendingTopicsManager() {
                 <td className="px-3 py-3">{new Date(topic.startsAt).toLocaleString()}</td>
                 <td className="px-3 py-3">{topic.expiresAt ? new Date(topic.expiresAt).toLocaleString() : 'No expiry'}</td>
                 <td className="px-3 py-3">{topic.articleTags.map((tag) => <div key={tag}>{tag}</div>)}</td>
-                <td className="break-all px-3 py-3">{topic.pinnedArticleId || 'None'}</td>
+                <td className="break-all px-3 py-3">{topic.pinnedArticleId ? <PinnedStoryStatus id={topic.pinnedArticleId} articleTags={topic.articleTags} /> : 'None'}</td>
                 <td className="px-3 py-3"><div className="flex gap-2">
                   <button type="button" className={buttonClass} disabled={disabled} aria-label={`Edit ${topic.name.gu}`} onClick={() => { setNotice(''); setActionError(''); setEditor({ id: topic.id }); }}>Edit</button>
                   <button type="button" className={buttonClass} disabled={disabled} aria-label={`${topic.active ? 'Deactivate' : 'Activate'} ${topic.name.gu}`} onClick={() => {
