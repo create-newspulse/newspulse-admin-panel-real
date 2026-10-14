@@ -654,14 +654,14 @@ describe('ArticleForm Quality Tools', () => {
   });
 
   it('publishes an English source article through the canonical publish service when Hindi and Gujarati are missing', async () => {
-    renderArticleForm('admin');
+    renderArticleForm('founder');
     await fillPublishableSourceArticle();
 
     const publishButton = screen.getByRole('button', { name: 'Publish' });
     await waitFor(() => expect(publishButton).not.toBeDisabled());
     fireEvent.click(publishButton);
 
-    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('created-1', expect.any(String)));
+    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('created-1'));
     expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({
       status: 'draft',
       language: 'en',
@@ -719,7 +719,7 @@ describe('ArticleForm Quality Tools', () => {
   });
 
   it('keeps genuine required-field validation before publish', async () => {
-    renderArticleForm('admin');
+    renderArticleForm('founder');
     fireEvent.change(controlNearLabel<HTMLInputElement>('Title', 'input'), { target: { value: 'English source story' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Content editor input' }), {
       target: { value: 'This is a complete article body but category has intentionally not been selected.' },
@@ -736,7 +736,7 @@ describe('ArticleForm Quality Tools', () => {
 
   it('shows backend publish errors from the canonical publish service', async () => {
     mocks.publishArticle.mockRejectedValueOnce(new Error('Backend publish failed'));
-    renderArticleForm('admin');
+    renderArticleForm('founder');
     await fillPublishableSourceArticle();
 
     const publishButton = screen.getByRole('button', { name: 'Publish' });
@@ -929,7 +929,7 @@ describe('ArticleForm Author Byline', () => {
   });
 
   it('retains selection in preview and saves before dedicated publish on create', async () => {
-    renderArticleForm('admin');
+    renderArticleForm('founder');
     await fillPublishableSourceArticle();
     await fillAuthor();
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
@@ -938,17 +938,19 @@ describe('ArticleForm Author Byline', () => {
     });
     expect(createArticle).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('created-1', expect.any(String)));
+    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('created-1'));
     expect(mocks.createArticle.mock.calls[0][0].authorByline).toEqual({ enabled: true, snapshot: { name: 'Shailesh Rathod' } });
     expect(mocks.createArticle.mock.invocationCallOrder[0]).toBeLessThan(mocks.publishArticle.mock.invocationCallOrder[0]);
-    expect(mocks.publishArticle.mock.calls[0]).toHaveLength(2);
+    expect(mocks.publishArticle.mock.calls[0]).toHaveLength(1);
   });
 
   it('saves the existing byline before dedicated publish on edit', async () => {
+    mocks.authUser = { ...mocks.authUser, role: 'founder' };
     renderAuthorEdit();
     await screen.findByDisplayValue('Shailesh Rathod');
+    fireEvent.change(controlNearLabel<HTMLInputElement>('Title', 'input'), { target: { value: 'Revised headline before publication' } });
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('article-1', expect.any(String)));
+    await waitFor(() => expect(publishArticle).toHaveBeenCalledWith('article-1'));
     expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('authorByline');
     expect(mocks.updateArticle.mock.invocationCallOrder[0]).toBeLessThan(mocks.publishArticle.mock.invocationCallOrder[0]);
   });

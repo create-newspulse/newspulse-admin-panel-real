@@ -2,13 +2,15 @@
 
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useIsFetching, useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { FiltersDrawer } from '@/components/news/FiltersDrawer';
 import { NewsTable } from '@/components/news/NewsTable';
-import { QuickViewsBar, type QuickViewCounts, type QuickViewKey } from '@/components/news/QuickViewsBar';
+import { QuickViewsBar, type QuickViewCounts, type QuickViewKey, type QuickViewLoadState } from '@/components/news/QuickViewsBar';
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
 import apiClient from '@/lib/api';
 import { publishArticle } from '@/lib/api/articles';
+import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
 import { debug } from '@/lib/debug';
 import { guardAction, type ArticleWorkflowAction } from '@/lib/articleWorkflowGuard';
 import toast from 'react-hot-toast';
@@ -32,6 +34,12 @@ const STATUS_TABS: { value: 'all' | ArticleStatus; label: string }[] = [
 export default function ManageNews() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const articlesFetching = useIsFetching({ queryKey: ['articles'] }) > 0;
+  const lifecyclePending = useIsMutating({ mutationKey: ['articles', 'lifecycle'] }) > 0;
+  const [listLoadState, setListLoadState] = React.useState<QuickViewLoadState>('loading');
+  const [transitionPending, setTransitionPending] = React.useState(false);
+  const transitionInFlight = React.useRef(false);
 
   const quickViewsStickyRef = React.useRef<HTMLDivElement | null>(null);
   const [tableHeaderTop, setTableHeaderTop] = React.useState(0);
@@ -218,29 +226,52 @@ export default function ManageNews() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Workflow transition (mirrors legacy doTransition)
-  const doTransition = async (id: string, action: ArticleWorkflowAction) => {
+  const doTransition = async (action: ArticleWorkflowAction) => {
+    if (transitionInFlight.current || lifecyclePending || articlesFetching || listLoadState !== 'ready') return;
+    const ids = [...new Set(selectedIds)];
+    if (!ids.length) return;
+    let completed = 0;
+    const failures: string[] = [];
+    let refreshNeeded = false;
+    transitionInFlight.current = true;
+    setTransitionPending(true);
     try {
       const g = guardAction(action, publishEnabled, { isFounder });
       if (!g.allowed) {
-        debug('[ManageNews] blocked transition', { id, action, publishEnabled });
+        debug('[ManageNews] blocked transition', { action, publishEnabled });
         toast.error(g.reason || 'Action blocked');
         return;
       }
 
-      if (action === 'publish') {
-        await publishArticle(id);
-      } else {
-        await apiClient.post(`/news/${id}/transition`, { action });
+      refreshNeeded = action !== 'publish';
+      for (const id of ids) {
+        try {
+          const result = action === 'publish'
+            ? await publishArticle(id)
+            : (await apiClient.post(`/news/${id}/transition`, { action })).data;
+          completed += 1;
+          refreshNeeded = true;
+          const warning = articleFollowUpWarning(result);
+          if (warning) toast(warning);
+        } catch (error: unknown) {
+          const failure = normalizeArticleError(error, 'Transition failed');
+          refreshNeeded ||= failure.status === 409;
+          failures.push(failure.message);
+          if (action === 'publish') break;
+        }
       }
-      toast.success(`${action} done`);
-
-      // Trigger a soft refresh by nudging params (keeps pagination)
-      setParams(p => ({ ...p }));
-    } catch (err: any) {
-      toast.error(
-        err?.response?.data?.message || err?.message || 'Transition failed',
-      );
+      if (failures.length) toast.error(`${completed} of ${ids.length} stories updated. ${failures.length} failed. ${[...new Set(failures)].join(' ')}`);
+      else toast.success(`${action} done`);
+    } finally {
+      if (refreshNeeded) {
+        try {
+          await refreshArticleQueries(queryClient);
+        } catch {
+          toast.error('The latest article list could not be loaded. Refresh the list; do not repeat completed actions.');
+        }
+      }
+      transitionInFlight.current = false;
+      setTransitionPending(false);
     }
   };
 
@@ -263,10 +294,15 @@ export default function ManageNews() {
               Add New
             </button>
             <button
-              onClick={() => setParams(p => ({ ...p }))}
+              disabled={articlesFetching || transitionPending || lifecyclePending}
+              onClick={() => {
+                void refreshArticleQueries(queryClient).catch((error: unknown) => {
+                  toast.error(normalizeArticleError(error, 'Refresh failed').message);
+                });
+              }}
               className="px-3 py-1 bg-slate-700 text-white rounded"
             >
-              Refresh
+              {articlesFetching ? 'Refreshing...' : 'Refresh'}
             </button>
           </div>
         </div>
@@ -313,6 +349,7 @@ export default function ManageNews() {
         <QuickViewsBar
           value={quickView}
           counts={quickCounts}
+          loadState={listLoadState}
           onChange={handleQuickViewChange}
           onOpenFilters={() => setFiltersOpen(true)}
         />
@@ -439,6 +476,8 @@ export default function ManageNews() {
           search={debouncedSearch}
           quickView={quickView}
           onCounts={setQuickCounts}
+          onLoadStateChange={setListLoadState}
+          actionsDisabled={transitionPending}
           onSelectIds={setSelectedIds}
           onPageChange={(p) => setParams(prev => ({ ...prev, page: Math.max(1, p) }))}
           highlightId={highlightId || undefined}
@@ -468,11 +507,12 @@ export default function ManageNews() {
             <span className="mx-2 text-slate-400">|</span>
 
           <button
+            disabled={transitionPending || lifecyclePending || listLoadState !== 'ready'}
             onClick={() => {
               if (
                 confirm(`Send ${selectedIds.length} article(s) to Review?`)
               ) {
-                selectedIds.forEach(id => void doTransition(id, 'toReview'));
+                void doTransition('toReview');
               }
             }}
             className="px-2 py-1 rounded border"
@@ -481,9 +521,10 @@ export default function ManageNews() {
           </button>
 
           <button
+            disabled={transitionPending || lifecyclePending || listLoadState !== 'ready'}
             onClick={() => {
               if (confirm(`Send ${selectedIds.length} article(s) to Legal?`)) {
-                selectedIds.forEach(id => void doTransition(id, 'toLegal'));
+                void doTransition('toLegal');
               }
             }}
             className="px-2 py-1 rounded border"
@@ -492,9 +533,10 @@ export default function ManageNews() {
           </button>
 
           <button
+            disabled={transitionPending || lifecyclePending || listLoadState !== 'ready'}
             onClick={() => {
               if (confirm(`Approve ${selectedIds.length} article(s)?`)) {
-                selectedIds.forEach(id => void doTransition(id, 'approve'));
+                void doTransition('approve');
               }
             }}
             className="px-2 py-1 rounded border"
@@ -502,11 +544,12 @@ export default function ManageNews() {
             Approve
           </button>
 
-          {publishEnabled ? (
+          {publishEnabled && isFounder ? (
             <button
+              disabled={transitionPending || lifecyclePending || listLoadState !== 'ready'}
               onClick={() => {
                 if (confirm(`Publish ${selectedIds.length} article(s)?`)) {
-                  selectedIds.forEach(id => void doTransition(id, 'publish'));
+                  void doTransition('publish');
                 }
               }}
               className="px-2 py-1 rounded border text-white bg-red-600"

@@ -85,6 +85,25 @@ export interface Article {
   createdAt?: string;
   updatedAt?: string;
   scheduledAt?: string;
+  deletedFromStatus?: ArticleStatus | null;
+  deletedAt?: string | null;
+}
+
+export interface ArticleMutationResponse {
+  ok?: boolean;
+  success?: boolean;
+  status?: number;
+  article?: Article;
+  data?: { article?: Article };
+  restoredStatuses?: ArticleStatus[];
+  changedIds?: string[];
+  deletedIds?: string[];
+  deletedCount?: number;
+  publishedLanguages?: string[];
+  translationGroupId?: string;
+  committed?: boolean;
+  revalidation?: { ok?: boolean };
+  postCommitWarnings?: Array<{ code: string; message?: string }>;
 }
 
 export interface ListResponse {
@@ -190,42 +209,36 @@ function withDescriptionFallback<T extends Record<string, any>>(data: T): T {
   return data;
 }
 
-function isFallbackableHardDeleteError(err: any): boolean {
-  const status = err?.response?.status;
-  // Backends vary: some return 404/405 when the hard-delete route isn't implemented,
-  // others return 400 for an unexpected query param or unsupported action.
-  return status === 404 || status === 405 || status === 400;
+function mutationResponse(data: ArticleMutationResponse): ArticleMutationResponse {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Invalid article operation response');
+  }
+  if (data?.ok === false || data?.success === false) {
+    throw Object.assign(new Error('Article operation failed'), {
+      response: { status: data.status && data.status >= 400 ? data.status : 500, data },
+    });
+  }
+  if (data.ok !== true && data.success !== true && !data.article?._id && !data.data?.article?._id) {
+    throw new Error('Invalid article operation response');
+  }
+  return data;
 }
 
-async function tryHardDeleteAttempts<T = any>(attempts: Array<() => Promise<T>>): Promise<T> {
-  let lastErr: any = null;
-  for (const attempt of attempts) {
-    try {
-      return await attempt();
-    } catch (e: any) {
-      lastErr = e;
-      if (isFallbackableHardDeleteError(e)) continue;
-      throw e;
-    }
-  }
-  throw lastErr || new Error('Hard delete failed');
-}
-
-async function patchThenPut<T = any>(url: string, payload: any): Promise<T> {
-  try {
-    const res = await adminApiClient.patch(url, payload);
-    return res.data as T;
-  } catch (e: any) {
-    const status = e?.response?.status;
-    // Some backends don't implement PATCH; fall back to PUT for status updates.
-    if (status && status !== 404 && status !== 405) throw e;
-  }
-  const res2 = await adminApiClient.put(url, payload);
-  return res2.data as T;
+async function putArticleState(url: string, payload: Record<string, unknown>): Promise<ArticleMutationResponse> {
+  const res = await adminApiClient.put(url, payload);
+  return mutationResponse(res.data);
 }
 
 
 function normalizeListResponse(payload: any, opts: { requestedPage: number; limit: number }): ListResponse {
+  if (payload?.ok === false || payload?.success === false) {
+    throw Object.assign(new Error('Failed to load articles'), {
+      response: { status: payload.status >= 400 ? payload.status : 500, data: payload },
+    });
+  }
+  if (![payload?.data, payload?.items, payload?.rows, payload?.articles].some(Array.isArray)) {
+    throw new Error('Invalid articles response');
+  }
   const rawRows: Article[] = Array.isArray(payload?.data)
     ? payload.data
     : (Array.isArray(payload?.items)
@@ -333,18 +346,17 @@ export async function getArticle(id: string): Promise<Article> {
 export async function archiveArticle(id: string) {
   const encoded = encodeURIComponent(id);
   const url = `${ARTICLES_PATH}/${encoded}`;
-  return patchThenPut(url, { status: 'archived' });
+  return putArticleState(url, { status: 'archived' });
 }
 export async function restoreArticle(id: string) {
   const encoded = encodeURIComponent(id);
-  const url = `${ARTICLES_PATH}/${encoded}`;
-  return patchThenPut(url, { status: 'draft' });
+  const res = await adminApiClient.post<ArticleMutationResponse>(`${ARTICLES_PATH}/${encoded}/restore`);
+  return mutationResponse(res.data);
 }
 export async function deleteArticle(id: string) {
-  // Soft delete in UI: mark as deleted (keeps data recoverable)
   const encoded = encodeURIComponent(id);
-  const url = `${ARTICLES_PATH}/${encoded}`;
-  return patchThenPut(url, { status: 'deleted' });
+  const res = await adminApiClient.delete<ArticleMutationResponse>(`${ARTICLES_PATH}/${encoded}`);
+  return mutationResponse(res.data);
 }
 
 // --- Control tower helpers ---
@@ -359,21 +371,26 @@ export async function updateArticleStatus(id: string, status: ArticleStatus) {
     payload: { status },
     relatedArticleIds: [],
   });
-  return patchThenPut<Article>(url, { status });
+  return putArticleState(url, { status });
 }
 
-export async function publishArticle(id: string, publishedAt?: string) {
-  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}`;
-  const ts = (publishedAt && String(publishedAt).trim()) ? String(publishedAt).trim() : new Date().toISOString();
-  const payload = { status: 'published', publishedAt: ts };
+export async function publishArticle(id: string) {
+  const url = `${ARTICLES_PATH}/${encodeURIComponent(id)}/publish`;
   logAdminArticleRequest('publishArticle', {
     targetArticleId: id,
     route: `/admin-api/${url}`,
-    payload,
     relatedArticleIds: [],
   });
-  const res = await adminApiClient.put(url, payload);
-  return res.data as any;
+  const res = await adminApiClient.post<ArticleMutationResponse>(url);
+  return mutationResponse(res.data);
+}
+
+export async function unpublishArticle(id: string) {
+  const res = await adminApiClient.post<ArticleMutationResponse>(
+    `${ARTICLES_PATH}/${encodeURIComponent(id)}/unpublish`,
+    { toStatus: 'draft' },
+  );
+  return mutationResponse(res.data);
 }
 
 export async function retryArticleTranslation(id: string, opts?: { languages?: string[] }) {
@@ -402,7 +419,7 @@ export async function scheduleArticle(id: string, publishAt: string) {
     payload: { status: 'scheduled', publishAt },
     relatedArticleIds: [],
   });
-  return patchThenPut<Article>(url, { status: 'scheduled', publishAt });
+  return putArticleState(url, { status: 'scheduled', publishAt });
 }
 
 export async function unscheduleArticle(id: string) {
@@ -414,7 +431,7 @@ export async function unscheduleArticle(id: string) {
     payload: { status: 'draft', publishAt: null, scheduledAt: null },
     relatedArticleIds: [],
   });
-  return patchThenPut<Article>(url, { status: 'draft', publishAt: null, scheduledAt: null });
+  return putArticleState(url, { status: 'draft', publishAt: null, scheduledAt: null });
 }
 
 export async function deleteArticleSoft(id: string) {
@@ -423,49 +440,19 @@ export async function deleteArticleSoft(id: string) {
 
 export async function deleteArticleHard(id: string) {
   const encoded = encodeURIComponent(id);
-
-  // Try multiple common hard-delete contracts for maximum compatibility:
-  // - POST /api/articles/:id/hard-delete
-  // - POST /api/admin/articles/:id/hard-delete
-  // - DELETE /api/articles/:id?hard=true
-  // - DELETE /api/admin/articles/:id?hard=true
-  await tryHardDeleteAttempts([
-    async () => {
-      const res = await adminApiClient.post(`${ARTICLES_PATH}/${encoded}/hard-delete`);
-      return res.data as any;
-    },
-    async () => {
-      const res = await adminApiClient.post(`admin/articles/${encoded}/hard-delete`);
-      return res.data as any;
-    },
-    async () => {
-      const res = await adminApiClient.delete(`${ARTICLES_PATH}/${encoded}`, { params: { hard: 'true' } });
-      return res.data as any;
-    },
-    async () => {
-      const res = await adminApiClient.delete(`admin/articles/${encoded}`, { params: { hard: 'true' } });
-      return res.data as any;
-    },
-  ]);
-  return;
+  const res = await adminApiClient.post<ArticleMutationResponse>(`${ARTICLES_PATH}/${encoded}/hard-delete`);
+  return mutationResponse(res.data);
 }
 
 export async function bulkHardDeleteArticles(ids: string[]) {
-  const cleanIds = Array.isArray(ids) ? ids.map((x) => String(x || '').trim()).filter(Boolean) : [];
-  if (cleanIds.length === 0) return { ok: true, deletedCount: 0 } as any;
-
-  // Standardize on per-id hard deletes via /articles/:id?hard=true.
-  for (const id of cleanIds) {
-    await deleteArticleHard(id);
-  }
-  return { ok: true, deletedCount: cleanIds.length } as any;
+  const cleanIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (!cleanIds.length) throw new Error('Select at least one deleted story');
+  const res = await adminApiClient.post<ArticleMutationResponse>(`${ARTICLES_PATH}/forever/bulk`, { ids: cleanIds });
+  return mutationResponse(res.data);
 }
 
-// New resilient helper: try canonical hard-delete route first, then fallbacks
 export async function hardDeleteArticle(id: string) {
-  // Standard contract only.
-  await deleteArticleHard(id);
-  return;
+  return deleteArticleHard(id);
 }
 
 // Optional extra helpers (create/update/meta) if needed by other screens
@@ -478,6 +465,7 @@ export async function createArticle(data: Partial<Article>) {
     relatedArticleIds: [],
   });
   const res = await adminApiClient.post(ARTICLES_PATH, payload);
+  mutationResponse(res.data);
   return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
@@ -503,6 +491,7 @@ export async function updateArticle(id: string, data: Partial<Article>) {
     relatedArticleIds: [],
   });
   const res = await adminApiClient.put(url, payload);
+  mutationResponse(res.data);
   return res.data;
 }
 

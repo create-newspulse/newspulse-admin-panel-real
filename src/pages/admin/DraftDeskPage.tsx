@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
 import {
@@ -8,8 +9,12 @@ import {
   restoreArticle,
   hardDeleteArticle,
   Article as NPArticle,
+  type ArticleMutationResponse,
 } from '@/lib/api/articles';
 import { normalizeYouthPulseTrack } from '@/lib/youthPulseTracks';
+import { useAuth } from '@/context/AuthContext';
+import { normalizeRoleId } from '@/lib/adminAccessControl';
+import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
 
 // Extend with optional “community / pro / founder” hints
 type Article = NPArticle & {
@@ -219,6 +224,11 @@ function groupDraftTranslations(rows: Article[]): DraftGroup[] {
 }
 
 export default function DraftDeskPage() {
+  const { user } = useAuth();
+  const viewerIsFounder = normalizeRoleId(user?.role) === 'founder';
+  const queryClient = useQueryClient();
+  const lifecycleInFlight = useRef(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [items, setItems] = useState<Article[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
@@ -279,7 +289,7 @@ export default function DraftDeskPage() {
     return () => {
       cancelled = true;
     };
-  }, [statusFilter]);
+  }, [statusFilter, reloadVersion]);
 
   // Base array for all drafts with safe default
   const allDrafts: Article[] = Array.isArray(items) ? items : [];
@@ -304,65 +314,93 @@ export default function DraftDeskPage() {
   }, [allDrafts, sourceFilter, query]);
 
   const groupedDrafts = useMemo(() => groupDraftTranslations(filtered), [filtered]);
+  const lifecycleBusy = loading || !!deletingId || !!hardDeletingId || !!restoringId;
+
+  const finishLifecycle = async (id: string, result: ArticleMutationResponse, message: string) => {
+    const ids = result.deletedIds || result.changedIds || [id];
+    setItems((previous) => previous.filter((article) => !ids.includes(article._id)));
+    setReloadVersion((version) => version + 1);
+    toast.success(message);
+    const warning = articleFollowUpWarning(result);
+    if (warning) toast(warning);
+    try {
+      await refreshArticleQueries(queryClient);
+    } catch {
+      toast.error('The action completed, but the latest article list could not be loaded. Refresh it; do not repeat the action.');
+    }
+  };
+
+  const lifecycleFailed = async (error: unknown, fallback: string) => {
+    const failure = normalizeArticleError(error, fallback);
+    toast.error(failure.message);
+    if (failure.status === 409) {
+      setReloadVersion((version) => version + 1);
+      try {
+        await refreshArticleQueries(queryClient);
+      } catch {
+        toast.error('The latest story could not be loaded. Refresh before trying again.');
+      }
+    }
+  };
 
   const handleDelete = async (id: string) => {
+    if (lifecycleInFlight.current) return;
     const draft = items.find((a) => a._id === id);
     if (!draft) return;
 
     const ok = window.confirm(
-      'Delete this draft? It will move to Deleted and disappear from Draft Desk.',
+      'Delete this story and all available language versions? It will move to Deleted and disappear from Draft Desk.',
     );
     if (!ok) return;
 
+    lifecycleInFlight.current = true;
     try {
       setDeletingId(id);
-      // Reuse the same API as Manage News (soft delete = status "deleted")
-      await deleteArticle(id);
-      setItems((prev) => prev.filter((a) => a._id !== id));
-      toast.success('Draft moved to Deleted');
-    } catch (err: any) {
-      toast.error(
-        err?.response?.data?.message ||
-          err?.message ||
-          'Failed to delete draft',
-      );
+      const result = await deleteArticle(id);
+      await finishLifecycle(id, result, 'Story moved to Deleted');
+    } catch (error: unknown) {
+      await lifecycleFailed(error, 'Failed to delete story');
     } finally {
+      lifecycleInFlight.current = false;
       setDeletingId(null);
     }
   };
 
   const handleRestore = async (id: string) => {
-    const ok = window.confirm('Restore this draft back to All Drafts?');
+    if (lifecycleInFlight.current) return;
+    const ok = window.confirm('Restore this story and all available language versions? Backend will determine the restored status.');
     if (!ok) return;
+    lifecycleInFlight.current = true;
     try {
       setRestoringId(id);
-      await restoreArticle(id);
-      // Remove from current Deleted view list
-      setItems(prev => prev.filter(a => a._id !== id));
-      toast.success('Draft restored');
-    } catch (err: any) {
-      toast.error(
-        err?.response?.data?.message || err?.message || 'Failed to restore draft',
-      );
+      const result = await restoreArticle(id);
+      await finishLifecycle(id, result, result.restoredStatuses?.length
+        ? `Story restored (${result.restoredStatuses.join(', ')})` : 'Story restored');
+    } catch (error: unknown) {
+      await lifecycleFailed(error, 'Failed to restore story');
     } finally {
+      lifecycleInFlight.current = false;
       setRestoringId(null);
     }
   };
 
   const handleHardDelete = async (id: string) => {
-    const ok = window.confirm('Permanently delete this draft? This cannot be undone.');
-    if (!ok) return;
+    if (lifecycleInFlight.current) return;
+    if (!viewerIsFounder || items.find((article) => article._id === id)?.status !== 'deleted') {
+      toast.error('Only Founder can permanently delete an already-deleted story.');
+      return;
+    }
+    const confirmation = window.prompt('Permanently delete this story and all available language versions?\nThis cannot be undone.\nType DELETE to confirm.');
+    if (confirmation !== 'DELETE') return;
+    lifecycleInFlight.current = true;
     try {
       setHardDeletingId(id);
-      await hardDeleteArticle(id);
-      // Remove from current Deleted view list
-      setItems(prev => prev.filter(a => a._id !== id));
-      toast.success('Draft permanently deleted');
-    } catch (err: any) {
-      toast.error(
-        err?.response?.data?.message || err?.message || 'Failed to permanently delete draft',
-      );
+      const result = await hardDeleteArticle(id);
+      await finishLifecycle(id, result, 'Story permanently deleted');
+    } catch (error: unknown) {
+      await lifecycleFailed(error, 'Failed to permanently delete story');
     } finally {
+      lifecycleInFlight.current = false;
       setHardDeletingId(null);
     }
   };
@@ -645,7 +683,7 @@ export default function DraftDeskPage() {
                     <button
                       type="button"
                       className="px-3 py-1 rounded border text-center bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60"
-                      disabled={deletingId === a._id}
+                      disabled={lifecycleBusy}
                       onClick={() => handleDelete(a._id)}
                     >
                       {deletingId === a._id ? 'Deleting…' : 'Delete draft'}
@@ -653,25 +691,24 @@ export default function DraftDeskPage() {
                   </>
                 )}
 
-                {/* Actions for Deleted view: show regardless of exact status string */}
-                {statusFilter === 'deleted' && (
+                {statusFilter === 'deleted' && a.status === 'deleted' && (
                   <>
                     <button
                       type="button"
                       className="px-3 py-1 rounded border text-center bg-white hover:bg-slate-100 disabled:opacity-60"
-                      disabled={restoringId === a._id}
+                      disabled={lifecycleBusy || (!viewerIsFounder && group.articles.some((article) => article.deletedFromStatus === 'published'))}
                       onClick={() => handleRestore(a._id)}
                     >
                       {restoringId === a._id ? 'Restoring…' : 'Restore'}
                     </button>
-                    <button
+                    {viewerIsFounder && <button
                       type="button"
                       className="px-3 py-1 rounded border text-center bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
-                      disabled={hardDeletingId === a._id}
+                      disabled={lifecycleBusy}
                       onClick={() => handleHardDelete(a._id)}
                     >
                       {hardDeletingId === a._id ? 'Deleting…' : 'Delete Permanent'}
-                    </button>
+                    </button>}
                   </>
                 )}
               </div>

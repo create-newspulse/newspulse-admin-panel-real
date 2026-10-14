@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ARTICLE_PUSH_SPAM_WARNING } from '@/lib/pushSendFeedback';
 import { listAdminAnalyticsArticles } from '@/lib/api/adminAnalytics';
-import { archiveArticle, deleteArticle, listArticles, publishArticle, requeueArticleTranslations, scheduleArticle, updateArticleStatus } from '@/lib/api/articles';
+import { archiveArticle, deleteArticle, listArticles, publishArticle, requeueArticleTranslations, scheduleArticle, unpublishArticle, updateArticleStatus } from '@/lib/api/articles';
 import ArticlesAnalyticsPage from '@/pages/admin/analytics/ArticlesAnalyticsPage';
 import { NewsTable } from '../NewsTable';
 
@@ -37,6 +37,7 @@ vi.mock('@/lib/api/articles', () => ({
   restoreArticle: vi.fn(),
   deleteArticle: vi.fn(),
   publishArticle: vi.fn(),
+  unpublishArticle: vi.fn(),
   updateArticleStatus: vi.fn(),
   scheduleArticle: vi.fn(),
   unscheduleArticle: vi.fn(),
@@ -113,6 +114,7 @@ describe('NewsTable article push modal', () => {
       pages: 1,
     } as any);
     vi.mocked(publishArticle).mockResolvedValue({ ok: true } as any);
+    vi.mocked(unpublishArticle).mockResolvedValue({ ok: true });
     vi.mocked(archiveArticle).mockResolvedValue({ ok: true } as any);
     vi.mocked(deleteArticle).mockResolvedValue({ ok: true } as any);
     vi.mocked(updateArticleStatus).mockResolvedValue({ ok: true } as any);
@@ -290,9 +292,11 @@ describe('NewsTable article push modal', () => {
     await waitFor(() => expect(archiveArticle).toHaveBeenCalled());
     expect(vi.mocked(archiveArticle).mock.calls[0][0]).toBe('published-source');
 
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Unpublish' })[0]).toBeEnabled());
     fireEvent.click(screen.getAllByRole('button', { name: 'Unpublish' })[0]);
-    await waitFor(() => expect(updateArticleStatus).toHaveBeenCalledWith('published-source', 'draft'));
+    await waitFor(() => expect(unpublishArticle).toHaveBeenCalledWith('published-source'));
 
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Send Push' })[0]).toBeEnabled());
     fireEvent.click(screen.getAllByRole('button', { name: 'Send Push' })[0]);
     expect(screen.getByText('Send Article Push?')).toBeInTheDocument();
     expect(deleteArticle).not.toHaveBeenCalled();

@@ -8,6 +8,7 @@ import { ARTICLE_CATEGORY_OPTIONS } from '@/lib/articleCategories';
 import { isFaithCultureTopic } from '@/lib/faithCultureTopics';
 
 const mocks = vi.hoisted(() => ({
+  role: 'admin',
   apiGet: vi.fn(),
   getMediaStatus: vi.fn(),
   createArticle: vi.fn<(payload: Partial<Article>) => Promise<{ article: Article }>>(),
@@ -24,7 +25,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'admin-1', role: 'admin' } }),
+  useAuth: () => ({ user: { id: 'admin-1', role: mocks.role } }),
 }));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/api', () => ({ default: { get: mocks.apiGet } }));
@@ -159,12 +160,13 @@ async function advanceAutosave(milliseconds = 30_000) {
 
 function ownershipConflict() {
   return Object.assign(new Error('Topic must be changed on the source article'), {
-    response: { status: 409, data: { message: 'Topic must be changed on the source article' } },
+    response: { status: 409, data: { message: 'Change the Faith topic on the source article to keep translations aligned' } },
   });
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.role = 'admin';
   storedArticle = { ...sourceArticle };
   mocks.apiGet.mockResolvedValue({ data: ['en', 'hi', 'gu'] });
   mocks.getMediaStatus.mockResolvedValue({ ok: true, uploadEnabled: true });
@@ -179,7 +181,10 @@ beforeEach(() => {
     if (id === storedArticle._id) storedArticle = article;
     return { article };
   });
-  mocks.publishArticle.mockResolvedValue({ article: { ...sourceArticle, status: 'published' } });
+  mocks.publishArticle.mockImplementation(async (id: string) => {
+    storedArticle = { ...storedArticle, _id: id, status: 'published', publishedAt: '2026-01-15T10:00:00.000Z' };
+    return { article: { ...storedArticle } };
+  });
   mocks.retryArticleTranslation.mockResolvedValue({ ok: true });
   mocks.requeueArticleTranslations.mockResolvedValue({ ok: true });
   mocks.listArticlesByTranslationGroupId.mockResolvedValue(emptyGroup);
@@ -397,13 +402,14 @@ describe('ArticleForm Faith & Culture topic selector', () => {
   });
 
   it.each(['', 'folk-arts-festivals-textiles'])('keeps topic optional in the create save-then-publish flow (%s)', async (topic) => {
+    mocks.role = 'founder';
     renderForm();
     await fillCreate();
     if (topic) chooseTopic(topic);
     const publish = screen.getByRole('button', { name: 'Publish' });
     expect(publish).toBeEnabled();
     fireEvent.click(publish);
-    await waitFor(() => expect(mocks.publishArticle).toHaveBeenCalledWith('created-1', expect.any(String)));
+    await waitFor(() => expect(mocks.publishArticle).toHaveBeenCalledWith('created-1'));
     const payload = mocks.createArticle.mock.calls[0][0];
     expect(payload.status).toBe('draft');
     if (topic) expect(payload).toHaveProperty('topic', topic);
@@ -414,16 +420,19 @@ describe('ArticleForm Faith & Culture topic selector', () => {
   });
 
   it.each(['faith-spiritual-life', null])('saves edited topic %s before the separate publish status call', async (topic) => {
+    mocks.role = 'founder';
     renderForm(sourceArticle);
     chooseTopic(topic || '');
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(mocks.publishArticle).toHaveBeenCalledWith('source-1', expect.any(String)));
+    await waitFor(() => expect(mocks.publishArticle).toHaveBeenCalledWith('source-1'));
     expect(mocks.updateArticle).toHaveBeenCalledTimes(1);
-    expect(mocks.updateArticle.mock.calls[0][1]).toMatchObject({ status: 'draft', topic });
+    expect(mocks.updateArticle.mock.calls[0][1]).toMatchObject({ topic });
+    expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('status');
     expect(mocks.updateArticle.mock.invocationCallOrder[0]).toBeLessThan(mocks.publishArticle.mock.invocationCallOrder[0]);
   });
 
   it('resets the topic and saved snapshot when starting a new article after publish', async () => {
+    mocks.role = 'founder';
     renderForm();
     await fillCreate();
     chooseTopic('living-heritage');
@@ -466,7 +475,9 @@ describe('Faith topic autosave and saved snapshots', () => {
     expect(mocks.updateArticle).not.toHaveBeenCalled();
     await advanceAutosave(1);
     await waitFor(() => expect(mocks.updateArticle).toHaveBeenCalledTimes(1));
-    expect(mocks.updateArticle.mock.calls[0][1]).toMatchObject({ topic, status, content: sourceContent });
+    expect(mocks.updateArticle.mock.calls[0][1]).toMatchObject({ topic, content: sourceContent });
+    expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('status');
+    expect(storedArticle.status).toBe(status);
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
     await advanceAutosave();
     expect(mocks.updateArticle).toHaveBeenCalledTimes(1);
@@ -590,12 +601,13 @@ describe('Faith source ownership and linked drafts', () => {
   });
 
   it.each(['Save Draft', 'Publish'])('surfaces a backend 409 through existing %s errors without claiming success', async (action) => {
+    mocks.role = 'founder';
     vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.updateArticle.mockRejectedValueOnce(ownershipConflict());
     const { onDirtyChange } = renderForm({ ...sourceArticle, sourceLanguage: undefined });
     chooseTopic('');
     fireEvent.click(screen.getByRole('button', { name: action }));
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('This record has changed. Refresh and try again.'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Change the Faith topic on the source article to keep translations aligned'));
     expect(mocks.updateArticle.mock.calls[0][1]).toHaveProperty('topic', null);
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.publishArticle).not.toHaveBeenCalled();
@@ -609,7 +621,7 @@ describe('Faith source ownership and linked drafts', () => {
     const { onDirtyChange } = renderForm({ ...sourceArticle, sourceLanguage: undefined });
     chooseTopic('faith-spiritual-life');
     await advanceAutosave();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toHaveAttribute('title', 'This record has changed. Refresh and try again.'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toHaveAttribute('title', 'Change the Faith topic on the source article to keep translations aligned'));
     expect(screen.getByText(/Autosave failed/)).toBeInTheDocument();
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     expect(topicSelect()).toHaveValue('faith-spiritual-life');

@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import RichTextEditor from '@/components/editor/RichTextEditor';
 import { adminApiClient as api } from '@/lib/adminApiClient';
 import toast from 'react-hot-toast';
@@ -12,6 +13,8 @@ import type { WorkflowChecklist, WorkflowState } from '@/types/api';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
+import { publishArticle, updateArticle } from '@/lib/api/articles';
+import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
 
 interface NewsForm {
   title: string;
@@ -34,6 +37,9 @@ export default function EditNews() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { publishEnabled } = usePublishFlag();
+  const queryClient = useQueryClient();
+  const transitionInFlight = useRef(false);
+  const [transitionPending, setTransitionPending] = useState(false);
 
   const [form, setForm] = useState<NewsForm>({
     title: '',
@@ -168,6 +174,10 @@ export default function EditNews() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!id) {
+      toast.error('Missing article id');
+      return;
+    }
 
     if (!form.title || !form.content || !form.category || !form.language) {
       alert('⚠️ All fields are required');
@@ -184,13 +194,19 @@ export default function EditNews() {
         coverImage: trimmedCoverUrl ? { url: trimmedCoverUrl, publicId: trimmedCoverPid || undefined } : undefined,
       };
 
-      await api.put(`articles/${id}`, payload);
+      await updateArticle(id, payload);
 
       toast.success('✅ Article updated');
+      try {
+        await refreshArticleQueries(queryClient);
+      } catch {
+        toast.error('The update was saved, but the latest article list could not be loaded. Refresh it; do not repeat the save.');
+      }
       navigate('/manage-news');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(`❌ Server error: ${err?.message || 'unknown'}`);
+    } catch (error: unknown) {
+      const failure = normalizeArticleError(error, 'Save failed');
+      console.error('[EditNews] save failed', { status: failure.status, code: failure.code });
+      toast.error(failure.message);
     }
   };
 
@@ -245,7 +261,7 @@ export default function EditNews() {
   };
 
   const doTransition = async (action: 'toReview' | 'toLegal' | 'approve' | 'schedule' | 'publish') => {
-    if (!id) return;
+    if (!id || (action === 'publish' && transitionInFlight.current)) return;
     const allChecklistOk = checklist.ptiCompliance && checklist.rightsCleared && checklist.attributionPresent && checklist.defamationScanOk;
     const g = guardAction(action, publishEnabled, { checklistOk: allChecklistOk, stage: workflow?.stage, isFounder: (user?.role || '').toLowerCase() === 'founder' });
     if (!g.allowed) {
@@ -262,13 +278,50 @@ export default function EditNews() {
         }
         payload.scheduledAt = scheduleAt;
       }
-      const res = await api.post(`/news/${id}/transition`, payload);
-      const w = res.data?.data || res.data?.workflow || res.data;
-      if (w) setWorkflow(w);
+      if (action === 'publish') {
+        transitionInFlight.current = true;
+        setTransitionPending(true);
+        const result = await publishArticle(id);
+        const article = result.article || result.data?.article;
+        if (article) queryClient.setQueryData(['articles', 'one', id], article);
+        const publishedStatus = article?.status;
+        if (publishedStatus) setWorkflow((current) => current ? { ...current, status: publishedStatus } : current);
+        const warning = articleFollowUpWarning(result);
+        if (warning) toast(warning);
+        try {
+          const response = await api.get(`/news/${id}/workflow`);
+          setWorkflow(response.data?.data || response.data?.workflow || response.data);
+        } catch {
+          toast.error('Published, but the latest workflow could not be loaded. Refresh it; do not publish again.');
+        }
+      } else {
+        const res = await api.post(`/news/${id}/transition`, payload);
+        const w = res.data?.data || res.data?.workflow || res.data;
+        if (w) setWorkflow(w);
+        toast.success(`✅ ${action} complete`);
+        return;
+      }
       toast.success(`✅ ${action} complete`);
-    } catch (err: any) {
-      const msg = err?.message || 'transition failed';
-      toast.error(`❌ ${msg}`);
+      try {
+        await refreshArticleQueries(queryClient);
+      } catch {
+        toast.error('The action completed, but the latest article list could not be loaded. Refresh it; do not repeat the action.');
+      }
+    } catch (error: unknown) {
+      const failure = normalizeArticleError(error, 'Transition failed');
+      toast.error(failure.message);
+      if (action === 'publish' && failure.status === 409) {
+        try {
+          await refreshArticleQueries(queryClient);
+        } catch {
+          toast.error('The latest article state could not be loaded. Refresh before trying again.');
+        }
+      }
+    } finally {
+      if (action === 'publish') {
+        transitionInFlight.current = false;
+        setTransitionPending(false);
+      }
     }
   };
 
@@ -474,8 +527,9 @@ export default function EditNews() {
                 </button>
               </div>
               <button
+                type="button"
                 onClick={() => doTransition('publish')}
-                disabled={(workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk}
+                disabled={transitionPending || workflow.status === 'published' || (user?.role || '').toLowerCase() !== 'founder' || (workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk}
                 className={`px-3 py-2 rounded text-white ${((workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk) ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-500'}`}
               >
                 🚀 Publish Now

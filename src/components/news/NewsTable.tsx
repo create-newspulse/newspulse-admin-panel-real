@@ -12,6 +12,7 @@ import {
   restoreArticle,
   deleteArticle,
   publishArticle,
+  unpublishArticle,
   updateArticleStatus,
   scheduleArticle,
   unscheduleArticle,
@@ -22,11 +23,13 @@ import {
   type ListResponse,
 } from '@/lib/api/articles';
 import { normalizeError } from '@/lib/error';
+import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { normalizeRoleId } from '@/lib/adminAccessControl';
 import { ARTICLE_PUSH_SPAM_WARNING, pushSendErrorMessage } from '@/lib/pushSendFeedback';
 import { useAuth } from '@/context/AuthContext';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { ScheduleDialog } from './ScheduleDialog';
-import type { QuickViewCounts, QuickViewKey } from './QuickViewsBar';
+import type { QuickViewCounts, QuickViewKey, QuickViewLoadState } from './QuickViewsBar';
 import { listAdminAnalyticsArticles, type ArticlesAnalyticsRow } from '@/lib/api/adminAnalytics';
 import { formatDurationShort, formatNumberCompact, formatPercent } from '@/lib/formatDuration';
 
@@ -143,8 +146,8 @@ function getLocationTags(a: Article): string[] {
   return tags.filter((t) => t.startsWith('district:') || t.startsWith('city:'));
 }
 
-function formatUpdatedAt(a: Article): string {
-  const raw = (a as any)?.updatedAt || (a as any)?.createdAt;
+function formatArticleDate(a: Article, published: boolean): string {
+  const raw = published ? a.publishedAt : a.updatedAt || a.createdAt;
   if (!raw) return '—';
   const ts = Date.parse(String(raw));
   if (Number.isNaN(ts)) return '—';
@@ -400,41 +403,6 @@ function logNewsTableAction(label: string, payload: Record<string, any>): void {
   console.log(`[NewsTable] ${label}`, payload);
 }
 
-type DeleteStoryVariables = {
-  id: string;
-  groupKey: string;
-  groupArticleIds: string[];
-};
-
-function removeDeletedStoryFromListResponse(old: any, vars: DeleteStoryVariables): any {
-  if (!old) return old;
-  const rows: any[] | null = Array.isArray(old?.rows)
-    ? old.rows
-    : (Array.isArray(old?.data) ? old.data : null);
-  if (!rows) return old;
-
-  const idSet = new Set(vars.groupArticleIds.map((id) => String(id || '').trim()).filter(Boolean));
-  const groupKey = String(vars.groupKey || '').trim();
-  const nextRows = rows.filter((a) => {
-    const id = getArticleId(a as Article);
-    if (idSet.has(id)) return false;
-    if (groupKey && getManageNewsGroupKey(a as Article) === groupKey) return false;
-    return true;
-  });
-  const removed = rows.length - nextRows.length;
-  if (removed <= 0) return old;
-
-  const next: any = { ...old };
-  if (Array.isArray(old?.rows)) next.rows = nextRows;
-  if (Array.isArray(old?.data)) next.data = nextRows;
-  if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
-  if (typeof old?.pages === 'number' && typeof next.total === 'number') {
-    const limit = Math.max(1, Number(old?.limit || old?.perPage || rows.length || 1));
-    next.pages = Math.max(1, Math.ceil(next.total / limit));
-  }
-  return next;
-}
-
 function getAuthorName(a: Article): string {
   const authorRaw = (a as any)?.author;
 
@@ -483,17 +451,24 @@ interface Props {
   search: string;
   quickView: QuickViewKey;
   onCounts: (counts: QuickViewCounts) => void;
+  onLoadStateChange?: (state: QuickViewLoadState) => void;
+  actionsDisabled?: boolean;
   onSelectIds?: (ids: string[]) => void;
   onPageChange?: (page: number) => void;
   highlightId?: string;
   stickyTopOffsetPx?: number;
 }
 
-export function NewsTable({ params, search, quickView, onCounts, onSelectIds, onPageChange, highlightId, stickyTopOffsetPx = 0 }: Props) {
+type LifecycleRequest =
+  | { action: 'publish' | 'unpublish' | 'archive' | 'restore' | 'unarchive' | 'delete' | 'hardDelete' | 'unschedule'; id: string }
+  | { action: 'schedule'; id: string; at: string }
+  | { action: 'hardDeleteBulk'; ids: string[] };
+
+export function NewsTable({ params, search, quickView, onCounts, onLoadStateChange, actionsDisabled = false, onSelectIds, onPageChange, highlightId, stickyTopOffsetPx = 0 }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
-  const role = user?.role || 'editor';
+  const role = normalizeRoleId(user?.role);
   const { publishEnabled } = usePublishFlag();
 
   const [showAnalyticsCols, setShowAnalyticsCols] = React.useState<boolean>(() => {
@@ -516,6 +491,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
   const canArchive = role === 'admin' || role === 'founder' || role === 'editor';
   const canDelete = role === 'admin' || role === 'founder';
+  const isFounder = role === 'founder';
+  const publishedView = params.status === 'published' || quickView === 'published';
 
   // Build a stable fetch params object so react-query doesn't refetch on every render
   // when the parent passes a freshly-created `params` object.
@@ -531,7 +508,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       q: q ? q : undefined,
       page: params.page,
       limit: params.limit,
-      sort: params.sort,
+      sort: publishedView ? '-publishedAt' : params.sort,
     };
   }, [
     params.status,
@@ -543,9 +520,10 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     params.limit,
     params.sort,
     search,
+    publishedView,
   ]);
 
-  const { data, isLoading, error } = useQuery<ListResponse>({
+  const { data, isPending: isLoading, isFetching, isSuccess, error, refetch } = useQuery<ListResponse>({
     queryKey: [
       'articles',
       fetchParams.limit ?? 20,
@@ -558,134 +536,97 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       fetchParams.q ?? '',
     ],
     queryFn: () => listManageNewsArticles(fetchParams),
+    retry: false,
   });
+
+  React.useEffect(() => {
+    onLoadStateChange?.(isLoading || isFetching ? 'loading' : error ? 'error' : 'ready');
+  }, [isLoading, isFetching, error, onLoadStateChange]);
 
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
 
-  // Mutations
-  const mutateArchive = useMutation({
-    mutationFn: archiveArticle,
-    onSuccess: () => toast.success('Archived'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Archive failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
-  const mutateRestore = useMutation({
-    mutationFn: restoreArticle,
-    onSuccess: () => toast.success('Restored'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Restore failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
-  const mutateDelete = useMutation({
-    mutationFn: (vars: DeleteStoryVariables) => deleteArticle(vars.id),
-    onSuccess: (_data, vars) => {
-      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => removeDeletedStoryFromListResponse(old, vars));
-      setSelected((cur) => cur.filter((id) => !vars.groupArticleIds.includes(id)));
-      toast.success('Deleted');
-      qc.invalidateQueries({ queryKey: ['articles'] });
-      qc.invalidateQueries({ queryKey: ['admin', 'analytics', 'articles'] });
+  const lifecycleInFlight = React.useRef(false);
+  const lifecycleMutation = useMutation({
+    mutationKey: ['articles', 'lifecycle'],
+    retry: false,
+    mutationFn: (request: LifecycleRequest): Promise<unknown> => {
+      switch (request.action) {
+        case 'publish': return publishArticle(request.id);
+        case 'unpublish': return unpublishArticle(request.id);
+        case 'archive': return archiveArticle(request.id);
+        case 'restore': return restoreArticle(request.id);
+        case 'unarchive': return updateArticleStatus(request.id, 'draft');
+        case 'delete': return deleteArticle(request.id);
+        case 'hardDelete': return hardDeleteArticle(request.id);
+        case 'hardDeleteBulk': return bulkHardDeleteArticles(request.ids);
+        case 'unschedule': return unscheduleArticle(request.id);
+        case 'schedule': return scheduleArticle(request.id, request.at);
+      }
     },
-    onError: (err: any) => toast.error(normalizeError(err, 'Delete failed').message),
-  });
-  const mutatePublish = useMutation({
-    mutationFn: (id: string) => publishArticle(id),
-    onSuccess: () => toast.success('Published'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Publish failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
-  const mutateUnpublish = useMutation({
-    mutationFn: (id: string) => updateArticleStatus(id, 'draft'),
-    onSuccess: () => toast.success('Unpublished'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Unpublish failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
-  const mutateUnschedule = useMutation({
-    mutationFn: (id: string) => unscheduleArticle(id),
-    onSuccess: () => toast.success('Unscheduled'),
-    onError: (err: any) => toast.error(normalizeError(err, 'Unschedule failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
-  const mutateDeleteHard = useMutation({
-    mutationFn: (id: string) => hardDeleteArticle(id),
-    onMutate: async (id: string) => {
-      await qc.cancelQueries({ queryKey: ['articles'] });
-
-      const prev = qc.getQueriesData<ListResponse>({ queryKey: ['articles'] });
-
-      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => {
-        if (!old) return old;
-        const rows: any[] | null = Array.isArray(old?.rows)
-          ? old.rows
-          : (Array.isArray(old?.data) ? old.data : null);
-        if (!rows) return old;
-
-        const nextRows = rows.filter((a) => (a as any)?._id !== id);
-        const removed = rows.length - nextRows.length;
-        if (removed <= 0) return old;
-
-        const next: any = { ...old };
-        if (Array.isArray(old?.rows)) next.rows = nextRows;
-        if (Array.isArray(old?.data)) next.data = nextRows;
-        if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
-        return next;
-      });
-
-      setSelected((cur) => cur.filter((x) => x !== id));
-      return { prev };
+    onSuccess: async (result, request) => {
+      const labels: Record<LifecycleRequest['action'], string> = {
+        publish: 'Published', unpublish: 'Unpublished', archive: 'Archived',
+        restore: 'Restored', unarchive: 'Restored', delete: 'Deleted',
+        hardDelete: 'Deleted forever', hardDeleteBulk: 'Deleted forever',
+        unschedule: 'Unscheduled', schedule: 'Scheduled',
+      };
+      const ids = request.action === 'hardDeleteBulk' ? request.ids : [request.id];
+      setSelected((current) => current.filter((id) => !ids.includes(id)));
+      toast.success(request.action === 'schedule'
+        ? `Scheduled for local time ${new Date(request.at).toLocaleString()}`
+        : labels[request.action]);
+      const warning = articleFollowUpWarning(result);
+      if (warning) toast(warning);
+      try {
+        await Promise.all([
+          refreshArticleQueries(qc),
+          ...(['delete', 'hardDelete', 'hardDeleteBulk'].includes(request.action)
+            ? [qc.invalidateQueries({ queryKey: ['admin', 'analytics', 'articles'] }, { throwOnError: true })]
+            : []),
+        ]);
+      } catch {
+        toast.error('The action completed, but the refreshed list could not be loaded. Refresh the list; do not repeat the action.');
+      }
     },
-    onSuccess: () => toast.success('Deleted forever'),
-    onError: (err: any, _id, ctx) => {
-      if (ctx?.prev) {
-        for (const [key, data] of ctx.prev as any[]) {
-          qc.setQueryData(key, data);
+    onError: async (error: unknown) => {
+      const failure = normalizeArticleError(error, 'Article action failed');
+      toast.error(failure.message);
+      if (failure.status === 409) {
+        try {
+          await refreshArticleQueries(qc);
+        } catch {
+          toast.error('The latest story could not be loaded. Refresh before trying the action again.');
         }
       }
-      toast.error(normalizeError(err, 'Hard delete failed').message);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
+    onSettled: () => { lifecycleInFlight.current = false; },
   });
 
-  const [bulkDeleting, setBulkDeleting] = React.useState(false);
+  const runLifecycle = (request: LifecycleRequest) => {
+    if (lifecycleInFlight.current || actionsDisabled || isFetching) return;
+    if (['publish', 'unpublish', 'hardDelete', 'hardDeleteBulk'].includes(request.action) && !isFounder) {
+      toast.error('Founder permission is required for this action.');
+      return;
+    }
+    if (request.action === 'publish' && !publishEnabled) {
+      toast.error('Publishing temporarily disabled');
+      return;
+    }
+    if (request.action === 'hardDelete' || request.action === 'hardDeleteBulk') {
+      const ids = request.action === 'hardDeleteBulk' ? request.ids : [request.id];
+      if (!ids.length || ids.some((id) => rawRows.find((row) => row._id === id)?.status !== 'deleted')) {
+        toast.error('Only soft-deleted stories can be permanently removed.');
+        return;
+      }
+    }
+    lifecycleInFlight.current = true;
+    lifecycleMutation.mutate(request);
+  };
+
+  const lifecycleBusy = lifecycleMutation.isPending || actionsDisabled || isFetching;
+  const bulkDeleting = lifecycleMutation.isPending && lifecycleMutation.variables.action === 'hardDeleteBulk';
   const [translationBackfillMode, setTranslationBackfillMode] = React.useState<'all' | 'hi' | 'gu' | 'en'>('all');
   const [bulkTranslating, setBulkTranslating] = React.useState(false);
-  const mutateDeleteHardBulk = useMutation({
-    mutationFn: (ids: string[]) => bulkHardDeleteArticles(ids),
-    onMutate: async (ids: string[]) => {
-      setBulkDeleting(true);
-      // ensure we don't race with an inflight refetch
-      await qc.cancelQueries({ queryKey: ['articles'] });
-      return { ids };
-    },
-    onSuccess: (_data, ids: string[]) => {
-      const idSet = new Set(ids);
-      qc.setQueriesData({ queryKey: ['articles'] }, (old: any) => {
-        if (!old) return old;
-        const rows: any[] | null = Array.isArray(old?.rows)
-          ? old.rows
-          : (Array.isArray(old?.data) ? old.data : null);
-        if (!rows) return old;
-
-        const nextRows = rows.filter((a) => !idSet.has(String((a as any)?._id || '')));
-        const removed = rows.length - nextRows.length;
-        if (removed <= 0) return old;
-
-        const next: any = { ...old };
-        if (Array.isArray(old?.rows)) next.rows = nextRows;
-        if (Array.isArray(old?.data)) next.data = nextRows;
-        if (typeof old?.total === 'number') next.total = Math.max(0, old.total - removed);
-        return next;
-      });
-
-      setSelected([]);
-      toast.success(`Deleted forever (${ids.length})`);
-    },
-    onError: (err: any) => {
-      toast.error(normalizeError(err, 'Bulk hard delete failed').message);
-    },
-    onSettled: () => {
-      setBulkDeleting(false);
-      qc.invalidateQueries({ queryKey: ['articles'] });
-    },
-  });
 
   const mutateGenerateMissingTranslations = useMutation({
     mutationFn: async (jobs: Array<{ id: string; languages: string[] }>) => {
@@ -715,12 +656,6 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const [scheduleTarget, setScheduleTarget] = React.useState<Article | null>(null);
   const [articlePushTarget, setArticlePushTarget] = React.useState<Article | null>(null);
   const [articlePushSending, setArticlePushSending] = React.useState(false);
-  const mutateSchedule = useMutation({
-    mutationFn: ({ id, at }: { id: string; at: string }) => scheduleArticle(id, at),
-    onSuccess: (_data, vars) => toast.success(`Scheduled for local time ${new Date(vars.at).toLocaleString()}`),
-    onError: (err: any) => toast.error(normalizeError(err, 'Schedule failed').message),
-    onSettled: () => qc.invalidateQueries({ queryKey: ['articles'] }),
-  });
 
   // Selection
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -759,6 +694,15 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   }, [rawRows, params.status, isSeededSample]);
 
   const logicalGroups = React.useMemo(() => groupManageNewsArticleRows(baseRows), [baseRows]);
+
+  React.useEffect(() => {
+    if (!isSuccess || isFetching) return;
+    const availableIds = new Set(logicalGroups.map((group) => getArticleId(group.primary)));
+    setSelected((current) => {
+      const next = current.filter((id) => availableIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [logicalGroups, isSuccess, isFetching]);
 
   const articleMatchesSearch = React.useCallback((a: Article) => {
     if (!searchKey) return true;
@@ -815,11 +759,12 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   React.useEffect(() => { onCountsRef.current = onCounts; }, [onCounts]);
   const lastCountsKeyRef = React.useRef<string>('');
   React.useEffect(() => {
+    if (!isSuccess || isFetching) return;
     const key = JSON.stringify(counts);
     if (key === lastCountsKeyRef.current) return;
     lastCountsKeyRef.current = key;
     onCountsRef.current(counts);
-  }, [counts]);
+  }, [counts, isSuccess, isFetching]);
 
   const quickFilteredRows = React.useMemo(() => {
     const searchedSet = new Set(searchedRows.map((a) => getArticleId(a)));
@@ -846,9 +791,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   }, [groupMatches, logicalGroups, quickView, searchedRows]);
 
   const sortedRows = React.useMemo(() => {
-    // Lock default sorting: newest-first by updatedAt, falling back to createdAt / publishedAt.
     const getSortTs = (a: Article): number => {
-      const raw = (a as any)?.updatedAt
+      const raw = publishedView ? a.publishedAt : (a as any)?.updatedAt
         || (a as any)?.publishedAt
         || (a as any)?.publishAt
         || (a as any)?.createdAt
@@ -860,7 +804,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     const arr = [...quickFilteredRows];
     arr.sort((a, b) => getSortTs(b) - getSortTs(a));
     return arr;
-  }, [quickFilteredRows]);
+  }, [quickFilteredRows, publishedView]);
 
   const pageSize = Math.max(1, fetchParams.limit ?? 20);
   const logicalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
@@ -1071,10 +1015,10 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   const showSkeleton = isLoading;
 
   if (error) {
-    const status = (error as any)?.response?.status;
-    if (status === 401) {
+    const failure = normalizeArticleError(error, 'Error loading articles');
+    if (failure.authExpired) {
       return (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+        <div role="alert" className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
           <div className="font-semibold text-slate-900">Unauthorized</div>
           <div className="mt-1 text-xs text-slate-600">Your admin session is missing or expired. Please sign in again.</div>
           <div className="mt-3 flex items-center gap-2">
@@ -1087,17 +1031,24 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             </button>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              disabled={isFetching}
+              onClick={() => void refetch()}
               className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Reload
+              Retry
             </button>
           </div>
         </div>
       );
     }
-    const n = normalizeError(error, 'Error loading articles');
-    return <div className="text-red-600">{n.message}</div>;
+    return (
+      <div role="alert" className="rounded-xl border border-red-200 bg-white p-4 text-sm text-red-700">
+        <div>{failure.message}</div>
+        <button type="button" disabled={isFetching} onClick={() => void refetch()} className="mt-3 rounded border px-3 py-2">
+          {isFetching ? 'Refreshing...' : 'Retry'}
+        </button>
+      </div>
+    );
   }
 
   const empty = !showSkeleton && visibleRows.length === 0;
@@ -1143,8 +1094,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
     const id = a._id;
     const group = logicalGroups.find((candidate) => getArticleId(candidate.primary) === id);
     const groupRows = group?.articles || [a];
-    const groupArticleIds = groupRows.map(getArticleId).filter(Boolean);
-    const groupKey = group?.key || getManageNewsGroupKey(a);
+    const restoreNeedsFounder = groupRows.some((row) => row.deletedFromStatus === 'published');
     const baseLogPayload = {
       clickedArticleId: id,
       slug: String(a.slug || ''),
@@ -1170,26 +1120,25 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
 
         {st === 'draft' && (
           <>
-            <ActionLink
+            {isFounder && <ActionLink
               label="Publish"
               title={publishEnabled ? 'Publish' : 'Publish (disabled)'}
               tone="green"
-              disabled={!publishEnabled}
+              disabled={lifecycleBusy || !publishEnabled}
               onClick={() => {
                 if (!publishEnabled) return;
                 logNewsTableAction('publish click', {
                   ...baseLogPayload,
-                  route: `/admin-api/articles/${encodeURIComponent(id)}`,
-                  payload: { status: 'published' },
+                  route: `/admin-api/articles/${encodeURIComponent(id)}/publish`,
                 });
-                mutatePublish.mutate(id);
+                runLifecycle({ action: 'publish', id });
               }}
-            />
+            />}
             <ActionLink
               label="Schedule"
               title={publishEnabled ? 'Schedule…' : 'Schedule (disabled)'}
               tone="amber"
-              disabled={!publishEnabled}
+              disabled={lifecycleBusy || !publishEnabled}
               onClick={() => {
                 if (!publishEnabled) return;
                 logNewsTableAction('schedule click', {
@@ -1207,13 +1156,14 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Unschedule"
             tone="amber"
+            disabled={lifecycleBusy}
             onClick={() => {
               logNewsTableAction('unschedule click', {
                 ...baseLogPayload,
                 route: `/admin-api/articles/${encodeURIComponent(id)}`,
                 payload: { status: 'draft', publishAt: null, scheduledAt: null },
               });
-              mutateUnschedule.mutate(id);
+              runLifecycle({ action: 'unschedule', id });
             }}
           />
         )}
@@ -1238,26 +1188,28 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                 />
               );
             })()}
-            <ActionLink
+            {isFounder && <ActionLink
               label="Unpublish"
               tone="slate"
+              disabled={lifecycleBusy}
               onClick={() => {
                 logNewsTableAction('unpublish click', {
                   ...baseLogPayload,
-                  route: `/admin-api/articles/${encodeURIComponent(id)}`,
-                  payload: { status: 'draft' },
+                  route: `/admin-api/articles/${encodeURIComponent(id)}/unpublish`,
+                  payload: { toStatus: 'draft' },
                 });
-                mutateUnpublish.mutate(id);
+                runLifecycle({ action: 'unpublish', id });
               }}
-            />
+            />}
           </>
         )}
 
-        {st !== 'archived' && canArchive && (
+        {st !== 'archived' && st !== 'deleted' && canArchive && (
           <ActionLink
             label="Archive"
             tone="slate"
-            onClick={() => mutateArchive.mutate(id)}
+            disabled={lifecycleBusy}
+            onClick={() => runLifecycle({ action: 'archive', id })}
           />
         )}
 
@@ -1265,7 +1217,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Restore"
             tone="blue"
-            onClick={() => mutateRestore.mutate(id)}
+            disabled={lifecycleBusy || (restoreNeedsFounder && !isFounder)}
+            title={restoreNeedsFounder && !isFounder ? 'Founder permission is required to restore a published story' : undefined}
+            onClick={() => runLifecycle({ action: st === 'deleted' ? 'restore' : 'unarchive', id })}
           />
         )}
 
@@ -1273,21 +1227,23 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           <ActionLink
             label="Delete"
             tone="red"
+            disabled={lifecycleBusy}
             onClick={() => {
               const ok = confirm(buildManageNewsDeleteConfirmation(a, groupRows));
               if (!ok) return;
-              mutateDelete.mutate({ id, groupKey, groupArticleIds });
+              runLifecycle({ action: 'delete', id });
             }}
           />
         )}
 
-        {st === 'deleted' && canDelete && (
+        {st === 'deleted' && isFounder && (
           <ActionLink
             label="Delete forever"
             tone="red"
+            disabled={lifecycleBusy}
             onClick={() => {
-              const ok = confirm('Delete forever? This will permanently delete this article and cannot be undone.');
-              if (ok) mutateDeleteHard.mutate(id);
+              const confirmation = window.prompt(`Permanently delete "${a.title}" and all available language versions?\nThis cannot be undone.\nType DELETE to confirm.`);
+              if (confirmation === 'DELETE') runLifecycle({ action: 'hardDelete', id });
             }}
           />
         )}
@@ -1315,7 +1271,9 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs text-slate-600">Showing {visibleRows.length} of {quickFilteredRows.length} loaded</div>
+        <div role="status" className="text-xs text-slate-600">
+          {isLoading ? 'Loading stories...' : isFetching ? 'Refreshing stories...' : `Showing ${visibleRows.length} of ${quickFilteredRows.length} loaded`}
+        </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
             <input
@@ -1338,17 +1296,17 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             </select>
           ) : null}
         </div>
-        {(params.status === 'deleted' || (params.status as any) === 'trash') && canDelete && selected.length > 0 ? (
+        {params.status === 'deleted' && isFounder && selected.length > 0 ? (
           <button
             type="button"
-            disabled={bulkDeleting}
+            disabled={lifecycleBusy}
             onClick={() => {
               const ids = [...selected];
               const count = ids.length;
               if (count <= 0) return;
-              const ok = confirm(`Delete ${count} article${count === 1 ? '' : 's'} forever? This cannot be undone.`);
-              if (!ok) return;
-              mutateDeleteHardBulk.mutate(ids);
+              const confirmation = window.prompt(`Permanently delete ${count} selected stor${count === 1 ? 'y' : 'ies'} and all available language versions?\nThis cannot be undone.\nType DELETE to confirm.`);
+              if (confirmation !== 'DELETE') return;
+              runLifecycle({ action: 'hardDeleteBulk', ids });
             }}
             className={
               'rounded-md px-3 py-2 text-xs font-semibold '
@@ -1414,7 +1372,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                     </>
                   ) : null}
                   <th className={thBase} style={thStyle}>Location</th>
-                  <th className={thBase} style={thStyle}>Updated</th>
+                  <th className={thBase} style={thStyle}>{publishedView ? 'Published' : 'Updated'}</th>
                   <th className={thRight} style={thStyle}>Actions</th>
                 </tr>
               </thead>
@@ -1487,7 +1445,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                       </>
                     ) : null}
                     <th className={thBase} style={thStyle}>Location</th>
-                    <th className={thBase} style={thStyle}>Updated</th>
+                    <th className={thBase} style={thStyle}>{publishedView ? 'Published' : 'Updated'}</th>
                     <th className={thRight} style={thStyle}>Actions</th>
                   </tr>
                 </thead>
@@ -1567,7 +1525,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                           </>
                         ) : null}
                         <td className="px-3 py-3 align-top"><LocationBadge a={a} /></td>
-                        <td className="px-3 py-3 align-top text-xs text-slate-700 whitespace-nowrap">{formatUpdatedAt(a)}</td>
+                        <td className="px-3 py-3 align-top text-xs text-slate-700 whitespace-nowrap">{formatArticleDate(a, publishedView)}</td>
                         <td className="px-3 py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
                           {renderActions(a)}
                         </td>
@@ -1627,8 +1585,8 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
                       </div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-slate-500">Updated</div>
-                      <div>{formatUpdatedAt(a)}</div>
+                      <div className="text-[11px] text-slate-500">{publishedView ? 'Published' : 'Updated'}</div>
+                      <div>{formatArticleDate(a, publishedView)}</div>
                     </div>
                     <div className="col-span-2">
                       <div className="text-[11px] text-slate-500">Location</div>
@@ -1655,7 +1613,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
       )}
 
       {/* Pagination */}
-      <div className="flex items-center justify-between text-sm">
+      {!isLoading && <div className="flex items-center justify-between text-sm">
         <div className="text-xs text-slate-600">Page {currentPage} of {logicalPages}</div>
         <div className="flex items-center gap-2">
           <button
@@ -1675,7 +1633,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
             Next
           </button>
         </div>
-      </div>
+      </div>}
 
       <ScheduleDialog
         isOpen={scheduleOpen}
@@ -1689,7 +1647,7 @@ export function NewsTable({ params, search, quickView, onCounts, onSelectIds, on
           if (!scheduleTarget) return;
           const iso = new Date(localValue).toISOString();
           if (!iso || Number.isNaN(Date.parse(iso))) { toast.error('Invalid date'); return; }
-          mutateSchedule.mutate({ id: scheduleTarget._id, at: iso });
+          runLifecycle({ action: 'schedule', id: scheduleTarget._id, at: iso });
           setScheduleOpen(false);
           setScheduleTarget(null);
         }}
