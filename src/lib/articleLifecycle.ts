@@ -81,9 +81,14 @@ export function articleFollowUpWarning(result: unknown): string | null {
   return null;
 }
 
-export function refreshArticleQueries(client: QueryClient, includeDetails = true): Promise<void> {
+export async function refreshArticleQueries(client: QueryClient, includeDetails = true): Promise<void> {
+  // Invalidating an initial pending query alone reuses its pre-mutation request.
+  await client.cancelQueries({ queryKey: ['articles', 'logical-counts'] });
+  // Counts report their own errors and must not keep article actions pending.
+  void client.invalidateQueries({ queryKey: ['articles', 'logical-counts'] }, { throwOnError: false });
   return client.invalidateQueries({
     queryKey: ['articles'],
-    predicate: (query) => includeDetails || query.queryKey[1] !== 'one',
+    predicate: (query) => query.queryKey[1] !== 'logical-counts'
+      && (includeDetails || query.queryKey[1] !== 'one'),
   }, { throwOnError: true });
 }

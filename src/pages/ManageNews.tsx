@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useIsFetching, useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { FiltersDrawer } from '@/components/news/FiltersDrawer';
 import { NewsTable } from '@/components/news/NewsTable';
@@ -10,6 +10,7 @@ import { QuickViewsBar, type QuickViewCounts, type QuickViewKey, type QuickViewL
 import { UploadCsvDialog } from '@/components/news/UploadCsvDialog';
 import apiClient from '@/lib/api';
 import { publishArticle } from '@/lib/api/articles';
+import { getArticleLogicalCounts, normalizeArticleCountsError, type ArticleLogicalCountFilters } from '@/lib/api/articleCounts';
 import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
 import { debug } from '@/lib/debug';
 import { guardAction, type ArticleWorkflowAction } from '@/lib/articleWorkflowGuard';
@@ -35,7 +36,10 @@ export default function ManageNews() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const articlesFetching = useIsFetching({ queryKey: ['articles'] }) > 0;
+  const articlesFetching = useIsFetching({
+    queryKey: ['articles'],
+    predicate: (query) => query.queryKey[1] !== 'logical-counts',
+  }) > 0;
   const lifecyclePending = useIsMutating({ mutationKey: ['articles', 'lifecycle'] }) > 0;
   const [listLoadState, setListLoadState] = React.useState<QuickViewLoadState>('loading');
   const [transitionPending, setTransitionPending] = React.useState(false);
@@ -135,6 +139,27 @@ export default function ManageNews() {
   });
   const { publishEnabled, override, setOverride, envDefault } = usePublishFlag();
   const { isFounder } = useAuth();
+
+  const logicalCountFilters = React.useMemo<ArticleLogicalCountFilters>(() => ({
+    status: params.status,
+    category: params.category,
+    language: params.language,
+    from: params.from,
+    to: params.to,
+    q: debouncedSearch.trim() || undefined,
+  }), [params.status, params.category, params.language, params.from, params.to, debouncedSearch]);
+  const logicalCountsQuery = useQuery({
+    queryKey: ['articles', 'logical-counts', logicalCountFilters],
+    queryFn: ({ signal }) => getArticleLogicalCounts(logicalCountFilters, signal),
+    retry: false,
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const logicalCountState: QuickViewLoadState = logicalCountsQuery.isPending || logicalCountsQuery.isFetching
+    ? 'loading'
+    : logicalCountsQuery.isError || !logicalCountsQuery.data ? 'error' : 'ready';
+  const logicalCountsError = logicalCountsQuery.error ? normalizeArticleCountsError(logicalCountsQuery.error) : null;
 
   const clearAll = React.useCallback(() => {
     setQuickView('all');
@@ -326,6 +351,14 @@ export default function ManageNews() {
                   }
                 >
                   {t.label}
+                  {t.value === 'deleted' ? (
+                    <span
+                      aria-label={logicalCountState === 'loading' ? 'Loading count' : logicalCountState === 'error' ? 'Count unavailable' : undefined}
+                      className={`ml-2 px-2 py-0.5 rounded-full text-[11px] ${active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'}`}
+                    >
+                      {logicalCountState === 'loading' ? '...' : logicalCountState === 'ready' ? logicalCountsQuery.data?.counts.deleted : '--'}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -350,10 +383,33 @@ export default function ManageNews() {
           value={quickView}
           counts={quickCounts}
           loadState={listLoadState}
+          logicalCounts={logicalCountsQuery.data?.counts}
+          logicalLoadState={logicalCountState}
           onChange={handleQuickViewChange}
           onOpenFilters={() => setFiltersOpen(true)}
         />
       </div>
+
+      {logicalCountState === 'error' ? (
+        <div role="alert" aria-label="Logical story counts unavailable" className="max-w-6xl mx-auto px-4">
+          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {logicalCountsError?.status ? `HTTP ${logicalCountsError.status}: ` : ''}
+            {logicalCountsError?.message || 'Logical story counts unavailable'}
+            <button
+              type="button"
+              onClick={() => void logicalCountsQuery.refetch()}
+              className="ml-3 rounded border px-2 py-1 text-xs"
+            >
+              Retry counts
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {logicalCountState === 'ready' && logicalCountsQuery.data && logicalCountsQuery.data.counts.mixed > 0 ? (
+        <div role="status" className="max-w-6xl mx-auto px-4 text-xs text-amber-700">
+          Stories with mixed lifecycle statuses: {logicalCountsQuery.data.counts.mixed}. Counted separately.
+        </div>
+      ) : null}
 
       <div className="max-w-6xl mx-auto px-4">
         <div className="rounded border bg-white p-3">

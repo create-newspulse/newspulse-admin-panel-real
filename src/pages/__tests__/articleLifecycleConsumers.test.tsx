@@ -104,6 +104,7 @@ describe('Draft Desk existing lifecycle controls', () => {
   it('soft-deletes the whole story once and refreshes the current list and existing article queries', async () => {
     const client = renderPage();
     client.setQueryData(['articles', 'meta'], { total: 20 });
+    client.setQueryData(['articles', 'logical-counts'], { counts: { draft: 1 } });
     await screen.findByText('Lifecycle source story');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
@@ -112,11 +113,13 @@ describe('Draft Desk existing lifecycle controls', () => {
     expect(screen.queryByText('Lifecycle source story')).not.toBeInTheDocument();
     expect(screen.queryByText('Hindi edition')).not.toBeInTheDocument();
     expect(client.getQueryState(['articles', 'meta'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['articles', 'logical-counts'])?.isInvalidated).toBe(true);
   });
 
   it('does not promise a Draft restore when Backend restores a Published story', async () => {
     records = records.map((record) => ({ ...record, status: 'deleted', deletedFromStatus: 'published' }));
-    renderPage();
+    const client = renderPage();
+    client.setQueryData(['articles', 'logical-counts'], { counts: { deleted: 1 } });
     fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
     await screen.findByText('Lifecycle source story');
     const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -126,6 +129,7 @@ describe('Draft Desk existing lifecycle controls', () => {
     expect(mocks.restore.mock.calls).toEqual([['source-en']]);
     expect(mocks.update).not.toHaveBeenCalled();
     expect(records.every((record) => record.status === 'published')).toBe(true);
+    expect(client.getQueryState(['articles', 'logical-counts'])?.isInvalidated).toBe(true);
   });
 
   it.each(['admin', 'editor', 'staff'])('never exposes permanent deletion to %s', async (role) => {
@@ -141,7 +145,8 @@ describe('Draft Desk existing lifecycle controls', () => {
 
   it('requires typed confirmation before Founder permanently deletes the deleted story', async () => {
     records = records.map((record) => ({ ...record, status: 'deleted' }));
-    renderPage();
+    const client = renderPage();
+    client.setQueryData(['articles', 'logical-counts'], { counts: { deleted: 1 } });
     fireEvent.click(screen.getByRole('button', { name: 'Deleted' }));
     await screen.findByText('Lifecycle source story');
     const confirmation = vi.spyOn(window, 'prompt').mockReturnValueOnce('delete').mockReturnValueOnce('DELETE');
@@ -151,6 +156,7 @@ describe('Draft Desk existing lifecycle controls', () => {
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Story permanently deleted'));
     expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('all available language versions'));
     expect(mocks.hardDelete.mock.calls).toEqual([['source-en']]);
+    expect(client.getQueryState(['articles', 'logical-counts'])?.isInvalidated).toBe(true);
   });
 });
 

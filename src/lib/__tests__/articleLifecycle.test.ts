@@ -1,5 +1,5 @@
-import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { describe, expect, it, vi } from 'vitest';
 import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
 
 describe('article-scoped lifecycle feedback', () => {
@@ -105,15 +105,103 @@ describe('article-scoped lifecycle feedback', () => {
 
   it('invalidates article lists and existing count queries without clearing unrelated caches', async () => {
     const client = new QueryClient();
+    const cancelQueries = vi.spyOn(client, 'cancelQueries');
     client.setQueryData(['articles', 'list'], []);
     client.setQueryData(['articles', 'meta'], { total: 20 });
+    client.setQueryData(['articles', 'logical-counts', { status: 'all' }], { counts: { draft: 4 } });
+    client.setQueryData(['articles', 'logical-counts', { status: 'draft', language: 'hi' }], { counts: { draft: 2 } });
     client.setQueryData(['articles', 'one', 'story-1'], { _id: 'story-1' });
     client.setQueryData(['unrelated-module'], { untouched: true });
     await refreshArticleQueries(client, false);
+    expect(cancelQueries).toHaveBeenCalledTimes(1);
+    expect(cancelQueries).toHaveBeenCalledWith({ queryKey: ['articles', 'logical-counts'] });
     expect(client.getQueryState(['articles', 'list'])?.isInvalidated).toBe(true);
     expect(client.getQueryState(['articles', 'meta'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['articles', 'logical-counts', { status: 'all' }])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['articles', 'logical-counts', { status: 'draft', language: 'hi' }])?.isInvalidated).toBe(true);
     expect(client.getQueryState(['articles', 'one', 'story-1'])?.isInvalidated).toBe(false);
     expect(client.getQueryState(['unrelated-module'])?.isInvalidated).toBe(false);
     client.clear();
+  });
+});
+
+describe('article and logical-count refresh isolation', () => {
+  it.each(['counts', 'list'])('preserves the independent outcome when the %s refresh fails', async (failure) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const listError = new Error('Article list refresh failed');
+    const countsError = { response: { status: 503, data: { code: 'ARTICLES_UNAVAILABLE' } } };
+    const loadList = vi.fn(async () => {
+      if (failure === 'list') throw listError;
+      return ['new-row'];
+    });
+    const loadCounts = vi.fn(async () => {
+      if (failure === 'counts') throw countsError;
+      return { counts: { draft: 2 } };
+    });
+    const list = new QueryObserver(client, {
+      queryKey: ['articles', 'list'], queryFn: loadList, initialData: ['old-row'], staleTime: Infinity,
+    });
+    const counts = new QueryObserver(client, {
+      queryKey: ['articles', 'logical-counts', { status: 'all' }],
+      queryFn: loadCounts, initialData: { counts: { draft: 1 } }, staleTime: Infinity,
+    });
+    const stopList = list.subscribe(() => {});
+    const stopCounts = counts.subscribe(() => {});
+    try {
+      const refresh = refreshArticleQueries(client);
+      if (failure === 'list') await expect(refresh).rejects.toBe(listError);
+      else await expect(refresh).resolves.toBeUndefined();
+      await vi.waitFor(() => expect(counts.getCurrentResult().fetchStatus).toBe('idle'));
+      expect(loadList).toHaveBeenCalledTimes(1);
+      expect(loadCounts).toHaveBeenCalledTimes(1);
+      expect(list.getCurrentResult()).toMatchObject({
+        status: failure === 'list' ? 'error' : 'success',
+        data: failure === 'list' ? ['old-row'] : ['new-row'],
+      });
+      expect(counts.getCurrentResult()).toMatchObject({
+        status: failure === 'counts' ? 'error' : 'success',
+        data: { counts: { draft: failure === 'counts' ? 1 : 2 } },
+      });
+      if (failure === 'counts') expect(counts.getCurrentResult().error).toBe(countsError);
+    } finally {
+      stopList();
+      stopCounts();
+      client.clear();
+    }
+  });
+
+  it('completes article refresh without waiting for the count request to finish', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const nextCounts = { counts: { draft: 2 } };
+    let finishCounts!: (data: typeof nextCounts) => void;
+    const pendingCounts = new Promise<typeof nextCounts>((resolve) => { finishCounts = resolve; });
+    const loadList = vi.fn(async () => ['new-row']);
+    const loadCounts = vi.fn(() => pendingCounts);
+    const list = new QueryObserver(client, {
+      queryKey: ['articles', 'list'], queryFn: loadList, initialData: ['old-row'], staleTime: Infinity,
+    });
+    const counts = new QueryObserver(client, {
+      queryKey: ['articles', 'logical-counts', { status: 'all' }],
+      queryFn: loadCounts, initialData: { counts: { draft: 1 } }, staleTime: Infinity,
+    });
+    const stopList = list.subscribe(() => {});
+    const stopCounts = counts.subscribe(() => {});
+    const completed = vi.fn();
+    const failed = vi.fn();
+    const refresh = refreshArticleQueries(client).then(completed, failed);
+    try {
+      await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(1));
+      expect(failed).not.toHaveBeenCalled();
+      expect(list.getCurrentResult()).toMatchObject({ status: 'success', data: ['new-row'], fetchStatus: 'idle' });
+      expect(counts.getCurrentResult().isFetching).toBe(true);
+      expect(loadList).toHaveBeenCalledTimes(1);
+      expect(loadCounts).toHaveBeenCalledTimes(1);
+    } finally {
+      finishCounts(nextCounts);
+      await refresh;
+      stopList();
+      stopCounts();
+      client.clear();
+    }
   });
 });

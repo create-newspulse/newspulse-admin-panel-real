@@ -36,11 +36,13 @@ interface Props {
   value: QuickViewKey;
   counts: QuickViewCounts;
   loadState?: QuickViewLoadState;
+  logicalCounts?: Pick<QuickViewCounts, 'published' | 'draft' | 'scheduled'>;
+  logicalLoadState?: QuickViewLoadState;
   onChange: (v: QuickViewKey) => void;
   onOpenFilters: () => void;
 }
 
-export function QuickViewsBar({ value, counts, loadState = 'ready', onChange, onOpenFilters }: Props) {
+export function QuickViewsBar({ value, counts, loadState = 'ready', logicalCounts, logicalLoadState, onChange, onOpenFilters }: Props) {
   const items: QuickViewKey[] = ['all', 'published', 'draft', 'scheduled', 'breaking', 'regional', 'pti', 'flagged'];
 
   return (
@@ -50,7 +52,11 @@ export function QuickViewsBar({ value, counts, loadState = 'ready', onChange, on
           <div className="flex items-center gap-2 min-w-max">
             {items.map((k) => {
               const active = value === k;
-              const count = loadState === 'ready' ? counts[k] : loadState === 'loading' ? '...' : '--';
+              const logicalStatus = k === 'published' || k === 'draft' || k === 'scheduled';
+              const state = logicalStatus && logicalLoadState ? logicalLoadState : loadState;
+              const countValue = logicalStatus && logicalLoadState ? logicalCounts?.[k] : counts[k];
+              const unavailable = state === 'error' || (state === 'ready' && countValue === undefined);
+              const count = state === 'loading' ? '...' : unavailable ? '--' : countValue;
               return (
                 <button
                   key={k}
@@ -64,7 +70,7 @@ export function QuickViewsBar({ value, counts, loadState = 'ready', onChange, on
                   }
                 >
                   <span className="whitespace-nowrap">{VIEW_LABELS[k]}</span>
-                  <span aria-label={loadState === 'loading' ? 'Loading count' : loadState === 'error' ? 'Count unavailable' : undefined} className={
+                  <span aria-label={state === 'loading' ? 'Loading count' : unavailable ? 'Count unavailable' : undefined} className={
                     `px-2 py-0.5 rounded-full text-[11px] `
                     + (active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700')
                   }>

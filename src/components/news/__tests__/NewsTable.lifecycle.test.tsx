@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Article, ListResponse } from '@/lib/api/articles';
+import type { ArticleLogicalCounts } from '@/lib/api/articleCounts';
+import type { ManageNewsParams } from '@/types/api';
 import ManageNews from '@/pages/ManageNews';
 import { NewsTable } from '../NewsTable';
 
@@ -10,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   role: 'founder',
   publishEnabled: true,
   list: vi.fn(),
+  counts: vi.fn(),
   publish: vi.fn(),
   unpublish: vi.fn(),
   restore: vi.fn(),
@@ -46,8 +49,20 @@ vi.mock('@/lib/api/articles', () => ({
 }));
 vi.mock('@/lib/api/adminAnalytics', () => ({ listAdminAnalyticsArticles: vi.fn(async () => ({ rows: [] })) }));
 vi.mock('@/lib/api', () => ({ default: { post: mocks.transition } }));
-vi.mock('@/components/news/ArticleFilters', () => ({ ArticleFilters: () => null }));
-vi.mock('@/components/news/FiltersDrawer', () => ({ FiltersDrawer: () => null }));
+vi.mock('@/lib/adminApiClient', () => ({ adminApiClient: { get: mocks.counts } }));
+vi.mock('@/components/news/ArticleFilters', () => ({
+  ArticleFilters: ({ params, onChange }: { params: ManageNewsParams; onChange: (params: ManageNewsParams) => void }) => (
+    <>
+      <button onClick={() => onChange({
+        ...params, category: 'regional', language: 'hi', from: '2026-01-01', to: '2026-02-01',
+      })}>Apply test filters</button>
+      <button onClick={() => onChange({ ...params, sort: 'title' })}>Change sort only</button>
+    </>
+  ),
+}));
+vi.mock('@/components/news/FiltersDrawer', () => ({
+  FiltersDrawer: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <div>{children}</div> : null,
+}));
 vi.mock('@/components/news/UploadCsvDialog', () => ({ UploadCsvDialog: () => null }));
 vi.mock('react-hot-toast', () => ({
   default: Object.assign(vi.fn(), { success: mocks.toastSuccess, error: mocks.toastError }),
@@ -62,6 +77,24 @@ const story: Article = {
 
 function response(rows: Article[]): ListResponse {
   return { rows, total: rows.length, page: 1, pages: 1 };
+}
+
+function countsResponse(overrides: Partial<ArticleLogicalCounts['counts']> = {}) {
+  const counts = { published: 0, draft: 0, scheduled: 0, deleted: 0, archived: 0, mixed: 0, ...overrides };
+  return {
+    data: {
+      ok: true, success: true,
+      data: { unit: 'logical-story', total: Object.values(counts).reduce((sum, count) => sum + count, 0), counts },
+    },
+  };
+}
+
+function countButton(label: string) {
+  return screen.getByRole('button', { name: new RegExp(`^${label}\\s*(?:\\d+|Loading count|Count unavailable)$`) });
+}
+
+function expectCount(label: string, value: number | string) {
+  expect(within(countButton(label)).getByText(String(value), { exact: true })).toBeInTheDocument();
 }
 
 function renderTable(props: Partial<React.ComponentProps<typeof NewsTable>> = {}, managePage = false) {
@@ -93,6 +126,7 @@ beforeEach(() => {
   localStorage.clear();
   mocks.role = 'founder';
   mocks.publishEnabled = true;
+  mocks.counts.mockResolvedValue(countsResponse({ draft: 1 }));
   backendRows = [
     { ...story },
     { ...story, _id: 'edition-hi', title: 'Hindi edition', language: 'hi' },
@@ -297,11 +331,17 @@ describe('Manage News lifecycle actions', () => {
 
   it('keeps a successful mutation distinct from a failed follow-up refresh', async () => {
     mocks.list.mockResolvedValueOnce(response(backendRows)).mockRejectedValue({ response: { status: 503 } });
-    renderTable();
+    mocks.counts.mockResolvedValueOnce(countsResponse({ draft: 1 })).mockResolvedValue(countsResponse({ published: 1 }));
+    renderTable({}, true);
     await screen.findAllByText('Source story');
+    await waitFor(() => expect(action('Refresh')).toBeEnabled());
     fireEvent.click(action('Publish'));
     expect(await screen.findByRole('alert')).toHaveTextContent('temporarily unavailable');
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringContaining('do not repeat the action')));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      'The action completed, but the refreshed list could not be loaded. Refresh the list; do not repeat the action.',
+    ));
+    expectCount('Published', 1);
+    expect(mocks.counts).toHaveBeenCalledTimes(2);
     expect(mocks.publish).toHaveBeenCalledTimes(1);
     mocks.list.mockImplementation(async () => response(backendRows));
     fireEvent.click(action('Retry'));
@@ -333,7 +373,7 @@ describe('Manage News chronology and request states', () => {
     mocks.list.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     renderTable({}, true);
     expect(screen.getByText('Loading stories...')).toBeInTheDocument();
-    expect(screen.getAllByLabelText('Loading count')).toHaveLength(8);
+    expect(screen.getAllByLabelText('Loading count')).toHaveLength(9);
     expect(screen.queryByText('No stories found.')).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing 0/)).not.toBeInTheDocument();
     await act(async () => { finish(response([])); });
@@ -354,7 +394,8 @@ describe('Manage News chronology and request states', () => {
       : { code: 'BACKEND_OFFLINE' });
     renderTable({}, true);
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
-    await waitFor(() => expect(screen.getAllByLabelText('Count unavailable')).toHaveLength(8));
+    await waitFor(() => expect(screen.getAllByLabelText('Count unavailable')).toHaveLength(5));
+    expectCount('Draft', 1);
     expect(screen.queryByText('No stories found.')).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing 0/)).not.toBeInTheDocument();
     expect(mocks.list).toHaveBeenCalledTimes(1);
@@ -368,6 +409,7 @@ describe('Manage News chronology and request states', () => {
     fireEvent.click(action('Refresh'));
     await screen.findAllByText('Latest server title');
     expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.counts).toHaveBeenCalledTimes(2);
     expect(mocks.publish).not.toHaveBeenCalled();
   });
 
@@ -381,6 +423,7 @@ describe('Manage News chronology and request states', () => {
     await screen.findAllByRole('button', { name: 'Unpublish' });
     expect(mocks.publish.mock.calls).toEqual([['source-en']]);
     expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.counts).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -407,9 +450,310 @@ describe('Manage News chronology and request states', () => {
       ['first', 'second', 'third'].map((id) => [`/news/${id}/transition`, { action: operation }]),
     );
     await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    expect(mocks.counts).toHaveBeenCalledTimes(2);
     expect(mocks.toastError).toHaveBeenCalledWith(expect.stringContaining(`${3 - failedCount} of 3 stories updated. ${failedCount} failed.`));
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  describe('Manage News authoritative logical-story counters', () => {
+    it.each([
+      { operation: 'publish', label: 'Publish' },
+      { operation: 'toReview', label: 'To Review' },
+      { operation: 'refresh', label: 'Refresh' },
+    ] as const)('keeps $label usable while initial and refreshed counts are pending', async ({ operation, label }) => {
+      const pendingCounts: Array<(data: ReturnType<typeof countsResponse>) => void> = [];
+      mocks.counts.mockImplementation(() => new Promise<ReturnType<typeof countsResponse>>((resolve) => {
+        pendingCounts.push(resolve);
+      }));
+      mocks.transition.mockResolvedValue({ data: { ok: true } });
+      renderTable({}, true);
+      await screen.findAllByText('Source story');
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expectCount('Draft', '...');
+      if (operation === 'refresh') {
+        backendRows = backendRows.map((row) => ({ ...row, title: 'Latest server title' }));
+      } else {
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Select all visible' }));
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+      }
+      const buttons = screen.getAllByRole('button', { name: label });
+      expect(buttons[buttons.length - 1]).toBeEnabled();
+      fireEvent.click(buttons[buttons.length - 1]);
+      await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expect(mocks.counts).toHaveBeenCalledTimes(2);
+      expect(mocks.counts.mock.calls[0][1].signal.aborted).toBe(true);
+      expectCount('Draft', '...');
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      if (operation === 'publish') {
+        expect(mocks.publish.mock.calls).toEqual([['source-en']]);
+        expect(action('Unpublish')).toBeEnabled();
+      } else if (operation === 'toReview') {
+        expect(mocks.transition.mock.calls).toEqual([['/news/source-en/transition', { action: 'toReview' }]]);
+        expect(action('To Review')).toBeEnabled();
+      } else {
+        await screen.findAllByText('Latest server title');
+        expect(mocks.publish).not.toHaveBeenCalled();
+        expect(mocks.transition).not.toHaveBeenCalled();
+      }
+      await act(async () => {
+        pendingCounts[1](countsResponse(operation === 'publish' ? { published: 1 } : { draft: 1 }));
+        pendingCounts[0](countsResponse({ draft: 1 }));
+      });
+      await waitFor(() => expectCount('Published', operation === 'publish' ? 1 : 0));
+      expect(mocks.counts).toHaveBeenCalledTimes(2);
+    });
+
+    it('maps the four status counters directly while keeping Archived unnumbered and mixed separate', async () => {
+      mocks.counts.mockResolvedValue(countsResponse({ published: 12, draft: 4, scheduled: 2, deleted: 2, archived: 1, mixed: 1 }));
+      const { client } = renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expectCount('Published', 12);
+      expectCount('Draft', 4);
+      expectCount('Scheduled', 2);
+      expectCount('Deleted', 2);
+      expectCount('All', 1);
+      expect(screen.getByRole('button', { name: 'Archived' })).toHaveTextContent(/^Archived$/);
+      expect(screen.getByText('Stories with mixed lifecycle statuses: 1. Counted separately.')).toHaveAttribute('role', 'status');
+      expect(client.getQueriesData<ArticleLogicalCounts>({ queryKey: ['articles', 'logical-counts'] })[0]?.[1])
+        .toMatchObject({ total: 22, counts: { archived: 1, mixed: 1 } });
+      expect(mocks.counts).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows one logical story, not three language editions or a locally derived status count', async () => {
+      backendRows = backendRows.map((row) => ({ ...row, status: 'published' }));
+      mocks.counts.mockResolvedValue(countsResponse({ published: 1 }));
+      renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expectCount('Published', 1);
+      expectCount('Draft', 0);
+      await expect(mocks.list.mock.results[0].value).resolves.toMatchObject({ total: 3, rows: expect.any(Array) });
+      expect(mocks.counts).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps all four counts unknown while loading, then displays genuine empty-selection zeros', async () => {
+      let finish!: (response: ReturnType<typeof countsResponse>) => void;
+      mocks.counts.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      renderTable({}, true);
+      await screen.findAllByText('Source story');
+      for (const label of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(label, '...');
+      expectCount('All', 1);
+      await act(async () => { finish(countsResponse()); });
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      for (const label of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(label, 0);
+      expect(screen.queryByRole('alert', { name: 'Logical story counts unavailable' })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      [401, 'session has expired'],
+      [403, 'permission'],
+      [419, 'session has expired'],
+      [503, 'temporarily unavailable'],
+      [0, 'Cannot reach the Backend'],
+    ])('keeps failed status counts unknown for HTTP/network %s without hiding the loaded list', async (status, message) => {
+      mocks.counts.mockRejectedValue(status
+        ? { response: { status, data: { message: 'Private Backend diagnostic' } } }
+        : { code: 'BACKEND_OFFLINE' });
+      renderTable({}, true);
+      const alert = await screen.findByRole('alert', { name: 'Logical story counts unavailable' });
+      expect(alert).toHaveTextContent(message);
+      expect(alert).not.toHaveTextContent('Private Backend diagnostic');
+      await screen.findAllByText('Source story');
+      for (const label of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(label, '--');
+      expectCount('All', 1);
+      expect(mocks.counts).toHaveBeenCalledTimes(1);
+      expect(mocks.list).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['malformed', 'identity conflict'])('does not reinterpret a %s response as zero counts', async (failure) => {
+      if (failure === 'malformed') {
+        const invalid = countsResponse();
+        invalid.data.data.counts.draft = -1;
+        mocks.counts.mockResolvedValue(invalid);
+      } else {
+        mocks.counts.mockRejectedValue({
+          response: { status: 409, data: { code: 'ARTICLE_LOGICAL_IDENTITY_CONFLICT', message: 'Private identity documents and stack trace' } },
+        });
+      }
+      renderTable({}, true);
+      const alert = await screen.findByRole('alert', { name: 'Logical story counts unavailable' });
+      expect(alert).toHaveTextContent(failure === 'malformed' ? 'response could not be read' : 'HTTP 409');
+      if (failure === 'identity conflict') expect(alert).toHaveTextContent('article identities conflict');
+      expect(alert).not.toHaveTextContent('Private identity documents');
+      for (const label of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(label, '--');
+      expect(mocks.counts).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries counts deliberately without reloading the list or replaying a lifecycle operation', async () => {
+      mocks.counts.mockRejectedValueOnce({ response: { status: 503 } }).mockResolvedValue(countsResponse({ draft: 7 }));
+      renderTable({}, true);
+      await screen.findByRole('alert', { name: 'Logical story counts unavailable' });
+      fireEvent.click(screen.getByRole('button', { name: 'Retry counts' }));
+      await waitFor(() => expectCount('Draft', 7));
+      expect(mocks.counts).toHaveBeenCalledTimes(2);
+      expect(mocks.list).toHaveBeenCalledTimes(1);
+      expect(mocks.publish).not.toHaveBeenCalled();
+    });
+
+    it('mirrors supported active list filters without including sort or quick-view-only selection', async () => {
+      renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Published' }));
+      await waitFor(() => expect(mocks.counts).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Apply test filters' }));
+      await waitFor(() => expect(mocks.counts).toHaveBeenCalledTimes(3));
+      fireEvent.change(screen.getByPlaceholderText(/Search title, summary, content, tags/), { target: { value: ' Source ' } });
+      await waitFor(() => expect(mocks.counts).toHaveBeenCalledTimes(4));
+      const scope = {
+        status: 'published', category: 'regional', language: 'hi', from: '2026-01-01', to: '2026-02-01', q: 'Source',
+      };
+      expect(mocks.counts).toHaveBeenLastCalledWith('articles/counts', expect.objectContaining({ params: scope }));
+      expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining(scope));
+      const listCalls = mocks.list.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: 'Change sort only' }));
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expect(mocks.list).toHaveBeenCalledTimes(listCalls);
+      fireEvent.click(countButton('Draft'));
+      expect(mocks.counts).toHaveBeenCalledTimes(4);
+    });
+
+    it('preserves record-page loading and existing grouped-row pagination, independently of count totals', async () => {
+      backendRows = Array.from({ length: 22 }, (_, index) => ['en', 'hi', 'gu'].map((language) => ({
+        ...story, _id: `story-${index}-${language}`, title: `Story ${index}`, language, translationGroupId: `story-${index}`,
+      }))).flat();
+      mocks.list.mockImplementation(async ({ page = 1, limit = 20 }: ManageNewsParams) => ({
+        rows: backendRows.slice((page - 1) * limit, page * limit), total: 66, page, pages: Math.ceil(66 / limit),
+      }));
+      mocks.counts.mockResolvedValue(countsResponse({ draft: 125 }));
+      renderTable({}, true);
+      await waitFor(() => expect(screen.getByText('Refresh', { selector: 'button' })).toBeEnabled());
+      expect(screen.getByText('125', { selector: 'span' })).toBeInTheDocument();
+      expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+      expect(mocks.list).toHaveBeenCalledTimes(4);
+      expect(mocks.list.mock.calls.map(([params]) => params.page)).toEqual([1, 2, 3, 4]);
+      expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(21);
+      fireEvent.click(screen.getByText('Next', { selector: 'button' }));
+      expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+      expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
+      expect(mocks.list).toHaveBeenCalledTimes(4);
+      expect(mocks.counts).toHaveBeenCalledTimes(1);
+    }, 10_000);
+
+    it.each([
+      { operation: 'publish', label: 'Publish', before: 'draft', after: 'published' },
+      { operation: 'unpublish', label: 'Unpublish', before: 'published', after: 'draft' },
+      { operation: 'remove', label: 'Delete', before: 'draft', after: 'deleted' },
+      { operation: 'restore', label: 'Restore', before: 'deleted', after: null },
+      { operation: 'hardDelete', label: 'Delete forever', before: 'deleted', after: null },
+    ] as const)('finishes $operation and refreshes rows without waiting for logical counts', async ({ operation, label, before, after }) => {
+      backendRows = backendRows.map((row) => ({ ...row, status: before, deletedFromStatus: 'published' }));
+      mocks.counts.mockResolvedValue(countsResponse({ [before]: 1 }));
+      const { client } = renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      if (before === 'deleted') {
+        fireEvent.click(countButton('Deleted'));
+        await screen.findAllByText('Source story');
+        await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      }
+      const countCalls = mocks.counts.mock.calls.length;
+      const listCalls = mocks.list.mock.calls.length;
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      vi.spyOn(window, 'prompt').mockReturnValue('DELETE');
+      let finishCounts!: (data: ReturnType<typeof countsResponse>) => void;
+      mocks.counts.mockImplementationOnce(() => new Promise((resolve) => { finishCounts = resolve; }));
+      fireEvent.click(action(label));
+      await waitFor(() => expect(mocks.counts).toHaveBeenCalledTimes(countCalls + 1));
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expect(mocks[operation].mock.calls).toEqual([['source-en']]);
+      expect(mocks.list).toHaveBeenCalledTimes(listCalls + 1);
+      expect(client.isMutating({ mutationKey: ['articles', 'lifecycle'] })).toBe(0);
+      for (const countLabel of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(countLabel, '...');
+      if (after === 'published') expect(action('Unpublish')).toBeEnabled();
+      if (after === 'draft') expect(action('Publish')).toBeEnabled();
+      await act(async () => { finishCounts(countsResponse(after ? { [after]: 1 } : {})); });
+      await waitFor(() => expect(screen.queryByLabelText('Loading count')).not.toBeInTheDocument());
+      for (const bucket of ['published', 'draft', 'scheduled', 'deleted']) {
+        expectCount(bucket[0].toUpperCase() + bucket.slice(1), bucket === after ? 1 : 0);
+      }
+    });
+
+    it('replaces an initial pending count request after lifecycle success and ignores its late stale response', async () => {
+      let finishStale!: (response: ReturnType<typeof countsResponse>) => void;
+      mocks.counts.mockImplementationOnce(() => new Promise((resolve) => { finishStale = resolve; }))
+        .mockResolvedValue(countsResponse({ published: 1 }));
+      renderTable({}, true);
+      await screen.findAllByText('Source story');
+      expectCount('Draft', '...');
+      fireEvent.click(action('Publish'));
+      await waitFor(() => expect(mocks.counts).toHaveBeenCalledTimes(2));
+      await waitFor(() => expectCount('Published', 1));
+      expect(mocks.counts.mock.calls[0][1].signal.aborted).toBe(true);
+      await act(async () => { finishStale(countsResponse({ draft: 1 })); });
+      expectCount('Published', 1);
+      expectCount('Draft', 0);
+      expect(mocks.counts).toHaveBeenCalledTimes(2);
+      expect(mocks.list).toHaveBeenCalledTimes(2);
+      expect(mocks.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([403, 409, 503])('does not optimistically change counts after lifecycle HTTP %s failure', async (status) => {
+      mocks.publish.mockRejectedValue({ response: { status, data: {} } });
+      renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      fireEvent.click(action('Publish'));
+      await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      expectCount('Published', 0);
+      expectCount('Draft', 1);
+      expect(mocks.counts).toHaveBeenCalledTimes(status === 409 ? 2 : 1);
+      expect(mocks.publish).toHaveBeenCalledTimes(1);
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    });
+
+    it.each([503, 409])('isolates count HTTP %s after a successful mutation and list refresh', async (status) => {
+      mocks.counts.mockResolvedValueOnce(countsResponse({ draft: 1 })).mockRejectedValue({
+        response: { status, data: status === 409 ? { code: 'ARTICLE_LOGICAL_IDENTITY_CONFLICT' } : {} },
+      });
+      renderTable({}, true);
+      await waitFor(() => expect(action('Refresh')).toBeEnabled());
+      fireEvent.click(action('Publish'));
+      expect(await screen.findByRole('alert', { name: 'Logical story counts unavailable' })).toHaveTextContent(`HTTP ${status}`);
+      await waitFor(() => expect(action('Unpublish')).toBeEnabled());
+      for (const label of ['Published', 'Draft', 'Scheduled', 'Deleted']) expectCount(label, '--');
+      expect(mocks.toastSuccess).toHaveBeenCalledWith('Published');
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(mocks.publish).toHaveBeenCalledTimes(1);
+      expect(mocks.list).toHaveBeenCalledTimes(2);
+      expect(mocks.counts).toHaveBeenCalledTimes(2);
+      mocks.counts.mockResolvedValue(countsResponse({ published: 1 }));
+      fireEvent.click(screen.getByRole('button', { name: 'Retry counts' }));
+      await waitFor(() => expectCount('Published', 1));
+      expect(mocks.counts).toHaveBeenCalledTimes(3);
+      expect(mocks.list).toHaveBeenCalledTimes(2);
+      expect(mocks.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not add polling or duplicate requests on rerenders, selection, or quick-view changes', async () => {
+      vi.useFakeTimers();
+      try {
+        await act(async () => {
+          renderTable({}, true);
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(mocks.counts).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Select all visible' }));
+        fireEvent.click(countButton('Draft'));
+        await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+        expectCount('Draft', 1);
+        expect(mocks.counts).toHaveBeenCalledTimes(1);
+        expect(mocks.list).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('does not continue a Publish batch after a conflict or replay its mutation', async () => {
