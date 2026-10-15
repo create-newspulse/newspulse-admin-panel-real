@@ -1,21 +1,38 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
+import toast from 'react-hot-toast';
 import appSource from '../../App.tsx?raw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import AdsManager from '@/pages/AdsManager';
 import AdminModuleRoute from '@/components/AdminModuleRoute';
+import type { AuthContextValue } from '@/context/AuthContext';
 import { adminApi, api } from '@/lib/api';
 import { getAdminAnalyticsAdPerformance } from '@/lib/api/adminAnalytics';
-import { getAdInquiriesUnreadCount, listAdInquiries } from '@/lib/adsInquiriesApi';
+import { getAdInquiryStatusCount, getAdInquiriesUnreadCount, listAdInquiries, logAdsInquiriesDiagnostic, markAdInquiriesRead } from '@/lib/adsInquiriesApi';
 import { listSponsoredArticleInventory, listSponsoredFeatures, saveSponsoredFeature } from '@/lib/sponsoredFeaturesApi';
+
+const authState = vi.hoisted((): Pick<AuthContextValue,
+  'isFounder' | 'isAuthenticated' | 'isSessionResolved' | 'isReady' | 'isRestoring' | 'isLoading' | 'user' | 'token' | 'logout'
+> => ({
+  isFounder: true,
+  isAuthenticated: true,
+  isSessionResolved: true,
+  isReady: true,
+  isRestoring: false,
+  isLoading: false,
+  token: 'synthetic-admin-access',
+  user: { id: 'founder-1', email: 'founder@example.test', role: 'founder', specialRights: ['ads', 'ads_manager', 'media_kit'] },
+  logout: vi.fn(),
+}));
 
 vi.mock('react-hot-toast', () => ({
   default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ isFounder: true, isAuthenticated: true, isReady: true, isRestoring: false, isLoading: false, user: { role: 'founder', specialRights: ['ads', 'ads_manager', 'media_kit'] } }),
+  useAuth: () => authState,
 }));
 
 vi.mock('@/hooks/useAdminEffectiveAccess', () => ({
@@ -124,6 +141,16 @@ function mockAdsManagerRecords(records: any[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(authState, {
+    isFounder: true,
+    isAuthenticated: true,
+    isSessionResolved: true,
+    isReady: true,
+    isRestoring: false,
+    isLoading: false,
+    token: 'synthetic-admin-access',
+    user: { id: 'founder-1', email: 'founder@example.test', role: 'founder', specialRights: ['ads', 'ads_manager', 'media_kit'] },
+  });
   creativeImages.clear();
   mockCreativeImage();
   vi.stubGlobal('URL', class extends URL {
@@ -145,8 +172,9 @@ beforeEach(() => {
     if (path === '/media-kit') return { data: null };
     return { data: {} };
   });
-  vi.mocked(getAdInquiriesUnreadCount).mockResolvedValue(0);
-  vi.mocked(listAdInquiries).mockResolvedValue({ items: [], total: 0, source: 'mock', raw: {} });
+  vi.mocked(getAdInquiryStatusCount).mockReset().mockResolvedValue(0);
+  vi.mocked(getAdInquiriesUnreadCount).mockReset().mockResolvedValue(0);
+  vi.mocked(listAdInquiries).mockReset().mockResolvedValue({ items: [], total: 0, source: 'mock', raw: {} });
   vi.mocked(listSponsoredFeatures).mockResolvedValue([]);
   vi.mocked(saveSponsoredFeature).mockResolvedValue([]);
   vi.mocked(listSponsoredArticleInventory).mockResolvedValue([]);
@@ -163,6 +191,265 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe('Ads unread-count polling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  function pendingCount() {
+    let resolve!: (value: number) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<number>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function authFailure(status: number) {
+    const message = status === 403
+      ? 'Access denied. You do not have permission for this action.'
+      : 'Your session has expired. Please sign in again.';
+    return Object.assign(new Error(message), { status, code: 'AUTH_REJECTED' });
+  }
+
+  async function renderAds() {
+    const view = render(<AdsManager />);
+    await act(async () => {});
+    return view;
+  }
+
+  async function advance(ms: number) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  }
+
+  function seedInquiry() {
+    vi.mocked(listAdInquiries).mockResolvedValue({
+      items: [{ id: 'inquiry-1', name: 'Synthetic inquiry', email: 'inquiry@example.test', message: 'Test inquiry', status: 'new', createdAt: '2026-01-01T00:00:00.000Z' }],
+      total: 1,
+      source: 'mock',
+      raw: {},
+    });
+  }
+
+  async function showInquiries() {
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ad Inquiries' })); });
+  }
+
+  async function markSelectedRead() {
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all visible inquiries' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Mark Selected Read' })); });
+    expect(markAdInquiriesRead).toHaveBeenCalledWith(['inquiry-1']);
+  }
+
+  it.each([
+    ['hydrating', { isReady: false }],
+    ['unresolved', { isSessionResolved: false }],
+    ['logged out', { isAuthenticated: false }],
+    ['restoring', { isRestoring: true }],
+    ['logging in', { isLoading: true }],
+  ] as const)('makes no unread request while auth is %s', async (_state, change) => {
+    Object.assign(authState, change);
+    await renderAds();
+    await advance(90_000);
+    expect(getAdInquiriesUnreadCount).not.toHaveBeenCalled();
+  });
+
+  it('requests immediately once eligible and keeps the 30-second cadence across re-renders', async () => {
+    authState.isSessionResolved = false;
+    const view = await renderAds();
+    expect(getAdInquiriesUnreadCount).not.toHaveBeenCalled();
+
+    authState.isSessionResolved = true;
+    await act(async () => { view.rerender(<AdsManager />); });
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+    await act(async () => { view.rerender(<AdsManager />); });
+    await advance(29_999);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(3);
+  });
+
+  it('allows a resolved authenticated cookie session without a bearer token', async () => {
+    authState.token = null;
+    await renderAds();
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps at most one request in flight even across several interval ticks', async () => {
+    const pending = pendingCount();
+    vi.mocked(getAdInquiriesUnreadCount).mockReturnValueOnce(pending.promise);
+    await renderAds();
+    await advance(90_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+
+    await act(async () => { pending.resolve(2); });
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a post-action refresh overlap a scheduled unread request', async () => {
+    seedInquiry();
+    const pending = pendingCount();
+    await renderAds();
+    await showInquiries();
+    vi.mocked(getAdInquiriesUnreadCount).mockReturnValueOnce(pending.promise);
+    await advance(30_000);
+    await markSelectedRead();
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve(0); });
+  });
+
+  it('does not let scheduled polling overlap a post-action unread request', async () => {
+    seedInquiry();
+    const pending = pendingCount();
+    await renderAds();
+    await showInquiries();
+    vi.mocked(getAdInquiriesUnreadCount).mockReturnValueOnce(pending.promise);
+    await markSelectedRead();
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    await advance(60_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve(0); });
+  });
+
+  it.each([401, 403, 419])('preserves HTTP %s and unknown count, pauses polling, and resumes only on deliberate retry', async (status) => {
+    seedInquiry();
+    const failure = authFailure(status);
+    vi.mocked(getAdInquiriesUnreadCount).mockResolvedValueOnce(8).mockRejectedValueOnce(failure);
+    await renderAds();
+    await advance(30_000);
+    expect(screen.getByRole('alert')).toHaveTextContent(`HTTP ${status}: ${failure.message}`);
+    expect(logAdsInquiriesDiagnostic).toHaveBeenCalledWith('unread-count:failed', expect.objectContaining({
+      status, message: failure.message, code: 'AUTH_REJECTED',
+    }));
+
+    await showInquiries();
+    await markSelectedRead();
+    expect(screen.getByText(/New inquiries:/)).toHaveTextContent('New inquiries: \u2014');
+    expect(screen.getByRole('alert')).toHaveTextContent(`HTTP ${status}: ${failure.message}`);
+    await advance(180_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    expect(authState.logout).not.toHaveBeenCalled();
+    expect(authState.isAuthenticated).toBe(true);
+
+    vi.mocked(getAdInquiriesUnreadCount).mockResolvedValue(3);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry unread count' })); });
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(/New inquiries:/)).toHaveTextContent('New inquiries: 3');
+    await advance(29_999);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(3);
+    await advance(1);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(4);
+  });
+
+  it('retains the unread auth failure if a later inquiry-list request fails differently', async () => {
+    const failure = authFailure(401);
+    vi.mocked(getAdInquiriesUnreadCount).mockRejectedValueOnce(failure);
+    const view = await renderAds();
+    vi.mocked(listAdInquiries).mockRejectedValueOnce(Object.assign(new Error('List unavailable'), { status: 503 }));
+    await showInquiries();
+    expect(screen.getByRole('alert')).toHaveTextContent(`HTTP 401: ${failure.message}`);
+    await act(async () => { view.rerender(<AdsManager />); });
+    await advance(60_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes a paused poll after a newly resolved session, not a tab change', async () => {
+    vi.mocked(getAdInquiriesUnreadCount).mockRejectedValueOnce(authFailure(419));
+    const view = await renderAds();
+    await showInquiries();
+    await advance(60_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+
+    authState.isSessionResolved = false;
+    await act(async () => { view.rerender(<AdsManager />); });
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+    authState.isSessionResolved = true;
+    await act(async () => { view.rerender(<AdsManager />); });
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each(['isAuthenticated', 'isSessionResolved'] as const)('aborts and stops when %s becomes false', async (key) => {
+    const pending = pendingCount();
+    vi.mocked(getAdInquiriesUnreadCount).mockReturnValueOnce(pending.promise);
+    const view = await renderAds();
+    const signal = vi.mocked(getAdInquiriesUnreadCount).mock.calls[0][0]?.signal;
+    expect(signal?.aborted).toBe(false);
+    authState[key] = false;
+    await act(async () => { view.rerender(<AdsManager />); });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { pending.resolve(20); });
+    await advance(90_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it.each(['token', 'user'] as const)('aborts on a verified %s change and ignores the old response without unlocking the new request', async (key) => {
+    const oldRequest = pendingCount();
+    const newRequest = pendingCount();
+    vi.mocked(getAdInquiriesUnreadCount).mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise);
+    const view = await renderAds();
+    const oldSignal = vi.mocked(getAdInquiriesUnreadCount).mock.calls[0][0]?.signal;
+    if (key === 'token') authState.token = 'synthetic-renewed-access';
+    else authState.user = { id: 'founder-2', email: 'second@example.test', role: 'founder' };
+    await act(async () => { view.rerender(<AdsManager />); });
+    expect(oldSignal?.aborted).toBe(true);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(getAdInquiriesUnreadCount).mock.calls[1][0]?.signal?.aborted).toBe(false);
+
+    await act(async () => { oldRequest.resolve(99); });
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    expect(toast).not.toHaveBeenCalled();
+    await act(async () => { newRequest.resolve(2); });
+    await advance(30_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['success', 'auth failure'] as const)('aborts on unmount and ignores a late %s', async (outcome) => {
+    const pending = pendingCount();
+    vi.mocked(getAdInquiriesUnreadCount).mockResolvedValueOnce(1).mockReturnValueOnce(pending.promise);
+    const view = await renderAds();
+    await advance(30_000);
+    const signal = vi.mocked(getAdInquiriesUnreadCount).mock.calls[1][0]?.signal;
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      if (outcome === 'success') pending.resolve(10);
+      else pending.reject(authFailure(401));
+    });
+    await advance(90_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    expect(toast).not.toHaveBeenCalled();
+    expect(logAdsInquiriesDiagnostic).not.toHaveBeenCalledWith('unread-count:failed', expect.anything());
+  });
+
+  it('keeps only one non-aborted request and timer during Strict Mode effect replay', async () => {
+    vi.mocked(getAdInquiriesUnreadCount).mockImplementation((options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    const view = render(<StrictMode><AdsManager /></StrictMode>);
+    await act(async () => {});
+    const signals = vi.mocked(getAdInquiriesUnreadCount).mock.calls.map(([options]) => options?.signal);
+    expect(signals).toHaveLength(2);
+    expect(signals.filter((signal) => signal && !signal.aborted)).toHaveLength(1);
+    await advance(60_000);
+    expect(getAdInquiriesUnreadCount).toHaveBeenCalledTimes(2);
+    view.unmount();
+    await act(async () => {});
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    expect(logAdsInquiriesDiagnostic).not.toHaveBeenCalledWith('unread-count:failed', expect.anything());
+  });
 });
 
 describe('Auto Creative Fit', () => {

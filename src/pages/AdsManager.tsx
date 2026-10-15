@@ -1272,6 +1272,12 @@ type InquiryApiErrorState = {
   code?: string;
 };
 
+type UnreadCountPolling = {
+  controller: AbortController | null;
+  intervalId: number | null;
+  paused: boolean;
+};
+
 function isAbortError(err: any): boolean {
   const name = String(err?.name || '');
   const message = String(err?.message || '');
@@ -1465,7 +1471,9 @@ function extractAdsList(payload: any): any[] {
 
 export default function AdsManager() {
   const [tab, setTab] = React.useState<'ads' | 'inquiries' | 'media-kit' | 'ad-performance'>('ads');
-  const { isFounder, user } = useAuth();
+  const { isFounder, user, token, isAuthenticated, isSessionResolved, isReady, isRestoring, isLoading: authLoading } = useAuth();
+  const unreadPollingEnabled = isReady && isSessionResolved && isAuthenticated && !isRestoring && !authLoading;
+  const unreadSessionId = user?.id || user?._id || user?.email;
 
   type InquiryStatusTab = 'new' | 'read' | 'deleted';
   type InquiryTabCounts = Record<InquiryStatusTab, number | null>;
@@ -1508,6 +1516,8 @@ export default function AdsManager() {
   const [bulkAction, setBulkAction] = React.useState<'mark-read' | 'move-to-trash' | 'restore' | 'delete-permanently' | null>(null);
   const [confirmBulkPermanentDelete, setConfirmBulkPermanentDelete] = React.useState(false);
   const lastUnreadRef = React.useRef<number | null>(null);
+  const unreadPollingRef = React.useRef<UnreadCountPolling | null>(null);
+  const [unreadPollingRetry, setUnreadPollingRetry] = React.useState(0);
   const selectAllVisibleRef = React.useRef<HTMLInputElement | null>(null);
   const [inquiryReplyOverrides, setInquiryReplyOverrides] = React.useState<Record<string, InquiryReplyMeta>>({});
   const inquiryReplyOverridesRef = React.useRef<Record<string, InquiryReplyMeta>>({});
@@ -1532,9 +1542,9 @@ export default function AdsManager() {
     return `Showing ${tabLabelMap[inquiryStatusTab]} inquiries`;
   }, [inquiryStatusTab, tabLabelMap]);
   const activeCornerCountLabel = React.useMemo(() => {
-    const value = inquiryTabCounts[inquiryStatusTab];
+    const value = inquiryStatusTab === 'new' && inquiriesUnreadError ? null : inquiryTabCounts[inquiryStatusTab];
     return typeof value === 'number' ? String(value) : '—';
-  }, [inquiryStatusTab, inquiryTabCounts]);
+  }, [inquiryStatusTab, inquiryTabCounts, inquiriesUnreadError]);
   const activeCornerTitle = React.useMemo(() => {
     if (inquiryStatusTab === 'new') return 'New inquiries';
     if (inquiryStatusTab === 'read') return 'Read inquiries';
@@ -2859,7 +2869,7 @@ export default function AdsManager() {
       setInquiries([]);
       setInquiriesTotal(null);
       setInquiriesUnreadCount(null);
-      setInquiriesUnreadError(nextError);
+      setInquiriesUnreadError((previous) => unreadPollingRef.current?.paused ? previous : nextError);
       setInquiriesError(nextError);
       lastUnreadRef.current = null;
       logAdsInquiriesDiagnostic('list:failed', {
@@ -2875,8 +2885,15 @@ export default function AdsManager() {
   }, []);
 
   const fetchUnreadCount = React.useCallback(async () => {
+    const polling = unreadPollingRef.current;
+    if (!polling || polling.paused || polling.controller) return;
+
+    const controller = new AbortController();
+    polling.controller = controller;
     try {
-      const next = await getAdInquiriesUnreadCount();
+      const next = await getAdInquiriesUnreadCount({ signal: controller.signal });
+      if (controller.signal.aborted || unreadPollingRef.current !== polling) return;
+
       setInquiriesUnreadCount(next);
       setInquiryTabCounts((prev) => ({ ...prev, new: next }));
       setInquiriesUnreadError(null);
@@ -2886,10 +2903,17 @@ export default function AdsManager() {
         toast('New Ad Inquiry received');
       }
       lastUnreadRef.current = next;
-    } catch (err: any) {
-      if (isAbortError(err)) return;
+    } catch (err: unknown) {
+      if (controller.signal.aborted || unreadPollingRef.current !== polling || isAbortError(err)) return;
 
       const nextError = describeInquiryError(err, 'Unread count unavailable');
+      if (nextError.status === 401 || nextError.status === 403 || nextError.status === 419) {
+        polling.paused = true;
+        if (polling.intervalId !== null) {
+          window.clearInterval(polling.intervalId);
+          polling.intervalId = null;
+        }
+      }
       // Polling should not spam errors, but the UI should not lie.
       setInquiriesUnreadCount(null);
       setInquiryTabCounts((prev) => ({ ...prev, new: null }));
@@ -2901,6 +2925,8 @@ export default function AdsManager() {
         message: nextError.message,
         code: nextError.code,
       });
+    } finally {
+      polling.controller = null;
     }
   }, []);
 
@@ -3042,12 +3068,21 @@ export default function AdsManager() {
   }, [fetchAds]);
 
   React.useEffect(() => {
+    if (!unreadPollingEnabled) return;
+
+    const polling: UnreadCountPolling = { controller: null, intervalId: null, paused: false };
+    unreadPollingRef.current = polling;
+    lastUnreadRef.current = null;
     void fetchUnreadCount();
-    const id = window.setInterval(() => {
+    polling.intervalId = window.setInterval(() => {
       void fetchUnreadCount();
     }, 30_000);
-    return () => window.clearInterval(id);
-  }, [fetchUnreadCount]);
+    return () => {
+      unreadPollingRef.current = null;
+      if (polling.intervalId !== null) window.clearInterval(polling.intervalId);
+      polling.controller?.abort();
+    };
+  }, [fetchUnreadCount, unreadPollingEnabled, unreadSessionId, user?.role, token, unreadPollingRetry]);
 
   React.useEffect(() => {
     if (tab !== 'inquiries') return;
@@ -3481,6 +3516,23 @@ export default function AdsManager() {
           Ad Performance
         </button>
       </div>
+
+      {inquiriesUnreadError && (inquiriesUnreadError.status === 401 || inquiriesUnreadError.status === 403 || inquiriesUnreadError.status === 419) ? (
+        <div role="alert" className="border rounded p-3 bg-rose-50 text-rose-900 border-rose-200">
+          <div className="text-sm font-semibold">Unread count unavailable</div>
+          <div className="text-xs mt-1">HTTP {inquiriesUnreadError.status}: {inquiriesUnreadError.message}</div>
+          <button
+            type="button"
+            className="mt-2 px-3 py-1.5 rounded border text-sm disabled:opacity-60"
+            disabled={!unreadPollingEnabled}
+            onClick={() => {
+              if (!unreadPollingRef.current?.controller) setUnreadPollingRetry((value) => value + 1);
+            }}
+          >
+            Retry unread count
+          </button>
+        </div>
+      ) : null}
 
       {tab === 'ad-performance' ? (
         <AdPerformancePanel

@@ -325,6 +325,8 @@ export async function adminFetch(path: string, init: AdminFetchOptions = {}): Pr
     // Reset banner cooldown once we successfully reach the backend again.
     lastOfflineBannerAt = 0;
   } catch (e: any) {
+    if (init.signal?.aborted || e?.name === 'AbortError') throw e;
+
     // Helpful debug in production: shows what URL/method fetch attempted.
     // This is especially useful when CORS/preflight blocks cross-origin writes.
     try {
