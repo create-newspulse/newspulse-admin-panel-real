@@ -27,6 +27,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'admin-1', role: mocks.role } }),
 }));
+vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
+  useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
+}));
+vi.mock('@/lib/api/trendingTopics', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/api/trendingTopics')>(),
+  loadAvailableTopics: vi.fn(async () => ({ items: [] })),
+}));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/api', () => ({ default: { get: mocks.apiGet } }));
 vi.mock('@/lib/api/articles', () => ({
@@ -289,14 +296,16 @@ describe('ArticleForm Faith & Culture topic selector', () => {
       slug: sourceArticle.slug,
       summary: sourceArticle.summary,
       content: sourceArticle.content,
-      tags: sourceArticle.tags,
     });
+    expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('tags');
+    expect(storedArticle.tags).toEqual(sourceArticle.tags);
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
     mocks.updateArticle.mockClear();
     fireEvent.change(control<HTMLInputElement>('Title', 'input'), { target: { value: 'A later title update' } });
     await saveDraft();
     for (const [, payload] of mocks.updateArticle.mock.calls) expect(payload).not.toHaveProperty('topic');
     expect(storedArticle.topic).toBe('food-agricultural-heritage');
+    expect(storedArticle.tags).toEqual(sourceArticle.tags);
   });
 
   it.each([false, true])('preserves an existing custom slug and hand-written summary on a topic-only save (API load: %s)', async (loadFromApi) => {

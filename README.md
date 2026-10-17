@@ -112,11 +112,21 @@ Default frontend dev port in this repo is `5173`.
 
 ### Editorial Trending Topics
 
-Founder accounts can open **Editorial > Trending Topics** at
-`/admin/editorial/trending-topics`. Existing Editorial article workflows are unchanged.
+Open **Editorial > Trending Topics** or **Manage News > Trending Topics** at
+`/admin/editorial/trending-topics`. Story-management reads require authenticated,
+Founder-granted `manage_news` access. Attachment/detachment additionally requires
+the existing Edit news special right (`can_edit_news`, backend `news_edit`).
+Founder retains control. Topic creation, configuration, activation, and pins
+remain Founder-only.
+
 One topic contains Gujarati, Hindi, and English names/descriptions. Enter exact
-`News.tags` values one per line; topic membership does not use article category or
-`News.topic`. Optional pins select published CMS News stories without editing them.
+`News.tags` values one per line. Membership reuses these tags; it is not a new
+article field, category, Faith & Culture `topic`, or SEO keyword. Backend V2
+allows assignment using uniquely owned `topic:` tags. Shared/ordinary legacy
+tags can remain readable but unsafe mutations return `409 UNSAFE_TOPIC_TAGS`.
+The Admin must not work around this conflict, rewrite tags, or migrate topics.
+Optional pins select published CMS News stories; they prioritize presentation
+and do not create membership.
 
 Changes require an explicit Save. New topics default to Active OFF; the canonical
 slug becomes read-only after creation. Dates are entered in the displayed browser
@@ -125,10 +135,56 @@ numbers appear earlier. An active future topic is scheduled; an active expired
 topic leaves the strip but keeps its archive/detail available. Deactivate makes
 it unavailable publicly without deleting it.
 
-The Admin client uses `/admin-api/admin/topics` (backend `/api/admin/topics`):
-GET/POST on the collection and GET/PATCH on individual topics. Backend validation
-and Founder authorization remain authoritative. This UI does not configure the
-public-site Trending Strip switch or deploy the separate backend/public website.
+The existing `adminApiClient` uses the relative resource `admin/topics`, producing
+`/admin-api/admin/topics` (backend `/api/admin/topics`). Do not concatenate the
+backend compatibility mounts into the browser base. The authoritative V2 source
+is backend commit `5028e5e` (`editorialTopicStories.service.js` and
+`adminEditorialTopics.routes.js`).
+
+| Operation | Resource below `admin/topics` | Contract |
+| --- | --- | --- |
+| Topic configuration (Founder) | GET/POST collection; GET/PATCH `/:id` | Existing multilingual topic CRUD |
+| Selector / staff directory | GET `/available` | `lang`, `active=all`, `page`, `limit`, optional CMS News `storyId` |
+| Attached stories | GET `/:id/stories` | `lang`, `page`, `limit` |
+| Existing-story search | GET `/:id/stories/search` | Same pagination plus required `q` (2-120 characters) |
+| Suggestions | GET `/:id/candidates` | Same pagination, optional `q`; `suggestionOnly: true`, `{field, term}` match reasons |
+| Attach / detach | POST `/:id/stories/attach` or `/detach` | `{storyIds: [...]}` with 1-50 CMS News edition/logical-story IDs |
+
+Available topics include `id`, localized `title`/`name`, `slug`, `active`,
+`promotionState`, `startsAt`, `expiresAt`, `articleTags`, `membershipTag`, and
+`assignmentSupported`. With `storyId`, the response includes `logicalStoryId`
+and each option's `attached`/`membershipConsistent` flags. Load all topic pages;
+do not infer selection from SEO or category.
+
+Story rows are already grouped by the Backend. `logicalStoryId` is the source
+CMS News ID, `articleId` is the displayed edition, and `variantIds` contains the
+editions. Rows also include title, real category, lifecycle status, `publishedAt`,
+`availableLanguages`, `pinned`, `attached`, and `membershipConsistent`.
+Pagination is `items`, `total`, `count`, `page`, `limit`, `totalPages`,
+`hasNextPage`; totals count logical stories, not translations. Never send
+compatibility Article IDs or group unrelated stories by a matching slug.
+
+Add/Edit uses a separate **Trending Topics** selector for zero, one, or multiple
+memberships. Choices are staged until the existing save/autosave/publish flow;
+new drafts are saved before assignment, and Publish waits for assignment.
+Unchanged memberships cause no attach/detach requests. Unrelated article edits
+omit unchanged tags; topic association tags are not edited through ordinary
+Tags. Existing-article tag edits require a successfully loaded membership catalog;
+unavailable topics do not block unrelated article edits.
+A failed membership request retains the choices and the saved article ID,
+reports partial completion truthfully, and never retries automatically. The
+retained legacy Edit News route uses the same selector and membership helpers.
+
+**Manage Stories** provides attached rows, bounded Backend search, and candidate
+suggestions. Suggestions are never selected or attached automatically. Only a
+confirmed `ok: true`, `committed: true` mutation is accepted as saved. A failed
+post-commit revalidation is a visible warning, not a reason to repeat the write.
+Loading, successful empty results, API errors, and unsafe-tag conflicts have
+distinct states. Expiry never triggers a detach, tag clear, or archive deletion.
+
+Backend validation and authorization remain authoritative. This UI does not
+configure the public-site Trending Strip switch or deploy the separate
+backend/public website.
 
 ### Ads Manager: automatic creative preparation
 

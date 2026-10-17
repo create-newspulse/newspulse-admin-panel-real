@@ -28,6 +28,8 @@ import { useAuth } from '@context/AuthContext';
 import { getEffectiveSpecialRights, normalizeRoleId } from '@/lib/adminAccessControl';
 import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsSection';
 import AuthorBylineSection from '@/components/news/AuthorBylineSection';
+import TrendingTopicSelector from '@/components/news/TrendingTopicSelector';
+import { TopicMembershipSaveError, useArticleTrendingTopics } from '@/hooks/useArticleTrendingTopics';
 import { buildAuthorBylinePayload, restoreAuthorByline, type AuthorByline, type AuthorBylineRequest } from '@/lib/authorByline';
 import {
   EMPTY_PULSE_DIALOGUE_VALUE,
@@ -514,6 +516,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [authorByline, setAuthorByline] = useState<AuthorByline>({ enabled: false });
   const [authorPhotoUploadPending, setAuthorPhotoUploadPending] = useState(false);
   const [language, setLanguage] = useState<LangCode>(() => (initialEditId ? 'en' : DEFAULT_CREATE_LANGUAGE));
+  const trendingTopics = useArticleTrendingTopics({ storyId: effectiveId, lang: language, resetKey: initialEditId });
   const [translationGroupId, setTranslationGroupId] = useState<string>('');
   const [translationStatus, setTranslationStatus] = useState<string | null>(null);
   const [status, setStatus] = useState<'draft'|'scheduled'|'published'>('draft');
@@ -730,6 +733,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   };
 
   function resetToNewArticle() {
+    trendingTopics.reset();
     setEffectiveId(null);
     setSuppressServerHydration(false);
     originalStatusRef.current = 'unknown';
@@ -1032,7 +1036,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }
 
   function setTagsSafe(next: string[]) {
-    setTags(dedupeTags(next));
+    if (next.some(trendingTopics.isProtectedTag)) {
+      toast.error('Use Trending Topics to change topic membership. Association tags cannot be edited here.');
+      return;
+    }
+    setTags(dedupeTags([...tags.filter(trendingTopics.isProtectedTag), ...next]));
   }
 
   const breakingChecked = useMemo(() => {
@@ -1042,6 +1050,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   function toggleGujaratLocationTag(tag: string) {
     const rawTag = String(tag || '').trim();
     if (!rawTag) return;
+    if (trendingTopics.isProtectedTag(rawTag)) {
+      toast.error('This tag is used by a Trending Topic. Membership changes require the Trending Topics control and Backend validation.');
+      return;
+    }
 
     const key = normalizeTagKey(rawTag);
     const prev = Array.isArray(tags) ? tags : [];
@@ -1793,6 +1805,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutationInFlightRef.current = true;
       mutationTargetIdRef.current = effectiveId;
       const submittedSnapshot = buildSnapshot();
+      const submittedTopics = trendingTopics.snapshotChanges();
+      const topicsChanged = Object.keys(submittedTopics).length > 0;
+      if (topicsChanged && !trendingTopics.access.canEdit) {
+        throw new TopicMembershipSaveError('Manage News access and the Edit news special right are required to save Trending Topics.', null);
+      }
       const wasPublished = originalStatusRef.current === 'published';
       if (desiredStatusOverride === 'published' && effectiveUserRole !== 'founder') {
         throw new Error('Founder permission is required to publish.');
@@ -1814,6 +1831,36 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         && !wasPublished;
       const translationGroupIdForSave = (translationGroupId || '').trim()
         || (saveAllLanguageDrafts ? createTranslationGroupId(title || slug || summary || 'article') : '');
+      const ordinaryTags = tags.filter((tag) => !trendingTopics.isProtectedTag(tag));
+      const ordinaryTagsChanged = JSON.stringify(ordinaryTags)
+        !== JSON.stringify(lastSavedSnapshot.tags.filter((tag) => !trendingTopics.isProtectedTag(tag)));
+      const tagMetadataChanged = ordinaryTagsChanged || isSponsoredArticle !== lastSavedSnapshot.isSponsoredArticle;
+      if (effectiveId && tagMetadataChanged
+        && (!trendingTopics.access.canRead || !trendingTopics.query.isSuccess || trendingTopics.query.isFetching)) {
+        throw new TopicMembershipSaveError('Article tags were not saved. Load Trending Topics successfully before changing tags so existing memberships can be preserved.', null);
+      }
+      let associationTags = tags.filter(trendingTopics.isProtectedTag);
+      if (effectiveId && tagMetadataChanged) {
+        const latest = await getArticle(effectiveId);
+        associationTags = (latest.tags || []).filter(trendingTopics.isProtectedTag);
+      }
+
+      async function saveSelectedTopics(savedId: string | null) {
+        if (!topicsChanged) return;
+        if (!savedId) {
+          setNeedsLatestRefresh(true);
+          throw new TopicMembershipSaveError('The article save returned no CMS News ID. Reload before retrying; do not create another draft. Trending Topics were not changed.', null);
+        }
+        try {
+          const warning = await trendingTopics.saveChanges(savedId, submittedTopics);
+          if (warning) toast(warning);
+        } catch (error: unknown) {
+          if (error instanceof TopicMembershipSaveError) {
+            throw new TopicMembershipSaveError(`The article was saved, but not all Trending Topic changes were confirmed. ${error.message}`, error.cause);
+          }
+          throw error;
+        }
+      }
 
       type PublicArticleStatus = 'draft' | 'scheduled' | 'published';
       const trimOrUndef = (v: string) => {
@@ -1866,7 +1913,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         coverImage?: { url: string; publicId?: string };
         pulseDialogue?: ReturnType<typeof buildPulseDialoguePayload>;
         authorByline?: AuthorBylineRequest;
-        tags: string[];
+        tags?: string[];
         isSponsored?: boolean;
         sponsored?: boolean;
         sponsorBrandName?: string;
@@ -1922,14 +1969,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           ? { state: geoState, district: geoDistrict, city: geoCity }
           : undefined;
         const normalizedTags = (() => {
-          const baseTags = Array.isArray(tags) ? tags : [];
+          const baseTags = ordinaryTags;
           if (!isSponsoredArticle) {
-            return baseTags.filter((tag) => {
+            return [...baseTags.filter((tag) => {
               const key = normalizeTagKey(tag);
               return key !== 'sponsored' && key !== 'sponsored-article';
-            });
+            }), ...associationTags];
           }
-          return dedupeTags([...baseTags, 'sponsored', 'sponsored-article']);
+          return dedupeTags([...baseTags, 'sponsored', 'sponsored-article', ...associationTags]);
         })();
         const sponsorBrand = trimOrUndef(sponsorBrandName);
         const sponsorDisclosureText = trimOrUndef(sponsorDisclosure);
@@ -1977,7 +2024,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
           pulseDialogue: pulseDialoguePayload,
           ...(authorPayload ? { authorByline: authorPayload } : {}),
-          tags: normalizedTags,
+          // Unchanged tags and existing linked editions must not overwrite logical-story membership.
+          ...(!effectiveId || opts.newArticle || (!opts.language && tagMetadataChanged) ? { tags: normalizedTags } : {}),
           isSponsored: isSponsoredArticle ? true : undefined,
           sponsored: isSponsoredArticle ? true : undefined,
           sponsorBrandName: sponsorBrand,
@@ -2033,6 +2081,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         mutationTargetIdRef.current = idToPublish;
         lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId, category, faithTopic: submittedSnapshot.faithTopic, authorByline, snapshot: submittedSnapshot, wasPublished };
+        await saveSelectedTopics(idToPublish);
         const published = await publishArticle(idToPublish);
         return { ...(published as any), __npCreatedId: idToPublish };
       }
@@ -2115,17 +2164,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryAllowed) {
         throw new Error('Category is not allowed');
       }
-      if (onSubmit) return onSubmit(body);
-
-      const savedResult = computedMode === 'create'
-        ? await createArticle(body as any)
-        : await updateArticle(effectiveId!, body as any);
-
-      if (!saveAllLanguageDrafts || !translationGroupIdForSave) return savedResult;
+      const savedResult = onSubmit ? await onSubmit(body)
+        : computedMode === 'create'
+          ? await createArticle(body as any)
+          : await updateArticle(effectiveId!, body as any);
 
       const savedRaw: any = savedResult as any;
       const savedArticle = (savedRaw?.article) || (savedRaw?.data?.article) || (savedRaw?.data && typeof savedRaw.data === 'object' ? savedRaw.data : savedRaw);
       const activeSavedId = savedArticle?._id || savedArticle?.id || savedRaw?._id || savedRaw?.id || effectiveId;
+      mutationTargetIdRef.current = activeSavedId || effectiveId;
+      if (!effectiveId && activeSavedId) {
+        setEffectiveId(String(activeSavedId));
+        setSuppressServerHydration(true);
+        originalStatusRef.current = 'draft';
+        if (mode === 'create') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('id', String(activeSavedId));
+          window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+        }
+      }
+      if (onSubmit || !saveAllLanguageDrafts || !translationGroupIdForSave) {
+        await saveSelectedTopics(activeSavedId ? String(activeSavedId) : null);
+        return { ...savedResult, __npTopicMembershipChanged: topicsChanged };
+      }
       const linkedDraftIds: Partial<Record<LangCode, string>> = {};
 
       for (const code of ARTICLE_LANGUAGE_CODES) {
@@ -2156,7 +2217,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         }
       }
 
-      return { ...(savedResult as any), __npLinkedDraftIds: linkedDraftIds, translationGroupId: translationGroupIdForSave };
+      await saveSelectedTopics(activeSavedId ? String(activeSavedId) : null);
+      return { ...(savedResult as any), __npLinkedDraftIds: linkedDraftIds, translationGroupId: translationGroupIdForSave, __npTopicMembershipChanged: topicsChanged };
     },
     onSuccess: async (result: any) => {
       const raw = result as any;
@@ -2164,7 +2226,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const returnedId = saved?._id || saved?.id || raw?.__npCreatedId || mutationTargetIdRef.current;
       if (saved?._id) qc.setQueryData(['articles', 'one', String(saved._id)], saved);
       let refreshFailed = false;
-      if (returnedId && (saveKindRef.current === 'publish' || lastSubmitRef.current?.wasPublished)) {
+      if (returnedId && (saveKindRef.current === 'publish' || lastSubmitRef.current?.wasPublished || raw?.__npTopicMembershipChanged)) {
         try {
           saved = await getArticle(String(returnedId));
           qc.setQueryData(['articles', 'one', String(returnedId)], saved);
@@ -2261,6 +2323,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const editsAfterSubmit = snapshotHash(currentSnapshotRef.current) !== snapshotHash(submitted);
       const savedSnapshot: Snapshot = {
         ...submitted,
+        tags: Array.isArray(saved?.tags) ? saved.tags : submitted.tags,
         slug: safeSlug,
         status: authoritativeStatus,
         category: lastSubmitRef.current?.category ?? category,
@@ -2269,6 +2332,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         authorByline: restoreAuthorByline(saved?.authorByline ?? lastSubmitRef.current?.authorByline ?? authorByline),
         publishedAt: savedPublishedAt,
       };
+      if (!editsAfterSubmit) setTags(savedSnapshot.tags);
       setLastSavedSnapshot(savedSnapshot);
       setLastSavedAt(Date.now());
 
@@ -2287,7 +2351,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         toast.error(message);
       }
       mutationInFlightRef.current = false;
-      dirtyRef.current = editsAfterSubmit || snapshotHash(currentSnapshotRef.current) !== snapshotHash(savedSnapshot);
+      dirtyRef.current = editsAfterSubmit || snapshotHash(currentSnapshotRef.current) !== snapshotHash(savedSnapshot)
+        || trendingTopics.hasPendingChanges();
       setSaveHydrationVersion((version) => version + 1);
       if (refreshFailed) pendingSaveRef.current = false;
       else setLifecycleMessage(null);
@@ -2313,7 +2378,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       onDone();
     },
     onError: async (err: unknown) => {
-      const n = normalizeArticleError(err, 'Save failed');
+      const n = err instanceof TopicMembershipSaveError
+        ? { ...normalizeError(err.cause, err.message), message: err.message }
+        : normalizeArticleError(err, 'Save failed');
       console.error('[ArticleForm] mutation error', { status: n.status, code: n.code });
       pendingSaveRef.current = false;
       autosavePausedRef.current = true;
@@ -2325,7 +2392,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       } else {
         toast.error(n.message);
       }
-      if (n.status === 409 && mutationTargetIdRef.current) {
+      if ((n.status === 409 || err instanceof TopicMembershipSaveError) && mutationTargetIdRef.current) {
         setNeedsLatestRefresh(true);
         await refreshLatestPreservingEdits();
         try {
@@ -2347,17 +2414,19 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (mutation.isPending || !pendingSaveRef.current) return;
     pendingSaveRef.current = false;
     if (!mutation.isSuccess || autosavePausedRef.current || needsLatestRefresh || refreshingArticle
-      || currentArticleRecord?.status === 'deleted' || snapshotHash(currentSnapshotRef.current) === lastSavedHash) return;
+      || currentArticleRecord?.status === 'deleted'
+      || (snapshotHash(currentSnapshotRef.current) === lastSavedHash && !trendingTopics.hasPendingChanges())) return;
     saveKindRef.current = 'autosave';
     mutationInFlightRef.current = true;
     mutation.mutate(undefined);
-  }, [mutation.isPending, mutation.isSuccess, mutation.mutate, needsLatestRefresh, refreshingArticle, currentArticleRecord?.status, lastSavedHash]);
+  }, [mutation.isPending, mutation.isSuccess, mutation.mutate, needsLatestRefresh, refreshingArticle, currentArticleRecord?.status, lastSavedHash, trendingTopics.isDirty]);
 
   function saveDraft(){
     if (needsLatestRefresh || refreshingArticle || currentArticleRecord?.status === 'deleted') return;
     if (mutationInFlightRef.current || mutation.isPending) {
       if (saveKindRef.current !== 'publish' && lastSubmitRef.current
-        && snapshotHash(currentSnapshotRef.current) !== snapshotHash(lastSubmitRef.current.snapshot)) pendingSaveRef.current = true;
+        && (snapshotHash(currentSnapshotRef.current) !== snapshotHash(lastSubmitRef.current.snapshot)
+          || trendingTopics.hasPendingChanges())) pendingSaveRef.current = true;
     } else {
       // Create mode: force draft persist.
       // Edit mode: no override so live stays live.
@@ -2509,7 +2578,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
-  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, faithTopic, faithTopicReadOnly, pulseDialogue, authorByline, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl, mutation.isPending]);
+  }, [effectiveId, title, slug, summary, content, coverImageUrl, coverImagePublicId, category, editorialType, youthPulseTrack, faithTopic, faithTopicReadOnly, pulseDialogue, authorByline, language, translationGroupId, status, tags, scheduledAt, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl, mutation.isPending, trendingTopics.changes]);
 
   async function runLanguageCheck(l: 'en'|'hi'|'gu') { try { const res = await verifyLanguage(contentPlain || title, l); setLangIssues(prev => ({ ...prev, [l]: res.issues })); } catch {} }
   async function runReadability(){ try { const res = await readability(contentPlain || title, language); setReadabilityGrade(res.grade); setReadingSeconds(res.readingTimeSec); } catch {} }
@@ -2555,8 +2624,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [title, slug, summary, content, category, editorialType, youthPulseTrack, faithTopic, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
-    return currentHash !== lastSavedHash;
-  }, [currentHash, lastSavedHash]);
+    return currentHash !== lastSavedHash || trendingTopics.isDirty;
+  }, [currentHash, lastSavedHash, trendingTopics.isDirty]);
 
   useEffect(() => {
     dirtyRef.current = isDirty;
@@ -3399,9 +3468,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                   <input type="datetime-local" value={scheduledAt} onChange={e=> setScheduledAt(e.target.value)} className="w-full border px-2 py-2 rounded" />
                 </div>
               )}
+              <TrendingTopicSelector topics={trendingTopics}
+                disabled={isSaving || isPublishing || mutation.isPending || needsLatestRefresh || refreshingArticle || currentArticleRecord?.status === 'deleted'} />
               <div>
                 <label className="block text-xs font-medium mb-1">Tags</label>
-                <TagInput value={tags} onChange={setTagsSafe} />
+                <TagInput value={tags.filter((tag) => !trendingTopics.isProtectedTag(tag))} onChange={setTagsSafe} />
+                <p className="mt-1 text-xs text-slate-500">Ordinary article tags only. Topic association tags are managed through Trending Topics.</p>
               </div>
 
               {/* Cover Image (Upload-only) */}

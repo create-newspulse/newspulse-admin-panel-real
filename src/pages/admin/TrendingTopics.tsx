@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
+import { useTrendingTopicsAccess } from '@/hooks/useTrendingTopicsAccess';
 import Switch from '@/components/settings/Switch';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import TopicStoryManager from '@/components/news/TopicStoryManager';
 import Denied from '@/pages/Denied';
 import { getArticle, listArticles, type Article } from '@/lib/api/articles';
 import {
   createTopic, getTopic, listTopics, topicErrorMessage, updateTopic,
+  listAvailableTopics, topicStoryErrorMessage,
   type EditorialTopic, type EditorialTopicListResponse, type LocalizedText,
 } from '@/lib/api/trendingTopics';
 import { normalizeError } from '@/lib/error';
@@ -372,6 +374,7 @@ function TrendingTopicsManager() {
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [now, setNow] = useState(Date.now);
+  const [managedTopic, setManagedTopic] = useState<EditorialTopic | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -411,6 +414,8 @@ function TrendingTopicsManager() {
   }
 
   const disabled = loading || busy || !!editor || !!deactivate;
+  if (managedTopic) return <TopicStoryManager topic={{ id: managedTopic.id, title: managedTopic.name.gu, slug: managedTopic.slug }}
+    canEdit onClose={() => setManagedTopic(null)} />;
   return (
     <div className="space-y-5">
       <Link to="/admin/editorial" className="text-sm text-blue-600">Back to Editorial</Link>
@@ -450,6 +455,8 @@ function TrendingTopicsManager() {
                     if (topic.active) { setActionError(''); setDeactivate(topic); }
                     else void setActive(topic, true);
                   }}>{topic.active ? 'Deactivate' : 'Activate'}</button>
+                  <button type="button" className={buttonClass} disabled={disabled} aria-label={`Manage Stories ${topic.name.gu}`}
+                    onClick={() => setManagedTopic(topic)}>Manage Stories</button>
                 </div></td>
               </tr>
             ))}</tbody>
@@ -471,9 +478,48 @@ function TrendingTopicsManager() {
   );
 }
 
+function TopicStoryDirectory({ canEdit }: { canEdit: boolean }) {
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<{ id: string; title: string; slug: string } | null>(null);
+  const query = useQuery({
+    queryKey: ['trending-topics', 'directory', page],
+    queryFn: () => listAvailableTopics({ lang: 'gu', active: 'all', page, limit: 20 }),
+    retry: false,
+    staleTime: 0,
+  });
+  if (selected) return <TopicStoryManager topic={selected} canEdit={canEdit} onClose={() => setSelected(null)} />;
+  const loading = query.isPending || query.isFetching;
+  return <div className="space-y-5">
+    <Link to="/admin/articles" className="text-sm text-blue-600">Back to Manage News</Link>
+    <h1 className="text-2xl font-bold">Trending Topics</h1>
+    <p className="text-sm">Manage logical-story membership using your existing Manage News access. Topic configuration, activation, and pins remain Founder-only.</p>
+    {loading ? <p role="status">Loading topics...</p> : query.isError ? (
+      <div role="alert" className={errorClass}>{topicStoryErrorMessage(query.error)} <button type="button" className={buttonClass} onClick={() => void query.refetch()}>Retry topics</button></div>
+    ) : query.data && <>
+      {!query.data.items.length ? <p>No topics found.</p> : (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-800"><tr>{['Topic', 'Promotion', 'Actions'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
+            <tbody>{query.data.items.map((topic) => <tr key={topic.id} className="border-t border-slate-200 align-top">
+              <td className="px-3 py-3">{LANGUAGES.map(({ code }) => <div key={code} lang={code}>{topic.name[code]}</div>)}<div className="text-xs text-slate-500">{topic.slug}</div></td>
+              <td className="px-3 py-3">{topic.promotionState}</td>
+              <td className="px-3 py-3"><button type="button" className={buttonClass} onClick={() => setSelected(topic)}>Manage Stories</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      <div className="flex items-center gap-3">
+        <button type="button" className={buttonClass} disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous topics</button>
+        <span className="text-sm">Page {page} of {Math.max(1, query.data.totalPages)} ({query.data.total} topics)</span>
+        <button type="button" className={buttonClass} disabled={!query.data.hasNextPage} onClick={() => setPage(page + 1)}>Next topics</button>
+      </div>
+    </>}
+  </div>;
+}
+
 export default function TrendingTopics() {
-  const { isAuthenticated, isFounder } = useAuth();
-  // Do not extend FounderRoute's development/demo allowances to this live-content control.
-  if (!isAuthenticated || !isFounder) return <Denied message="Trending Topics management is restricted to the Founder." />;
-  return <TrendingTopicsManager />;
+  const access = useTrendingTopicsAccess();
+  if (access.loading) return <p role="status">Checking Trending Topics access...</p>;
+  if (!access.canRead) return <Denied message={access.reason} />;
+  return access.isFounder ? <TrendingTopicsManager /> : <TopicStoryDirectory canEdit={access.canEdit} />;
 }

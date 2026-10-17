@@ -15,6 +15,8 @@ import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
 import { publishArticle, updateArticle } from '@/lib/api/articles';
 import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import TrendingTopicSelector from '@/components/news/TrendingTopicSelector';
+import { TopicMembershipSaveError, useArticleTrendingTopics } from '@/hooks/useArticleTrendingTopics';
 
 interface NewsForm {
   title: string;
@@ -40,6 +42,8 @@ export default function EditNews() {
   const queryClient = useQueryClient();
   const transitionInFlight = useRef(false);
   const [transitionPending, setTransitionPending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
 
   const [form, setForm] = useState<NewsForm>({
     title: '',
@@ -47,6 +51,11 @@ export default function EditNews() {
     category: '',
     language: '',
     summary: ''
+  });
+  const trendingTopics = useArticleTrendingTopics({
+    storyId: id || null,
+    resetKey: id || null,
+    lang: /^gu/i.test(form.language) ? 'gu' : /^hi/i.test(form.language) ? 'hi' : 'en',
   });
 
   const [loading, setLoading] = useState(true);
@@ -174,6 +183,7 @@ export default function EditNews() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saveInFlight.current || transitionInFlight.current) return;
     if (!id) {
       toast.error('Missing article id');
       return;
@@ -184,6 +194,14 @@ export default function EditNews() {
       return;
     }
 
+    const selectedTopics = trendingTopics.snapshotChanges();
+    if (trendingTopics.hasPendingChanges() && !trendingTopics.access.canEdit) {
+      toast.error('Manage News access and the Edit news special right are required to save Trending Topics.');
+      return;
+    }
+    saveInFlight.current = true;
+    setSaving(true);
+    let articleSaved = false;
     try {
       const trimmedCoverUrl = String(coverUrl || '').trim();
       const trimmedCoverPid = String(coverPublicId || '').trim();
@@ -195,6 +213,9 @@ export default function EditNews() {
       };
 
       await updateArticle(id, payload);
+      articleSaved = true;
+      const topicWarning = await trendingTopics.saveChanges(id, selectedTopics);
+      if (topicWarning) toast(topicWarning);
 
       toast.success('✅ Article updated');
       try {
@@ -204,9 +225,14 @@ export default function EditNews() {
       }
       navigate('/manage-news');
     } catch (error: unknown) {
-      const failure = normalizeArticleError(error, 'Save failed');
+      const failure = error instanceof TopicMembershipSaveError
+        ? { ...normalizeError(error.cause, error.message), message: `${articleSaved ? 'The article was saved, but topic changes were not fully confirmed. ' : ''}${error.message}` }
+        : normalizeArticleError(error, 'Save failed');
       console.error('[EditNews] save failed', { status: failure.status, code: failure.code });
       toast.error(failure.message);
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
     }
   };
 
@@ -261,7 +287,7 @@ export default function EditNews() {
   };
 
   const doTransition = async (action: 'toReview' | 'toLegal' | 'approve' | 'schedule' | 'publish') => {
-    if (!id || (action === 'publish' && transitionInFlight.current)) return;
+    if (!id || (action === 'publish' && (transitionInFlight.current || saveInFlight.current))) return;
     const allChecklistOk = checklist.ptiCompliance && checklist.rightsCleared && checklist.attributionPresent && checklist.defamationScanOk;
     const g = guardAction(action, publishEnabled, { checklistOk: allChecklistOk, stage: workflow?.stage, isFounder: (user?.role || '').toLowerCase() === 'founder' });
     if (!g.allowed) {
@@ -281,6 +307,8 @@ export default function EditNews() {
       if (action === 'publish') {
         transitionInFlight.current = true;
         setTransitionPending(true);
+        const topicWarning = await trendingTopics.saveChanges(id, trendingTopics.snapshotChanges());
+        if (topicWarning) toast(topicWarning);
         const result = await publishArticle(id);
         const article = result.article || result.data?.article;
         if (article) queryClient.setQueryData(['articles', 'one', id], article);
@@ -308,7 +336,9 @@ export default function EditNews() {
         toast.error('The action completed, but the latest article list could not be loaded. Refresh it; do not repeat the action.');
       }
     } catch (error: unknown) {
-      const failure = normalizeArticleError(error, 'Transition failed');
+      const failure = error instanceof TopicMembershipSaveError
+        ? { ...normalizeError(error.cause, error.message), message: error.message }
+        : normalizeArticleError(error, 'Transition failed');
       toast.error(failure.message);
       if (action === 'publish' && failure.status === 409) {
         try {
@@ -389,6 +419,8 @@ export default function EditNews() {
           ))}
         </select>
 
+        <TrendingTopicSelector topics={trendingTopics} disabled={saving || transitionPending} />
+
         <button
           type="button"
           onClick={handleAISummary}
@@ -415,6 +447,7 @@ export default function EditNews() {
         <div className="text-right">
           <button
             type="submit"
+            disabled={saving || transitionPending}
             className="bg-green-700 text-white px-6 py-2 rounded hover:bg-green-600"
           >
             💾 Save Changes

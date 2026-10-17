@@ -5,7 +5,6 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Editorial from '@/pages/admin/Editorial';
 import TrendingTopics from '@/pages/admin/TrendingTopics';
-import FounderRoute from '@/components/FounderRoute';
 import AdminModuleRoute from '@/components/AdminModuleRoute';
 import type { adminApiClient } from '@/lib/adminApiClient';
 import type { Article } from '@/lib/api/articles';
@@ -118,7 +117,7 @@ function renderRoute(initialPath = path) {
       <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
           <Route path="/admin/editorial" element={<AdminModuleRoute moduleKey="editorial"><Editorial /></AdminModuleRoute>} />
-          <Route path={path} element={<AdminModuleRoute moduleKey="editorial"><FounderRoute><TrendingTopics /></FounderRoute></AdminModuleRoute>} />
+          <Route path={path} element={<AdminModuleRoute moduleKey="manage_news"><TrendingTopics /></AdminModuleRoute>} />
           <Route path="/unauthorized" element={<p>Unauthorized route</p>} />
           <Route path="/login" element={<p>Login route</p>} />
         </Routes>
@@ -168,8 +167,8 @@ function expectNoWrites() {
 }
 
 describe('Trending Topics routing and Founder access', () => {
-  it('wires the actual App route through both existing guards and keeps Editorial intact', () => {
-    expect(appSource).toContain('path="/admin/editorial/trending-topics" element={<AdminModuleRoute moduleKey="editorial"><FounderRoute><TrendingTopics /></FounderRoute></AdminModuleRoute>}');
+  it('wires the V2 route through existing manage_news access and keeps Editorial intact', () => {
+    expect(appSource).toContain('path="/admin/editorial/trending-topics" element={<AdminModuleRoute moduleKey="manage_news"><TrendingTopics /></AdminModuleRoute>}');
     expect(appSource).toContain('path="/admin/editorial" element={<AdminModuleRoute moduleKey="editorial"><Editorial /></AdminModuleRoute>}');
   });
 
@@ -204,7 +203,7 @@ describe('Trending Topics routing and Founder access', () => {
     mocks.auth.user.role = role;
     mocks.auth.isFounder = false;
     renderRoute();
-    expect(screen.getByText('Unauthorized route')).toBeInTheDocument();
+    expect(screen.getByText('This module is restricted to the Founder.')).toBeInTheDocument();
     expect(client.get).not.toHaveBeenCalled();
     expectNoWrites();
   });
@@ -214,7 +213,7 @@ describe('Trending Topics routing and Founder access', () => {
     mocks.auth.user.role = 'admin';
     mocks.auth.isFounder = false;
     renderRoute();
-    expect(screen.getByText(/Trending Topics management is restricted/)).toBeInTheDocument();
+    expect(screen.getByText('This module is restricted to the Founder.')).toBeInTheDocument();
     expect(client.get).not.toHaveBeenCalled();
   });
 

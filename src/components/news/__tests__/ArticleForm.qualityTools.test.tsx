@@ -29,6 +29,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@context/AuthContext', () => ({
   useAuth: () => ({ user: mocks.authUser }),
 }));
+vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
+  useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
+}));
+vi.mock('@/lib/api/trendingTopics', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/api/trendingTopics')>(),
+  loadAvailableTopics: vi.fn(async () => ({ items: [] })),
+}));
 
 vi.mock('@/context/PublishFlagContext', () => ({
   usePublishFlag: () => ({ publishEnabled: true }),
@@ -262,12 +269,14 @@ describe('ArticleForm Gujarat location dropdowns', () => {
   };
 
   function renderLocationEdit(locations = savedLocations) {
+    const article = {
+      _id: 'article-1', title: 'Existing regional story', slug: 'existing-regional-story', content: 'Existing regional story with enough content for normal editorial workflows.',
+      category: 'regional', language: 'en', lang: 'en', status: 'draft' as const, ...locations,
+    };
+    mocks.getArticle.mockResolvedValue(article);
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
       <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
-        <ArticleForm mode="edit" id="article-1" userRole="admin" initialValues={{
-          _id: 'article-1', title: 'Existing regional story', slug: 'existing-regional-story', content: 'Existing regional story with enough content for normal editorial workflows.',
-          category: 'regional', language: 'en', lang: 'en', status: 'draft', ...locations,
-        }} />
+        <ArticleForm mode="edit" id="article-1" userRole="admin" initialValues={article} />
       </MemoryRouter>
     </QueryClientProvider>);
   }
@@ -335,12 +344,15 @@ describe('ArticleForm Gujarat location dropdowns', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
     await waitFor(() => expect(updateArticle).toHaveBeenCalled());
     expect(mocks.updateArticle.mock.calls[0][1]).toEqual(expect.objectContaining({
-      ...savedLocations, geo: { state: 'gujarat', district: 'surat', city: 'vadodara' },
+      state: savedLocations.state, district: savedLocations.district, city: savedLocations.city,
+      geo: { state: 'gujarat', district: 'surat', city: 'vadodara' },
     }));
+    expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('tags');
   });
 
   it('keeps the existing fallback and clear behavior when deselecting locations', async () => {
     renderLocationEdit();
+    await screen.findByText('No Trending Topics are available.');
     const districts = openLocations('District');
     const cities = openLocations('Big City');
     fireEvent.click(districts.getByRole('checkbox', { name: 'Surat' }));
@@ -374,8 +386,10 @@ describe('ArticleForm Gujarat location dropdowns', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
     await waitFor(() => expect(updateArticle).toHaveBeenCalled());
     expect(mocks.updateArticle.mock.calls[0][1]).toEqual(expect.objectContaining({
-      ...existing, city: 'updated-custom-city', geo: { state: 'custom-state', district: 'custom-district', city: 'updated-custom-city' },
+      state: existing.state, district: existing.district, city: 'updated-custom-city',
+      geo: { state: 'custom-state', district: 'custom-district', city: 'updated-custom-city' },
     }));
+    expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('tags');
   });
 });
 

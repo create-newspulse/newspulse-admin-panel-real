@@ -20,6 +20,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({ useAuth: () => ({ user: { id: 'test-user', role: mocks.role } }) }));
+vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
+  useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
+}));
+vi.mock('@/lib/api/trendingTopics', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/api/trendingTopics')>(),
+  loadAvailableTopics: vi.fn(async () => ({ items: [] })),
+}));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: mocks.publishEnabled }) }));
 vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 'hi', 'gu'] })) } }));
 vi.mock('@/lib/api/articles', () => ({
@@ -129,14 +136,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Trending tag membership through Save Update', () => {
+describe('Ordinary tags and protected Trending tags through Save Update', () => {
   it.each([
     ['faith-culture', 'navratri-2026'],
     ['tech', 'ai-2026'],
-  ])('adds and removes an exact Trending tag without changing the %s story or its publication', async (category, tag) => {
+  ])('adds and removes an exact ordinary tag without changing the %s story or its publication', async (category, tag) => {
     const otherTag = tag.toUpperCase();
     const originalTags = ['local-news', otherTag];
     const { client } = renderForm({ ...source, category, tags: originalTags });
+    await screen.findByText('No Trending Topics are available.');
     const pinKey = ['articles', 'trending-pin', source._id];
     const candidatesKey = ['articles', 'trending-candidates', '', 1];
     client.setQueryData(pinKey, { ...stored });
@@ -171,7 +179,8 @@ describe('Trending tag membership through Save Update', () => {
     expect(stored).toMatchObject({ _id: source._id, category, status: 'published', publishedAt: originalPublishedAt, tags: originalTags });
     expect(client.getQueryData(['articles', 'one', source._id])).toMatchObject({ category, tags: originalTags });
     expect(mocks.update).toHaveBeenCalledTimes(2);
-    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(mocks.get).toHaveBeenCalledTimes(4);
+    for (const [id] of mocks.get.mock.calls) expect(id).toBe(source._id);
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(mocks.translations).not.toHaveBeenCalled();
@@ -180,11 +189,14 @@ describe('Trending tag membership through Save Update', () => {
   it('retains case-distinct saved Trending tags when hydrating and saving another edit', async () => {
     const tags = ['navratri-2026', 'Navratri-2026', 'topic:Navratri-2026'];
     renderForm({ ...source, category: 'faith-culture', tags });
-    for (const tag of tags) expect(screen.getByText(tag, { exact: true })).toBeInTheDocument();
+    for (const tag of tags.slice(0, 2)) expect(screen.getByText(tag, { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText('topic:Navratri-2026', { exact: true })).not.toBeInTheDocument();
     fireEvent.change(titleInput(), { target: { value: 'Same story, updated headline' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
-    expect(mocks.update.mock.calls[0][1]).toMatchObject({ category: 'faith-culture', tags });
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({ category: 'faith-culture' });
+    expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('tags');
+    expect(stored.tags).toEqual(tags);
     expect(mocks.create).not.toHaveBeenCalled();
   });
 });
@@ -215,8 +227,10 @@ describe('Founder Edit Published - Save Update', () => {
     const payload = mocks.update.mock.calls[0][1];
     expect(payload).toMatchObject({
       title: 'Updated published headline', slug: source.slug, content: source.content,
-      summary: source.summary, category: source.category, tags: source.tags, imageUrl: source.imageUrl,
+      summary: source.summary, category: source.category, imageUrl: source.imageUrl,
     });
+    expect(payload).not.toHaveProperty('tags');
+    expect(stored.tags).toEqual(source.tags);
     expect(payload).not.toHaveProperty('status');
     expect(payload).not.toHaveProperty('publishedAt');
     expect(mocks.publish).not.toHaveBeenCalled();

@@ -503,7 +503,7 @@ function App() {
               <Route path="/admin/aira" element={<AdminModuleRoute moduleKey="aira"><Aira /></AdminModuleRoute>} />
               <Route path="/admin/youth-pulse" element={<ProtectedRoute><YouthPulse /></ProtectedRoute>} />
               <Route path="/admin/editorial" element={<AdminModuleRoute moduleKey="editorial"><Editorial /></AdminModuleRoute>} />
-              <Route path="/admin/editorial/trending-topics" element={<AdminModuleRoute moduleKey="editorial"><FounderRoute><TrendingTopics /></FounderRoute></AdminModuleRoute>} />
+              <Route path="/admin/editorial/trending-topics" element={<AdminModuleRoute moduleKey="manage_news"><TrendingTopics /></AdminModuleRoute>} />
 
               {/* Legacy Safe Owner Zone v5 routes: redirect to canonical /admin/safe-owner-zone */}
               <Route path="/safeownerzone" element={<Navigate to="/admin/safe-owner-zone" replace />} />

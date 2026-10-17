@@ -1,7 +1,7 @@
 // newspulse-admin-panel-real-main/src/pages/ManageNews.tsx
 
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useIsFetching, useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArticleFilters } from '@/components/news/ArticleFilters';
 import { FiltersDrawer } from '@/components/news/FiltersDrawer';
@@ -306,6 +306,9 @@ export default function ManageNews() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">Manage News Articles</h1>
           <div className="flex flex-wrap gap-2 items-center">
+            <Link to="/admin/editorial/trending-topics" className="px-3 py-1 rounded border border-slate-300">
+              Trending Topics
+            </Link>
             <button
               onClick={() => setShowCsv(true)}
               className="px-3 py-1 bg-indigo-600 text-white rounded"
