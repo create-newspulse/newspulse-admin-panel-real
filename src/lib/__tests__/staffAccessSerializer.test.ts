@@ -117,6 +117,31 @@ describe('staff access serializer', () => {
     expect(localSpecialRightKey('marketing_delete_campaign_report')).toBe('delete_campaign_report');
   });
 
+  it('preserves an intentionally empty permanent selection across every write alias', () => {
+    const payload = serializeStaffAccessPayload({ specialRights: [], auditReason: 'No permanent action rights' });
+
+    expect(payload.specialRightsOverride).toEqual([]);
+    expect(payload.specialRights).toEqual([]);
+    expect(payload.rights).toEqual([]);
+    expect(payload).not.toHaveProperty('specialRightsConfigured');
+  });
+
+  it('does not merge a temporary publishing grant into permanent selections', () => {
+    const payload = serializeStaffAccessPayload({
+      specialRights: ['can_edit_news'],
+      temporaryGrants: [{ targetType: 'right', key: 'can_publish_news', expiresAt: '2030-01-01T00:00:00.000Z' }],
+      auditReason: 'Temporary publishing cover',
+    });
+
+    expect(payload.specialRightsOverride).toEqual(['news_edit']);
+    expect(payload.temporaryAccess).toEqual([{
+      rightKey: 'news_publish',
+      enabled: true,
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      reason: 'Temporary publishing cover',
+    }]);
+  });
+
   it('serializes Marketing CRM rights without Ads Manager delivery rights', () => {
     const payload = serializeStaffAccessPayload({
       moduleAccess: ['marketing'],

@@ -19,7 +19,19 @@ export type TeamUser = {
   coverageAreas?: string[];
   permissions?: string[];
   moduleAccess?: string[];
+  moduleAccessOverride?: string[];
   specialRights?: string[];
+  specialRightsOverride?: string[];
+  specialRightsConfigured?: boolean | null;
+  temporaryAccess?: {
+    _id?: string | null;
+    moduleKey?: string | null;
+    rightKey?: string | null;
+    enabled: boolean;
+    expiresAt?: string | null;
+    reason?: string | null;
+    grantedBy?: string | null;
+  }[];
   accountStatus?: string;
   accessExpiresAt?: string;
   accessExpiryDate?: string;
@@ -33,6 +45,14 @@ export type TeamUser = {
   createdAt?: string;
   updatedAt?: string;
   [k: string]: any;
+};
+
+export type StaffAccessRecord = {
+  user: TeamUser;
+  effectiveAccess: {
+    accessVersion?: number;
+    specialRights: { key: string; allowed: boolean; state: string; founderOnly?: boolean }[];
+  };
 };
 
 export type CreateTeamUserPayload = {
@@ -309,6 +329,20 @@ export async function getTeamUser(id: string): Promise<TeamUser> {
   return (raw?.user || raw?.data?.user || raw?.data || raw) as TeamUser;
 }
 
+export async function getStaffAccessRecord(id: string): Promise<StaffAccessRecord> {
+  const raw = await adminJson<Partial<StaffAccessRecord> & { data?: Partial<StaffAccessRecord> }>(TEAM_API_PATHS.accessRecord(id), { cache: 'no-store' });
+  const user = raw?.user ?? raw?.data?.user;
+  const effectiveAccess = raw?.effectiveAccess ?? raw?.data?.effectiveAccess;
+  if (!user || String(user._id || user.id || '') !== id
+    || !Array.isArray(user.specialRightsOverride) || !user.specialRightsOverride.every((right) => typeof right === 'string')
+    || typeof user.specialRightsConfigured !== 'boolean'
+    || !effectiveAccess || !Array.isArray(effectiveAccess.specialRights)
+    || !effectiveAccess.specialRights.every((right) => right && typeof right.key === 'string' && typeof right.allowed === 'boolean' && typeof right.state === 'string')) {
+    throw new Error('Backend did not return authoritative saved Special Rights and configured state.');
+  }
+  return { user, effectiveAccess };
+}
+
 export async function createTeamUser(payload: CreateTeamUserPayload): Promise<any> {
   return adminJson(TEAM_API_PATHS.users, {
     method: 'POST',
@@ -378,7 +412,7 @@ export async function updateTeamRole(id: string, payload: Partial<TeamRolePayloa
 export async function saveStaffAccessOverride(id: string, payload: StaffAccessOverridePayload): Promise<any> {
   const serialized = serializeStaffAccessPayload(payload);
   const requests: Promise<any>[] = [];
-  if (payload.moduleAccess || payload.moduleStates) {
+  if (payload.moduleAccess !== undefined || payload.moduleStates !== undefined) {
     requests.push(adminJson(TEAM_API_PATHS.accessModules(id), {
       method: 'PATCH',
       json: {
@@ -390,7 +424,7 @@ export async function saveStaffAccessOverride(id: string, payload: StaffAccessOv
       },
     }));
   }
-  if (payload.specialRights) {
+  if (payload.specialRights !== undefined) {
     const taskRights = serialized.specialRights.filter((right) => TASK_RIGHT_KEYS.has(right));
     const accountControlRights = serialized.specialRights.filter((right) => ACCOUNT_CONTROL_RIGHT_KEYS.has(right));
     requests.push(adminJson(TEAM_API_PATHS.accessRights(id), {
@@ -410,18 +444,12 @@ export async function saveStaffAccessOverride(id: string, payload: StaffAccessOv
     requests.push(adminJson(TEAM_API_PATHS.accessTemporary(id), {
       method: 'POST',
       json: { accessExpiryDate: serialized.accessExpiryDate, expiresAt: serialized.accessExpiryDate, auditReason: serialized.auditReason, reason: serialized.reason },
-    }).catch((err) => {
-      if ([404, 405, 501].includes(statusOf(err))) return { temporaryUnavailable: true };
-      throw err;
     }));
   }
   serialized.temporaryAccess.forEach((grant) => {
     requests.push(adminJson(TEAM_API_PATHS.accessTemporary(id), {
       method: 'POST',
       json: { ...grant, auditReason: grant.reason || serialized.auditReason, reason: grant.reason || serialized.reason },
-    }).catch((err) => {
-      if ([404, 405, 501].includes(statusOf(err))) return { temporaryUnavailable: true };
-      throw err;
     }));
   });
   return Promise.all(requests);

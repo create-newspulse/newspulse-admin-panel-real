@@ -13,6 +13,7 @@ import {
   forceChangePasswordUser,
   generateTemporaryPasswordUser,
   getNextTeamStaffIdPreview,
+  getStaffAccessRecord,
   getTeamRoles,
   getTeamTasks,
   getTeamUsers,
@@ -35,6 +36,7 @@ import {
   type TeamUser,
   type TeamRole,
   type TeamTask,
+  type StaffAccessRecord,
 } from '@/api/teamManagementApi';
 import AuditLogsView from '@/pages/admin/settings/admin-panel/AuditLogsView';
 import { AdminApiError } from '@/lib/http/adminFetch';
@@ -116,7 +118,12 @@ type DelegationRightKey =
   | 'archive_staff_account'
   | 'assign_staff_access'
   | 'assign_staff_tasks';
-export type StaffAccessSnapshot = { moduleAccess: string[]; specialRights: string[]; temporaryGrants: { targetType: 'module' | 'right'; key: string; expiresAt: string; reason: string }[] };
+export type StaffAccessSnapshot = {
+  moduleAccess: string[];
+  specialRights: string[];
+  specialRightsConfigured: boolean;
+  temporaryGrants: { targetType: 'module' | 'right'; key: string; expiresAt: string; reason: string; enabled: boolean; grantedBy: string }[];
+};
 type StaffActionModal =
   | { type: 'password'; mode: PasswordActionMode; user: TeamUser }
   | { type: 'access'; mode: AccountAccessMode; user: TeamUser }
@@ -192,7 +199,7 @@ const TASK_STATUSES = ['Assigned', 'In Progress', 'Submitted', 'Under Review', '
 const TASK_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 const TASK_BOARD_VIEWS = ['My Tasks', 'Team Tasks', 'Management Tasks', 'Field Tasks', 'Newsroom Tasks', 'Overdue Tasks'];
 
-const EMPTY_ACCESS_SNAPSHOT: StaffAccessSnapshot = { moduleAccess: [], specialRights: [], temporaryGrants: [] };
+const EMPTY_ACCESS_SNAPSHOT: StaffAccessSnapshot = { moduleAccess: [], specialRights: [], specialRightsConfigured: false, temporaryGrants: [] };
 
 function normalizeAccessFlag(value: unknown): 'enabled' | 'disabled' | 'inherited' | 'overridden' | 'unknown' {
   if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
@@ -255,55 +262,30 @@ function normalizeTemporaryGrants(raw: unknown): StaffAccessSnapshot['temporaryG
       key,
       expiresAt: String(grant?.expiresAt ?? grant?.accessExpiryDate ?? grant?.expiryDate ?? '').trim(),
       reason: String(grant?.reason ?? '').trim(),
+      enabled: grant?.enabled !== false,
+      grantedBy: String(grant?.grantedBy ?? '').trim(),
     };
-  }).filter((grant) => grant.key).sort((a, b) => `${a.targetType}:${a.key}:${a.expiresAt}:${a.reason}`.localeCompare(`${b.targetType}:${b.key}:${b.expiresAt}:${b.reason}`));
+  }).filter((grant) => grant.key).sort((a, b) => `${a.targetType}:${a.key}:${a.enabled}:${a.expiresAt}:${a.reason}`.localeCompare(`${b.targetType}:${b.key}:${b.enabled}:${b.expiresAt}:${b.reason}`));
 }
 
-function normalizeStaffAccessSnapshot(raw: Record<string, any>): StaffAccessSnapshot {
-  const accessOverrides = raw?.accessOverrides || {};
-  const moduleAccessStates = moduleAccessFromStates(raw?.moduleAccessStates ?? accessOverrides.moduleAccessStates);
-  const moduleOverride = normalizeModulePermissionSet(raw?.moduleAccessOverride ?? accessOverrides.moduleAccessOverride);
-  const specialRightsOverride = normalizeSpecialRightPermissionSet(raw?.specialRightsOverride ?? accessOverrides.specialRightsOverride);
+export function createAccessSnapshot(moduleAccess: unknown, specialRights: unknown, temporaryGrants: unknown, specialRightsConfigured = false): StaffAccessSnapshot {
   return {
-    moduleAccess: moduleAccessStates.length ? moduleAccessStates : moduleOverride.length ? moduleOverride : normalizeModulePermissionSet(raw?.moduleAccess ?? raw?.modules ?? accessOverrides.modules ?? accessOverrides.moduleAccess),
-    specialRights: specialRightsOverride.length ? specialRightsOverride : normalizeSpecialRightPermissionSet(raw?.specialRights ?? raw?.rights ?? accessOverrides.specialRights ?? accessOverrides.rights),
-    temporaryGrants: normalizeTemporaryGrants(raw?.temporaryGrants ?? raw?.temporaryPermissions ?? raw?.temporaryAccess ?? accessOverrides.temporaryGrants),
+    moduleAccess: normalizeModulePermissionSet(moduleAccess),
+    specialRights: normalizeSpecialRightPermissionSet(specialRights),
+    specialRightsConfigured,
+    temporaryGrants: normalizeTemporaryGrants(temporaryGrants),
   };
 }
 
-export function createAccessSnapshot(moduleAccess: unknown, specialRights: unknown, temporaryGrants: unknown): StaffAccessSnapshot {
-  return normalizeStaffAccessSnapshot({ moduleAccess, specialRights, temporaryGrants } as Record<string, any>);
-}
-
-function accessSnapshotFromTeamUser(teamUser: TeamUser): StaffAccessSnapshot {
-  const saved = normalizeStaffAccessSnapshot(teamUser as any);
-  return {
-    moduleAccess: saved.moduleAccess.length ? saved.moduleAccess : normalizeModulePermissionSet(getEffectiveModuleAccess(teamUser)),
-    specialRights: saved.specialRights.length ? saved.specialRights : normalizeSpecialRightPermissionSet(getEffectiveSpecialRights(teamUser)),
-    temporaryGrants: saved.temporaryGrants,
-  };
-}
-
-function accessSnapshotFromSaveResult(result: unknown, fallback: StaffAccessSnapshot): StaffAccessSnapshot {
-  const responses = Array.isArray(result) ? result : [result];
-  let mergedRaw: Record<string, any> = {};
-
-  responses.forEach((response: any) => {
-    const data = response?.data && typeof response.data === 'object' ? response.data : {};
-    const user = data.user || response?.user;
-    const record = data.record || response?.record;
-    if (user && typeof user === 'object') mergedRaw = { ...mergedRaw, ...user };
-    if (record && typeof record === 'object') mergedRaw = { ...mergedRaw, ...record };
-    if (Array.isArray(data.temporaryAccess)) mergedRaw.temporaryAccess = data.temporaryAccess;
-    if (Array.isArray(response?.temporaryAccess)) mergedRaw.temporaryAccess = response.temporaryAccess;
-  });
-
-  const normalized = normalizeStaffAccessSnapshot(mergedRaw);
-  return {
-    moduleAccess: normalized.moduleAccess.length ? normalized.moduleAccess : fallback.moduleAccess,
-    specialRights: normalized.specialRights.length ? normalized.specialRights : fallback.specialRights,
-    temporaryGrants: normalized.temporaryGrants.length ? normalized.temporaryGrants : fallback.temporaryGrants,
-  };
+export function accessSnapshotFromTeamUser(teamUser: TeamUser): StaffAccessSnapshot {
+  const accessOverrides = teamUser.accessOverrides || {};
+  const moduleStates = teamUser.moduleAccessStates ?? accessOverrides.moduleAccessStates;
+  return createAccessSnapshot(
+    moduleStates != null ? moduleAccessFromStates(moduleStates) : teamUser.moduleAccessOverride ?? accessOverrides.moduleAccessOverride ?? teamUser.moduleAccess ?? teamUser.modules ?? accessOverrides.modules ?? accessOverrides.moduleAccess,
+    teamUser.specialRightsOverride ?? accessOverrides.specialRightsOverride ?? accessOverrides.specialRights ?? accessOverrides.rights,
+    teamUser.temporaryAccess ?? teamUser.temporaryGrants ?? teamUser.temporaryPermissions ?? accessOverrides.temporaryGrants,
+    teamUser.specialRightsConfigured === true,
+  );
 }
 
 function accessSnapshotsEqual(left: StaffAccessSnapshot, right: StaffAccessSnapshot): boolean {
@@ -1244,7 +1226,9 @@ export default function TeamManagement() {
   const [err, setErr] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [savingRole, setSavingRole] = useState(false);
-  const [overrideDrafts, setOverrideDrafts] = useState<Record<string, { moduleAccess: AdminModuleKey[]; specialRights: SpecialRightKey[] }>>({});
+  const [overrideDrafts, setOverrideDrafts] = useState<Record<string, { moduleAccess: AdminModuleKey[]; specialRights: SpecialRightKey[]; specialRightsConfigured?: boolean }>>({});
+  const [staffAccessRecords, setStaffAccessRecords] = useState<Record<string, StaffAccessRecord>>({});
+  const [accessReloadRequired, setAccessReloadRequired] = useState<Record<string, boolean>>({});
   const [savingOverrideId, setSavingOverrideId] = useState<string | null>(null);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [expandedStaffId, setExpandedStaffId] = useState<string | null>(null);
@@ -1633,6 +1617,7 @@ export default function TeamManagement() {
         next[id] = {
           moduleAccess: savedSnapshot.moduleAccess as AdminModuleKey[],
           specialRights: savedSnapshot.specialRights as SpecialRightKey[],
+          specialRightsConfigured: savedSnapshot.specialRightsConfigured,
         };
       });
       return next;
@@ -2101,34 +2086,74 @@ export default function TeamManagement() {
       toast.error(message);
       return;
     }
-    if (!id || isFounderUser(teamUser)) return;
+    if (!id || isFounderUser(teamUser)) {
+      toast.error(!id ? 'Select a staff member.' : 'Founder account is protected.');
+      return;
+    }
+    if (accessReloadRequired[id]) {
+      toast.error('Reload Staff Control Center to verify saved access before making more changes.');
+      return;
+    }
+    if (savingOverrideId) {
+      toast.error('Wait for the current access save to finish.');
+      return;
+    }
     if (auditReason.trim().length < 5) {
       const message = 'Enter an audit reason.';
       setAccessSaveNotice({ tone: 'error', message });
       toast.error(message);
       return;
     }
+    if (pendingTemporaryGrants.some((grant) => !grant.expiresAt || !Number.isFinite(Date.parse(grant.expiresAt)) || Date.parse(grant.expiresAt) <= Date.now())) {
+      toast.error('Set a future expiry for every temporary grant before saving.');
+      return;
+    }
+    if (pendingTemporaryGrants.some((grant) => (grant.reason || auditReason).trim().length < 3)) {
+      toast.error('Enter a reason of at least three characters for every temporary grant.');
+      return;
+    }
     const draft = overrideDrafts[id] || accessSnapshotFromTeamUser(teamUser);
-    const optimisticSnapshot = createAccessSnapshot(draft.moduleAccess, draft.specialRights, pendingTemporaryGrants);
+    const baseline = initialAccessSnapshots[id] || accessSnapshotFromTeamUser(teamUser);
+    const rightsChanged = JSON.stringify(normalizeSpecialRightPermissionSet(draft.specialRights)) !== JSON.stringify(baseline.specialRights)
+      || (draft.specialRightsConfigured === true && !baseline.specialRightsConfigured);
+    const modulesChanged = JSON.stringify(normalizeModulePermissionSet(draft.moduleAccess)) !== JSON.stringify(baseline.moduleAccess)
+      || pendingTemporaryGrants.some((grant) => grant.targetType === 'module');
+    let changesSubmitted = false;
     setSavingOverrideId(id);
     setAccessSaveNotice(null);
     try {
-      const result = await saveStaffAccessOverride(id, { ...draft, reason: auditReason.trim(), auditReason: auditReason.trim(), accessExpiryDate: temporaryAccessExpiry || undefined, accessVersion: typeof teamUser.accessVersion === 'number' ? teamUser.accessVersion : undefined, temporaryGrants: pendingTemporaryGrants.map((grant) => ({ targetType: grant.targetType, key: grant.key, expiresAt: grant.expiresAt, reason: grant.reason })) });
-      if (Array.isArray(result) && result.some((item: any) => item?.temporaryUnavailable)) toast.error('Temporary access API is not available yet.');
-      else toast.success('Staff access updated successfully.');
-      const savedSnapshot = accessSnapshotFromSaveResult(result, optimisticSnapshot);
-      setInitialAccessSnapshots((state) => ({ ...state, [id]: savedSnapshot }));
-      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess: savedSnapshot.moduleAccess as AdminModuleKey[], specialRights: savedSnapshot.specialRights as SpecialRightKey[] } }));
+      await saveStaffAccessOverride(id, {
+        ...(modulesChanged ? { moduleAccess: draft.moduleAccess } : {}),
+        ...(rightsChanged ? { specialRights: draft.specialRights } : {}),
+        reason: auditReason.trim(),
+        auditReason: auditReason.trim(),
+        accessExpiryDate: temporaryAccessExpiry || undefined,
+        accessVersion: staffAccessRecords[id]?.effectiveAccess.accessVersion ?? teamUser.accessVersion,
+        temporaryGrants: pendingTemporaryGrants.map((grant) => ({ targetType: grant.targetType, key: grant.key, expiresAt: grant.expiresAt, reason: grant.reason })),
+      });
+      changesSubmitted = true;
       clearAdminEffectiveAccessCache();
+      const record = await getStaffAccessRecord(id);
+      if (rightsChanged && record.user.specialRightsConfigured !== true) {
+        throw new Error('Backend did not confirm the permanent Special Rights configuration.');
+      }
+      const savedSnapshot = accessSnapshotFromTeamUser(record.user);
+      setStaffAccessRecords((state) => ({ ...state, [id]: record }));
+      setItems((state) => state.map((item) => userId(item) === id ? record.user : item));
+      setDetailsUser((current) => current && userId(current) === id ? record.user : current);
+      setInitialAccessSnapshots((state) => ({ ...state, [id]: savedSnapshot }));
+      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess: savedSnapshot.moduleAccess as AdminModuleKey[], specialRights: savedSnapshot.specialRights as SpecialRightKey[], specialRightsConfigured: savedSnapshot.specialRightsConfigured } }));
       setAccessSaveNotice({ tone: 'success', message: 'Staff access updated successfully.' });
+      toast.success('Staff access updated successfully.');
       setAuditReason('');
       setTemporaryAccessExpiry('');
       setTemporaryGrants([]);
-      await fetchStaff();
     } catch (err2: any) {
       logTeamApiError('save access override failed', err2);
       if (isTeamApiUnauthorized(err2)) setSessionBlocked(true);
-      const message = toTeamApiErrorMessage(err2, 'Save override failed');
+      const errorMessage = toTeamApiErrorMessage(err2, 'Save override failed');
+      const message = changesSubmitted ? `Access changes were submitted, but authoritative reload failed. Reload Staff Control Center before saving again. ${errorMessage}` : errorMessage;
+      if (changesSubmitted) setAccessReloadRequired((state) => ({ ...state, [id]: true }));
       setAccessSaveNotice({ tone: 'error', message });
       toast.error(message);
     } finally {
@@ -2299,16 +2324,16 @@ export default function TeamManagement() {
     const teamUser = selectedAccessUser;
     const id = teamUser ? userId(teamUser) : '';
     const savedFallback = teamUser ? accessSnapshotFromTeamUser(teamUser) : EMPTY_ACCESS_SNAPSHOT;
-    const draft = teamUser && id ? overrideDrafts[id] || { moduleAccess: savedFallback.moduleAccess as AdminModuleKey[], specialRights: savedFallback.specialRights as SpecialRightKey[] } : { moduleAccess: [] as AdminModuleKey[], specialRights: [] as SpecialRightKey[] };
+    const draft = teamUser && id ? overrideDrafts[id] || { moduleAccess: savedFallback.moduleAccess as AdminModuleKey[], specialRights: savedFallback.specialRights as SpecialRightKey[], specialRightsConfigured: savedFallback.specialRightsConfigured } : { moduleAccess: [] as AdminModuleKey[], specialRights: [] as SpecialRightKey[], specialRightsConfigured: false };
     const matchingPreset = teamUser ? [
       ...DEFAULT_ROLE_ACCESS.map((preset) => ({ roleName: preset.label, id: preset.id, moduleAccess: preset.modules, specialRights: preset.specialRights })),
       ...roles,
     ].find((preset) => normalizeRoleId(preset.roleName || preset.id) === normalizeRoleId(teamUser.role)) : null;
     const initialAccessSnapshot = id ? initialAccessSnapshots[id] || savedFallback : EMPTY_ACCESS_SNAPSHOT;
-    const currentAccessState = createAccessSnapshot(draft.moduleAccess, draft.specialRights, temporaryGrants);
+    const currentAccessState = createAccessSnapshot(draft.moduleAccess, draft.specialRights, [...initialAccessSnapshot.temporaryGrants, ...temporaryGrants], draft.specialRightsConfigured ?? initialAccessSnapshot.specialRightsConfigured);
     const hasAccessChanges = hasStaffAccessChanges(initialAccessSnapshot, currentAccessState);
-    const isSaving = !!id && savingOverrideId === id;
-    const saveDisabledReason = getStaffAccessSaveDisabledReason({ selectedStaffId: id || null, selectedStaffIsFounder: !!teamUser && isFounderUser(teamUser), isFounder, hasAccessChanges, auditReason, isSaving });
+    const isSaving = savingOverrideId !== null;
+    const saveDisabledReason = accessReloadRequired[id] ? 'Reload Staff Control Center to verify saved access before making more changes.' : getStaffAccessSaveDisabledReason({ selectedStaffId: id || null, selectedStaffIsFounder: !!teamUser && isFounderUser(teamUser), isFounder, hasAccessChanges, auditReason, isSaving });
     const saveDisabled = !!saveDisabledReason;
     const baselineModules = initialAccessSnapshot.moduleAccess as AdminModuleKey[];
     const baselineRights = initialAccessSnapshot.specialRights as SpecialRightKey[];
@@ -2320,7 +2345,7 @@ export default function TeamManagement() {
     const enabledModules = draft.moduleAccess.length;
     const enabledRights = draft.specialRights.length;
     const savedStaffForEffectiveAccess = { ...teamUser, moduleAccess: baselineModules, specialRights: baselineRights, temporaryGrants: initialAccessSnapshot.temporaryGrants, accessOverrides: { modules: baselineModules, specialRights: baselineRights, temporaryGrants: initialAccessSnapshot.temporaryGrants } };
-    const draftStaffForEffectiveAccess = { ...teamUser, moduleAccess: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants, accessOverrides: { modules: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants } };
+    const draftStaffForEffectiveAccess = { ...teamUser, moduleAccess: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants: currentAccessState.temporaryGrants, accessOverrides: { modules: draft.moduleAccess, specialRights: draft.specialRights, temporaryGrants: currentAccessState.temporaryGrants } };
     const effectiveModuleRows = ADMIN_MODULES.map((moduleItem) => ({ moduleItem, access: resolveAdminModuleAccess(savedStaffForEffectiveAccess, moduleItem.key, { modulePolicy: globalModulePolicy }), pendingAccess: resolveAdminModuleAccess(draftStaffForEffectiveAccess, moduleItem.key, { modulePolicy: globalModulePolicy }) }));
     const effectivelyAvailableCount = effectiveModuleRows.filter((item) => item.access.allowed).length;
     const globallyLockedCount = effectiveModuleRows.filter((item) => item.access.reasonCode === 'GLOBAL_STAFF_LOCK' || item.access.policyState === 'hidden').length;
@@ -2331,12 +2356,12 @@ export default function TeamManagement() {
     const addedRights = draft.specialRights.filter((key) => !baselineRights.includes(key));
     const removedRights = baselineRights.filter((key) => !draft.specialRights.includes(key));
     const setModules = (moduleAccess: AdminModuleKey[]) => id && setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, moduleAccess } }));
-    const setRights = (specialRights: SpecialRightKey[]) => id && setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, specialRights } }));
+    const setRights = (specialRights: SpecialRightKey[]) => id && setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, specialRights, specialRightsConfigured: true } }));
     const loadPresetSuggestions = () => {
       if (!id || !matchingPreset) return;
       const moduleAccess = (matchingPreset.moduleAccess || []).filter((key) => !PRESET_BLOCKED_MODULES.has(key as AdminModuleKey)) as AdminModuleKey[];
       const specialRights = (matchingPreset.specialRights || []).filter((key) => !PRESET_BLOCKED_RIGHTS.has(key as SpecialRightKey)) as SpecialRightKey[];
-      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess, specialRights } }));
+      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess, specialRights, specialRightsConfigured: true } }));
       setTemporaryGrants([]);
       setAccessSaveNotice({ tone: 'success', message: 'Suggestions loaded. Review the permissions below and save when ready.' });
       toast.success('Suggestions loaded. Review the permissions below and save when ready.');
@@ -2408,13 +2433,13 @@ export default function TeamManagement() {
         setRights(toggleValue(draft.specialRights, key, false));
         removeTemporaryGrant('right', key);
       } else if (nextState === 'temporary') {
-        setRights(toggleValue(draft.specialRights, key, true));
+        if (draft.specialRights.includes(key)) setRights(toggleValue(draft.specialRights, key, false));
         addOrUpdateTemporaryGrant('right', key);
       }
     };
     const resetAccessDraft = () => {
       if (!id || !teamUser) return;
-      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess: baselineModules, specialRights: baselineRights } }));
+      setOverrideDrafts((state) => ({ ...state, [id]: { moduleAccess: baselineModules, specialRights: baselineRights, specialRightsConfigured: initialAccessSnapshot.specialRightsConfigured } }));
       setAuditReason('');
       setAccessSaveNotice(null);
       setTemporaryAccessExpiry('');
@@ -2441,7 +2466,7 @@ export default function TeamManagement() {
       if (state === 'founder_only') return <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800">Founder Only 🔒</span>;
       if (state === 'locked') return <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Locked</span>;
       return (
-        <select value={state} disabled={disabled || !isFounder} onChange={(event) => onChange(event.target.value as AccessControlState)} className="min-w-36 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500">
+        <select value={state} disabled={disabled || !isFounder || isSaving || accessReloadRequired[id]} onChange={(event) => onChange(event.target.value as AccessControlState)} className="min-w-36 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500">
           <option value="disabled">Disabled</option>
           <option value="enabled">Enabled</option>
           <option value="temporary">Temporary</option>
@@ -2454,7 +2479,22 @@ export default function TeamManagement() {
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="min-w-full text-sm">
             <thead><tr className="bg-slate-50 text-left text-slate-600"><th className="px-4 py-3">Right name</th><th className="px-4 py-3">State control</th><th className="px-4 py-3">Notes</th></tr></thead>
-            <tbody>{rights.map((rightKey) => { const state = rightState(rightKey); return <tr key={rightKey} className="border-t border-slate-200"><td className="px-4 py-3 font-semibold text-slate-900">{labelForRight(rightKey)}</td><td className="px-4 py-3">{renderStateControl(state, (nextState) => updateRightState(rightKey, nextState))}</td><td className="px-4 py-3 text-slate-600">{state === 'founder_only' ? 'Protected right. Backend remains final authority.' : state === 'temporary' ? `Temporary until ${selectedByKey('right', rightKey)?.expiresAt || 'expiry not set'}` : 'Role default can be overridden here.'}</td></tr>; })}</tbody>
+            <tbody>{rights.map((rightKey) => {
+              const state = rightState(rightKey);
+              const effective = staffAccessRecords[id]?.effectiveAccess.specialRights.find((item) => localSpecialRightKey(item.key) === rightKey);
+              const savedTemporary = initialAccessSnapshot.temporaryGrants.filter((grant) => grant.targetType === 'right' && grant.key === rightKey);
+              return <tr key={rightKey} className="border-t border-slate-200">
+                <td className="px-4 py-3 font-semibold text-slate-900">{labelForRight(rightKey)}</td>
+                <td className="px-4 py-3">{renderStateControl(state, (nextState) => updateRightState(rightKey, nextState))}</td>
+                <td className="px-4 py-3 text-slate-600">
+                  {state === 'founder_only' ? 'Protected right. Backend remains final authority.' : <>
+                    <div>{state === 'temporary' ? `Staged temporary grant until ${selectedByKey('right', rightKey)?.expiresAt || 'expiry not set'}` : 'Permanent selection only. Role presets and computed rights are not copied here.'}</div>
+                    {effective ? <div>Backend effective access: {effective.allowed ? 'Allowed' : 'Not allowed'} ({effective.state}).</div> : <div>Backend computed rights: {normalizeSpecialRightPermissionSet(teamUser?.specialRights).includes(rightKey) ? 'included' : 'not included'}. Account and module restrictions still apply.</div>}
+                    {savedTemporary.map((grant, index) => <div key={index}>{grant.expiresAt && Date.parse(grant.expiresAt) <= Date.now() ? 'Expired temporary' : 'Temporary'} {grant.enabled ? 'grant' : 'denial'} until {grant.expiresAt ? formatDateTime(grant.expiresAt) : 'no expiry'}.</div>)}
+                  </>}
+                </td>
+              </tr>;
+            })}</tbody>
           </table>
         </div>
       </div>
@@ -2463,13 +2503,13 @@ export default function TeamManagement() {
       <SectionCard title="Staff Access & Special Rights" subtitle="Step 1: Choose Staff. Step 2: What can this staff open? Step 3: What can this staff do? Step 4: Review & Save.">
         {!teamUser ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No staff accounts loaded yet.</div> : <div className="space-y-4">
           {!isFounder ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">Only the Founder can save Staff Access and Special Rights changes.</div> : null}
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">Staff Access opens modules. Special Rights allow actions inside modules. Role/Position only suggests defaults; Founder makes the final decision here.</div>
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-950">Staff Access opens modules. Special Rights allow actions inside modules. Role/Position only suggests defaults; Founder makes the final decision here. {initialAccessSnapshot.specialRightsConfigured ? 'Permanent Special Rights are configured, including an empty selection.' : 'Permanent Special Rights are not configured. Legacy effective rights remain separate until the Founder explicitly edits and saves Special Rights.'}</div>
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
             <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-sm font-semibold text-slate-950">Staff Selector</div>
               <input value={staffAccessSearch} onChange={(event) => setStaffAccessSearch(event.target.value)} placeholder="Search staff" className={`${inputClass} mt-3`} />
               <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                {searchedStaff.map((item) => { const itemId = userId(item); return <button key={itemId || item.email} type="button" onClick={() => selectAccessStaff(itemId)} className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${itemId === id ? 'border-slate-900 bg-white text-slate-950 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}><span className="block truncate font-semibold">{displayFullName(item, false)}</span><span className="block truncate text-xs text-slate-500">{roleLabel(item.role)} · {displayStaffId(item.staffId)}</span></button>; })}
+                {searchedStaff.map((item) => { const itemId = userId(item); return <button key={itemId || item.email} type="button" disabled={!!savingOverrideId} onClick={() => selectAccessStaff(itemId)} className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${itemId === id ? 'border-slate-900 bg-white text-slate-950 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}><span className="block truncate font-semibold">{displayFullName(item, false)}</span><span className="block truncate text-xs text-slate-500">{roleLabel(item.role)} · {displayStaffId(item.staffId)}</span></button>; })}
                 {!searchedStaff.length ? <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">No staff matched.</div> : null}
               </div>
             </aside>
@@ -2486,7 +2526,7 @@ export default function TeamManagement() {
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Individual modules enabled</div><div className="mt-1 font-semibold text-slate-950">{enabledModules}</div></div>
                   <div><div className="text-xs font-semibold uppercase text-slate-500">Effectively available</div><div className="mt-1 font-semibold text-slate-950">{effectivelyAvailableCount}</div></div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600"><button type="button" disabled={!matchingPreset || !isFounder || !id} onClick={loadPresetSuggestions} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Load Suggestions</button><span className="text-slate-600">Loads suggestions only. Nothing is saved yet.</span><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800">Individual modules enabled: {enabledModules}</span><span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-blue-800">Effectively available: {effectivelyAvailableCount}</span><span className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1">Globally locked: {globallyLockedCount}</span><span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800">Founder-only: {founderOnlyCount}</span><span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">Temporary: {temporaryGrants.length}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">Rights enabled: {enabledRights}</span></div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600"><button type="button" disabled={!matchingPreset || !isFounder || !id || isSaving || accessReloadRequired[id]} onClick={loadPresetSuggestions} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Load Suggestions</button><span className="text-slate-600">Loads suggestions only. Nothing is saved yet.</span><span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800">Individual modules enabled: {enabledModules}</span><span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-blue-800">Effectively available: {effectivelyAvailableCount}</span><span className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1">Globally locked: {globallyLockedCount}</span><span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-800">Founder-only: {founderOnlyCount}</span><span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-800">Temporary: {initialAccessSnapshot.temporaryGrants.length + temporaryGrants.length}</span><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">Rights enabled: {enabledRights}</span></div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-white p-2"><div className="flex flex-wrap gap-2">{ACCESS_STUDIO_TABS.map((tab) => <button key={tab.key} type="button" onClick={() => setAccessStudioTab(tab.key)} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${accessStudioTab === tab.key ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}>{tab.label}</button>)}</div></div>
               {accessStudioTab === 'modules' ? <div className="space-y-3">
@@ -2526,10 +2566,42 @@ export default function TeamManagement() {
               {accessStudioTab === 'staffAdmin' ? renderRightsRows(RIGHT_TAB_GROUPS.staffAdmin) : null}
               {accessStudioTab === 'security' ? renderRightsRows(RIGHT_TAB_GROUPS.security) : null}
               {accessStudioTab === 'system' ? renderRightsRows(RIGHT_TAB_GROUPS.system) : null}
-              {accessStudioTab === 'temporary' ? <div className="space-y-4"><div className="rounded-xl border border-slate-200 bg-white p-4"><div className="grid grid-cols-1 gap-3 md:grid-cols-[150px_minmax(180px,1fr)_180px_minmax(220px,1fr)_auto]"><label className={fieldLabelClass}>Access type<select value={temporaryGrantForm.targetType} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, targetType: event.target.value as 'module' | 'right', key: event.target.value === 'module' ? 'dashboard' : 'can_publish_news' }))} className={inputClass}><option value="module">Module</option><option value="right">Right</option></select></label><label className={fieldLabelClass}>Module / Right<select value={temporaryGrantForm.key} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, key: event.target.value }))} className={inputClass}>{temporaryGrantForm.targetType === 'module' ? ADMIN_MODULES.filter((item) => !FOUNDER_ONLY_MODULES.has(item.key)).map((item) => <option key={item.key} value={item.key}>{item.label}</option>) : SPECIAL_RIGHTS.filter((item) => !FOUNDER_ONLY_RIGHTS.has(item.key)).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label><label className={fieldLabelClass}>Expires at<input type="datetime-local" value={temporaryGrantForm.expiresAt} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, expiresAt: event.target.value }))} className={inputClass} /></label><label className={fieldLabelClass}>Reason<input value={temporaryGrantForm.reason} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, reason: event.target.value }))} className={inputClass} /></label><div className="flex items-end"><button type="button" disabled={!temporaryGrantForm.expiresAt || !temporaryGrantForm.reason.trim()} onClick={() => { const key = temporaryGrantForm.key as AdminModuleKey | SpecialRightKey; addOrUpdateTemporaryGrant(temporaryGrantForm.targetType, key, { expiresAt: temporaryGrantForm.expiresAt, reason: temporaryGrantForm.reason.trim() }); if (temporaryGrantForm.targetType === 'module') setModules(toggleValue(draft.moduleAccess, key as AdminModuleKey, true)); else setRights(toggleValue(draft.specialRights, key as SpecialRightKey, true)); setTemporaryGrantForm((state) => ({ ...state, expiresAt: '', reason: '' })); }} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Add Grant</button></div></div></div><div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="min-w-full text-sm"><thead><tr className="bg-slate-50 text-left text-slate-600"><th className="px-4 py-3">Access type</th><th className="px-4 py-3">Module / Right</th><th className="px-4 py-3">Expires at</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Granted by</th><th className="px-4 py-3">Action</th></tr></thead><tbody>{temporaryGrants.map((grant) => <tr key={`${grant.targetType}-${grant.key}`} className="border-t border-slate-200"><td className="px-4 py-3 font-semibold capitalize text-slate-900">{grant.targetType}</td><td className="px-4 py-3 text-slate-700">{grant.targetType === 'module' ? labelForModule(grant.key as AdminModuleKey) : labelForRight(grant.key as SpecialRightKey)}</td><td className="px-4 py-3 text-slate-700">{formatDateTime(grant.expiresAt)}</td><td className="px-4 py-3 text-slate-700">{grant.reason || '-'}</td><td className="px-4 py-3 text-slate-700">{grant.grantedBy}</td><td className="px-4 py-3"><button type="button" onClick={() => removeTemporaryGrant(grant.targetType, grant.key)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">Remove</button></td></tr>)}{!temporaryGrants.length ? <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No temporary module or right grants staged.</td></tr> : null}</tbody></table></div></div> : null}
+              {accessStudioTab === 'temporary' ? <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-[150px_minmax(180px,1fr)_180px_minmax(220px,1fr)_auto]">
+                    <label className={fieldLabelClass}>Access type<select value={temporaryGrantForm.targetType} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, targetType: event.target.value as 'module' | 'right', key: event.target.value === 'module' ? 'dashboard' : 'can_publish_news' }))} className={inputClass}><option value="module">Module</option><option value="right">Right</option></select></label>
+                    <label className={fieldLabelClass}>Module / Right<select value={temporaryGrantForm.key} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, key: event.target.value }))} className={inputClass}>{temporaryGrantForm.targetType === 'module' ? ADMIN_MODULES.filter((item) => !FOUNDER_ONLY_MODULES.has(item.key)).map((item) => <option key={item.key} value={item.key}>{item.label}</option>) : SPECIAL_RIGHTS.filter((item) => !FOUNDER_ONLY_RIGHTS.has(item.key)).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                    <label className={fieldLabelClass}>Expires at<input type="datetime-local" value={temporaryGrantForm.expiresAt} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, expiresAt: event.target.value }))} className={inputClass} /></label>
+                    <label className={fieldLabelClass}>Reason<input value={temporaryGrantForm.reason} onChange={(event) => setTemporaryGrantForm((state) => ({ ...state, reason: event.target.value }))} className={inputClass} /></label>
+                    <div className="flex items-end"><button type="button" disabled={!isFounder || isSaving || accessReloadRequired[id] || !temporaryGrantForm.expiresAt || !temporaryGrantForm.reason.trim()} onClick={() => {
+                      const key = temporaryGrantForm.key as AdminModuleKey | SpecialRightKey;
+                      addOrUpdateTemporaryGrant(temporaryGrantForm.targetType, key, { expiresAt: temporaryGrantForm.expiresAt, reason: temporaryGrantForm.reason.trim() });
+                      if (temporaryGrantForm.targetType === 'module') setModules(toggleValue(draft.moduleAccess, key as AdminModuleKey, true));
+                      setTemporaryGrantForm((state) => ({ ...state, expiresAt: '', reason: '' }));
+                    }} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Add Grant</button></div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead><tr className="bg-slate-50 text-left text-slate-600"><th className="px-4 py-3">Access type</th><th className="px-4 py-3">Module / Right</th><th className="px-4 py-3">Expires at</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Granted by</th><th className="px-4 py-3">Action</th></tr></thead>
+                    <tbody>
+                      {initialAccessSnapshot.temporaryGrants.map((grant, index) => <tr key={`saved-${index}`} className="border-t border-slate-200">
+                        <td className="px-4 py-3 font-semibold capitalize text-slate-900">{grant.targetType}</td>
+                        <td className="px-4 py-3 text-slate-700">{grant.targetType === 'module' ? labelForModule(grant.key as AdminModuleKey) : labelForRight(grant.key as SpecialRightKey)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatDateTime(grant.expiresAt)}</td>
+                        <td className="px-4 py-3 text-slate-700">{grant.reason || '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{grant.grantedBy || '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{grant.expiresAt && Date.parse(grant.expiresAt) <= Date.now() ? 'Expired' : 'Saved'} {grant.enabled ? 'grant' : 'denial'}</td>
+                      </tr>)}
+                      {temporaryGrants.map((grant) => <tr key={`${grant.targetType}-${grant.key}`} className="border-t border-slate-200"><td className="px-4 py-3 font-semibold capitalize text-slate-900">{grant.targetType}</td><td className="px-4 py-3 text-slate-700">{grant.targetType === 'module' ? labelForModule(grant.key as AdminModuleKey) : labelForRight(grant.key as SpecialRightKey)}</td><td className="px-4 py-3 text-slate-700">{formatDateTime(grant.expiresAt)}</td><td className="px-4 py-3 text-slate-700">{grant.reason || '-'}</td><td className="px-4 py-3 text-slate-700">{grant.grantedBy}</td><td className="px-4 py-3"><button type="button" disabled={!isFounder || isSaving || accessReloadRequired[id]} onClick={() => removeTemporaryGrant(grant.targetType, grant.key)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">Remove</button></td></tr>)}
+                      {!initialAccessSnapshot.temporaryGrants.length && !temporaryGrants.length ? <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No temporary module or right grants staged.</td></tr> : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div> : null}
               {accessStudioTab === 'review' ? <div className="space-y-4"><div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-sm font-semibold text-slate-950">Selected staff:</div><div className="mt-1 text-sm text-slate-700">{displayFullName(teamUser, false)} · {roleLabel(teamUser.role)} · {displayStaffId(teamUser.staffId)}</div></div><div className="grid grid-cols-1 gap-4 md:grid-cols-3"><div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="font-semibold text-emerald-900">Added</div><div className="mt-2 space-y-1 text-sm text-emerald-900">{[...addedModules.map(labelForModule), ...addedRights.map(labelForRight)].map((item) => <div key={item}>{item}</div>)}{!addedModules.length && !addedRights.length ? <div>Nothing added</div> : null}</div></div><div className="rounded-xl border border-rose-200 bg-rose-50 p-4"><div className="font-semibold text-rose-900">Removed</div><div className="mt-2 space-y-1 text-sm text-rose-900">{[...removedModules.map(labelForModule), ...removedRights.map(labelForRight)].map((item) => <div key={item}>{item}</div>)}{!removedModules.length && !removedRights.length ? <div>Nothing removed</div> : null}</div></div><div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="font-semibold text-amber-900">Temporary</div><div className="mt-2 space-y-1 text-sm text-amber-900">{temporaryGrants.map((grant) => <div key={`${grant.targetType}-${grant.key}`}>{grant.targetType === 'module' ? labelForModule(grant.key as AdminModuleKey) : labelForRight(grant.key as SpecialRightKey)} until {formatDateTime(grant.expiresAt)}</div>)}{!temporaryGrants.length ? <div>No temporary grants</div> : null}</div></div></div><label className={fieldLabelClass}>Reason<textarea value={accessChangeReason} onChange={(event) => setAccessChangeReason(event.target.value)} className={`${inputClass} min-h-24`} placeholder="Required for major access changes." /></label></div> : null}
               <div className="sticky bottom-0 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-                <label className={fieldLabelClass}>Audit Reason<textarea value={auditReason} required minLength={5} onChange={(event) => setAuditReason(event.target.value)} className={`${inputClass} min-h-20`} placeholder="Explain why these access changes are being made" /></label>
+                <label className={fieldLabelClass}>Audit Reason<textarea value={auditReason} disabled={isSaving} required minLength={5} onChange={(event) => setAuditReason(event.target.value)} className={`${inputClass} min-h-20`} placeholder="Explain why these access changes are being made" /></label>
                 {accessSaveNotice ? <div className={`mt-2 rounded-lg border px-3 py-2 text-sm font-semibold ${accessSaveNotice.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>{accessSaveNotice.message}</div> : saveDisabledReason ? <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">{saveDisabledReason}</div> : null}
                 <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="text-xs text-slate-600">Select existing staff, update module access, special rights, temporary permissions, and save with an audit reason. Backend remains final security authority.</div>
@@ -3069,7 +3141,12 @@ export default function TeamManagement() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
               {detailsTab === 'profile' ? <div className="grid grid-cols-1 gap-3 md:grid-cols-3"><div><div className="text-xs font-semibold uppercase text-slate-500">Full Name</div><div className="mt-1 font-semibold text-slate-950">{displayFullName(detailsUser, isFounderUser(detailsUser))}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Staff ID</div><div className="mt-1 font-semibold text-slate-950">{displayStaffId(detailsUser.staffId, isFounderUser(detailsUser))}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Role</div><div className="mt-1 font-semibold text-slate-950">{roleLabel(detailsUser.role)}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Department</div><div className="mt-1 font-semibold text-slate-950">{displayDepartment(detailsUser, isFounderUser(detailsUser))}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Assigned Sections</div><div className="mt-1 font-semibold text-slate-950">{listText(detailsUser.assignedSections)}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Coverage Area</div><div className="mt-1 font-semibold text-slate-950">{listText(coverageAreaValues(detailsUser))}</div></div></div> : null}
               {detailsTab === 'access' ? <div className="flex flex-wrap gap-1.5">{getEffectiveModuleAccess(detailsUser).map((key) => <StatusPill key={key} label={ADMIN_MODULES.find((item) => item.key === key)?.label || key} tone={FOUNDER_ONLY_MODULES.has(key) ? 'rose' : 'emerald'} />)}</div> : null}
-              {detailsTab === 'rights' ? <div className="flex flex-wrap gap-1.5">{getEffectiveSpecialRights(detailsUser).map((key) => <StatusPill key={key} label={SPECIAL_RIGHTS.find((item) => item.key === key)?.label || key} tone={FOUNDER_ONLY_RIGHTS.has(key) ? 'rose' : 'blue'} />)}</div> : null}
+              {detailsTab === 'rights' ? <div className="space-y-2">
+                <div>{isFounderUser(detailsUser) ? 'Protected Founder rights' : detailsUser.specialRightsConfigured === true ? 'Saved permanent Special Rights' : 'Permanent Special Rights are not configured; legacy effective access remains separate.'}</div>
+                <div className="flex flex-wrap gap-1.5">{(isFounderUser(detailsUser) ? getEffectiveSpecialRights(detailsUser) : accessSnapshotFromTeamUser(detailsUser).specialRights).map((key) => <StatusPill key={key} label={SPECIAL_RIGHTS.find((item) => item.key === key)?.label || key} tone={FOUNDER_ONLY_RIGHTS.has(key as SpecialRightKey) ? 'rose' : 'blue'} />)}</div>
+                {!isFounderUser(detailsUser) && !accessSnapshotFromTeamUser(detailsUser).specialRights.length ? <div>No permanent Special Rights selected.</div> : null}
+                {accessSnapshotFromTeamUser(detailsUser).temporaryGrants.filter((grant) => grant.targetType === 'right').map((grant, index) => <div key={index}>{grant.expiresAt && Date.parse(grant.expiresAt) <= Date.now() ? 'Expired temporary' : 'Temporary'} {grant.enabled ? 'grant' : 'denial'}: {SPECIAL_RIGHTS.find((item) => item.key === grant.key)?.label || grant.key} until {formatDateTime(grant.expiresAt)}.</div>)}
+              </div> : null}
               {detailsTab === 'security' ? <div className="grid grid-cols-1 gap-3 md:grid-cols-3"><div><div className="text-xs font-semibold uppercase text-slate-500">Account Status</div><div className="mt-1"><StatusPill label={displayAccountStatus(detailsUser, isUserActive(detailsUser))} /></div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Session Status</div><div className="mt-1"><StatusPill label={getSessionStatusDisplay(detailsUser, user)} /></div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Must Change Password</div><div className="mt-1 font-semibold text-slate-950">{staffMustChangePassword(detailsUser) ? 'Yes' : 'No'}</div></div></div> : null}
               {detailsTab === 'activity' ? <div className="grid grid-cols-1 gap-3 md:grid-cols-4"><div><div className="text-xs font-semibold uppercase text-slate-500">Last Login</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(detailsUser.lastLogin || detailsUser.lastLoginAt || detailsUser.loginAt)}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Last Logout</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(detailsUser.lastLogout || detailsUser.lastLogoutAt || detailsUser.logoutAt)}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Created At</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(detailsUser.createdAt)}</div></div><div><div className="text-xs font-semibold uppercase text-slate-500">Updated At</div><div className="mt-1 font-semibold text-slate-950">{formatDateTime(detailsUser.updatedAt)}</div></div></div> : null}
               {detailsTab === 'danger' ? <div className="space-y-3"><div className="rounded-xl border border-rose-200 bg-rose-50 p-3 font-semibold text-rose-900">{isFounderUser(detailsUser) ? 'Founder account is protected. No staff danger actions are available.' : 'Archive or permanent-delete actions require Founder permission and backend enforcement.'}</div>{!isFounderUser(detailsUser) ? <div className="flex flex-wrap gap-2"><button type="button" disabled={!canArchiveStaffAccounts} onClick={() => openArchiveModal(detailsUser)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50">Archive</button>{canShowPermanentDeleteAction(detailsUser) ? <button type="button" disabled={!isFounder || !canDeleteTestAccounts} onClick={() => openDeleteTestModal(detailsUser)} className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-700">Delete Permanently</button> : null}</div> : null}</div> : null}
@@ -3285,7 +3362,8 @@ export default function TeamManagement() {
         <div className="space-y-3">
           {teamRows.filter((teamUser) => !isFounderUser(teamUser)).map((teamUser) => {
             const id = userId(teamUser);
-            const draft = overrideDrafts[id] || { moduleAccess: getEffectiveModuleAccess(teamUser), specialRights: getEffectiveSpecialRights(teamUser) };
+            const saved = accessSnapshotFromTeamUser(teamUser);
+            const draft = overrideDrafts[id] || { moduleAccess: saved.moduleAccess as AdminModuleKey[], specialRights: saved.specialRights as SpecialRightKey[], specialRightsConfigured: saved.specialRightsConfigured };
             const assignedModules = defaultModulesForRole(teamUser.role);
             const assignedRights = defaultRightsForRole(teamUser.role);
             return (
@@ -3311,7 +3389,7 @@ export default function TeamManagement() {
                   </div>
                   <div className="xl:col-span-2">
                     <div className="mb-2 text-sm font-semibold text-slate-950">Individual special rights</div>
-                    <CheckboxList items={SPECIAL_RIGHTS} values={draft.specialRights} disabled={!isFounder} onChange={(specialRights) => setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, specialRights } }))} />
+                    <CheckboxList items={SPECIAL_RIGHTS} values={draft.specialRights} disabled={!isFounder} onChange={(specialRights) => setOverrideDrafts((state) => ({ ...state, [id]: { ...draft, specialRights, specialRightsConfigured: true } }))} />
                   </div>
                 </div>
               </div>

@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import TeamManagement, { createAccessSnapshot, getStaffAccessSaveDisabledReason, hasStaffAccessChanges, type StaffAccessSnapshot } from '@/pages/admin/settings/admin-panel/TeamManagement';
+import TeamManagement, { accessSnapshotFromTeamUser, createAccessSnapshot, getStaffAccessSaveDisabledReason, hasStaffAccessChanges, type StaffAccessSnapshot } from '@/pages/admin/settings/admin-panel/TeamManagement';
+import type { StaffAccessRecord, TeamUser } from '@/api/teamManagementApi';
 
 const mocks = vi.hoisted(() => ({
   authUser: { id: 'founder-1', email: 'kiran@newspulse.co.in', role: 'founder' },
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getTeamRoles: vi.fn(),
   getTeamTasks: vi.fn(),
   getNextTeamStaffIdPreview: vi.fn(),
+  getStaffAccessRecord: vi.fn(),
   createTeamRole: vi.fn(),
   createTeamUser: vi.fn(),
   saveStaffAccessOverride: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock('@/api/teamManagementApi', () => ({
   forceChangePasswordUser: vi.fn(),
   generateTemporaryPasswordUser: vi.fn(),
   getNextTeamStaffIdPreview: mocks.getNextTeamStaffIdPreview,
+  getStaffAccessRecord: mocks.getStaffAccessRecord,
   getTeamRoles: mocks.getTeamRoles,
   getTeamTasks: mocks.getTeamTasks,
   getTeamUsers: mocks.getTeamUsers,
@@ -97,7 +100,19 @@ const staffUser = {
   accessExpiryDate: '2027-01-01T00:00:00.000Z',
   moduleAccess: ['dashboard'],
   specialRights: [],
+  moduleAccessOverride: ['dashboard'],
+  specialRightsOverride: [],
+  specialRightsConfigured: true,
+  temporaryAccess: [],
 };
+
+function staffAccessRecord(user: TeamUser, specialRights: StaffAccessRecord['effectiveAccess']['specialRights'] = []): StaffAccessRecord {
+  return { user, effectiveAccess: { specialRights, accessVersion: 4 } };
+}
+
+function rightControl(label: string): HTMLSelectElement {
+  return within(screen.getByText(label).closest('tr')!).getByRole('combobox') as HTMLSelectElement;
+}
 
 const expiredStaffUser = {
   id: 'staff-3',
@@ -171,6 +186,8 @@ beforeEach(() => {
   mocks.getTeamRoles.mockResolvedValue([]);
   mocks.getTeamTasks.mockResolvedValue([]);
   mocks.getNextTeamStaffIdPreview.mockResolvedValue('NP-2026-0003');
+  mocks.getStaffAccessRecord.mockReset();
+  mocks.getStaffAccessRecord.mockResolvedValue(staffAccessRecord(staffUser));
   mocks.createTeamRole.mockResolvedValue({ ok: true });
   mocks.createTeamUser.mockResolvedValue({ temporaryPassword: 'Temp#12345', staffId: 'NP-2026-0003' });
   mocks.saveStaffAccessOverride.mockResolvedValue([]);
@@ -214,6 +231,60 @@ describe('TeamManagement staff access save validation', () => {
 
     expect(hasStaffAccessChanges(saved, current)).toBe(false);
   });
+
+  it.each([undefined, null, false])('keeps legacy configured state %s distinct from an explicitly saved empty selection', (configured) => {
+    const legacy = accessSnapshotFromTeamUser({
+      role: 'editor',
+      specialRightsConfigured: configured,
+      specialRightsOverride: [],
+      specialRights: ['news_publish'],
+      permissions: ['content.publish'],
+    });
+    const savedEmpty = createAccessSnapshot([], [], [], true);
+
+    expect(legacy.specialRights).toEqual([]);
+    expect(legacy.specialRightsConfigured).toBe(false);
+    expect(hasStaffAccessChanges(legacy, savedEmpty)).toBe(true);
+  });
+
+  it('does not substitute computed, effective or role permissions when saved rights are absent', () => {
+    const snapshot = accessSnapshotFromTeamUser({
+      role: 'editor',
+      specialRights: ['news_publish'],
+      rights: ['news_publish'],
+      effectiveAccess: { effectiveSpecialRights: ['news_publish'] },
+      permissions: ['content.publish'],
+    });
+
+    expect(snapshot.specialRights).toEqual([]);
+    expect(snapshot.specialRightsConfigured).toBe(false);
+  });
+
+  it('retains explicit empty saved modules and rights instead of falling back to computed fields', () => {
+    const snapshot = accessSnapshotFromTeamUser({
+      moduleAccessOverride: [],
+      moduleAccess: ['add_news'],
+      specialRightsOverride: [],
+      specialRights: ['news_publish'],
+      specialRightsConfigured: true,
+    });
+
+    expect(snapshot.moduleAccess).toEqual([]);
+    expect(snapshot.specialRights).toEqual([]);
+    expect(snapshot.specialRightsConfigured).toBe(true);
+  });
+
+  it('normalizes saved permanent keys while preserving temporary denial metadata separately', () => {
+    const snapshot = accessSnapshotFromTeamUser({
+      specialRightsOverride: ['news_edit'],
+      specialRightsConfigured: true,
+      specialRights: ['news_publish'],
+      temporaryAccess: [{ rightKey: 'news_publish', enabled: false, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Temporary denial' }],
+    });
+
+    expect(snapshot.specialRights).toEqual(['can_edit_news']);
+    expect(snapshot.temporaryGrants).toEqual([expect.objectContaining({ key: 'can_publish_news', enabled: false, reason: 'Temporary denial' })]);
+  });
 });
 
 describe('TeamManagement staff access save button', () => {
@@ -231,11 +302,12 @@ describe('TeamManagement staff access save button', () => {
     await waitFor(() => {
       expect(mocks.saveStaffAccessOverride).toHaveBeenCalledWith('staff-1', expect.objectContaining({
         moduleAccess: ['dashboard', 'add_news'],
-        specialRights: expect.any(Array),
         reason: 'Routine access review',
         temporaryGrants: [],
       }));
     });
+    expect(mocks.saveStaffAccessOverride.mock.calls[0][1]).not.toHaveProperty('specialRights');
+    expect(mocks.getStaffAccessRecord).toHaveBeenCalledWith('staff-1');
     expect(await screen.findByText('Staff access updated successfully.')).toBeInTheDocument();
     expect(mocks.clearAdminEffectiveAccessCache).toHaveBeenCalled();
     await waitFor(() => expect(saveButton).toBeDisabled());
@@ -271,6 +343,330 @@ describe('TeamManagement staff access save button', () => {
     expect(within(addNewsRow).getByText('Would become Allowed')).toBeInTheDocument();
     expect(screen.getByLabelText('Audit Reason')).toHaveValue('Routine access review');
   }, 15000);
+});
+
+describe('TeamManagement permanent Special Rights contract', () => {
+  it('displays unconfigured legacy rights safely without copying computed permissions or saving on open', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{
+      ...staffUser,
+      role: 'editor',
+      specialRightsOverride: undefined,
+      specialRightsConfigured: undefined,
+      specialRights: ['news_publish', 'news_edit'],
+      permissions: ['content.publish'],
+    }]);
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(rightControl('Edit news')).toHaveValue('disabled');
+    expect(screen.getByText(/Permanent Special Rights are not configured/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Inspect legacy profile only' } });
+    expect(saveButton).toBeDisabled();
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+    expect(mocks.getStaffAccessRecord).not.toHaveBeenCalled();
+  });
+
+  it('saves [] and reloads it without restoring Publish News from presets or stale PATCH snapshots', async () => {
+    const original = { ...staffUser, role: 'editor', specialRightsOverride: ['news_publish'], specialRights: ['news_publish'] };
+    const updated = { ...original, specialRightsOverride: [], specialRights: [] };
+    mocks.getTeamUsers.mockResolvedValue([original]);
+    mocks.saveStaffAccessOverride.mockResolvedValueOnce([{ user: original }, { data: { user: original } }]);
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord(updated, [{ key: 'news_publish', allowed: false, state: 'disabled' }]));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(rightControl('Can publish news')).toHaveValue('enabled');
+    fireEvent.change(rightControl('Can publish news'), { target: { value: 'disabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Remove all permanent action rights' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    expect(mocks.saveStaffAccessOverride).toHaveBeenCalledWith('staff-1', expect.objectContaining({ specialRights: [] }));
+    expect(mocks.saveStaffAccessOverride.mock.calls[0][1]).not.toHaveProperty('specialRightsConfigured');
+    expect(mocks.getStaffAccessRecord).toHaveBeenCalledWith('staff-1');
+    expect(mocks.getTeamUsers).toHaveBeenCalledTimes(1);
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(saveButton).toBeDisabled();
+
+    cleanup();
+    mocks.getTeamUsers.mockResolvedValue([updated]);
+    const reopenedSave = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(reopenedSave).toBeDisabled();
+    expect(mocks.saveStaffAccessOverride).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the selected permanent rights while keeping a computed temporary Publish grant separate', async () => {
+    const updated: TeamUser = {
+      ...staffUser,
+      specialRightsOverride: ['news_edit'],
+      specialRights: ['news_edit', 'news_publish'],
+      temporaryAccess: [{ rightKey: 'news_publish', enabled: true, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Temporary publishing cover' }],
+    };
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord(updated, [
+      { key: 'news_edit', allowed: true, state: 'enabled' },
+      { key: 'news_publish', allowed: true, state: 'temporary' },
+    ]));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Allow editing, not permanent publishing' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    expect(mocks.saveStaffAccessOverride).toHaveBeenCalledWith('staff-1', expect.objectContaining({ specialRights: ['can_edit_news'] }));
+    expect(rightControl('Edit news')).toHaveValue('enabled');
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(screen.getByText('Backend effective access: Allowed (temporary).')).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Temporary Access' }));
+    expect(screen.getByText('Saved grant')).toBeInTheDocument();
+    expect(screen.getByText('Temporary publishing cover')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+
+  it('uses the authoritative reload rather than treating the submitted selection as the saved result', async () => {
+    const updated = { ...staffUser, specialRightsOverride: ['news_edit'], specialRights: ['news_edit'] };
+    let finishReload!: (value: StaffAccessRecord) => void;
+    mocks.getStaffAccessRecord.mockReturnValueOnce(new Promise<StaffAccessRecord>((resolve) => { finishReload = resolve; }));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(rightControl('Can publish news'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Review authoritative selection' } });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(mocks.getStaffAccessRecord).toHaveBeenCalledWith('staff-1'));
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(rightControl('Edit news')).toBeDisabled();
+    await act(async () => { finishReload(staffAccessRecord(updated)); });
+    await screen.findByText('Staff access updated successfully.');
+    expect(rightControl('Edit news')).toHaveValue('enabled');
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(screen.getByRole('button', { name: 'Save Access Changes' })).toBeDisabled();
+  });
+
+  it('can explicitly configure an empty legacy selection without activating it merely by opening the editor', async () => {
+    const legacy = { ...staffUser, specialRightsConfigured: false, specialRights: ['news_publish'] };
+    mocks.getTeamUsers.mockResolvedValue([legacy]);
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(saveButton).toBeDisabled();
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'disabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Explicitly configure no permanent rights' } });
+
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+    await screen.findByText('Staff access updated successfully.');
+    expect(mocks.saveStaffAccessOverride).toHaveBeenCalledWith('staff-1', expect.objectContaining({ specialRights: [] }));
+    expect(screen.getByText(/Permanent Special Rights are configured/)).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('resetting a legacy draft discards the staged configured marker as well as selections', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{ ...staffUser, specialRightsConfigured: false }]);
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'disabled' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Changes' }));
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Inspect without changing access' } });
+
+    expect(saveButton).toBeDisabled();
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+  });
+
+  it('does not configure legacy Special Rights during a module-only save', async () => {
+    const legacy = { ...staffUser, specialRightsConfigured: false, specialRights: ['news_publish'] };
+    mocks.getTeamUsers.mockResolvedValue([legacy]);
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord({ ...legacy, moduleAccessOverride: ['dashboard', 'add_news'] }));
+    const saveButton = await renderAccessEditor();
+    const addNews = screen.getByText('Add News').closest('tr')!;
+    fireEvent.change(within(addNews).getByRole('combobox'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Adjust module access only' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    expect(mocks.saveStaffAccessOverride.mock.calls[0][1]).not.toHaveProperty('specialRights');
+    expect(screen.getByText(/Permanent Special Rights are not configured/)).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('keeps saved grants, denials and expired entries separate without marking the editor dirty on open', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{
+      ...staffUser,
+      specialRights: ['news_publish'],
+      temporaryAccess: [
+        { rightKey: 'news_publish', enabled: true, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Cover grant' },
+        { rightKey: 'news_edit', enabled: false, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Review denial' },
+        { rightKey: 'news_schedule', enabled: true, expiresAt: '2020-01-01T00:00:00.000Z', reason: 'Expired cover' },
+      ],
+    }]);
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(rightControl('Edit news')).toHaveValue('disabled');
+    fireEvent.click(screen.getByRole('button', { name: 'Temporary Access' }));
+    expect(screen.getByText('Saved grant')).toBeInTheDocument();
+    expect(screen.getByText('Saved denial')).toBeInTheDocument();
+    expect(screen.getByText('Expired grant')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Inspect temporary rights only' } });
+    expect(saveButton).toBeDisabled();
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+  });
+
+  it('saves a new temporary grant without adding it to permanent rights or resubmitting saved grants', async () => {
+    const savedGrant = { rightKey: 'news_edit', enabled: true, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Existing edit cover' };
+    const stagedGrant = { rightKey: 'news_publish', enabled: true, expiresAt: '2030-02-01T10:00', reason: 'Publishing cover' };
+    const original = { ...staffUser, specialRightsConfigured: false, temporaryAccess: [savedGrant] };
+    mocks.getTeamUsers.mockResolvedValue([original]);
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord({ ...original, temporaryAccess: [savedGrant, stagedGrant] }));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Temporary Access' }));
+    fireEvent.change(screen.getByLabelText('Access type'), { target: { value: 'right' } });
+    fireEvent.change(screen.getByLabelText('Expires at'), { target: { value: stagedGrant.expiresAt } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: stagedGrant.reason } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Grant' }));
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Approve temporary publishing cover' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    const payload = mocks.saveStaffAccessOverride.mock.calls[0][1];
+    expect(payload).not.toHaveProperty('specialRights');
+    expect(payload.temporaryGrants).toEqual([{ targetType: 'right', key: 'can_publish_news', expiresAt: stagedGrant.expiresAt, reason: stagedGrant.reason }]);
+    expect(screen.getAllByText('Saved grant')).toHaveLength(2);
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(rightControl('Edit news')).toHaveValue('disabled');
+  });
+
+  it('does not remove a saved permanent selection because a temporary denial makes effective access false', async () => {
+    const original = { ...staffUser, specialRightsOverride: ['news_publish'], specialRights: ['news_publish'] };
+    const updated: TeamUser = {
+      ...original,
+      specialRightsOverride: ['news_edit', 'news_publish'],
+      specialRights: ['news_edit'],
+      temporaryAccess: [{ rightKey: 'news_publish', enabled: false, expiresAt: '2030-01-01T00:00:00.000Z', reason: 'Publishing paused' }],
+    };
+    mocks.getTeamUsers.mockResolvedValue([original]);
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord(updated, [{ key: 'news_publish', allowed: false, state: 'disabled' }]));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Retain permanent rights during temporary denial' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    expect(rightControl('Can publish news')).toHaveValue('enabled');
+    expect(screen.getByText('Backend effective access: Not allowed (disabled).')).toBeInTheDocument();
+    expect(screen.getByText(/Temporary denial until/)).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('does not claim success or overwrite the draft when the authoritative reload fails', async () => {
+    mocks.getStaffAccessRecord.mockRejectedValueOnce(new Error('Authoritative read unavailable'));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Retain this review on reload failure' } });
+    fireEvent.click(saveButton);
+
+    expect(await screen.findByText(/Access changes were submitted, but authoritative reload failed/)).toBeInTheDocument();
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(rightControl('Edit news')).toHaveValue('enabled');
+    expect(screen.getByLabelText('Audit Reason')).toHaveValue('Retain this review on reload failure');
+    expect(saveButton).toBeDisabled();
+    expect(mocks.getTeamUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not claim that permanent rights were configured when the Backend still reports legacy state', async () => {
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord({ ...staffUser, specialRightsConfigured: false }));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Edit news'), { target: { value: 'enabled' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Configure editing only' } });
+    fireEvent.click(saveButton);
+
+    expect(await screen.findByText(/Backend did not confirm the permanent Special Rights configuration/)).toBeInTheDocument();
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('never sends a partial permanent removal when converting a right to temporary access without a valid expiry', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{ ...staffUser, specialRightsOverride: ['news_publish'] }]);
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Can publish news'), { target: { value: 'temporary' } });
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Convert to temporary publishing cover' } });
+    fireEvent.click(saveButton);
+
+    expect(mocks.toastError).toHaveBeenCalledWith('Set a future expiry for every temporary grant before saving.');
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+    expect(mocks.getStaffAccessRecord).not.toHaveBeenCalled();
+  });
+
+  it('converts a permanent right to temporary without leaving it in the permanent selection', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{ ...staffUser, specialRightsOverride: ['news_publish'] }]);
+    const grant = { rightKey: 'news_publish', enabled: true, expiresAt: '2030-02-01T10:00', reason: 'Temporary publishing only' };
+    mocks.getStaffAccessRecord.mockResolvedValueOnce(staffAccessRecord({ ...staffUser, specialRights: ['news_publish'], temporaryAccess: [grant] }));
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(rightControl('Can publish news'), { target: { value: 'temporary' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Temporary Access' }));
+    fireEvent.change(screen.getByLabelText('Access type'), { target: { value: 'right' } });
+    fireEvent.change(screen.getByLabelText('Expires at'), { target: { value: grant.expiresAt } });
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: grant.reason } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Grant' }));
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Convert permanent publishing to a temporary grant' } });
+    fireEvent.click(saveButton);
+
+    await screen.findByText('Staff access updated successfully.');
+    expect(mocks.saveStaffAccessOverride).toHaveBeenCalledWith('staff-1', expect.objectContaining({
+      specialRights: [],
+      temporaryGrants: [{ targetType: 'right', key: 'can_publish_news', expiresAt: grant.expiresAt, reason: grant.reason }],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    expect(rightControl('Can publish news')).toHaveValue('disabled');
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('opens staff and protected Founder profiles without any permission mutation', async () => {
+    mocks.getTeamUsers.mockResolvedValue([{ ...staffUser, specialRights: ['news_publish'] }]);
+    renderTeamRoute('/admin/settings/admin-panel/team');
+    fireEvent.click(await screen.findByRole('button', { name: 'Staff Registry' }));
+    const staffRow = (await screen.findByText('Reporter One')).closest('tr')!;
+    fireEvent.click(within(staffRow).getByRole('button', { name: 'View Details' }));
+    const dialog = screen.getByRole('dialog', { name: 'Staff Details' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Special Rights' }));
+    expect(within(dialog).getByText('No permanent Special Rights selected.')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Can publish news')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    const founderRow = screen.getByText('Founder Admin').closest('tr')!;
+    fireEvent.click(within(founderRow).getByRole('button', { name: 'View Details' }));
+    const founderDialog = screen.getByRole('dialog', { name: 'Staff Details' });
+    fireEvent.click(within(founderDialog).getByRole('button', { name: 'Special Rights' }));
+    expect(within(founderDialog).getByText('Protected Founder rights')).toBeInTheDocument();
+    expect(within(founderDialog).queryByRole('button', { name: 'Save Access Changes' })).not.toBeInTheDocument();
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+    expect(mocks.createTeamUser).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-Founder Staff Access controls read-only', async () => {
+    mocks.authUser = { id: 'editor-1', email: 'editor@example.test', role: 'editor' };
+    const saveButton = await renderAccessEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Newsroom Actions' }));
+    fireEvent.change(screen.getByLabelText('Audit Reason'), { target: { value: 'Cannot grant myself permissions' } });
+
+    expect(saveButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Load Suggestions' })).toBeDisabled();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(mocks.saveStaffAccessOverride).not.toHaveBeenCalled();
+  });
 });
 
 describe('TeamManagement route organization', () => {
