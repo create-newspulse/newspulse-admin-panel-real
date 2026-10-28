@@ -356,7 +356,7 @@ describe('ArticleForm V2 Trending Topic selection and existing saves', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
     await saveDraft();
     expect(mocks.create).toHaveBeenCalledTimes(1);
-    expect(mocks.update).toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
     expect(stored.tags).toContain('topic:navratri-2026');
   });
 

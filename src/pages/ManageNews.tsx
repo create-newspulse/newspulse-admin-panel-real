@@ -19,6 +19,7 @@ import type { ArticleStatus } from '@/types/articles';
 import type { ManageNewsParams } from '@/types/api';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { useAuth } from '@/context/AuthContext';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
 import { useDebounce } from '@/hooks/useDebounce';
 import { ARTICLE_CATEGORY_LABELS, isAllowedArticleCategoryKey } from '@/lib/articleCategories';
 
@@ -78,6 +79,7 @@ export default function ManageNews() {
 
   const [showCsv, setShowCsv] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [selectionVersion, setSelectionVersion] = React.useState(0);
 
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [searchInput, setSearchInput] = React.useState('');
@@ -139,6 +141,7 @@ export default function ManageNews() {
   });
   const { publishEnabled, override, setOverride, envDefault } = usePublishFlag();
   const { isFounder } = useAuth();
+  const editorialAccess = useEditorialAccess();
 
   const logicalCountFilters = React.useMemo<ArticleLogicalCountFilters>(() => ({
     status: params.status,
@@ -261,7 +264,7 @@ export default function ManageNews() {
     transitionInFlight.current = true;
     setTransitionPending(true);
     try {
-      const g = guardAction(action, publishEnabled, { isFounder });
+      const g = guardAction(action, publishEnabled, { isFounder, canPublish: editorialAccess.canPublish });
       if (!g.allowed) {
         debug('[ManageNews] blocked transition', { action, publishEnabled });
         toast.error(g.reason || 'Action blocked');
@@ -285,9 +288,16 @@ export default function ManageNews() {
           if (action === 'publish') break;
         }
       }
-      if (failures.length) toast.error(`${completed} of ${ids.length} stories updated. ${failures.length} failed. ${[...new Set(failures)].join(' ')}`);
+      if (failures.length) {
+        const notAttempted = ids.length - completed - failures.length;
+        toast.error(`${completed} of ${ids.length} stories updated. ${failures.length} failed. ${notAttempted ? `${notAttempted} not attempted. ` : ''}${[...new Set(failures)].join(' ')}${completed ? ' Completed writes were not rolled back; do not repeat them.' : ''}`);
+      }
       else toast.success(`${action} done`);
     } finally {
+      if (action === 'publish' && completed > 0) {
+        setSelectedIds([]);
+        setSelectionVersion((version) => version + 1);
+      }
       if (refreshNeeded) {
         try {
           await refreshArticleQueries(queryClient);
@@ -538,6 +548,7 @@ export default function ManageNews() {
           onLoadStateChange={setListLoadState}
           actionsDisabled={transitionPending}
           onSelectIds={setSelectedIds}
+          selectionVersion={selectionVersion}
           onPageChange={(p) => setParams(prev => ({ ...prev, page: Math.max(1, p) }))}
           highlightId={highlightId || undefined}
           stickyTopOffsetPx={tableHeaderTop}
@@ -603,7 +614,7 @@ export default function ManageNews() {
             Approve
           </button>
 
-          {publishEnabled && isFounder ? (
+          {publishEnabled && editorialAccess.canPublish ? (
             <button
               disabled={transitionPending || lifecyclePending || listLoadState !== 'ready'}
               onClick={() => {

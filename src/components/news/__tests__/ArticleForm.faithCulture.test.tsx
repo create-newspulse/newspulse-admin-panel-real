@@ -25,8 +25,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'admin-1', role: mocks.role } }),
+  useAuth: () => ({ user: { id: 'admin-1', role: mocks.role, moduleAccess: ['manage_news'] },
+    isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false }),
 }));
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+  isLoading: false, error: null, backendAccess: {},
+  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+}) }));
 vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
   useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
 }));
@@ -649,7 +654,7 @@ describe('Faith source ownership and linked drafts', () => {
     else expect(payload).not.toHaveProperty('topic');
   });
 
-  it('saves topic on the source but omits it from secondary updates to existing linked children', async () => {
+  it('saves topic on the source without rewriting unchanged linked children', async () => {
     mocks.listArticlesByTranslationGroupId.mockResolvedValue({
       ...emptyGroup,
       rows: [{ ...sourceArticle, _id: 'hi-1', lang: 'hi', language: 'hi' }],
@@ -661,11 +666,11 @@ describe('Faith source ownership and linked drafts', () => {
     await saveDraft();
     expect(mocks.updateArticle.mock.calls[0]).toEqual(['source-1', expect.objectContaining({ topic: 'faith-spiritual-life' })]);
     const childSaves = mocks.updateArticle.mock.calls.filter(([id]) => id === 'hi-1');
-    expect(childSaves.length).toBeGreaterThan(0);
-    for (const [, payload] of childSaves) expect(payload).not.toHaveProperty('topic');
+    expect(childSaves).toHaveLength(0);
   });
 
   it('includes the stable topic when Save Draft creates a new linked language draft', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderForm(sourceArticle);
     chooseTopic('language-cultural-identity');
     fireEvent.change(control<HTMLSelectElement>('Language', 'select'), { target: { value: 'hi' } });

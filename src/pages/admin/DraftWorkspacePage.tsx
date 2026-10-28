@@ -7,10 +7,16 @@ import { FiltersDrawer } from '@/components/news/FiltersDrawer';
 import {
   deleteArticle,
   getArticle,
-  updateArticleStatus,
-  updateArticlePartial,
+  getOwnDraft,
+  publishArticle,
+  updateArticle,
   type Article,
+  type OwnDraftDetail,
 } from '@/lib/api/articles';
+import { articleCmsId, articleFollowUpWarning, normalizeArticleError } from '@/lib/articleLifecycle';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
+import { usePublishFlag } from '@/context/PublishFlagContext';
 
 type DraftPatch = Partial<Pick<Article,
   | 'title'
@@ -18,19 +24,16 @@ type DraftPatch = Partial<Pick<Article,
   | 'content'
   | 'category'
   | 'tags'
-  | 'language'
-  | 'imageUrl'
-  | 'coverImage'
   | 'coverImageUrl'
 >>;
+type WorkspaceArticle = Article | OwnDraftDetail;
 
-function normalizeImageUrl(a?: Article): string {
-  const cover: any = (a as any)?.coverImage;
+function normalizeImageUrl(a?: WorkspaceArticle): string {
+  const cover = a?.coverImage;
   if (cover && typeof cover === 'object') {
-    const u = cover.url || cover.secureUrl || cover.secure_url || '';
-    return String(u || '').trim();
+    return String(cover.url || '').trim();
   }
-  return String((cover as any) || a?.imageUrl || a?.coverImageUrl || '').trim();
+  return String(cover || a?.coverImageUrl || (a && 'imageUrl' in a ? a.imageUrl : '') || '').trim();
 }
 
 function toTagString(tags?: string[]): string {
@@ -48,14 +51,27 @@ function parseTagString(s: string): string[] {
 export default function DraftWorkspacePage() {
   const { id } = useParams();
   const draftId = String(id || '').trim();
+  const access = useEditorialAccess();
+  if (access.loading) return <div>Checking Draft Workspace access...</div>;
+  if (!access.canManageNews && !access.canReadOwnDrafts) {
+    return <div role="alert" className="rounded border p-4 text-red-700">{access.reason}</div>;
+  }
+  return <DraftWorkspace key={`${draftId}:${access.canManageNews}`} draftId={draftId}
+    restricted={!access.canManageNews} canPublish={access.canPublish} />;
+}
+
+function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; restricted: boolean; canPublish: boolean }) {
   const navigate = useNavigate();
+  const { publishEnabled } = usePublishFlag();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const mode = String(searchParams.get('mode') || '').toLowerCase();
   const drawerOpen = mode === 'edit';
 
   const [loading, setLoading] = useState(false);
-  const [article, setArticle] = useState<Article | null>(null);
+  const [article, setArticle] = useState<WorkspaceArticle | null>(null);
+  const [loadError, setLoadError] = useState<ReturnType<typeof normalizeArticleError> | null>(null);
+  const [loadVersion, setLoadVersion] = useState(0);
 
   const [form, setForm] = useState<{
     title: string;
@@ -69,17 +85,28 @@ export default function DraftWorkspacePage() {
 
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<ReturnType<typeof normalizeArticleError> | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [published, setPublished] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
-  const lastSentRef = useRef<string>('');
+  const pendingPatch = useRef<DraftPatch>({});
+  const inFlight = useRef(false);
+  const paused = useRef(false);
+  const mounted = useRef(true);
+  useUnsavedChanges(dirty, saving);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       if (!draftId) return;
       setLoading(true);
+      setLoadError(null);
       try {
-        const a = await getArticle(draftId);
+        const a = await (restricted ? getOwnDraft(draftId) : getArticle(draftId));
         if (cancelled) return;
         setArticle(a);
         setForm({
@@ -91,8 +118,8 @@ export default function DraftWorkspacePage() {
           language: a.language || '',
           image: normalizeImageUrl(a),
         });
-      } catch (e: any) {
-        toast.error(e?.message || 'Failed to load draft');
+      } catch (error: unknown) {
+        if (!cancelled) setLoadError(normalizeArticleError(error, 'Failed to load draft'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,7 +128,7 @@ export default function DraftWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [draftId]);
+  }, [draftId, restricted, loadVersion]);
 
   const sanitizedHtml = useMemo(() => {
     const raw = String(article?.content || '').trim();
@@ -109,39 +136,78 @@ export default function DraftWorkspacePage() {
     return DOMPurify.sanitize(raw);
   }, [article?.content]);
 
-  const scheduleSave = (patch: DraftPatch) => {
-    if (!draftId) return;
-
-    const signature = JSON.stringify(patch);
-    if (signature === lastSentRef.current) return;
-
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-
-    saveTimerRef.current = window.setTimeout(async () => {
-      try {
-        setSaving(true);
-        lastSentRef.current = signature;
-        const updated = await updateArticlePartial(draftId, patch);
-        setArticle(updated);
-        setLastSavedAt(Date.now());
-      } catch (e: any) {
-        // Allow further saves after a failure
-        lastSentRef.current = '';
-        toast.error(e?.message || 'Autosave failed');
-      } finally {
-        setSaving(false);
-      }
-    }, 600);
+  const armSave = () => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    if (paused.current) return;
+    saveTimerRef.current = window.setTimeout(() => { void flushPending(); }, 600);
   };
 
+  async function flushPending(): Promise<boolean> {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    if (inFlight.current || paused.current) return false;
+    const patch = pendingPatch.current;
+    if (!Object.keys(patch).length) return true;
+    pendingPatch.current = {};
+    inFlight.current = true;
+    setSaving(true);
+    try {
+      const result = await updateArticle(draftId, patch);
+      if (!mounted.current) return true;
+      // Only locally edited fields are applied; a restricted DTO is never promoted to a full editor DTO.
+      setArticle((previous) => previous ? { ...previous, ...patch } : previous);
+      setLastSavedAt(Date.now());
+      setSaveError(null);
+      const followUp = articleFollowUpWarning(result);
+      setWarning(followUp);
+      if (followUp) {
+        paused.current = true;
+        setRecoveryReady(false);
+      }
+      setDirty(Object.keys(pendingPatch.current).length > 0);
+      return true;
+    } catch (error: unknown) {
+      if (!mounted.current) return false;
+      pendingPatch.current = { ...patch, ...pendingPatch.current };
+      paused.current = true;
+      setRecoveryReady(false);
+      setDirty(true);
+      setSaveError(normalizeArticleError(error, 'Autosave failed'));
+      return false;
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) {
+        setSaving(false);
+        if (Object.keys(pendingPatch.current).length && !paused.current) armSave();
+      }
+    }
+  }
+
   useEffect(() => {
+    mounted.current = true;
     return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      mounted.current = false;
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (deleted && !saving && !dirty) navigate('/draft-desk');
+  }, [deleted, saving, dirty, navigate]);
+
+  async function refreshLatest() {
+    setRefreshing(true);
+    setRecoveryReady(false);
+    try {
+      const latest = await (restricted ? getOwnDraft(draftId) : getArticle(draftId));
+      setArticle(latest);
+      setRecoveryReady(true);
+    } catch (error: unknown) {
+      toast.error(normalizeArticleError(error, 'Could not refresh the draft; your edits are still here').message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const setMode = (next: 'view' | 'edit') => {
     const sp = new URLSearchParams(searchParams);
@@ -150,10 +216,9 @@ export default function DraftWorkspacePage() {
     setSearchParams(sp, { replace: true });
   };
 
-  const onChange = (key: keyof NonNullable<typeof form>, value: string) => {
+  const onChange = (key: Exclude<keyof NonNullable<typeof form>, 'language'>, value: string) => {
     if (!form) return;
-    const next = { ...form, [key]: value };
-    setForm(next);
+    setForm((previous) => previous ? { ...previous, [key]: value } : previous);
 
     const patch: DraftPatch = {};
     if (key === 'title') patch.title = value;
@@ -161,46 +226,57 @@ export default function DraftWorkspacePage() {
     if (key === 'content') patch.content = value;
     if (key === 'category') patch.category = value;
     if (key === 'tags') patch.tags = parseTagString(value);
-    if (key === 'language') patch.language = value;
-    if (key === 'image') {
-      const v = value.trim();
-      patch.imageUrl = v || undefined;
-      patch.coverImageUrl = v || undefined;
-      patch.coverImage = v ? ({ url: v } as any) : undefined;
-    }
+    if (key === 'image') patch.coverImageUrl = value.trim();
 
-    scheduleSave(patch);
+    pendingPatch.current = { ...pendingPatch.current, ...patch };
+    setDirty(true);
+    armSave();
   };
 
-  const submitToManageNews = async () => {
-    if (!draftId) return;
-    const ok = window.confirm('Submit this draft to Manage News for review?');
-    if (!ok) return;
+  const publishDraft = async () => {
+    if (!canPublish || !publishEnabled || published || inFlight.current || paused.current) return;
+    const hadEdits = Object.keys(pendingPatch.current).length > 0;
+    if (!await flushPending() || paused.current || Object.keys(pendingPatch.current).length) return;
+    if (!window.confirm('Publish this story? The Backend will verify every language edition and your effective Publish News right.')) return;
+    inFlight.current = true;
+    setSaving(true);
     try {
-      setSaving(true);
-      // Existing workflow convention used by Draft Desk in this repo
-      await updateArticleStatus(draftId, 'review' as any);
-      toast.success('Submitted to Manage News');
-      navigate(`/admin/articles?qv=draft&highlight=${encodeURIComponent(draftId)}`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Submit failed');
+      const result = await publishArticle(article ? articleCmsId(article) : draftId);
+      setPublished(true);
+      paused.current = true;
+      setWarning(articleFollowUpWarning(result));
+      toast.success('Story published');
+    } catch (error: unknown) {
+      paused.current = true;
+      setRecoveryReady(false);
+      const failure = normalizeArticleError(error, 'Publication failed');
+      setSaveError({ ...failure, message: `${hadEdits ? 'Draft changes were saved. ' : ''}Publication was not confirmed. ${failure.message}` });
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
 
   const deleteDraft = async () => {
-    if (!draftId) return;
-    const ok = window.confirm('Delete this draft? It will move to Deleted.');
+    if (!draftId || restricted || inFlight.current) return;
+    const ok = window.confirm(`Delete this draft? It will move to Deleted.${dirty ? ' Unsaved edits will be discarded.' : ''}`);
     if (!ok) return;
+    inFlight.current = true;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     try {
       setSaving(true);
-      await deleteArticle(draftId);
+      const result = await deleteArticle(draftId);
+      pendingPatch.current = {};
+      setDirty(false);
+      setDeleted(true);
       toast.success('Draft moved to Deleted');
-      navigate('/draft-desk');
-    } catch (e: any) {
-      toast.error(e?.message || 'Delete failed');
+      const followUp = articleFollowUpWarning(result);
+      if (followUp) toast(followUp);
+    } catch (error: unknown) {
+      paused.current = true;
+      setSaveError(normalizeArticleError(error, 'Delete failed'));
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
@@ -229,7 +305,7 @@ export default function DraftWorkspacePage() {
             {article?.language ? <span>· {article.language.toUpperCase()}</span> : null}
             {article?.category ? <span>· {article.category}</span> : null}
             {article?.updatedAt ? <span>· Updated {new Date(article.updatedAt).toLocaleString()}</span> : null}
-            {article?.status ? <span>· status: {String(article.status)}</span> : null}
+            {article?.status ? <span>· status: {published ? 'published' : String(article.status)}</span> : null}
           </div>
         </div>
 
@@ -237,34 +313,57 @@ export default function DraftWorkspacePage() {
           <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-white hover:bg-slate-50"
+            disabled={!article || loading || published}
             onClick={() => setMode('edit')}
           >
             Edit draft
           </button>
-          <button
+          {!restricted && <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
             disabled={saving || loading}
-            onClick={submitToManageNews}
+            onClick={() => navigate(`/admin/articles?qv=draft&highlight=${encodeURIComponent(draftId)}`)}
           >
-            Submit to Manage News
-          </button>
-          <button
+            Open in Manage News
+          </button>}
+          {canPublish && !published && <button type="button" className="rounded-md border bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+            disabled={!article || loading || saving || !publishEnabled || !!saveError || !!warning}
+            onClick={() => void publishDraft()}>Publish</button>}
+          {!restricted && <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60"
-            disabled={saving || loading}
+            disabled={!article || saving || loading}
             onClick={deleteDraft}
           >
             Delete draft
-          </button>
+          </button>}
         </div>
       </div>
 
       {loading ? <div>Loading…</div> : null}
+      {restricted && <p className="text-sm text-slate-600">Own-draft workspace. Only changed fields are saved; other editions and omitted metadata are not loaded or replaced.</p>}
+      {published && <div role="status" className="rounded border p-3 text-emerald-700">Publication committed. This story is no longer an own draft. Do not publish it again.</div>}
+      {(saveError || warning) && <div role="alert" className="rounded border border-amber-300 p-3 text-amber-900">
+        <div>{saveError?.message || warning}</div>
+        <p>Unsaved edits remain in this workspace. Automatic retries are paused.</p>
+        {!published && <button type="button" className="mt-2 underline" disabled={saving || refreshing} onClick={() => void refreshLatest()}>
+          {refreshing ? 'Refreshing...' : 'Refresh latest state without discarding edits'}
+        </button>}
+        {!published && recoveryReady && <button type="button" className="ml-3 underline" disabled={saving}
+          onClick={() => {
+            paused.current = false;
+            setSaveError(null);
+            setWarning(null);
+            setRecoveryReady(false);
+            void flushPending();
+          }}>Resume saving unsaved changes</button>}
+      </div>}
+      {!saveError && !warning && dirty && <div role="status">Unsaved changes{saving ? ' - saving...' : ''}</div>}
 
-      {!loading && !article ? (
-        <div className="p-3 rounded border bg-amber-50 text-amber-800">
-          Draft not found or you don’t have access.
+      {!loading && loadError ? (
+        <div role="alert" className="p-3 rounded border bg-amber-50 text-amber-800">
+          {loadError.status === 404 ? 'This draft is not available in your workspace.' : loadError.message}
+          {loadError.status !== 403 && <button type="button" className="ml-3 underline" onClick={() => setLoadVersion((value) => value + 1)}>Retry loading draft</button>}
         </div>
       ) : null}
 
@@ -300,7 +399,9 @@ export default function DraftWorkspacePage() {
         title={
           saving
             ? 'Editing (saving…)'
-            : lastSavedAt
+            : dirty
+              ? 'Editing (unsaved changes)'
+              : lastSavedAt
               ? `Editing (saved ${new Date(lastSavedAt).toLocaleTimeString()})`
               : 'Edit draft'
         }
@@ -309,10 +410,11 @@ export default function DraftWorkspacePage() {
         {!form ? (
           <div className="text-sm text-slate-600">Loading editor…</div>
         ) : (
-          <div className="space-y-3">
+          <fieldset className="space-y-3" disabled={published}>
             <div>
               <label className="text-xs font-medium text-slate-600">Title</label>
               <input
+                aria-label="Title"
                 value={form.title}
                 onChange={(e) => onChange('title', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border rounded text-sm"
@@ -323,6 +425,7 @@ export default function DraftWorkspacePage() {
             <div>
               <label className="text-xs font-medium text-slate-600">Summary</label>
               <textarea
+                aria-label="Summary"
                 value={form.summary}
                 onChange={(e) => onChange('summary', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border rounded text-sm min-h-[90px]"
@@ -333,6 +436,7 @@ export default function DraftWorkspacePage() {
             <div>
               <label className="text-xs font-medium text-slate-600">Content</label>
               <textarea
+                aria-label="Content"
                 value={form.content}
                 onChange={(e) => onChange('content', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border rounded text-sm min-h-[180px]"
@@ -344,6 +448,7 @@ export default function DraftWorkspacePage() {
               <div>
                 <label className="text-xs font-medium text-slate-600">Category</label>
                 <input
+                  aria-label="Category"
                   value={form.category}
                   onChange={(e) => onChange('category', e.target.value)}
                   className="mt-1 w-full px-3 py-2 border rounded text-sm"
@@ -353,8 +458,9 @@ export default function DraftWorkspacePage() {
               <div>
                 <label className="text-xs font-medium text-slate-600">Language</label>
                 <input
+                  aria-label="Language"
+                  readOnly
                   value={form.language}
-                  onChange={(e) => onChange('language', e.target.value)}
                   className="mt-1 w-full px-3 py-2 border rounded text-sm"
                   placeholder="en / hi / ..."
                 />
@@ -364,6 +470,7 @@ export default function DraftWorkspacePage() {
             <div>
               <label className="text-xs font-medium text-slate-600">Tags</label>
               <input
+                aria-label="Tags"
                 value={form.tags}
                 onChange={(e) => onChange('tags', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border rounded text-sm"
@@ -374,6 +481,7 @@ export default function DraftWorkspacePage() {
             <div>
               <label className="text-xs font-medium text-slate-600">Image</label>
               <input
+                aria-label="Image"
                 value={form.image}
                 onChange={(e) => onChange('image', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border rounded text-sm"
@@ -390,7 +498,7 @@ export default function DraftWorkspacePage() {
                 Close
               </button>
             </div>
-          </div>
+          </fieldset>
         )}
       </FiltersDrawer>
     </div>

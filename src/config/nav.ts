@@ -3,7 +3,7 @@ import {
   filterNavItemsByOwnerVisibility,
   type AdminFeatureVisibilityState,
 } from '@/lib/adminFeatureVisibility';
-import { resolveAdminModuleAccess, type AdminModuleKey } from '@/lib/adminAccessControl';
+import { resolveAdminModuleAccess, resolveAnyAdminModuleAccess, type AdminModuleKey } from '@/lib/adminAccessControl';
 import type { AdminEffectiveModuleAccess, AdminModulePolicyMap } from '@/lib/adminModulePolicy';
 import { ADMIN_MARKETING_ROUTE } from '@/config/adminRoutes';
 
@@ -91,7 +91,9 @@ export function leftNavWithAccess(user: any, accessInput: NavAccessInput) {
   const role = String(user?.role || 'viewer').toLowerCase();
   return NAV_ITEMS.filter((item) => !item.hidden && !item.rightSide).flatMap((item) => {
     if (item.moduleKey) {
-      const result = resolveAdminModuleAccess(user, item.moduleKey, access);
+      const result = item.key === 'drafts'
+        ? resolveAnyAdminModuleAccess(user, ['draft_desk', 'add_news', 'manage_news'], access)
+        : resolveAdminModuleAccess(user, item.moduleKey, access);
       if (!result.visible) return [];
       return [{ ...item, locked: !result.allowed, lockedReason: result.reason }];
     }

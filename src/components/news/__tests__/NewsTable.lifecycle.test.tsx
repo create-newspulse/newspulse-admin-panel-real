@@ -10,6 +10,7 @@ import { NewsTable } from '../NewsTable';
 
 const mocks = vi.hoisted(() => ({
   role: 'founder',
+  staffPublish: false,
   publishEnabled: true,
   list: vi.fn(),
   counts: vi.fn(),
@@ -26,8 +27,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: { role: mocks.role }, isFounder: mocks.role === 'founder' }),
+  useAuth: () => ({
+    user: { role: mocks.role, moduleAccess: ['manage_news'], specialRights: mocks.staffPublish ? ['news_publish', 'news_edit'] : [],
+      newsPublishGrantRecorded: mocks.staffPublish },
+    isFounder: mocks.role === 'founder', isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false,
+  }),
 }));
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+  isLoading: false, error: null, backendAccess: {},
+  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+}) }));
 vi.mock('@/context/PublishFlagContext', () => ({
   usePublishFlag: () => ({
     publishEnabled: mocks.publishEnabled, envDefault: true, override: null, setOverride: vi.fn(),
@@ -125,6 +134,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
   mocks.role = 'founder';
+  mocks.staffPublish = false;
   mocks.publishEnabled = true;
   mocks.counts.mockResolvedValue(countsResponse({ draft: 1 }));
   backendRows = [
@@ -168,6 +178,47 @@ afterEach(() => {
 });
 
 describe('Manage News lifecycle actions', () => {
+  it('uses the existing effective staff grant for publication, without exposing scheduling', async () => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
+    backendRows = [{ ...story, _id: 'public-copy-1', sourceNewsId: 'source-en' }];
+    renderTable();
+    await screen.findAllByText('Source story');
+    expect(screen.queryByRole('button', { name: 'Schedule' })).not.toBeInTheDocument();
+    fireEvent.click(action('Publish'));
+    await waitFor(() => expect(mocks.publish.mock.calls).toEqual([['source-en']]));
+    expect(mocks.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 409])('surfaces staff publication HTTP %s without replaying it', async (status) => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
+    mocks.publish.mockRejectedValue({ response: { status, data: {} } });
+    renderTable();
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Publish'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(status === 403 ? /denied/ : /conflict/)));
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+    expect(mocks.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('prevents republishing a committed story when the list refresh fails', async () => {
+    mocks.publish.mockImplementationOnce(async () => {
+      mocks.list.mockRejectedValue({ response: { status: 503, data: {} } });
+      return { committed: true, revalidation: { ok: false } };
+    });
+    renderTable();
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Publish'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringContaining('action completed')));
+    const publish = screen.queryByRole('button', { name: 'Publish' });
+    if (publish) {
+      expect(publish).toBeDisabled();
+      fireEvent.click(publish);
+    }
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['refresh', 'lifecycle'])('keeps Edit and Push usable during an unrelated %s while locking lifecycle actions', async (pending) => {
     backendRows = backendRows.map((row) => ({ ...row, status: 'published' }));
     const { client } = renderTable();
@@ -201,7 +252,7 @@ describe('Manage News lifecycle actions', () => {
     expect(mocks.updateStatus).not.toHaveBeenCalled();
   });
 
-  it('prevents repeated clicks while a whole-story action is in flight', async () => {
+  it('prevents repeated clicks while in flight and until committed publication is reflected in the list', async () => {
     let finish!: (value: { ok: boolean }) => void;
     mocks.publish.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     renderTable();
@@ -212,7 +263,8 @@ describe('Manage News lifecycle actions', () => {
     await waitFor(() => expect(mocks.publish).toHaveBeenCalledTimes(1));
     expect(action('Publish')).toBeDisabled();
     await act(async () => { finish({ ok: true }); });
-    await waitFor(() => expect(action('Publish')).toBeEnabled());
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    expect(action('Publish')).toBeDisabled();
     expect(mocks.publish).toHaveBeenCalledTimes(1);
   });
 
@@ -757,6 +809,8 @@ describe('Manage News chronology and request states', () => {
   });
 
   it('does not continue a Publish batch after a conflict or replay its mutation', async () => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
     backendRows = ['first', 'second'].map((id) => ({ ...story, _id: id, title: `${id} story`, translationGroupId: id }));
     mocks.publish.mockRejectedValueOnce({ response: { status: 409, data: { message: 'Article group changed. Reload and retry.' } } });
     renderTable({}, true);
@@ -769,5 +823,23 @@ describe('Manage News chronology and request states', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
     expect(mocks.publish.mock.calls).toEqual([['first']]);
     expect(mocks.toastError).toHaveBeenCalledWith(expect.stringContaining('Article group changed. Reload and retry.'));
+  });
+
+  it('reports staff bulk publication partial commits and clears selection rather than replaying successes', async () => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
+    backendRows = ['first', 'second', 'third'].map((id) => ({ ...story, _id: id, title: `${id} story`, translationGroupId: id }));
+    mocks.publish.mockResolvedValueOnce({ committed: true }).mockRejectedValueOnce({ response: { status: 403, data: {} } });
+    renderTable({}, true);
+    await screen.findAllByText('first story');
+    await waitFor(() => expect(action('Refresh')).toBeEnabled());
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all visible' }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const publish = screen.getAllByRole('button', { name: 'Publish' });
+    fireEvent.click(publish[publish.length - 1]);
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/1 of 3.*1 failed.*1 not attempted.*not rolled back/)));
+    await waitFor(() => expect(screen.queryByText('Selected: 3')).not.toBeInTheDocument());
+    expect(screen.getByRole('checkbox', { name: 'Select all visible' })).not.toBeChecked();
+    expect(mocks.publish.mock.calls).toEqual([['first'], ['second']]);
   });
 });

@@ -321,14 +321,14 @@ function App() {
               <Route path="/admin/finance" element={<AdminModuleRoute moduleKey="finance_desk"><FinanceDesk /></AdminModuleRoute>} />
               <Route path="/admin/sponsored-content" element={<Navigate to="/admin/ads" replace />} />
               {/* Draft Desk */}
-              <Route path="/draft-desk" element={<AdminModuleRoute moduleKey="draft_desk"><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></AdminModuleRoute>} />
-              <Route path="/draft-desk/:id" element={<AdminModuleRoute moduleKey="draft_desk"><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/draft-desk" element={<AdminModuleRoute moduleKey={['draft_desk', 'add_news', 'manage_news']}><LockCheckWrapper><DraftDeskPage /></LockCheckWrapper></AdminModuleRoute>} />
+              <Route path="/draft-desk/:id" element={<AdminModuleRoute moduleKey={['draft_desk', 'add_news', 'manage_news']}><LockCheckWrapper><DraftWorkspacePage /></LockCheckWrapper></AdminModuleRoute>} />
               {/* Legacy Draft Desk routes */}
               <Route path="/admin/drafts" element={<Navigate to="/draft-desk" replace />} />
               <Route path="/admin/drafts/:id" element={<Navigate to="/draft-desk/:id" replace />} />
 
               {/* 📡 Broadcast Center (Founder-only) */}
-              <Route path="/admin/draft-desk" element={<AdminModuleRoute moduleKey="draft_desk"><Navigate to="/draft-desk" replace /></AdminModuleRoute>} />
+              <Route path="/admin/draft-desk" element={<AdminModuleRoute moduleKey={['draft_desk', 'add_news', 'manage_news']}><Navigate to="/draft-desk" replace /></AdminModuleRoute>} />
 
               {/* 📡 Broadcast Center */}
               <Route path="/admin/broadcast-center" element={<AdminModuleRoute moduleKey="broadcast_center"><BroadcastCenter /></AdminModuleRoute>} />

@@ -19,7 +19,8 @@ Representative current routes:
 | `/login`, `/employee/login`                          | The same email/password `SimpleLogin` component; `/admin/login` redirects to `/login`.                                                |
 | `/admin/articles`                                    | `ManageNews`, behind the `manage_news` module gate and `LockCheckWrapper`.                                                            |
 | `/add`, `/admin/add-news`                            | `AddNews` / `ArticleForm`, behind the `add_news` module gate.                                                                         |
-| `/admin/articles/:id/edit`                           | `ArticleEditPage` / `ArticleForm`, wrapped in `ProtectedRoute` and `LockCheckWrapper`, not the same module wrapper as the list route. |
+| `/admin/articles/:id/edit`                           | `ArticleEditPage` / `ArticleForm` for effective Manage News access; eligible limited staff are redirected to the own-draft workspace before any full article read. |
+| `/draft-desk`, `/draft-desk/:id`                     | Effective Manage News, Add News or Draft Desk module access. Manage News readers retain the full desk; other eligible staff use the restricted own-draft contracts. |
 | `/edit/:id`                                          | Retained `EditNews` workflow screen. Its wrapper names alone do not establish protection outside their path scope.                    |
 | `/admin/settings/admin-panel/team`                   | Team Management, with the `team_management` module gate under the Settings Center.                                                    |
 | `/admin/settings/admin-panel/founder-access-control` | Founder module-policy UI, wrapped in `FounderRoute` under the Settings Center.                                                        |
@@ -118,13 +119,26 @@ Preserve each feature's existing helper and contract. Token/error/refresh behavi
 [lib/api/articles.ts](./src/lib/api/articles.ts) implements the canonical modern publish operation:
 
 ```text
-PUT /admin-api/articles/:encodedId
-Body: { status: "published", publishedAt: "<ISO timestamp>" }
+POST /admin-api/articles/:encodedCmsNewsId/publish
+No client-generated status or publication timestamp
 ```
 
-`publishArticle` encodes the ID and supplies the current timestamp when none is provided. `updateArticleStatus(id, 'published')` delegates to the same helper. The proxy normally forwards this to `/api/articles/:encodedId` on the backend.
+`publishArticle` encodes the CMS News ID. `updateArticleStatus(id, 'published')` delegates to the same helper. The proxy forwards to `/api/articles/:id/publish`; the Backend owns group publication and chronology. When a record explicitly identifies a `sourceNewsId`, publication uses that CMS ID rather than the public-copy ID. Unpublish uses `POST /articles/:id/unpublish` with `{ toStatus: 'draft' }`.
 
-Scheduling and other status changes use separate article helpers, generally PATCH with a PUT fallback. Scheduling sends `status: 'scheduled'` and `publishAt`; unscheduling sends draft status and clears schedule fields. These are not calls to a universal workflow-transition POST endpoint.
+Scheduling and other status changes use a single PUT, without PATCH/legacy fallbacks. Scheduling sends `status: 'scheduled'` and `publishAt`; unscheduling sends draft status and clears schedule fields. Staff publishing does not grant scheduling or unpublishing.
+
+### Restricted Draft Desk and save recovery
+
+[useEditorialAccess.ts](./src/hooks/useEditorialAccess.ts) consumes the existing authentication profile and module resolver; it does not add roles, grants, presets or access-management screens.
+
+- Limited staff use `GET /admin-api/articles/own-drafts` and `GET /admin-api/articles/own-drafts/:id` through the existing authenticated article client. List parameters are pagination and supported sort only. Failures, denial and successful empty results are separate UI states, with no permissive route fallback.
+- These responses are typed separately as `OwnDraftSummary` / `OwnDraftDetail`. They omit ownership, translation-group and other full-editor metadata. They never hydrate `ArticleForm`, trigger sibling-language reads or produce an invented full article payload. Deep links to modern/legacy full editors redirect eligible limited staff to the restricted workspace.
+- [DraftWorkspacePage.tsx](./src/pages/admin/DraftWorkspacePage.tsx) merges edits during a 600 ms debounce and serializes patch-only PUTs. A newer pending value wins over an older in-flight value. The workspace does not write omitted fields or change language identity. The Backend still checks ownership and the complete write scope.
+- Failed saves retain text and pause automatic retries. Refresh reads do not discard edits or repeat mutations; resuming unsaved writes is explicit. Committed follow-up warnings remain distinct from failed writes, and successful patches are removed from the pending queue.
+- [useUnsavedChanges.ts](./src/hooks/useUnsavedChanges.ts) protects links, programmatic navigation, native Browser Back/Forward and unload with the existing BrowserRouter. In-flight saves block SPA navigation. The main editor also confirms language switching, keeps unsaved language buffers and writes each edition's own CMS ID.
+- Manual multilingual saves write only edited secondary editions. Each acknowledged save records its ID and submitted content before the next request. Later failures report partial completion, preserve remaining edits and do not replay unchanged successful writes. Save Update preserves publication chronology. Automatic translation jobs are not requeued just to retry a partially completed save.
+
+Contract boundaries: assigned-but-not-owned drafts remain unsupported without a trusted Backend grant. The restricted DTO is not enough for full-editor hydration. The workspace does not invent a `review` article status or a staff submission permission; authorized users can open Manage News for its existing review workflow. A read grant does not guarantee permission to save or publish a group containing other owners' or protected editions. Missing/older Backend routes are surfaced as failures, not bypassed. These contracts require the separately reviewed Backend changes; local mocked validation does not establish deployment.
 
 ## 6. Publishing and editorial workflow
 
@@ -139,20 +153,22 @@ Founder oversight, editorial review, approval, and server-side authorization are
 | Check         | Current helper behavior                                                                                                                                    |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Runtime flag  | Blocks `publish` and `schedule` when `publishEnabled` is false.                                                                                            |
-| Founder       | Blocks `publish` only when `ctx.isFounder === false`; it does not impose that role check on `schedule`, and an omitted Founder field does not trigger it.  |
+| Publishing access | Requires explicit Founder context or an effective `canPublish` result. Omitted authorization does not permit publication. |
+| Scheduling    | Requires explicit Founder context, independently of staff Publish News eligibility. |
 | Checklist     | Blocks `publish`/`schedule` only when `ctx.checklistOk === false`. Omitted checklist context is not rejected.                                              |
 | Stage         | If a nonempty stage is provided, scheduling requires `approved`, and publishing requires `approved` or `scheduled`. Omitted stage context is not rejected. |
 | Other actions | The helper does not validate review/legal/approval transitions or support unpublish/archive actions.                                                       |
 
-Evaluation order is flag, publish-role check, checklist, then stage. The result is `{ allowed, reason? }` with a human-readable reason, not the former documented structured block-reason payload. There is no single enforced application-wide transition matrix.
+Evaluation order is flag, action authorization, checklist, then stage. The result is `{ allowed, reason? }` with a human-readable reason. There is no single enforced application-wide transition matrix.
 
 ### Actual mounted Admin UI behavior
 
-- **News table:** [NewsTable.tsx](./src/components/news/NewsTable.tsx) shows publish/schedule actions on draft rows and disables them when the runtime flag is off. Those handlers call the article helpers directly without `guardAction`, an approved-stage requirement, or a per-row Founder check. Unpublish and unschedule handlers are not gated by that flag. Archive/restore controls admit the literal `admin`, `founder`, and `editor` roles; they are not Founder-only. Surrounding module gates and backend decisions remain separate.
-- **Modern editor:** [ArticleForm.tsx](./src/components/news/ArticleForm.tsx) computes publish eligibility from the passed `userRole` (`admin` or `founder`), runtime flag, and required title/category/content checks. Its publish flow also performs form-specific checks, slug availability, and confirmations. Both [AddNews.tsx](./src/pages/AddNews.tsx) and [ArticleEditPage.tsx](./src/pages/ArticleEditPage.tsx) currently pass `userRole="admin"`. Thus this publish role prop is not itself an authoritative check of the signed-in user's role, even though other editor controls use authenticated role/special rights.
+- **Shared publication eligibility:** authenticated Founder retains controls. Staff require a computed Publish News special right plus `newsPublishGrantRecorded`, and an eligible content workspace: Manage News with the effective Edit News right, or own-draft workspace access. The marker alone, permanent selections and role presets never authorize the UI. The Backend remains final authority for grant validity, expiry, ownership, protected editions and group scope.
+- **News table:** [NewsTable.tsx](./src/components/news/NewsTable.tsx) uses that eligibility and the runtime flag for publication. Schedule/unschedule and unpublish remain Founder-only. Existing archive/restore and other unrelated module controls are unchanged. Table lifecycle handlers use the canonical article helpers; their checks are not a universal workflow-stage policy.
+- **Modern editor:** [ArticleForm.tsx](./src/components/news/ArticleForm.tsx) uses the same effective publication eligibility, not the `userRole` compatibility prop. Required fields, slug checks, confirmations and the runtime flag remain. Existing content is saved without a lifecycle downgrade, then the canonical publication endpoint is called. If publication fails after a draft save, the UI reports that save as committed rather than claiming rollback. Scheduling controls and schedule writes require Founder.
 - The modern editor does not call the workflow guard or require an approved workflow stage/editorial workflow checklist. It persists the article as a draft first, then invokes the canonical PUT publish helper. Ordinary create saves use draft status; autosave preserves the existing status rather than constituting the explicit publish action.
-- **Manage News bulk transitions:** [ManageNews.tsx](./src/pages/ManageNews.tsx) calls the workflow helper with `isFounder`, but without stage/checklist context. Bulk publish then uses `publishArticle`; non-publish workflow transitions still POST to `/news/:id/transition` through the shared API client.
-- **Retained legacy editor:** [EditNews.tsx](./src/pages/EditNews.tsx) supplies stage, checklist, and Founder context to the guard, then posts its legacy actions to `/news/:id/transition`. This retained path is not the modern `NewsTable`/`ArticleForm` publishing contract.
+- **Manage News bulk transitions:** [ManageNews.tsx](./src/pages/ManageNews.tsx) passes effective publication eligibility and Founder context to the workflow helper. Bulk publication uses `publishArticle`, stops on a failure, distinguishes completed/failed/unattempted items and clears selection after any publication commits. Non-publish review transitions retain their existing contract. A table publication awaiting successful list reconciliation cannot be blindly repeated from a stale draft row.
+- **Retained legacy editor:** [EditNews.tsx](./src/pages/EditNews.tsx) uses full Manage News access, the same publication eligibility, stage and checklist checks. Publication uses the canonical CMS endpoint; other review actions retain `/news/:id/transition`. A denied detail read no longer triggers a list fallback.
 
 ### Runtime publish toggle
 
@@ -236,7 +252,8 @@ These are checked-in routing rules, not a live verification of deployment settin
 Relevant existing tests include:
 
 - [Workflow guard tests](./tests/articleWorkflowGuard.test.ts) and [bulk-row sanitizer tests](./tests/bulkUploadGuard.test.ts).
-- [Modern publish request contract](./src/lib/api/__tests__/articles.publish.test.ts).
+- [Modern publish request contract](./src/lib/api/__tests__/articles.publish.test.ts), [restricted own-draft API contracts](./src/lib/api/__tests__/articles.ownDrafts.test.ts), [Workspace integration](./src/pages/admin/__tests__/DraftWorkspacePage.integration.test.tsx), [effective editorial eligibility](./src/hooks/__tests__/useEditorialAccess.test.tsx), and [unsaved navigation](./src/hooks/__tests__/useUnsavedChanges.test.tsx).
+- [Editor lifecycle and multilingual partial saves](./src/components/news/__tests__/ArticleForm.lifecycle.test.tsx) and [table publication/lifecycle behavior](./src/components/news/__tests__/NewsTable.lifecycle.test.tsx).
 - [Session restoration](./src/context/__tests__/AuthContext.restoreSession.test.tsx), [shell bootstrap](./src/lib/__tests__/adminShellBootstrap.test.ts), and [module-route readiness](./src/components/__tests__/AdminModuleRoute.authReady.test.tsx).
 - [Module policy resolution](./src/lib/__tests__/adminAccessControl.policy.test.ts) and [effective-access loading/cache behavior](./src/hooks/__tests__/useAdminEffectiveAccess.test.tsx).
 - [Staff Access serialization](./src/lib/__tests__/staffAccessSerializer.test.ts), [Staff Access API contracts](./src/api/__tests__/teamManagementApi.staffAccess.test.ts), [Staff Access save behavior](./src/pages/admin/settings/admin-panel/__tests__/TeamManagement.accessSave.test.tsx), and [Founder policy UI](./src/pages/admin/settings/admin-panel/__tests__/FounderAccessControl.test.tsx).

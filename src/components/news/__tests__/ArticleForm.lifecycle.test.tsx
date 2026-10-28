@@ -8,6 +8,8 @@ import ArticleEditPage from '@/pages/ArticleEditPage';
 
 const mocks = vi.hoisted(() => ({
   role: 'founder',
+  staffPublish: false,
+  modules: ['manage_news'] as string[],
   publishEnabled: true,
   create: vi.fn<(data: Partial<Article>) => Promise<{ article: Article }>>(),
   update: vi.fn<(id: string, data: Partial<Article>) => Promise<{ article: Article }>>(),
@@ -19,7 +21,18 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('@context/AuthContext', () => ({ useAuth: () => ({ user: { id: 'test-user', role: mocks.role } }) }));
+vi.mock('@context/AuthContext', () => ({ useAuth: () => ({
+  isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false,
+  user: { id: 'test-user', role: mocks.role, moduleAccess: mocks.modules,
+    specialRights: mocks.staffPublish ? ['news_edit', 'news_publish'] : [], newsPublishGrantRecorded: mocks.staffPublish },
+}) }));
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+  isLoading: false, error: null, backendAccess: {},
+  modulePolicy: {
+    manage_news: { moduleKey: 'manage_news', state: 'available' },
+    add_news: { moduleKey: 'add_news', state: 'available' },
+  },
+}) }));
 vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
   useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
 }));
@@ -103,6 +116,8 @@ function conflict(message = 'Article lifecycle changed. Reload and retry the edi
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.role = 'founder';
+  mocks.staffPublish = false;
+  mocks.modules = ['manage_news'];
   mocks.publishEnabled = true;
   stored = { ...source };
   mocks.get.mockImplementation(async () => ({ ...stored }));
@@ -459,7 +474,7 @@ describe('Founder Edit Published - Save Update', () => {
 });
 
 describe('Scheduled multilingual authoring', () => {
-  it('saves existing language editions and still queues automatic translations without changing lifecycle fields', async () => {
+  it('saves only the edited edition and still queues selected automatic translations without changing lifecycle fields', async () => {
     const scheduledAt = '2026-11-01T10:00:00.000Z';
     mocks.update.mockImplementation(async (id, payload) => {
       const wirePayload = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
@@ -472,7 +487,7 @@ describe('Scheduled multilingual authoring', () => {
     fireEvent.change(titleInput(), { target: { value: 'Updated scheduled headline' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
     await waitFor(() => expect(mocks.translations).toHaveBeenCalledTimes(1));
-    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1', 'edition-hi', 'edition-gu']);
+    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1']);
     for (const [, payload] of mocks.update.mock.calls) {
       expect(payload).not.toHaveProperty('status');
       expect(payload).not.toHaveProperty('publishedAt');
@@ -483,6 +498,7 @@ describe('Scheduled multilingual authoring', () => {
   });
 
   it('still creates a manually authored missing language draft for a Scheduled source', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mocks.group.mockImplementation(async () => ({ rows: [{ ...stored }], total: 1, page: 1, pages: 1 }));
     mocks.create.mockImplementation(async (payload) => ({ article: { ...source, ...payload, _id: 'created-hi' } }));
     renderForm({ ...source, status: 'scheduled' });
@@ -565,7 +581,7 @@ describe('ArticleForm canonical publication', () => {
     if (!category) throw new Error('Category control not found');
     fireEvent.change(category, { target: { value: 'national' } });
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith('Slug already exists'));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/GU saved.*Slug already exists/)));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled());
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.publish).toHaveBeenCalledWith('created-1');
@@ -574,5 +590,212 @@ describe('ArticleForm canonical publication', () => {
     expect(mocks.publish.mock.calls).toEqual([['created-1'], ['created-1']]);
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.create.mock.calls[0][0]).not.toHaveProperty('publishedAt');
+  });
+});
+
+describe('Editorial integration: multilingual commits and effective publication', () => {
+  function languageControl() {
+    const select = screen.getByText('Language').parentElement?.querySelector('select');
+    if (!select) throw new Error('Language control not found');
+    return select;
+  }
+
+  function installEditions(status: 'draft' | 'published' = 'draft') {
+    const editions: Record<string, Article> = {
+      'source-1': { ...source, status },
+      'edition-hi': { ...source, _id: 'edition-hi', title: 'Hindi edition', slug: 'hindi-edition', language: 'hi', lang: 'hi', status },
+      'edition-gu': { ...source, _id: 'edition-gu', title: 'Gujarati edition', slug: 'gujarati-edition', language: 'gu', lang: 'gu', status },
+    };
+    mocks.group.mockImplementation(async () => ({ rows: Object.values(editions), total: 3, page: 1, pages: 1 }));
+    mocks.get.mockImplementation(async (id) => ({ ...editions[id] }));
+    mocks.update.mockImplementation(async (id, payload) => {
+      const patch = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+      editions[id] = { ...editions[id], ...patch };
+      return { article: { ...editions[id] } };
+    });
+    return editions;
+  }
+
+  async function readyEditions() {
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    await screen.findByText('No Trending Topics are available.');
+  }
+
+  it('switches to a published Hindi edition without changing its ID, group or original publishedAt', async () => {
+    const editions = installEditions('published');
+    renderForm(editions['source-1']);
+    await readyEditions();
+    fireEvent.change(languageControl(), { target: { value: 'hi' } });
+    expect(titleInput()).toHaveValue('Hindi edition');
+    fireEvent.change(titleInput(), { target: { value: 'Updated Hindi edition' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['edition-hi']);
+    expect(editions['source-1'].title).toBe(source.title);
+    expect(editions['edition-hi']).toMatchObject({
+      _id: 'edition-hi', language: 'hi', translationGroupId: 'story-group', publishedAt: originalPublishedAt, status: 'published',
+    });
+    expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('publishedAt');
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 409])('reports an EN commit followed by HI HTTP %s, then retries only unsaved editions', async (status) => {
+    const editions = installEditions();
+    const normalUpdate = mocks.update.getMockImplementation()!;
+    let rejectHindi = true;
+    mocks.update.mockImplementation(async (id, payload) => {
+      if (id === 'edition-hi' && rejectHindi) {
+        rejectHindi = false;
+        throw { response: { status, data: {} } };
+      }
+      return normalUpdate(id, payload);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderForm(editions['source-1']);
+    await readyEditions();
+    fireEvent.change(titleInput(), { target: { value: 'Edited English title' } });
+    fireEvent.change(languageControl(), { target: { value: 'hi' } });
+    fireEvent.change(titleInput(), { target: { value: 'Edited Hindi title' } });
+    fireEvent.change(languageControl(), { target: { value: 'gu' } });
+    fireEvent.change(titleInput(), { target: { value: 'Edited Gujarati title' } });
+    fireEvent.change(languageControl(), { target: { value: 'en' } });
+    expect(titleInput()).toHaveValue('Edited English title');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/EN saved.*HI save did not complete/));
+    expect(screen.getByRole('alert')).toHaveTextContent('not rolled back');
+    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1', 'edition-hi']);
+    expect(editions['source-1'].title).toBe('Edited English title');
+    expect(mocks.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh latest state' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh latest state' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
+    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1', 'edition-hi', 'edition-hi', 'edition-gu']);
+    expect(editions['edition-hi'].title).toBe('Edited Hindi title');
+    expect(editions['edition-gu'].title).toBe('Edited Gujarati title');
+    expect(Object.values(editions).every((article) => article.translationGroupId === 'story-group' && article.publishedAt === originalPublishedAt)).toBe(true);
+    expect(mocks.translations).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText(/All changes saved/)).toBeInTheDocument());
+  });
+
+  it('keeps unsaved language buffers and allows canceling a language switch', async () => {
+    const editions = installEditions();
+    renderForm(editions['source-1']);
+    await readyEditions();
+    fireEvent.change(titleInput(), { target: { value: 'Keep my English edit' } });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.change(languageControl(), { target: { value: 'hi' } });
+    expect(languageControl()).toHaveValue('en');
+    expect(titleInput()).toHaveValue('Keep my English edit');
+    confirm.mockReturnValue(true);
+    fireEvent.change(languageControl(), { target: { value: 'hi' } });
+    expect(titleInput()).toHaveValue('Hindi edition');
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    fireEvent.change(languageControl(), { target: { value: 'en' } });
+    expect(titleInput()).toHaveValue('Keep my English edit');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('retains a newly created Hindi ID when the following Gujarati create fails', async () => {
+    const editions = installEditions();
+    delete editions['edition-hi'];
+    delete editions['edition-gu'];
+    let rejectGujarati = true;
+    mocks.create.mockImplementation(async (payload) => {
+      if (payload.lang === 'gu' && rejectGujarati) {
+        rejectGujarati = false;
+        throw { response: { status: 409, data: {} } };
+      }
+      const id = `created-${payload.lang}`;
+      editions[id] = { ...source, ...payload, _id: id };
+      return { article: { ...editions[id] } };
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderForm(editions['source-1']);
+    await screen.findByText('No Trending Topics are available.');
+    await waitFor(() => expect(mocks.group).toHaveBeenCalled());
+    fireEvent.change(languageControl(), { target: { value: 'hi' } });
+    fireEvent.change(titleInput(), { target: { value: 'New Hindi edition' } });
+    fireEvent.change(languageControl(), { target: { value: 'gu' } });
+    fireEvent.change(titleInput(), { target: { value: 'New Gujarati edition' } });
+    fireEvent.change(languageControl(), { target: { value: 'en' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/EN, HI saved.*GU save did not complete/));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
+    expect(mocks.create.mock.calls.map(([payload]) => payload.lang)).toEqual(['hi', 'gu', 'gu']);
+    expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1']);
+    expect(editions['created-hi']._id).toBe('created-hi');
+    expect(editions['created-gu'].translationGroupId).toBe('story-group');
+    expect(mocks.translations).not.toHaveBeenCalled();
+  });
+
+  it('retains a committed-save warning, pauses autosave and does not replay the write after a read', async () => {
+    const editions = installEditions();
+    const normalUpdate = mocks.update.getMockImplementation()!;
+    mocks.update.mockImplementationOnce(async (id, payload) => ({
+      ...await normalUpdate(id, payload), committed: true, postCommitWarnings: [{ code: 'FOLLOW_UP' }],
+    }));
+    renderForm(editions['source-1']);
+    await readyEditions();
+    fireEvent.change(titleInput(), { target: { value: 'Committed source title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('EN save committed'));
+    expect(screen.getByRole('alert')).toHaveTextContent('do not repeat');
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.translations).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh latest state' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh latest state' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Backend follow-up failed'));
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([403, 409])('retains a saved draft when publication returns HTTP %s without replaying content saves', async (status) => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
+    mocks.publish.mockRejectedValueOnce({ response: { status, data: {} } });
+    renderForm({ ...source, status: 'draft' });
+    await readyEditions();
+    fireEvent.change(titleInput(), { target: { value: 'Saved before publication' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/EN saved.*Publication did not complete/));
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.publish.mock.calls).toEqual([['source-1']]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh latest state' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh latest state' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledTimes(2));
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('enables effective staff publishing without enabling scheduling and uses a CMS ID rather than a copy ID', async () => {
+    mocks.role = 'editor';
+    mocks.staffPublish = true;
+    renderForm({ ...source, _id: 'public-copy-1', sourceNewsId: 'source-1', status: 'draft' });
+    await readyEditions();
+    const status = screen.getByText('Status', { exact: true }).parentElement?.querySelector('select');
+    expect(status).toBeDisabled();
+    expect(screen.queryByRole('option', { name: 'Scheduled' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(mocks.publish.mock.calls).toEqual([['source-1']]));
+  });
+
+  it('does not fetch language siblings or the full editor DTO after limited staff create an own draft', async () => {
+    mocks.role = 'intern';
+    mocks.modules = ['add_news'];
+    renderForm(null);
+    fireEvent.change(titleInput(), { target: { value: 'Own new draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft saved'));
+    expect(mocks.group).not.toHaveBeenCalled();
+    expect(mocks.get).not.toHaveBeenCalled();
   });
 });

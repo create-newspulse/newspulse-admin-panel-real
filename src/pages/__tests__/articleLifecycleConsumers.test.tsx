@@ -20,7 +20,14 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { role: mocks.role } }) }));
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({
+  user: { role: mocks.role, moduleAccess: ['manage_news'] },
+  isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false,
+}) }));
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+  isLoading: false, error: null, backendAccess: {},
+  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+}) }));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/adminApiClient', () => ({ adminApiClient: { get: mocks.get, post: mocks.post } }));
 vi.mock('@/lib/api/articles', () => ({
@@ -225,5 +232,22 @@ describe('Legacy editor publication integration', () => {
     expect(publish).toBeDisabled();
     fireEvent.click(publish);
     expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it('keeps publication committed when the response has no article and the workflow read fails', async () => {
+    records[0] = { ...source, _id: 'public-copy-1', sourceNewsId: 'source-en' };
+    mocks.publish.mockImplementationOnce(async () => {
+      mocks.get.mockRejectedValue({ response: { status: 503, data: {} } });
+      return { committed: true, revalidation: { ok: false } };
+    });
+    renderPage(true);
+    const publish = await screen.findByRole('button', { name: /Publish Now/ });
+    await waitFor(() => expect(publish).toBeEnabled());
+    fireEvent.click(publish);
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Published, but')));
+    expect(publish).toBeDisabled();
+    fireEvent.click(publish);
+    expect(mocks.publish.mock.calls).toEqual([['source-en']]);
+    expect(mocks.post).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Navigate, useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import RichTextEditor from '@/components/editor/RichTextEditor';
 import { adminApiClient as api } from '@/lib/adminApiClient';
 import toast from 'react-hot-toast';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
 import { usePublishFlag } from '../context/PublishFlagContext';
 import { guardAction } from '../lib/articleWorkflowGuard';
 import { debug } from '../lib/debug';
@@ -14,7 +14,8 @@ import CoverImageUpload from '@/components/articles/CoverImageUpload';
 import { uploadCoverImage } from '@/lib/api/media';
 import { normalizeError } from '@/lib/error';
 import { publishArticle, updateArticle } from '@/lib/api/articles';
-import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { articleCmsId, articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
 import TrendingTopicSelector from '@/components/news/TrendingTopicSelector';
 import { TopicMembershipSaveError, useArticleTrendingTopics } from '@/hooks/useArticleTrendingTopics';
 
@@ -36,8 +37,19 @@ const LANGUAGE_OPTIONS = ['English', 'Hindi', 'Gujarati'];
 
 export default function EditNews() {
   const { id } = useParams();
+  const access = useEditorialAccess();
+  if (access.loading) return <div>Checking article access...</div>;
+  if (access.canManageNews) return <LegacyEditor key={id} />;
+  if (id && access.canReadOwnDrafts) return <Navigate to={`/draft-desk/${encodeURIComponent(id)}?mode=edit`} replace />;
+  return <div role="alert">{access.reason}</div>;
+}
+
+function LegacyEditor() {
+  const { id } = useParams();
   const navigate = useNavigate();
+  const editorialAccess = useEditorialAccess();
   const { user } = useAuth();
+  const cmsId = useRef<string | null>(null);
   const { publishEnabled } = usePublishFlag();
   const queryClient = useQueryClient();
   const transitionInFlight = useRef(false);
@@ -86,6 +98,7 @@ export default function EditNews() {
         const data = res.data;
         const article = data?.article || data?.data || data;
         if (article && (article._id || article.id)) {
+          cmsId.current = articleCmsId({ _id: article._id || article.id, sourceNewsId: article.sourceNewsId });
           const incomingCoverField: any = article?.coverImage;
           const incomingCoverUrl = (() => {
             if (incomingCoverField && typeof incomingCoverField === 'object') {
@@ -118,27 +131,8 @@ export default function EditNews() {
         } else {
           setError('⚠️ Article not found');
         }
-      } catch (err) {
-        console.warn('Direct fetch failed, attempting fallback list lookup…');
-        try {
-          const list = await api.get('articles');
-          const items = list.data?.articles || list.data?.items || list.data || [];
-          const found = items.find((n: any) => (n._id || n.id) === id);
-          if (found) {
-            setForm({
-              title: found.title || '',
-              content: found.content || '',
-              category: found.category || '',
-              language: found.language || '',
-              summary: found.summary || ''
-            });
-          } else {
-            setError('⚠️ Article not found');
-          }
-        } catch (e) {
-          console.error(e);
-          setError('❌ Failed to load article');
-        }
+      } catch (err: unknown) {
+        setError(normalizeArticleError(err, 'Failed to load article').message);
       } finally {
         setLoading(false);
       }
@@ -289,7 +283,10 @@ export default function EditNews() {
   const doTransition = async (action: 'toReview' | 'toLegal' | 'approve' | 'schedule' | 'publish') => {
     if (!id || (action === 'publish' && (transitionInFlight.current || saveInFlight.current))) return;
     const allChecklistOk = checklist.ptiCompliance && checklist.rightsCleared && checklist.attributionPresent && checklist.defamationScanOk;
-    const g = guardAction(action, publishEnabled, { checklistOk: allChecklistOk, stage: workflow?.stage, isFounder: (user?.role || '').toLowerCase() === 'founder' });
+    const g = guardAction(action, publishEnabled, {
+      checklistOk: allChecklistOk, stage: workflow?.stage,
+      isFounder: editorialAccess.isFounder, canPublish: editorialAccess.canPublish,
+    });
     if (!g.allowed) {
       debug('[EditNews] blocked transition', { id, action, publishEnabled });
       toast.error(g.reason || 'Publishing disabled');
@@ -305,15 +302,15 @@ export default function EditNews() {
         payload.scheduledAt = scheduleAt;
       }
       if (action === 'publish') {
+        if (!cmsId.current) throw new Error('Missing CMS News ID. Reload before publishing.');
         transitionInFlight.current = true;
         setTransitionPending(true);
-        const topicWarning = await trendingTopics.saveChanges(id, trendingTopics.snapshotChanges());
+        const topicWarning = await trendingTopics.saveChanges(cmsId.current, trendingTopics.snapshotChanges());
         if (topicWarning) toast(topicWarning);
-        const result = await publishArticle(id);
+        const result = await publishArticle(cmsId.current);
         const article = result.article || result.data?.article;
-        if (article) queryClient.setQueryData(['articles', 'one', id], article);
-        const publishedStatus = article?.status;
-        if (publishedStatus) setWorkflow((current) => current ? { ...current, status: publishedStatus } : current);
+        if (article) queryClient.setQueryData(['articles', 'one', cmsId.current], article);
+        setWorkflow((current) => current ? { ...current, status: article?.status || 'published' } : current);
         const warning = articleFollowUpWarning(result);
         if (warning) toast(warning);
         try {
@@ -544,7 +541,7 @@ export default function EditNews() {
               >
                 ✅ Approve
               </button>
-              <div className="flex items-center gap-2">
+              {editorialAccess.canSchedule && <div className="flex items-center gap-2">
                 <input
                   type="datetime-local"
                   value={scheduleAt}
@@ -558,11 +555,11 @@ export default function EditNews() {
                 >
                   🗓 Schedule
                 </button>
-              </div>
+              </div>}
               <button
                 type="button"
                 onClick={() => doTransition('publish')}
-                disabled={transitionPending || workflow.status === 'published' || (user?.role || '').toLowerCase() !== 'founder' || (workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk}
+                disabled={transitionPending || workflow.status === 'published' || !editorialAccess.canPublish || (workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk}
                 className={`px-3 py-2 rounded text-white ${((workflow.stage !== 'approved' && workflow.stage !== 'scheduled') || !allChecklistOk) ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-500'}`}
               >
                 🚀 Publish Now

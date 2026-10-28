@@ -27,8 +27,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ user: mocks.authUser }),
+  useAuth: () => ({ user: { ...mocks.authUser, moduleAccess: ['manage_news'] },
+    isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false }),
 }));
+vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+  isLoading: false, error: null, backendAccess: {},
+  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+}) }));
 vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
   useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
 }));
@@ -630,6 +635,7 @@ describe('ArticleForm Quality Tools', () => {
   });
 
   it.each([false, true])('keeps scheduled edits saving through the existing payload (reporter enabled: %s)', async (enabled) => {
+    mocks.authUser = { ...mocks.authUser, role: 'founder' };
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
       <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
         <ArticleForm

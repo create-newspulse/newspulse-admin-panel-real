@@ -1,27 +1,28 @@
-import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React from 'react';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArticleForm } from '@/components/news/ArticleForm';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
 
 // Direct Add Article page using the advanced ArticleForm (replaces old redirect shim)
 const AddNews: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [dirty, setDirty] = useState(false);
+  const access = useEditorialAccess();
   const resumeId = searchParams.get('id');
   const sponsoredMode = searchParams.get('sponsored') === '1';
+  if (access.loading) return <div>Checking article access...</div>;
+  if (resumeId && !access.canManageNews) {
+    return access.canReadOwnDrafts
+      ? <Navigate to={`/draft-desk/${encodeURIComponent(resumeId)}?mode=edit`} replace />
+      : <div role="alert">{access.reason}</div>;
+  }
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-2">📝 Add Article</h1>
         <button
           type="button"
-          onClick={() => {
-            if (dirty) {
-              const ok = window.confirm('You have unsaved changes. Leave this page?');
-              if (!ok) return;
-            }
-            navigate('/admin/news');
-          }}
+          onClick={() => navigate(access.canManageNews ? '/admin/news' : '/draft-desk')}
           className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
         >Back to News</button>
       </div>
@@ -35,7 +36,6 @@ const AddNews: React.FC = () => {
         mode="create"
         id={resumeId}
         userRole="admin"
-        onDirtyChange={setDirty}
         defaultSponsored={sponsoredMode}
       />
     </div>

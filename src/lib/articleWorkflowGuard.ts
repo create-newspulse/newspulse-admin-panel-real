@@ -9,7 +9,8 @@ export function isPublishLike(action: ArticleWorkflowAction): boolean {
 
 export interface GuardContext {
   publishEnabled: boolean;
-  isFounder?: boolean;              // elevated role allowed to publish
+  isFounder?: boolean;
+  canPublish?: boolean;             // resolved from existing effective Staff Access
   checklistOk?: boolean;            // editorial checklist completeness
   stage?: string;                   // current workflow stage (draft/review/legal/approved/scheduled)
 }
@@ -23,9 +24,11 @@ export function guardAction(action: ArticleWorkflowAction, publishEnabled: boole
   if (!publishEnabled && (isPublish || isSchedule)) {
     return { allowed: false, reason: 'Publishing disabled (runtime flag OFF)' };
   }
-  // Founder-only publish enforcement
-  if (isPublish && publishEnabled && ctx?.isFounder === false) {
-    return { allowed: false, reason: 'Only founder may publish currently' };
+  if (isPublish && ctx?.isFounder !== true && ctx?.canPublish !== true) {
+    return { allowed: false, reason: 'An effective Founder-granted Publish News right is required' };
+  }
+  if (isSchedule && ctx?.isFounder !== true) {
+    return { allowed: false, reason: 'Only Founder may schedule news' };
   }
   // Checklist enforcement (only if provided)
   if ((isPublish || isSchedule) && ctx?.checklistOk === false) {

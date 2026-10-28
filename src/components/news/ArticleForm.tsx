@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, updateArticle, getArticle, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article } from '@/lib/api/articles';
+import { createArticle, updateArticle, getArticle, getOwnDraft, publishArticle, retryArticleTranslation, requeueArticleTranslations, listArticlesByTranslationGroupId, type Article, type ArticleMutationResponse } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -13,7 +13,9 @@ import { readingTimeSec } from '@/lib/readtime';
 import RichTextEditor from '@/components/editor/RichTextEditor';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { normalizeError } from '@/lib/error';
-import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { articleCmsId, articleFollowUpWarning, ArticleSaveProgressError, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import PreviewModal from '@/components/preview/PreviewModal';
 import { buildSlugSuggestions, checkSlugAvailability } from '@/lib/slugAvailability';
 import CoverImageUpload from '@/components/articles/CoverImageUpload';
@@ -68,6 +70,13 @@ type ArticleLanguageReviewFields = {
   seoTitle: string;
   metaDescription: string;
 };
+
+type LanguageBaseline = { draft: ArticleLanguageDraft; review: ArticleLanguageReviewFields };
+type CommittedEdition = { id: string; signature: string; result: ArticleMutationResponse };
+
+function editionFingerprint(draft: ArticleLanguageDraft, review: ArticleLanguageReviewFields): string {
+  return JSON.stringify([draft.title, draft.slug, draft.summary, draft.content, review.imageAltText, review.seoTitle, review.metaDescription]);
+}
 
 const EMPTY_LANGUAGE_DRAFT: ArticleLanguageDraft = {
   title: '',
@@ -450,6 +459,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const editorialAccess = useEditorialAccess();
   const effectiveUserRole = normalizeRoleId(user?.role || userRole);
   const effectiveSpecialRights = useMemo(() => getEffectiveSpecialRights(user), [user]);
   // resolve edit id
@@ -464,6 +474,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const autosavePausedRef = useRef(false);
   const hydratedArticleIdRef = useRef<string | null>(null);
   const mutationTargetIdRef = useRef<string | null>(initialEditId);
+  const languageBaselinesRef = useRef<Partial<Record<LangCode, LanguageBaseline>>>({});
+  const committedEditionsRef = useRef<Partial<Record<LangCode, CommittedEdition>>>({});
+  const unknownSaveIdentityRef = useRef(false);
+  const anchorLanguageRef = useRef<LangCode | null>(null);
   // After creating a draft in-place (Add Article), we intentionally avoid refetching
   // the server copy because it can overwrite the in-progress form values.
   const [suppressServerHydration, setSuppressServerHydration] = useState(false);
@@ -476,6 +490,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     autosavePausedRef.current = false;
     hydratedArticleIdRef.current = null;
     mutationTargetIdRef.current = initialEditId;
+    languageBaselinesRef.current = {};
+    committedEditionsRef.current = {};
+    unknownSaveIdentityRef.current = false;
+    anchorLanguageRef.current = null;
   }, [initialEditId]);
   const computedMode: 'create'|'edit' = effectiveId ? 'edit' : 'create';
   const qc = useQueryClient();
@@ -483,7 +501,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const { data } = useQuery({
     queryKey: ['articles','one',effectiveId],
     queryFn: ()=> effectiveId ? getArticle(effectiveId) : Promise.resolve(null),
-    enabled: !!effectiveId && !initialValues && !suppressServerHydration,
+    enabled: !!effectiveId && !initialValues && !suppressServerHydration && editorialAccess.canManageNews,
+    retry: false,
   });
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -733,6 +752,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   };
 
   function resetToNewArticle() {
+    if (dirtyRef.current && !window.confirm('Start another article and discard unsaved changes?')) return;
     trendingTopics.reset();
     setEffectiveId(null);
     setSuppressServerHydration(false);
@@ -743,6 +763,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     autosavePausedRef.current = false;
     hydratedArticleIdRef.current = null;
     mutationTargetIdRef.current = null;
+    languageBaselinesRef.current = {};
+    committedEditionsRef.current = {};
+    unknownSaveIdentityRef.current = false;
+    anchorLanguageRef.current = null;
     setTitle('');
     setSlug('');
     setAutoSlug(true);
@@ -803,7 +827,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     try {
       const u = new URL(window.location.href);
       u.searchParams.delete('id');
-      window.history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
     } catch {}
   }
 
@@ -858,16 +882,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   function selectLanguageWorkspace(code: LangCode) {
     if (code === language) return;
+    if (mutationInFlightRef.current || publishFlowInFlightRef.current) {
+      toast.error('Wait for the current save before switching languages.');
+      return;
+    }
+    if (dirtyRef.current && !window.confirm('You have unsaved changes. Switch language? Your edits will remain in this workspace until saved.')) return;
     const currentDraft = { title, slug, summary, content };
-    setLanguageDrafts((prev) => {
-      const next = { ...prev, [language]: currentDraft };
-      const existingVariant = translationVariants[code];
-      const nextDraft = hasAnyLanguageDraftContent(next[code])
-        ? next[code]
-        : (existingVariant ? getArticleDraftFromRecord(existingVariant) : { ...EMPTY_LANGUAGE_DRAFT });
-      window.setTimeout(() => applyLanguageDraft(code, nextDraft), 0);
-      return next;
-    });
+    const next = { ...languageDrafts, [language]: currentDraft };
+    const existingVariant = translationVariants[code];
+    const baseline = languageBaselinesRef.current[code]?.draft
+      || (existingVariant ? getArticleDraftFromRecord(existingVariant) : { ...EMPTY_LANGUAGE_DRAFT });
+    const nextDraft = hasAnyLanguageDraftContent(next[code]) ? next[code] : baseline;
+    const nextStatus = getVariantStatus(existingVariant);
+    const workspaceStatus = nextStatus === 'published' || nextStatus === 'scheduled' ? nextStatus : 'draft';
+    const nextPublishedAt = String(existingVariant?.publishedAt || '');
+    setLanguageDrafts(next);
+    applyLanguageDraft(code, nextDraft);
+    setStatus(workspaceStatus);
+    originalStatusRef.current = workspaceStatus;
+    setPublishedAt(nextPublishedAt);
+    setStatusExplicitlyChanged(false);
+    setLastSavedSnapshot((previous) => ({
+      ...previous, ...baseline, language: code, status: workspaceStatus, publishedAt: nextPublishedAt,
+    }));
   }
 
   function getDraftForLanguage(code: LangCode): ArticleLanguageDraft {
@@ -991,6 +1028,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const lastSavedHash = useMemo(() => snapshotHash(lastSavedSnapshot), [lastSavedSnapshot]);
   const currentSnapshotRef = useRef<Snapshot>(EMPTY_SNAPSHOT);
   currentSnapshotRef.current = buildSnapshot();
+  const hasPendingLanguageChanges = ARTICLE_LANGUAGE_CODES.some((code) => {
+    const draft = code === language ? { title, slug, summary, content } : languageDrafts[code];
+    const baseline = languageBaselinesRef.current[code];
+    return editionFingerprint(draft, languageReviewFields[code])
+      !== editionFingerprint(baseline?.draft || EMPTY_LANGUAGE_DRAFT, baseline?.review || EMPTY_LANGUAGE_REVIEW_FIELDS);
+  });
 
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -1131,7 +1174,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (src && !initialValues && suppressServerHydration) return;
     if (src) {
       if (hydratedArticleIdRef.current === src._id
-        && (dirtyRef.current || mutationInFlightRef.current || autosavePausedRef.current)) return;
+        && (dirtyRef.current || mutationInFlightRef.current || autosavePausedRef.current
+          || language !== normalizeLang(src.lang ?? src.language))) return;
       hydratedArticleIdRef.current = src._id || effectiveId;
       const dbg = isArticleEditorDebugEnabled();
       if (dbg) {
@@ -1323,6 +1367,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           sponsorCtaUrl: String((src as any).sponsorCtaUrl ?? (src as any).ctaUrl ?? ''),
         });
         setLastSavedSnapshot(s);
+        languageBaselinesRef.current[normalizeLang(s.language)] = {
+          draft: { title: s.title, slug: s.slug, summary: s.summary, content: s.content },
+          review: getArticleReviewFieldsFromRecord(src),
+        };
+        anchorLanguageRef.current = normalizeLang(s.language);
         setLastSavedAt(Date.now());
       } catch { /* ignore */ }
 
@@ -1401,7 +1450,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const translationGroupQuery = useQuery({
     queryKey: ['articles', 'translationGroup', translationGroupIdTrimmed],
     queryFn: async () => listArticlesByTranslationGroupId(translationGroupIdTrimmed, { limit: 50 }),
-    enabled: !!translationGroupIdTrimmed,
+    enabled: !!translationGroupIdTrimmed && editorialAccess.canManageNews,
     staleTime: 60 * 1000,
     retry: false,
   });
@@ -1433,34 +1482,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (currentArticleRecord) {
       return normalizeLang((currentArticleRecord as any)?.lang ?? (currentArticleRecord as any)?.language ?? language);
     }
-    return normalizeLang(language);
+    return anchorLanguageRef.current || normalizeLang(language);
   }, [currentArticleRecord, language]);
-
-  const faithTopicReadOnly = useMemo(() => {
-    if (!effectiveId || !currentArticleRecord) return false;
-    const sourceId = String(translationSourceArticle?._id || translationSourceArticle?.id || '').trim();
-    if (sourceId) return sourceId !== effectiveId;
-    // Use only explicit backend source metadata, not the translation UI's inferred source language.
-    const sourceLanguage = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
-    const recordLanguage = String(currentArticleRecord.lang ?? currentArticleRecord.language ?? '').trim().toLowerCase();
-    return !!sourceLanguage && isLangCode(recordLanguage) && sourceLanguage !== recordLanguage;
-  }, [effectiveId, currentArticleRecord, translationSourceArticle, translationGroupPayload]);
-
-  useEffect(() => {
-    if (faithTopicReadOnly && category === 'faith-culture') {
-      setFaithTopic(lastSavedSnapshot.category === 'faith-culture' ? lastSavedSnapshot.faithTopic : undefined);
-    }
-  }, [faithTopicReadOnly, category, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic]);
-
-  function buildFaithTopicPayload(newArticle = !effectiveId): Pick<Article, 'topic'> {
-    if (category !== 'faith-culture') return {};
-    if (!newArticle && (faithTopicReadOnly || (
-      lastSavedSnapshot.category === 'faith-culture' && faithTopic === lastSavedSnapshot.faithTopic
-    ))) return {};
-    if (isFaithCultureTopic(faithTopic)) return { topic: faithTopic };
-    if (!newArticle && faithTopic === null) return { topic: null };
-    return {};
-  }
 
   const translationVariants = useMemo(() => {
     const rows: any[] = (translationGroupQuery.data as any)?.rows || [];
@@ -1550,16 +1573,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
     if (translationGroupIdTrimmed && currentArticle) {
       const currentCode = currentArticleLanguage;
+      const currentWorkspace = language === currentCode;
       applyVariant(currentCode, {
         ...(currentArticle as any),
         _id: String(effectiveId || (currentArticle as any)?._id || (currentArticle as any)?.id || '').trim() || undefined,
         id: String(effectiveId || (currentArticle as any)?.id || (currentArticle as any)?._id || '').trim() || undefined,
-        title: String(title || (currentArticle as any)?.title || ''),
-        content: String(content || (currentArticle as any)?.content || (currentArticle as any)?.body || ''),
-        body: String(content || (currentArticle as any)?.body || (currentArticle as any)?.content || ''),
+        title: String(currentWorkspace ? title : currentArticle.title || ''),
+        content: String(currentWorkspace ? content : currentArticle.content || ''),
+        body: String(currentWorkspace ? content : currentArticle.content || ''),
         lang: currentCode,
         language: currentCode,
-        status: status || (currentArticle as any)?.status,
+        status: currentWorkspace ? status : currentArticle.status,
         state: state || (currentArticle as any)?.state,
         publishStatus: (currentArticle as any)?.publishStatus,
         isPublished: getVariantStatus({
@@ -1568,15 +1592,48 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           state,
           publishedAt,
         }) === 'published',
-        publishedAt: publishedAt || (currentArticle as any)?.publishedAt || (currentArticle as any)?.publishAt,
-        publishAt: publishedAt || (currentArticle as any)?.publishAt || (currentArticle as any)?.publishedAt,
+        publishedAt: currentWorkspace ? publishedAt : currentArticle.publishedAt,
+        publishAt: currentArticle.publishAt,
         translationGroupId: translationGroupIdTrimmed,
         __isSource: inferredSourceLanguage === currentCode,
       }, 'override');
     }
 
+    for (const code of ARTICLE_LANGUAGE_CODES) {
+      const committed = committedEditionsRef.current[code];
+      const baseline = languageBaselinesRef.current[code];
+      if (!committed || !baseline) continue;
+      const record = committed.result.article || committed.result.data?.article;
+      applyVariant(code, { ...record, ...baseline.draft, _id: committed.id, language: code, lang: code }, 'override');
+    }
     return map;
-  }, [translationGroupIdTrimmed, translationGroupQuery.data, translationGroupPayload, currentArticleRecord, translationSourceArticle, translationSourceLanguage, currentArticleLanguage, effectiveId, language, title, content, status, state, publishedAt]);
+  }, [translationGroupIdTrimmed, translationGroupQuery.data, translationGroupPayload, currentArticleRecord, translationSourceArticle, translationSourceLanguage, currentArticleLanguage, effectiveId, language, title, content, status, state, publishedAt, saveHydrationVersion]);
+
+  const faithTopicReadOnly = useMemo(() => {
+    const active = translationVariants[language];
+    if (!active?._id) return false;
+    const sourceId = String(translationSourceArticle?._id || translationSourceArticle?.id || '').trim();
+    if (sourceId) return sourceId !== articleCmsId(active);
+    // Only explicit Backend source metadata can make an edition's topic read-only.
+    const sourceLanguage = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
+    return !!sourceLanguage && sourceLanguage !== language;
+  }, [translationVariants, language, currentArticleRecord, translationSourceArticle, translationGroupPayload]);
+
+  useEffect(() => {
+    if (faithTopicReadOnly && category === 'faith-culture') {
+      setFaithTopic(lastSavedSnapshot.category === 'faith-culture' ? lastSavedSnapshot.faithTopic : undefined);
+    }
+  }, [faithTopicReadOnly, category, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic]);
+
+  function buildFaithTopicPayload(newArticle = !effectiveId): Pick<Article, 'topic'> {
+    if (category !== 'faith-culture') return {};
+    if (!newArticle && (faithTopicReadOnly || (
+      lastSavedSnapshot.category === 'faith-culture' && faithTopic === lastSavedSnapshot.faithTopic
+    ))) return {};
+    if (isFaithCultureTopic(faithTopic)) return { topic: faithTopic };
+    if (!newArticle && faithTopic === null) return { topic: null };
+    return {};
+  }
 
   const linkedVersionCodes = useMemo(() => {
     return (['en', 'hi', 'gu'] as const).filter((code) => !!translationVariants[code]);
@@ -1587,6 +1644,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const next = { ...prev };
       for (const code of ARTICLE_LANGUAGE_CODES) {
         const variant = translationVariants[code];
+        if (variant && !languageBaselinesRef.current[code]) {
+          languageBaselinesRef.current[code] = { draft: getArticleDraftFromRecord(variant), review: getArticleReviewFieldsFromRecord(variant) };
+        }
         if (variant && !hasAnyLanguageDraftContent(next[code])) {
           next[code] = getArticleDraftFromRecord(variant);
         }
@@ -1650,7 +1710,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [translationVariants]);
 
   const existingSlugs = useMemo(()=> new Set<string>([]), []);
-  useEffect(()=> { if (autoSlug) { uniqueSlug(title, existingSlugs).then(setSlug); } }, [title, autoSlug, existingSlugs]);
+  useEffect(() => {
+    let cancelled = false;
+    if (autoSlug) void uniqueSlug(title, existingSlugs).then((value) => { if (!cancelled) setSlug(value); });
+    return () => { cancelled = true; };
+  }, [title, autoSlug, existingSlugs]);
   useEffect(()=> { setReadingSeconds(readingTimeSec(content)); }, [content]);
 
   const languageOptions = useMemo(() => {
@@ -1780,14 +1844,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (!targetId || refreshingArticle) return;
     setRefreshingArticle(true);
     try {
-      const latest = await getArticle(targetId);
-      qc.setQueryData(['articles', 'one', targetId], latest);
+      const latest = editorialAccess.canManageNews ? await getArticle(targetId) : await getOwnDraft(targetId);
+      if (editorialAccess.canManageNews) qc.setQueryData(['articles', 'one', targetId], latest);
       if (latest.status === 'draft' || latest.status === 'scheduled' || latest.status === 'published') {
         originalStatusRef.current = latest.status;
         setStatus(latest.status);
         setStatusExplicitlyChanged(false);
       }
-      setPublishedAt(latest.publishedAt || '');
+      setPublishedAt('publishedAt' in latest ? latest.publishedAt || '' : '');
       setNeedsLatestRefresh(false);
     } catch (error: unknown) {
       setNeedsLatestRefresh(true);
@@ -1811,8 +1875,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         throw new TopicMembershipSaveError('Manage News access and the Edit news special right are required to save Trending Topics.', null);
       }
       const wasPublished = originalStatusRef.current === 'published';
-      if (desiredStatusOverride === 'published' && effectiveUserRole !== 'founder') {
-        throw new Error('Founder permission is required to publish.');
+      if (desiredStatusOverride === 'published' && !editorialAccess.canPublish) {
+        throw new Error('An effective Founder-granted Publish News right is required.');
       }
       if (category !== PULSE_DIALOGUE_CATEGORY && authorByline.enabled && authorPhotoUploadPending) {
         throw new Error('Please wait for the author photo upload to finish.');
@@ -1827,10 +1891,31 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ...languageDrafts,
         [language]: { title, slug, summary, content },
       };
+      const targetIdFor = (code: LangCode): string | null => {
+        const committed = committedEditionsRef.current[code];
+        if (committed) return committed.id;
+        const variant = translationVariants[code];
+        if (variant?._id) return articleCmsId(variant);
+        if (effectiveId && code === currentArticleLanguage) {
+          return currentArticleRecord?._id ? articleCmsId(currentArticleRecord as Article) : effectiveId;
+        }
+        return null;
+      };
+      const activeTargetId = targetIdFor(language);
+      mutationTargetIdRef.current = activeTargetId;
+      const hasEditionChanges = (code: LangCode) => {
+        const baseline = languageBaselinesRef.current[code];
+        return editionFingerprint(currentLanguageDrafts[code], languageReviewFields[code])
+          !== editionFingerprint(baseline?.draft || EMPTY_LANGUAGE_DRAFT, baseline?.review || EMPTY_LANGUAGE_REVIEW_FIELDS);
+      };
+      if (desiredStatusOverride === 'published' && ARTICLE_LANGUAGE_CODES.some((code) =>
+        code !== language && hasAnyLanguageDraftContent(currentLanguageDrafts[code]) && hasEditionChanges(code))) {
+        throw new Error('Save the edited language drafts before publishing. Unsaved editions have not been submitted.');
+      }
       const saveAllLanguageDrafts = saveKindRef.current === 'manual' && desiredStatusOverride !== 'published'
         && !wasPublished;
       const translationGroupIdForSave = (translationGroupId || '').trim()
-        || (saveAllLanguageDrafts ? createTranslationGroupId(title || slug || summary || 'article') : '');
+        || (!effectiveId && saveAllLanguageDrafts ? createTranslationGroupId(title || slug || summary || 'article') : '');
       const ordinaryTags = tags.filter((tag) => !trendingTopics.isProtectedTag(tag));
       const ordinaryTagsChanged = JSON.stringify(ordinaryTags)
         !== JSON.stringify(lastSavedSnapshot.tags.filter((tag) => !trendingTopics.isProtectedTag(tag)));
@@ -1840,8 +1925,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         throw new TopicMembershipSaveError('Article tags were not saved. Load Trending Topics successfully before changing tags so existing memberships can be preserved.', null);
       }
       let associationTags = tags.filter(trendingTopics.isProtectedTag);
-      if (effectiveId && tagMetadataChanged) {
-        const latest = await getArticle(effectiveId);
+      if (activeTargetId && tagMetadataChanged && editorialAccess.canManageNews) {
+        const latest = await getArticle(activeTargetId);
         associationTags = (latest.tags || []).filter(trendingTopics.isProtectedTag);
       }
 
@@ -2050,6 +2135,82 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const categoryKeyRaw = (category || '').trim();
       const categoryKey = normalizeArticleCategoryKey(categoryKeyRaw);
       const categoryAllowed = !categoryKeyRaw || !!categoryKey;
+      const committedLanguages: LangCode[] = [];
+      let activeWritePerformed = false;
+      const previousActiveDraft = languageBaselinesRef.current[language]?.draft;
+      const sourceContentChanged = !previousActiveDraft || (['title', 'summary', 'content'] as const).some((key) =>
+        currentLanguageDrafts[language][key] !== previousActiveDraft[key]);
+      const editedOtherLanguages = ARTICLE_LANGUAGE_CODES.some((code) => code !== language && hasEditionChanges(code));
+      let step = `${language.toUpperCase()} save`;
+      const submittedSignature = snapshotHash({
+        ...submittedSnapshot, slug: safeSlug, translationGroupId: translationGroupIdForSave,
+      }) + JSON.stringify(languageReviewFields[language]);
+
+      async function persistEdition(code: LangCode, payload: Partial<Article>, signature: string) {
+        step = `${code.toUpperCase()} save`;
+        const targetId = targetIdFor(code);
+        const previous = committedEditionsRef.current[code];
+        if (previous && previous.id === targetId && previous.signature === signature) {
+          committedLanguages.push(code);
+          return previous.result;
+        }
+        const result: ArticleMutationResponse = targetId
+          ? await updateArticle(targetId, payload)
+          : await createArticle(payload);
+        if (code === language) activeWritePerformed = true;
+        committedLanguages.push(code);
+        const savedArticle = result.article || result.data?.article;
+        const savedId = targetId || (savedArticle?._id ? articleCmsId(savedArticle) : null);
+        if (!savedId) {
+          unknownSaveIdentityRef.current = true;
+          setNeedsLatestRefresh(true);
+          throw new ArticleSaveProgressError(
+            `${code.toUpperCase()} save committed but returned no CMS News ID. Open Draft Desk to locate it; do not create another draft.`, null,
+          );
+        }
+        committedEditionsRef.current[code] = { id: savedId, signature, result };
+        languageBaselinesRef.current[code] = {
+          draft: { ...currentLanguageDrafts[code], slug: payload.slug || currentLanguageDrafts[code].slug },
+          review: { ...languageReviewFields[code] },
+        };
+        if (translationGroupIdForSave) setTranslationGroupId(translationGroupIdForSave);
+        if (code === language) {
+          mutationTargetIdRef.current = savedId;
+          if (!effectiveId) {
+            anchorLanguageRef.current = code;
+            setEffectiveId(savedId);
+            setSuppressServerHydration(true);
+            if (mode === 'create') {
+              const url = new URL(window.location.href);
+              url.searchParams.set('id', savedId);
+              window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+            }
+          }
+          setLastSavedSnapshot({ ...submittedSnapshot, slug: safeSlug, translationGroupId: translationGroupIdForSave });
+          setLastSavedAt(Date.now());
+        }
+        setSaveHydrationVersion((version) => version + 1);
+        const followUp = articleFollowUpWarning(result);
+        if (followUp) {
+          setNeedsLatestRefresh(true);
+          throw new ArticleSaveProgressError(`${code.toUpperCase()} save committed. ${followUp} Remaining steps were not attempted.`, null);
+        }
+        return result;
+      }
+
+      async function withSaveProgress<T>(operation: () => Promise<T>): Promise<T> {
+        try {
+          return await operation();
+        } catch (error: unknown) {
+          if (error instanceof ArticleSaveProgressError || !committedLanguages.length) throw error;
+          const failure = error instanceof TopicMembershipSaveError
+            ? error.message : normalizeArticleError(error, `${step} failed`).message;
+          throw new ArticleSaveProgressError(
+            `${committedLanguages.map((code) => code.toUpperCase()).join(', ')} saved. ${step} did not complete. ${failure} Successful writes were not rolled back and will not be replayed unchanged.`,
+            error instanceof TopicMembershipSaveError ? error.cause : error,
+          );
+        }
+      }
 
       // Production CMS contract:
       // Publish should persist the source draft first if needed, then publish via the canonical endpoint.
@@ -2059,31 +2220,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         if (!content.trim()) throw new Error('Content required to publish');
         if (!categoryAllowed) throw new Error('Category is not allowed');
 
-        const draftPayload = buildPublicPayload({ status: effectiveId ? undefined : 'draft' });
-
-        let idToPublish: string | null = effectiveId ? String(effectiveId) : null;
-        if (!idToPublish) {
-          const created: any = await createArticle(draftPayload as any);
-          const createdPayload = created?.article || created?.data?.article || created?.data || created;
-          idToPublish = createdPayload?._id || createdPayload?.id || created?._id || created?.id || null;
-          if (!idToPublish) throw new Error('Failed to create draft before publish (missing id).');
-          setEffectiveId(String(idToPublish));
-          setSuppressServerHydration(true);
-          originalStatusRef.current = 'draft';
-          if (mode === 'create') {
-            const url = new URL(window.location.href);
-            url.searchParams.set('id', String(idToPublish));
-            window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-          }
-        } else if (dirtyRef.current) {
-          await updateArticle(idToPublish, draftPayload as any);
-        }
-
-        mutationTargetIdRef.current = idToPublish;
-        lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !effectiveId, category, faithTopic: submittedSnapshot.faithTopic, authorByline, snapshot: submittedSnapshot, wasPublished };
-        await saveSelectedTopics(idToPublish);
-        const published = await publishArticle(idToPublish);
-        return { ...(published as any), __npCreatedId: idToPublish };
+        return withSaveProgress(async () => {
+          const draftPayload = buildPublicPayload({
+            status: activeTargetId ? undefined : 'draft',
+            language: language !== currentArticleLanguage ? language : undefined,
+            newArticle: !activeTargetId,
+          });
+          lastSubmitRef.current = { statusToSend: 'published', safeSlug, wasNew: !activeTargetId, category, faithTopic: submittedSnapshot.faithTopic, authorByline, snapshot: submittedSnapshot, wasPublished };
+          if (!activeTargetId || dirtyRef.current) await persistEdition(language, draftPayload, submittedSignature);
+          const idToPublish = targetIdFor(language);
+          if (!idToPublish) throw new Error('Missing CMS News ID before publication.');
+          mutationTargetIdRef.current = idToPublish;
+          step = 'Trending Topics';
+          await saveSelectedTopics(idToPublish);
+          step = 'Publication';
+          const published = await publishArticle(idToPublish);
+          return { ...published, __npCreatedId: idToPublish };
+        });
       }
 
       // Compute safe status to send:
@@ -2097,7 +2250,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         statusToSend = orig as PublicArticleStatus;
       } else if (desiredStatusOverride) {
         statusToSend = desiredStatusOverride;
-      } else if (computedMode === 'create') {
+      } else if (!activeTargetId) {
         statusToSend = 'draft';
       } else {
         const orig = originalStatusRef.current === 'unknown' ? (status || 'draft') : originalStatusRef.current;
@@ -2105,7 +2258,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         statusToSend = statusExplicitlyChanged && orig !== 'published' ? status : (orig as PublicArticleStatus);
       }
 
-      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !effectiveId, category, faithTopic: submittedSnapshot.faithTopic, authorByline, snapshot: submittedSnapshot, wasPublished };
+      lastSubmitRef.current = { statusToSend, safeSlug, wasNew: !activeTargetId, category, faithTopic: submittedSnapshot.faithTopic, authorByline, snapshot: submittedSnapshot, wasPublished };
 
       logArticleEditorDebug('submit', {
         kind: saveKindRef.current,
@@ -2123,10 +2276,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       });
 
       const body = buildPublicPayload({
-        status: computedMode === 'create' ? 'draft'
+        status: !activeTargetId ? 'draft'
           : saveKindRef.current === 'manual' && statusExplicitlyChanged && !wasPublished && statusToSend !== 'published'
             ? statusToSend : undefined,
+        language: language !== currentArticleLanguage ? language : undefined,
+        newArticle: !activeTargetId,
       });
+      if (body.status === 'scheduled' && !editorialAccess.canSchedule) throw new Error('Only Founder may schedule news.');
 
       logArticleEditorDebug('payload', {
         targetArticleId: effectiveId,
@@ -2164,69 +2320,45 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if ((statusToSend === 'published' || desiredStatusOverride === 'published') && !categoryAllowed) {
         throw new Error('Category is not allowed');
       }
-      const savedResult = onSubmit ? await onSubmit(body)
-        : computedMode === 'create'
-          ? await createArticle(body as any)
-          : await updateArticle(effectiveId!, body as any);
-
-      const savedRaw: any = savedResult as any;
-      const savedArticle = (savedRaw?.article) || (savedRaw?.data?.article) || (savedRaw?.data && typeof savedRaw.data === 'object' ? savedRaw.data : savedRaw);
-      const activeSavedId = savedArticle?._id || savedArticle?.id || savedRaw?._id || savedRaw?.id || effectiveId;
-      mutationTargetIdRef.current = activeSavedId || effectiveId;
-      if (!effectiveId && activeSavedId) {
-        setEffectiveId(String(activeSavedId));
-        setSuppressServerHydration(true);
-        originalStatusRef.current = 'draft';
-        if (mode === 'create') {
-          const url = new URL(window.location.href);
-          url.searchParams.set('id', String(activeSavedId));
-          window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      return withSaveProgress(async () => {
+        const savedResult = onSubmit ? await onSubmit(body) : await persistEdition(language, body, submittedSignature);
+        const activeSavedId = targetIdFor(language);
+        if (!onSubmit && saveAllLanguageDrafts && translationGroupIdForSave) {
+          for (const code of ARTICLE_LANGUAGE_CODES) {
+            if (code === language) continue;
+            const draft = currentLanguageDrafts[code];
+            if (!hasEditionChanges(code)) continue;
+            if (!draft.title.trim()) throw new Error(`${code.toUpperCase()} title is required to save its edited draft.`);
+            const targetId = targetIdFor(code);
+            const review = languageReviewFields[code];
+            const draftPayload = targetId ? {
+              title: draft.title, slug: ensureValidSlug(draft.slug, draft.title),
+              summary: draft.summary, description: draft.summary, content: draft.content,
+              imageAltText: review.imageAltText, imageAlt: review.imageAltText,
+              seoTitle: review.seoTitle, metaTitle: review.seoTitle, metaDescription: review.metaDescription,
+            } : buildPublicPayload({ status: 'draft', language: code, draft, newArticle: true });
+            await persistEdition(code, draftPayload, editionFingerprint(draft, review));
+          }
         }
-      }
-      if (onSubmit || !saveAllLanguageDrafts || !translationGroupIdForSave) {
-        await saveSelectedTopics(activeSavedId ? String(activeSavedId) : null);
-        return { ...savedResult, __npTopicMembershipChanged: topicsChanged };
-      }
-      const linkedDraftIds: Partial<Record<LangCode, string>> = {};
-
-      for (const code of ARTICLE_LANGUAGE_CODES) {
-        const draft = currentLanguageDrafts[code];
-        if (!hasAnyLanguageDraftContent(draft) || !draft.title.trim()) continue;
-
-        const variant = translationVariants[code];
-        const variantId = String((variant as any)?._id || (variant as any)?.id || '').trim();
-        const targetId = code === language ? String(activeSavedId || '').trim() : variantId;
-        if (code === language && targetId) {
-          linkedDraftIds[code] = targetId;
-          continue;
-        }
-        const draftPayload = buildPublicPayload({
-          status: targetId ? undefined : 'draft', language: code, draft,
-          newArticle: !targetId,
-          authorAlreadySaved: code === language,
-        });
-
-        if (targetId) {
-          await updateArticle(targetId, draftPayload as any);
-          linkedDraftIds[code] = targetId;
-        } else {
-          const created: any = await createArticle(draftPayload as any);
-          const createdArticle = created?.article || created?.data?.article || created?.data || created;
-          const createdId = String(createdArticle?._id || createdArticle?.id || '').trim();
-          if (createdId) linkedDraftIds[code] = createdId;
-        }
-      }
-
-      await saveSelectedTopics(activeSavedId ? String(activeSavedId) : null);
-      return { ...(savedResult as any), __npLinkedDraftIds: linkedDraftIds, translationGroupId: translationGroupIdForSave, __npTopicMembershipChanged: topicsChanged };
+        step = 'Trending Topics';
+        await saveSelectedTopics(activeSavedId);
+        return {
+          ...savedResult, translationGroupId: translationGroupIdForSave, __npTopicMembershipChanged: topicsChanged,
+          __npGenerateTranslations: activeWritePerformed && sourceContentChanged && !editedOtherLanguages
+            && (!translationSourceLanguage || language === translationSourceLanguage),
+        };
+      });
     },
     onSuccess: async (result: any) => {
       const raw = result as any;
       let saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
-      const returnedId = saved?._id || saved?.id || raw?.__npCreatedId || mutationTargetIdRef.current;
-      if (saved?._id) qc.setQueryData(['articles', 'one', String(saved._id)], saved);
+      const returnedId = mutationTargetIdRef.current || raw?.__npCreatedId || (saved?._id ? articleCmsId(saved) : saved?.id);
+      if (editorialAccess.canManageNews && saved?._id && articleCmsId(saved) === returnedId) {
+        qc.setQueryData(['articles', 'one', String(returnedId)], saved);
+      }
       let refreshFailed = false;
-      if (returnedId && (saveKindRef.current === 'publish' || lastSubmitRef.current?.wasPublished || raw?.__npTopicMembershipChanged)) {
+      if (returnedId && editorialAccess.canManageNews
+        && (saveKindRef.current === 'publish' || lastSubmitRef.current?.wasPublished || raw?.__npTopicMembershipChanged)) {
         try {
           saved = await getArticle(String(returnedId));
           qc.setQueryData(['articles', 'one', String(returnedId)], saved);
@@ -2241,7 +2373,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         }
       }
       const warning = articleFollowUpWarning(result);
-      if (warning) toast(warning);
+      if (warning) {
+        toast(warning);
+        setLifecycleMessage(warning);
+        autosavePausedRef.current = true;
+        setNeedsLatestRefresh(true);
+        pendingSaveRef.current = false;
+      }
 
       logArticleEditorDebug('saved', {
         id: saved?._id || saved?.id,
@@ -2261,7 +2399,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setTranslationStatus(extractTranslationStatus(saved));
       const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
       const savedId: string | null =
-        (effectiveId ||
+        (returnedId ||
+          effectiveId ||
           raw?.__npCreatedId ||
           raw?.data?.__npCreatedId ||
           saved?._id ||
@@ -2271,7 +2410,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const safeSlug = lastSubmitRef.current?.safeSlug || ensureValidSlug(slug, title);
       const savedStatus = saved?.status;
       const authoritativeStatus = savedStatus === 'draft' || savedStatus === 'scheduled' || savedStatus === 'published'
-        ? savedStatus : originalStatusRef.current === 'unknown' ? status : originalStatusRef.current;
+        ? savedStatus : saveKindRef.current === 'publish' ? 'published'
+          : originalStatusRef.current === 'unknown' ? status : originalStatusRef.current;
       const savedPublishedAt = typeof saved?.publishedAt === 'string' ? saved.publishedAt : publishedAt;
       const wasNew = lastSubmitRef.current?.wasNew ?? (!effectiveId);
       const syncResults: Partial<Record<LangCode, string>> | undefined = Array.isArray(raw?.publishedLanguages)
@@ -2288,13 +2428,13 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           try {
             const u = new URL(window.location.href);
             u.searchParams.set('id', String(savedId));
-            window.history.replaceState(null, '', `${u.pathname}${u.search}${u.hash}`);
+            window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
           } catch {}
         }
       }
 
       // Keep local state aligned with what we just saved.
-      if (safeSlug && safeSlug !== slug) {
+      if (safeSlug && safeSlug !== slug && currentSnapshotRef.current.slug === lastSubmitRef.current?.snapshot.slug) {
         setSlug(safeSlug);
         setAutoSlug(false);
       }
@@ -2354,7 +2494,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       dirtyRef.current = editsAfterSubmit || snapshotHash(currentSnapshotRef.current) !== snapshotHash(savedSnapshot)
         || trendingTopics.hasPendingChanges();
       setSaveHydrationVersion((version) => version + 1);
-      if (refreshFailed) pendingSaveRef.current = false;
+      if (refreshFailed || warning) pendingSaveRef.current = false;
       else setLifecycleMessage(null);
 
       // Avoid noisy toasts for autosave.
@@ -2372,19 +2512,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return;
       } else if (saveKindRef.current !== 'autosave') {
         toast.success(lastSubmitRef.current?.wasPublished ? 'Article updated' : wasNew ? 'Draft saved' : 'Draft updated');
-        if (generateTranslationsAfterSave && authoritativeStatus !== 'published') triggerAutomaticTranslationJob(savedId, 'save-draft');
+        if (!refreshFailed && !warning && raw?.__npGenerateTranslations !== false
+          && generateTranslationsAfterSave && authoritativeStatus !== 'published') triggerAutomaticTranslationJob(savedId, 'save-draft');
       }
 
       onDone();
     },
     onError: async (err: unknown) => {
-      const n = err instanceof TopicMembershipSaveError
+      const n = err instanceof ArticleSaveProgressError
+        ? { ...normalizeArticleError(err.cause, err.message), message: err.message }
+        : err instanceof TopicMembershipSaveError
         ? { ...normalizeError(err.cause, err.message), message: err.message }
         : normalizeArticleError(err, 'Save failed');
       console.error('[ArticleForm] mutation error', { status: n.status, code: n.code });
       pendingSaveRef.current = false;
       autosavePausedRef.current = true;
       setLifecycleMessage(n.message);
+      if (n.status === 403 || err instanceof ArticleSaveProgressError) setNeedsLatestRefresh(true);
 
       if (saveKindRef.current === 'autosave') {
         setAutosaveFailed(true);
@@ -2415,14 +2559,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     pendingSaveRef.current = false;
     if (!mutation.isSuccess || autosavePausedRef.current || needsLatestRefresh || refreshingArticle
       || currentArticleRecord?.status === 'deleted'
-      || (snapshotHash(currentSnapshotRef.current) === lastSavedHash && !trendingTopics.hasPendingChanges())) return;
+      || (snapshotHash(currentSnapshotRef.current) === lastSavedHash && !hasPendingLanguageChanges && !trendingTopics.hasPendingChanges())) return;
     saveKindRef.current = 'autosave';
     mutationInFlightRef.current = true;
     mutation.mutate(undefined);
-  }, [mutation.isPending, mutation.isSuccess, mutation.mutate, needsLatestRefresh, refreshingArticle, currentArticleRecord?.status, lastSavedHash, trendingTopics.isDirty]);
+  }, [mutation.isPending, mutation.isSuccess, mutation.mutate, needsLatestRefresh, refreshingArticle, currentArticleRecord?.status, lastSavedHash, hasPendingLanguageChanges, trendingTopics.isDirty]);
 
   function saveDraft(){
-    if (needsLatestRefresh || refreshingArticle || currentArticleRecord?.status === 'deleted') return;
+    if (needsLatestRefresh || refreshingArticle || unknownSaveIdentityRef.current || currentArticleRecord?.status === 'deleted') return;
     if (mutationInFlightRef.current || mutation.isPending) {
       if (saveKindRef.current !== 'publish' && lastSubmitRef.current
         && (snapshotHash(currentSnapshotRef.current) !== snapshotHash(lastSubmitRef.current.snapshot)
@@ -2438,8 +2582,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
   }
   function handlePublish(){
-    if (effectiveUserRole !== 'founder' || status === 'published') {
-      toast.error(status === 'published' ? 'Use Save Update for a published article.' : 'Founder permission is required to publish.');
+    if (!editorialAccess.canPublish || status === 'published') {
+      toast.error(status === 'published' ? 'Use Save Update for a published article.' : 'An effective Founder-granted Publish News right is required.');
       return;
     }
     if (!publishEnabled) {
@@ -2513,6 +2657,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }
 
   async function createLinkedTranslation(target: LangCode) {
+    if (mutationInFlightRef.current) {
+      toast.error('Wait for the current save before creating a translation.');
+      return;
+    }
+    const existingId = committedEditionsRef.current[target]?.id || translationVariants[target]?._id;
+    if (existingId) {
+      navigate(`/admin/articles/${encodeURIComponent(existingId)}/edit`);
+      return;
+    }
     if (!effectiveId) {
       toast.error('Save this story first to create a translation');
       return;
@@ -2558,6 +2711,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
       if (!newId) throw new Error('Failed to create translation (missing id)');
 
+      languageBaselinesRef.current[target] = {
+        draft: { title, slug: String(createdPayload.slug || ''), summary, content },
+        review: { ...EMPTY_LANGUAGE_REVIEW_FIELDS },
+      };
+      committedEditionsRef.current[target] = { id: newId, signature: '', result: created };
+      setSaveHydrationVersion((version) => version + 1);
+      const followUp = articleFollowUpWarning(created);
+      if (followUp) {
+        setLifecycleMessage(followUp);
+        toast(followUp);
+        return;
+      }
       toast.success(`Created ${languageLabel(target)} draft`);
       navigate(`/admin/articles/${encodeURIComponent(String(newId))}/edit`);
     } catch (err: any) {
@@ -2575,6 +2740,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       if (!title.trim()) return;
       if (mutation.isPending) return;
       saveKindRef.current = 'autosave';
+      mutationInFlightRef.current = true;
       mutation.mutate(undefined);
     }, 30000);
     return ()=> { if (autoSaveRef.current !== null) clearInterval(autoSaveRef.current); };
@@ -2591,7 +2757,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [title, category, content, categoryValidForPublish]);
 
   // Role gate stays in place; required fields gate controls enable/disable.
-  const roleCanPublish = effectiveUserRole === 'founder';
+  const roleCanPublish = editorialAccess.canPublish;
   const editingPublished = computedMode === 'edit' && status === 'published';
   const canPublish = roleCanPublish && requiredForPublishOk && publishEnabled && !needsLatestRefresh && !editingPublished
     && currentArticleRecord?.status !== 'deleted';
@@ -2621,27 +2787,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   const currentHash = useMemo(() => {
     return snapshotHash(buildSnapshot());
-  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, faithTopic, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightPriority, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
+  }, [title, slug, summary, content, category, editorialType, youthPulseTrack, faithTopic, lastSavedSnapshot.category, lastSavedSnapshot.faithTopic, pulseDialogue, authorByline, language, translationGroupId, status, tags, coverImageUrl, coverImagePublicId, isBreaking, spotlightEnabled, spotlightPinned, spotlightPriority, spotlightExpiryTime, publishedAt, state, district, city, isSponsoredArticle, sponsorBrandName, sponsorDisclosure, sponsorCtaText, sponsorCtaUrl]);
 
   const isDirty = useMemo(() => {
-    return currentHash !== lastSavedHash || trendingTopics.isDirty;
-  }, [currentHash, lastSavedHash, trendingTopics.isDirty]);
+    return currentHash !== lastSavedHash || hasPendingLanguageChanges || trendingTopics.isDirty;
+  }, [currentHash, lastSavedHash, hasPendingLanguageChanges, trendingTopics.isDirty]);
 
+  dirtyRef.current = isDirty;
   useEffect(() => {
-    dirtyRef.current = isDirty;
     onDirtyChange?.(isDirty);
   }, [isDirty]);
 
-  // Navigation guard: warn on refresh/back/tab close when dirty.
-  useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!dirtyRef.current) return;
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, []);
+  useUnsavedChanges(isDirty, mutation.isPending || isPublishing);
 
   const saveStatusText = useMemo(() => {
     if (isPublishing) return 'Publishing…';
@@ -3375,11 +3532,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     setStatus(e.target.value as any);
                     setStatusExplicitlyChanged(true);
                   }}
-                  disabled={effectiveUserRole === 'writer' || editingPublished || mutation.isPending}
+                  disabled={!editorialAccess.canSchedule || editingPublished || mutation.isPending}
                   className="w-full border px-2 py-2 rounded"
                 >
                   <option value='draft'>Draft</option>
-                  <option value='scheduled'>Scheduled</option>
+                  {(editorialAccess.canSchedule || status === 'scheduled') && <option value='scheduled'>Scheduled</option>}
                   {editingPublished && <option value='published'>Published</option>}
                 </select>
               </div>
@@ -3465,7 +3622,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               {status === 'scheduled' && (
                 <div>
                   <label className="block text-xs font-medium">Schedule (UTC)</label>
-                  <input type="datetime-local" value={scheduledAt} onChange={e=> setScheduledAt(e.target.value)} className="w-full border px-2 py-2 rounded" />
+                  <input type="datetime-local" value={scheduledAt} disabled={!editorialAccess.canSchedule} onChange={e=> setScheduledAt(e.target.value)} className="w-full border px-2 py-2 rounded" />
                 </div>
               )}
               <TrendingTopicSelector topics={trendingTopics}
@@ -3648,7 +3805,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       {lifecycleMessage && (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <div>{lifecycleMessage}</div>
-          {mutation.isError && <div className="mt-1">Your unsaved edits are kept. Autosave is paused until you save again.</div>}
+          {mutation.isError && <div className="mt-1">Your unsaved edits are kept. Autosave is paused. Review the latest state before explicitly saving remaining changes.</div>}
           {currentArticleRecord?.status && <div className="mt-1">Latest status: {currentArticleRecord.status}</div>}
           {(effectiveId || mutationTargetIdRef.current) && (
             <button type="button" className="mt-2 underline" disabled={refreshingArticle || mutation.isPending}

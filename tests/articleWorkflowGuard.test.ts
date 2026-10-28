@@ -31,10 +31,15 @@ describe('articleWorkflowGuard', () => {
     expect(allowed.allowed).toBe(true);
   });
   it('blocks schedule if stage not approved', () => {
-    const blocked = guardAction('schedule', true, { stage: 'review' });
+    const blocked = guardAction('schedule', true, { stage: 'review', isFounder: true });
     expect(blocked.allowed).toBe(false);
     expect(blocked.reason).toMatch(/approved/i);
-    expect(guardAction('schedule', true, { stage: 'approved' }).allowed).toBe(true);
+    expect(guardAction('schedule', true, { stage: 'approved', isFounder: true }).allowed).toBe(true);
+  });
+  it('permits an effective staff publication grant but never staff scheduling', () => {
+    expect(guardAction('publish', true, { isFounder: false, canPublish: true }).allowed).toBe(true);
+    expect(guardAction('schedule', true, { isFounder: false, canPublish: true, stage: 'approved' }).allowed).toBe(false);
+    expect(guardAction('publish', true).allowed).toBe(false);
   });
   it('blocks publish if stage invalid', () => {
     const blocked = guardAction('publish', true, { stage: 'draft', isFounder: true, checklistOk: true });

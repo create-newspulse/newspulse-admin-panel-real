@@ -9,6 +9,7 @@ import type { AuthorByline } from '@/lib/authorByline';
 
 export interface Article {
   _id: string;
+  sourceNewsId?: string;
   authorByline?: AuthorByline;
   title: string;
   slug?: string;
@@ -106,6 +107,55 @@ export interface ArticleMutationResponse {
   postCommitWarnings?: Array<{ code: string; message?: string }>;
 }
 
+// Own-draft reads deliberately omit group, ownership, workflow and other editor fields.
+// Never hydrate ArticleForm or build a full Article update from these DTOs.
+export interface OwnDraftSummary {
+  _id: string;
+  id: string;
+  title?: string | null;
+  slug?: string | null;
+  status: 'draft';
+  category?: string | null;
+  description: string | null;
+  summary: string | null;
+  language: string | null;
+  lang: string | null;
+  coverImageUrl: string | null;
+  imageURL?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface OwnDraftDetail extends OwnDraftSummary {
+  content: string | null;
+  body: string | null;
+  coverImage: { url: string | null; publicId: string | null; alt: string | null };
+  tags: string[];
+  editorialType?: string | null;
+  track?: string | null;
+  topic?: string | null;
+  externalUrls: string[];
+  embeds: string[];
+  gallery: string[];
+  stateTags: string[];
+  stateNames: string[];
+  seo: { metaTitle?: string | null; metaDescription?: string | null; canonicalUrl?: string | null };
+  location: {
+    state?: string | null; stateSlug?: string | null;
+    district?: string | null; districtSlug?: string | null;
+    city?: string | null; citySlug?: string | null;
+    country?: string | null; isUT?: boolean | null;
+  };
+  geo: { state?: string | null; district?: string | null; city?: string | null };
+}
+
+export interface OwnDraftList {
+  items: OwnDraftSummary[];
+  total: number;
+  page: number;
+  pages: number;
+}
+
 export interface ListResponse {
   // Canonical shape used by UI tables
   rows: Article[];
@@ -126,6 +176,49 @@ export interface ListResponse {
 }
 
 const ARTICLES_PATH = 'articles';
+
+function validateOwnDraftEnvelope(raw: { ok?: boolean; success?: boolean; status?: number }) {
+  if (raw?.ok === false || raw?.success === false) {
+    throw Object.assign(new Error('Failed to load own drafts'), {
+      response: { status: raw.status && raw.status >= 400 ? raw.status : 500, data: raw },
+    });
+  }
+  if (raw?.ok !== true && raw?.success !== true) throw new Error('Invalid own-draft response');
+}
+
+function isOwnDraft(value: OwnDraftSummary): boolean {
+  return !!value && typeof value._id === 'string' && !!value._id && value.status === 'draft';
+}
+
+export async function listOwnDrafts(params: { page?: number; limit?: number; sort?: '-createdAt' | '-updatedAt' } = {}): Promise<OwnDraftList> {
+  const res = await adminApiClient.get<{
+    ok?: boolean; success?: boolean; status?: number;
+    items: OwnDraftSummary[]; total: number; page: number; pages: number;
+  }>(`${ARTICLES_PATH}/own-drafts`, {
+    params: { page: params.page || 1, limit: params.limit || 20, sort: params.sort || '-createdAt' },
+  });
+  const raw = res.data;
+  validateOwnDraftEnvelope(raw);
+  if (!Array.isArray(raw.items) || !raw.items.every(isOwnDraft)
+    || !Number.isInteger(raw.total) || raw.total < 0
+    || !Number.isInteger(raw.page) || raw.page < 1 || !Number.isInteger(raw.pages) || raw.pages < 0) {
+    throw new Error('Invalid own-draft list response');
+  }
+  return { items: raw.items, total: raw.total, page: raw.page, pages: raw.pages };
+}
+
+export async function getOwnDraft(id: string): Promise<OwnDraftDetail> {
+  const res = await adminApiClient.get<{
+    ok?: boolean; success?: boolean; status?: number; article: OwnDraftDetail;
+  }>(`${ARTICLES_PATH}/own-drafts/${encodeURIComponent(id)}`);
+  const raw = res.data;
+  validateOwnDraftEnvelope(raw);
+  if (!isOwnDraft(raw.article) || !Array.isArray(raw.article.tags)
+    || (raw.article.content !== null && typeof raw.article.content !== 'string')) {
+    throw new Error('Invalid own-draft detail response');
+  }
+  return raw.article;
+}
 
 function isAdminArticleDebugEnabled(): boolean {
   try {
@@ -496,11 +589,8 @@ export async function updateArticle(id: string, data: Partial<Article>) {
 }
 
 export async function updateArticlePartial(id: string, patch: Partial<Article>): Promise<Article> {
-  // Standardize partial update to the same single endpoint as full updates.
-  // Requirement: ONLY PUT /admin-api/articles/:id.
-  const current = await getArticle(id);
-  const merged = { ...current, ...patch } as Partial<Article>;
-  const updated = await updateArticle(id, merged);
+  // PUT accepts field patches. Reading/merging a full record expands the write scope.
+  const updated = await updateArticle(id, patch);
   const raw = updated as any;
   const article = raw?.article || raw?.data?.article || raw?.data || raw;
   if (article && article._id) return article as Article;

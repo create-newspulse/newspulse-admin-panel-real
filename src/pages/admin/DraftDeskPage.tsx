@@ -5,16 +5,19 @@ import toast from 'react-hot-toast';
 
 import {
   listArticles,
+  listOwnDrafts,
   deleteArticle,
   restoreArticle,
   hardDeleteArticle,
   Article as NPArticle,
   type ArticleMutationResponse,
+  type OwnDraftList,
 } from '@/lib/api/articles';
 import { normalizeYouthPulseTrack } from '@/lib/youthPulseTracks';
 import { useAuth } from '@/context/AuthContext';
 import { normalizeRoleId } from '@/lib/adminAccessControl';
 import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
 
 // Extend with optional “community / pro / founder” hints
 type Article = NPArticle & {
@@ -224,6 +227,74 @@ function groupDraftTranslations(rows: Article[]): DraftGroup[] {
 }
 
 export default function DraftDeskPage() {
+  const access = useEditorialAccess();
+  if (access.loading) return <div>Checking Draft Desk access...</div>;
+  if (access.canManageNews) return <FullDraftDesk />;
+  if (access.canReadOwnDrafts) return <OwnDraftDesk />;
+  return <div role="alert" className="rounded border p-4 text-red-700">{access.reason}</div>;
+}
+
+function OwnDraftDesk() {
+  const navigate = useNavigate();
+  const [page, setPage] = useState(1);
+  const [reload, setReload] = useState(0);
+  const [result, setResult] = useState<OwnDraftList | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<ReturnType<typeof normalizeArticleError> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setFailure(null);
+    setResult(null);
+    listOwnDrafts({ page, limit: 20 }).then((data) => {
+      if (!cancelled) setResult(data);
+    }).catch((error: unknown) => {
+      if (!cancelled) setFailure(normalizeArticleError(error, 'Failed to load your drafts'));
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [page, reload]);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold">Draft Desk - My Drafts</h1>
+        <p className="text-sm text-slate-600">
+          Only your eligible, unpublished drafts are shown. Assigned-but-not-owned drafts are not supported.
+        </p>
+      </div>
+      {loading && <div>Loading your drafts...</div>}
+      {failure && (
+        <div role="alert" className="rounded border p-4 text-red-700">
+          <div>{failure.message}</div>
+          {failure.status !== 403 && <button type="button" className="mt-2 underline" onClick={() => setReload((value) => value + 1)}>Retry loading drafts</button>}
+        </div>
+      )}
+      {!loading && !failure && result?.items.length === 0 && <div className="rounded border bg-white p-6">No eligible own drafts found.</div>}
+      {result && result.items.map((draft) => (
+        <div key={draft._id} className="flex items-center justify-between gap-4 rounded border bg-white p-4">
+          <div className="min-w-0">
+            <h2 className="font-semibold">{draft.title || 'Untitled draft'}</h2>
+            <div className="text-xs text-slate-600">{draft.language?.toUpperCase()} {draft.category}</div>
+            <p className="text-sm text-slate-600">{snippet(draft.summary || '')}</p>
+          </div>
+          <button type="button" className="rounded border px-3 py-2 text-sm" onClick={() => navigate(`/draft-desk/${encodeURIComponent(draft._id)}?mode=edit`)}>Edit draft</button>
+        </div>
+      ))}
+      {result && result.pages > 1 && (
+        <div className="flex items-center gap-3">
+          <button type="button" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</button>
+          <span>Page {result.page} of {result.pages}</span>
+          <button type="button" disabled={page >= result.pages} onClick={() => setPage((value) => value + 1)}>Next</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FullDraftDesk() {
   const { user } = useAuth();
   const viewerIsFounder = normalizeRoleId(user?.role) === 'founder';
   const queryClient = useQueryClient();
@@ -231,6 +302,7 @@ export default function DraftDeskPage() {
   const [reloadVersion, setReloadVersion] = useState(0);
   const [items, setItems] = useState<Article[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<ReturnType<typeof normalizeArticleError> | null>(null);
   const [query, setQuery] = useState('');
 
   // NEW: status + source filters
@@ -260,6 +332,8 @@ export default function DraftDeskPage() {
 
     async function load() {
       setLoading(true);
+      setLoadError(null);
+      setItems([]);
       try {
         const statusParam = statusFilter === 'deleted' ? 'deleted' : 'draft';
         const res = await listArticles({
@@ -272,13 +346,9 @@ export default function DraftDeskPage() {
           // Safely adapt to API shape { rows, total, page?, limit? }
           setItems((res as any)?.rows ?? (res as any)?.data ?? []);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
-          toast.error(
-            err?.response?.data?.message ||
-              err?.message ||
-              'Failed to load drafts',
-          );
+          setLoadError(normalizeArticleError(err, 'Failed to load drafts'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -539,7 +609,11 @@ export default function DraftDeskPage() {
       </div>
 
       {loading && <div>Loading…</div>}
-      {!loading && groupedDrafts.length === 0 && (
+      {loadError && <div role="alert" className="rounded border p-4 text-red-700">
+        <div>{loadError.message}</div>
+        {loadError.status !== 403 && <button type="button" className="mt-2 underline" onClick={() => setReloadVersion((value) => value + 1)}>Retry loading drafts</button>}
+      </div>}
+      {!loading && !loadError && groupedDrafts.length === 0 && (
         <div className="p-3 rounded border bg-amber-50 text-amber-800">
           No drafts match this filter. Try clearing search or switching filters.
         </div>

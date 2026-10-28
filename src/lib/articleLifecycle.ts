@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { normalizeError, type NormalizedError } from '@/lib/error';
+import type { Article } from '@/lib/api/articles';
 
 const CONFLICT_MESSAGES = new Set([
   'Slug already exists',
@@ -7,6 +8,7 @@ const CONFLICT_MESSAGES = new Set([
   'Article group changed. Reload and retry.',
   'Article changed. Reload and retry.',
   'Article lifecycle changed. Reload and retry the edit.',
+  'Article save scope changed. Reload and retry.',
   'Article category changed; reload and retry the update',
   'Article changed; reload and retry the topic update',
   'Translation group changed. Reload and retry.',
@@ -60,6 +62,7 @@ export function normalizeArticleError(error: unknown, fallback: string): Normali
     normalized.message = 'Your session has expired. Please sign in again.';
     normalized.authExpired = true;
   } else if (normalized.status === 403) {
+    normalized.retriable = false;
     normalized.message = code === 'FOUNDER_REQUIRED'
       ? 'Founder permission is required for this action.'
       : 'Access denied. You do not have permission for this action.';
@@ -70,6 +73,19 @@ export function normalizeArticleError(error: unknown, fallback: string): Normali
     normalized.network = true;
   }
   return normalized;
+}
+
+export function articleCmsId(article: Pick<Article, '_id' | 'sourceNewsId'>): string {
+  const id = String(article.sourceNewsId || article._id || '').trim();
+  if (!id) throw new Error('Missing CMS News ID. Reload the story before publishing.');
+  return id;
+}
+
+export class ArticleSaveProgressError extends Error {
+  constructor(message: string, public readonly cause: unknown) {
+    super(message);
+    this.name = 'ArticleSaveProgressError';
+  }
 }
 
 export function articleFollowUpWarning(result: unknown): string | null {

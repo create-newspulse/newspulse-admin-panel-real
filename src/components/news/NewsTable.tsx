@@ -27,6 +27,8 @@ import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } 
 import { normalizeRoleId } from '@/lib/adminAccessControl';
 import { ARTICLE_PUSH_SPAM_WARNING, pushSendErrorMessage } from '@/lib/pushSendFeedback';
 import { useAuth } from '@/context/AuthContext';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import { articleCmsId } from '@/lib/articleLifecycle';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { ScheduleDialog } from './ScheduleDialog';
 import type { QuickViewCounts, QuickViewKey, QuickViewLoadState } from './QuickViewsBar';
@@ -454,6 +456,7 @@ interface Props {
   onLoadStateChange?: (state: QuickViewLoadState) => void;
   actionsDisabled?: boolean;
   onSelectIds?: (ids: string[]) => void;
+  selectionVersion?: number;
   onPageChange?: (page: number) => void;
   highlightId?: string;
   stickyTopOffsetPx?: number;
@@ -464,10 +467,11 @@ type LifecycleRequest =
   | { action: 'schedule'; id: string; at: string }
   | { action: 'hardDeleteBulk'; ids: string[] };
 
-export function NewsTable({ params, search, quickView, onCounts, onLoadStateChange, actionsDisabled = false, onSelectIds, onPageChange, highlightId, stickyTopOffsetPx = 0 }: Props) {
+export function NewsTable({ params, search, quickView, onCounts, onLoadStateChange, actionsDisabled = false, onSelectIds, selectionVersion = 0, onPageChange, highlightId, stickyTopOffsetPx = 0 }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
+  const editorialAccess = useEditorialAccess();
   const role = normalizeRoleId(user?.role);
   const { publishEnabled } = usePublishFlag();
 
@@ -544,6 +548,14 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
   }, [isLoading, isFetching, error, onLoadStateChange]);
 
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
+  const [unreflectedPublications, setUnreflectedPublications] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!isSuccess || isFetching) return;
+    setUnreflectedPublications((current) => {
+      const next = current.filter((id) => !rawRows.some((row) => articleCmsId(row) === id && row.status === 'published'));
+      return next.length === current.length ? current : next;
+    });
+  }, [rawRows, isSuccess, isFetching]);
 
   const lifecycleInFlight = React.useRef(false);
   const lifecycleMutation = useMutation({
@@ -571,7 +583,12 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
         unschedule: 'Unscheduled', schedule: 'Scheduled',
       };
       const ids = request.action === 'hardDeleteBulk' ? request.ids : [request.id];
-      setSelected((current) => current.filter((id) => !ids.includes(id)));
+      setSelected((current) => current.filter((id) => {
+        const row = rawRows.find((article) => article._id === id);
+        return !ids.includes(row ? articleCmsId(row) : id);
+      }));
+      if (request.action === 'publish') setUnreflectedPublications((current) => [...new Set([...current, request.id])]);
+      if (request.action === 'unpublish') setUnreflectedPublications((current) => current.filter((id) => id !== request.id));
       toast.success(request.action === 'schedule'
         ? `Scheduled for local time ${new Date(request.at).toLocaleString()}`
         : labels[request.action]);
@@ -604,7 +621,15 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
 
   const runLifecycle = (request: LifecycleRequest) => {
     if (lifecycleInFlight.current || actionsDisabled || isFetching) return;
-    if (['publish', 'unpublish', 'hardDelete', 'hardDeleteBulk'].includes(request.action) && !isFounder) {
+    if (request.action === 'publish' && unreflectedPublications.includes(request.id)) {
+      toast.error('Publication already committed. Refresh the list; do not repeat it.');
+      return;
+    }
+    if (request.action === 'publish' && !editorialAccess.canPublish) {
+      toast.error('An effective Founder-granted Publish News right is required.');
+      return;
+    }
+    if (['unpublish', 'schedule', 'unschedule', 'hardDelete', 'hardDeleteBulk'].includes(request.action) && !isFounder) {
       toast.error('Founder permission is required for this action.');
       return;
     }
@@ -659,6 +684,7 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
 
   // Selection
   const [selected, setSelected] = React.useState<string[]>([]);
+  React.useEffect(() => { setSelected([]); }, [selectionVersion]);
   // Avoid maximum update depth errors when parent passes a non-memoized callback.
   const onSelectIdsRef = React.useRef<typeof onSelectIds>(onSelectIds);
   React.useEffect(() => { onSelectIdsRef.current = onSelectIds; }, [onSelectIds]);
@@ -667,7 +693,10 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
     const key = JSON.stringify(selected);
     if (key === lastSelectedKeyRef.current) return;
     lastSelectedKeyRef.current = key;
-    onSelectIdsRef.current?.(selected);
+    onSelectIdsRef.current?.(selected.map((id) => {
+      const article = rawRows.find((row) => row._id === id);
+      return article ? articleCmsId(article) : id;
+    }));
   }, [selected]);
 
   // Client-side search + quick view filtering
@@ -1120,21 +1149,21 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
 
         {st === 'draft' && (
           <>
-            {isFounder && <ActionLink
+            {editorialAccess.canPublish && <ActionLink
               label="Publish"
               title={publishEnabled ? 'Publish' : 'Publish (disabled)'}
               tone="green"
-              disabled={lifecycleBusy || !publishEnabled}
+              disabled={lifecycleBusy || !publishEnabled || unreflectedPublications.includes(articleCmsId(a))}
               onClick={() => {
                 if (!publishEnabled) return;
                 logNewsTableAction('publish click', {
                   ...baseLogPayload,
                   route: `/admin-api/articles/${encodeURIComponent(id)}/publish`,
                 });
-                runLifecycle({ action: 'publish', id });
+                runLifecycle({ action: 'publish', id: articleCmsId(a) });
               }}
             />}
-            <ActionLink
+            {isFounder && <ActionLink
               label="Schedule"
               title={publishEnabled ? 'Schedule…' : 'Schedule (disabled)'}
               tone="amber"
@@ -1148,11 +1177,11 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
                 setScheduleTarget(a);
                 setScheduleOpen(true);
               }}
-            />
+            />}
           </>
         )}
 
-        {st === 'scheduled' && (
+        {st === 'scheduled' && isFounder && (
           <ActionLink
             label="Unschedule"
             tone="amber"

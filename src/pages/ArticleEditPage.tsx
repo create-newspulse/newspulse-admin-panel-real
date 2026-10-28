@@ -1,15 +1,23 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { Navigate, useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getArticle } from '@/lib/api/articles';
 import { ArticleForm } from '@/components/news/ArticleForm';
 import { ArticleAnalyticsPanel } from '@/components/analytics/ArticleAnalyticsPanel';
 import { normalizeArticleError } from '@/lib/articleLifecycle';
+import { useEditorialAccess } from '@/hooks/useEditorialAccess';
 
 export default function ArticleEditPage() {
   const { id } = useParams<{ id: string }>();
+  const access = useEditorialAccess();
+  if (access.loading) return <div>Checking article access...</div>;
+  if (access.canManageNews) return <FullArticleEditPage key={id} />;
+  if (id && access.canReadOwnDrafts) return <Navigate to={`/draft-desk/${encodeURIComponent(id)}?mode=edit`} replace />;
+  return <div role="alert" className="p-6 text-red-700">{access.reason}</div>;
+}
+
+function FullArticleEditPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [dirty, setDirty] = useState(false);
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['articles','one', id],
     queryFn: () => id ? getArticle(id) : Promise.resolve(null),
@@ -37,13 +45,7 @@ export default function ArticleEditPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2">✏️ Edit Article</h1>
         <button
           type="button"
-          onClick={() => {
-            if (dirty) {
-              const ok = window.confirm('You have unsaved changes. Leave this page?');
-              if (!ok) return;
-            }
-            navigate('/admin/articles');
-          }}
+          onClick={() => navigate('/admin/articles')}
           className="text-sm px-3 py-2 rounded border bg-white hover:bg-slate-50"
         >Back to News</button>
       </div>
@@ -58,7 +60,6 @@ export default function ArticleEditPage() {
         id={id}
         initialValues={data}
         userRole="admin"
-        onDirtyChange={setDirty}
       />
     </div>
   );
