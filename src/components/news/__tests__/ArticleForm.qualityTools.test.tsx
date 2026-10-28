@@ -703,7 +703,7 @@ describe('ArticleForm Quality Tools', () => {
     await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({ status: 'draft' })));
     await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('created-1', { languages: ['hi', 'gu'] }));
     expect(mocks.toastSuccess).toHaveBeenCalledWith('Draft saved');
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Translation generation failed'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Translation job could not be queued'));
     expect(publishArticle).not.toHaveBeenCalled();
   });
 
@@ -763,7 +763,11 @@ describe('ArticleForm Quality Tools', () => {
     await waitFor(() => expect(publishButton).not.toBeDisabled());
     fireEvent.click(publishButton);
 
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Backend publish failed'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      'EN saved. Publication did not complete. Publication failed Successful writes were not rolled back and will not be replayed unchanged.',
+    ));
+    expect(createArticle).toHaveBeenCalledTimes(1);
+    expect(publishArticle).toHaveBeenCalledExactlyOnceWith('created-1');
   });
 });
 
@@ -946,6 +950,27 @@ describe('ArticleForm Author Byline', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
     await waitFor(() => expect(createArticle).toHaveBeenCalled());
     expect(mocks.createArticle.mock.calls[0][0].authorByline).toEqual({ enabled: true, snapshot: { name: 'Shailesh Rathod' } });
+  });
+
+  it.each([
+    { label: 'a plain exception', error: new Error('Author Name is required when Author Byline is on.') },
+    {
+      label: 'an API response with a matching error name',
+      error: {
+        name: 'AuthorBylineValidationError',
+        response: { status: 400, data: { message: 'Please wait for the author photo upload to finish.' } },
+      },
+    },
+  ])('keeps remote validation messages sanitized for $label', async ({ error }) => {
+    mocks.createArticle.mockRejectedValueOnce(error);
+    renderArticleForm('admin');
+    await fillPublishableSourceArticle();
+    await fillAuthor();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Save failed'));
+    expect(createArticle).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).not.toHaveBeenCalledWith(expect.stringMatching(/Author Name|author photo upload/));
+    expect(screen.getByLabelText('Author Name *')).toHaveValue('Shailesh Rathod');
   });
 
   it('retains selection in preview and saves before dedicated publish on create', async () => {

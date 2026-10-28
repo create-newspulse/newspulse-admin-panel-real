@@ -133,7 +133,7 @@ describe('Pulse Dialogue curation UI', () => {
       const section = within(screen.getByRole('region', { name: entry.title }));
       fireEvent.click(section.getByRole('button', { name: `Move Up ${entry.prefix} 1` }));
       fireEvent.click(section.getByRole('button', { name: `Save ${entry.title}` }));
-      expect(await section.findByRole('alert')).toHaveTextContent('response' in failure ? 'Selection is not eligible' : 'Network Error');
+      expect(await section.findByRole('alert')).toHaveTextContent(`${entry.title} could not be saved.`);
       expect(section.getAllByRole('listitem')[0]).toHaveTextContent(`${entry.prefix} 1`);
       fireEvent.click(section.getByRole('button', { name: `Save ${entry.title}` }));
       await section.findByText(`${entry.title} saved.`);
@@ -239,7 +239,7 @@ describe('Pulse Dialogue curation UI', () => {
     await openEditor();
     client.get.mockRejectedValueOnce(new Error('Network Error'));
     fireEvent.click(screen.getByRole('button', { name: 'Add Article' }));
-    await screen.findByText('Network Error');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Candidates could not be loaded.');
     expect(screen.getByRole('button', { name: 'Add selected article' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry candidates' }));
     await screen.findByRole('option', { name: /Dialogue 3/ });

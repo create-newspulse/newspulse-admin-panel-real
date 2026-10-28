@@ -32,7 +32,7 @@ import PulseDialogueDetailsSection from '@/components/news/PulseDialogueDetailsS
 import AuthorBylineSection from '@/components/news/AuthorBylineSection';
 import TrendingTopicSelector from '@/components/news/TrendingTopicSelector';
 import { TopicMembershipSaveError, useArticleTrendingTopics } from '@/hooks/useArticleTrendingTopics';
-import { buildAuthorBylinePayload, restoreAuthorByline, type AuthorByline, type AuthorBylineRequest } from '@/lib/authorByline';
+import { AuthorBylineValidationError, buildAuthorBylinePayload, restoreAuthorByline, type AuthorByline, type AuthorBylineRequest } from '@/lib/authorByline';
 import {
   EMPTY_PULSE_DIALOGUE_VALUE,
   PULSE_DIALOGUE_CATEGORY,
@@ -1879,7 +1879,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         throw new Error('An effective Founder-granted Publish News right is required.');
       }
       if (category !== PULSE_DIALOGUE_CATEGORY && authorByline.enabled && authorPhotoUploadPending) {
-        throw new Error('Please wait for the author photo upload to finish.');
+        throw new AuthorBylineValidationError('Please wait for the author photo upload to finish.');
       }
       if (inlineImageUploadPending || /data-np-inline-image-uploading/i.test(content)) {
         throw new Error('Please wait for the image upload to finish.');
@@ -2523,7 +2523,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ? { ...normalizeArticleError(err.cause, err.message), message: err.message }
         : err instanceof TopicMembershipSaveError
         ? { ...normalizeError(err.cause, err.message), message: err.message }
-        : normalizeArticleError(err, 'Save failed');
+        : normalizeArticleError(err, err instanceof AuthorBylineValidationError ? err.message : 'Save failed');
       console.error('[ArticleForm] mutation error', { status: n.status, code: n.code });
       pendingSaveRef.current = false;
       autosavePausedRef.current = true;
