@@ -20,7 +20,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: { role: 'founder' } }),
+  useAuth: () => ({
+    user: { role: 'founder' },
+    isAuthenticated: true,
+    isReady: true,
+    isLoading: false,
+    isRestoring: false,
+  }),
 }));
 
 vi.mock('@/context/PublishFlagContext', () => ({

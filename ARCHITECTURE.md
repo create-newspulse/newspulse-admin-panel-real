@@ -166,7 +166,7 @@ Evaluation order is flag, action authorization, checklist, then stage. The resul
 - **Shared publication eligibility:** authenticated Founder retains controls. Staff require a computed Publish News special right plus `newsPublishGrantRecorded`, and an eligible content workspace: Manage News with the effective Edit News right, or own-draft workspace access. The marker alone, permanent selections and role presets never authorize the UI. The Backend remains final authority for grant validity, expiry, ownership, protected editions and group scope.
 - **News table:** [NewsTable.tsx](./src/components/news/NewsTable.tsx) uses that eligibility and the runtime flag for publication. Schedule/unschedule and unpublish remain Founder-only. Existing archive/restore and other unrelated module controls are unchanged. Table lifecycle handlers use the canonical article helpers; their checks are not a universal workflow-stage policy.
 - **Modern editor:** [ArticleForm.tsx](./src/components/news/ArticleForm.tsx) uses the same effective publication eligibility, not the `userRole` compatibility prop. Required fields, slug checks, confirmations and the runtime flag remain. Existing content is saved without a lifecycle downgrade, then the canonical publication endpoint is called. If publication fails after a draft save, the UI reports that save as committed rather than claiming rollback. Scheduling controls and schedule writes require Founder.
-- The modern editor does not call the workflow guard or require an approved workflow stage/editorial workflow checklist. It persists the article as a draft first, then invokes the canonical PUT publish helper. Ordinary create saves use draft status; autosave preserves the existing status rather than constituting the explicit publish action.
+- The modern editor does not call the workflow guard or require an approved workflow stage/editorial workflow checklist. It saves the source content when needed, then invokes the canonical POST publish helper. Ordinary create saves use draft status; autosave preserves the existing status rather than constituting the explicit publish action.
 - **Manage News bulk transitions:** [ManageNews.tsx](./src/pages/ManageNews.tsx) passes effective publication eligibility and Founder context to the workflow helper. Bulk publication uses `publishArticle`, stops on a failure, distinguishes completed/failed/unattempted items and clears selection after any publication commits. Non-publish review transitions retain their existing contract. A table publication awaiting successful list reconciliation cannot be blindly repeated from a stale draft row.
 - **Retained legacy editor:** [EditNews.tsx](./src/pages/EditNews.tsx) uses full Manage News access, the same publication eligibility, stage and checklist checks. Publication uses the canonical CMS endpoint; other review actions retain `/news/:id/transition`. A denied detail read no longer triggers a list fallback.
 
@@ -178,20 +178,19 @@ The effective override is honored only when `AuthContext.isFounder` is true, and
 
 **Override changes are not audit-logged by this setter or the toggle handlers.** There is no server-side flag update, shared cross-user policy, or automatic expiry implemented by this context. Do not confuse it with global module-policy controls or backend authorization.
 
-## 7. CSV import: CURRENT IMPLEMENTATION GAP / known safety gap
+## 7. CSV import: validated, sanitized uploads
 
-[bulkUploadGuard.ts](./src/lib/bulkUploadGuard.ts) returns copied rows with publish/schedule statuses downgraded to draft when the flag is off or the user is not Founder, clearing `scheduledAt` in downgraded rows. For an enabled Founder it also normalizes `schedule` to `scheduled`.
+[bulkUploadGuard.ts](./src/lib/bulkUploadGuard.ts) retains the existing CSV publication policy: publish/schedule statuses are downgraded to draft when the flag is off or the user is not Founder. In that case, `scheduledAt`, its `publishAt` compatibility alias and `publishedAt` are cleared, including on rows that do not explicitly request publication. Status whitespace/casing is normalized, and `schedule` maps to `scheduled` for an enabled Founder. Staff Publish News grants do not enable CSV publishing or scheduling.
 
-However, [UploadCsvDialog.tsx](./src/components/news/UploadCsvDialog.tsx):
+[UploadCsvDialog.tsx](./src/components/news/UploadCsvDialog.tsx):
 
-1. Parses the CSV with basic line/comma splitting and extracts status/schedule fields.
-2. Calls the sanitizer but uses only its `changed` count for the preflight message.
-3. Calls the mutation with the **original `File`**, appending that unchanged file to `FormData`.
-4. Sends `POST /admin-api/articles/bulk-upload`.
+1. Reads UTF-8 text without replacing invalid bytes. CSV parsing supports quoted commas, escaped quotes, embedded line breaks, a leading BOM and blank records outside quoted content.
+2. Rejects malformed quoting, empty/duplicate headers, inconsistent field counts, NUL characters and unsupported nonempty status values before any request. Omitted lifecycle columns remain omitted and empty status stays empty, avoiding an invented lifecycle change on update imports; lifecycle header spelling is normalized.
+3. Applies the sanitizer using current verified authentication, Founder context and the runtime flag after reading. It serializes the complete CSV, retaining column order and all non-lifecycle values, including GU/HI/EN content, IDs, extra columns and trailing empty cells.
+4. Creates a **new sanitized `File`** and sends it through the existing Admin API client as multipart field `file` to `POST /admin-api/articles/bulk-upload`. Read, decode, validation or file-construction failures never fall back to uploading the original file.
+5. Locks the selected file and close action while processing, disables mutation retries, surfaces API failures and distinguishes committed follow-up warnings. A completed upload cannot be replayed by clicking Upload again; another file selection resets the result.
 
-**The sanitized rows are not serialized or uploaded.** The UI can report that rows were sanitized while the transmitted CSV still contains the original statuses. This is an existing frontend safety gap, not a completed fix or a guaranteed publishing safeguard. The basic parser also is not a robust quoted-CSV parser.
-
-Backend sanitization/authorization is outside this frontend description and must not be assumed. Documenting this gap does not authorize fixing it during documentation-only work.
+Preflight validates CSV structure and known lifecycle controls, not the complete Backend article schema or date rules. Backend authorization, article validation, publication chronology and group scope remain authoritative; local mocked tests are not proof of deployed enforcement.
 
 ## 8. Queries, mutations, types, and errors
 
@@ -251,7 +250,7 @@ These are checked-in routing rules, not a live verification of deployment settin
 
 Relevant existing tests include:
 
-- [Workflow guard tests](./tests/articleWorkflowGuard.test.ts) and [bulk-row sanitizer tests](./tests/bulkUploadGuard.test.ts).
+- [Workflow guard tests](./tests/articleWorkflowGuard.test.ts), [CSV/parser and bulk-row sanitizer tests](./tests/bulkUploadGuard.test.ts), and [actual multipart CSV upload tests](./src/components/news/__tests__/UploadCsvDialog.test.tsx).
 - [Modern publish request contract](./src/lib/api/__tests__/articles.publish.test.ts), [restricted own-draft API contracts](./src/lib/api/__tests__/articles.ownDrafts.test.ts), [Workspace integration](./src/pages/admin/__tests__/DraftWorkspacePage.integration.test.tsx), [effective editorial eligibility](./src/hooks/__tests__/useEditorialAccess.test.tsx), and [unsaved navigation](./src/hooks/__tests__/useUnsavedChanges.test.tsx).
 - [Editor lifecycle and multilingual partial saves](./src/components/news/__tests__/ArticleForm.lifecycle.test.tsx) and [table publication/lifecycle behavior](./src/components/news/__tests__/NewsTable.lifecycle.test.tsx).
 - [Session restoration](./src/context/__tests__/AuthContext.restoreSession.test.tsx), [shell bootstrap](./src/lib/__tests__/adminShellBootstrap.test.ts), and [module-route readiness](./src/components/__tests__/AdminModuleRoute.authReady.test.tsx).
@@ -259,6 +258,6 @@ Relevant existing tests include:
 - [Staff Access serialization](./src/lib/__tests__/staffAccessSerializer.test.ts), [Staff Access API contracts](./src/api/__tests__/teamManagementApi.staffAccess.test.ts), [Staff Access save behavior](./src/pages/admin/settings/admin-panel/__tests__/TeamManagement.accessSave.test.tsx), and [Founder policy UI](./src/pages/admin/settings/admin-panel/__tests__/FounderAccessControl.test.tsx).
 - [Browser API-base resolution](./src/lib/__tests__/apiBaseResolution.test.ts) and [article/admin client behavior](./src/lib/__tests__/adminApiClient.test.ts).
 
-Helper tests establish their asserted behavior only: sanitizer tests do not prove that uploaded CSV bytes were rewritten, and guard tests do not prove every UI action invokes the guard. Do not reinstate an application-wide transition matrix or claim end-to-end enforcement without tracing the entry points and corresponding tests.
+Helper tests establish their asserted behavior only. The CSV component tests inspect the actual multipart file contents as well as fail-closed behavior; they do not prove Backend authorization. Guard tests do not prove every UI action invokes the guard. Do not reinstate an application-wide transition matrix or claim end-to-end enforcement without tracing the entry points and corresponding tests.
 
 Keep documentation corrections separate from runtime fixes. Any change to the known gaps, authorization, publishing, sessions, API contracts, or environment behavior requires its own approved scope and focused validation under [rules.md](./rules.md).

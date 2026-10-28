@@ -3,78 +3,130 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApiClient as api } from '@/lib/adminApiClient';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { useAuth } from '@/context/AuthContext';
-import { sanitizeBulkRows } from '@/lib/bulkUploadGuard';
+import { BulkCsvValidationError, sanitizeBulkCsv } from '@/lib/bulkUploadGuard';
+import { articleFollowUpWarning, normalizeArticleError } from '@/lib/articleLifecycle';
 import { debug } from '@/lib/debug';
-import { BulkUploadResult } from '@/types/api';
+import type { BulkUploadResult } from '@/types/api';
 
 interface Props { onDone: ()=>void; }
 export const UploadCsvDialog: React.FC<Props> = ({ onDone }) => {
   const qc = useQueryClient();
   const { publishEnabled } = usePublishFlag();
-  const { user } = useAuth();
-  const isFounder = (user?.role || '').toLowerCase() === 'founder';
-
-  const mutate = useMutation<BulkUploadResult, Error, File>({ mutationFn: async (file: File) => {
-    const fd = new FormData(); fd.append('file', file);
-    const res = await api.post('articles/bulk-upload', fd);
-    if (!publishEnabled || !isFounder) {
-      debug('[UploadCsvDialog] bulk upload performed while publish disabled or user not founder', { publishEnabled, isFounder });
-    }
-    return res.data as BulkUploadResult;
-  }, onSuccess: () => qc.invalidateQueries({ queryKey: ['articles'] }) });
+  const { user, isAuthenticated, isReady, isLoading, isRestoring } = useAuth();
+  const sessionReady = Boolean(isAuthenticated && isReady && !isLoading && !isRestoring && user?.role);
+  const isFounder = sessionReady && (user?.role || '').toLowerCase() === 'founder';
+  const access = React.useRef({ publishEnabled, isFounder, sessionReady });
+  access.current = { publishEnabled, isFounder, sessionReady };
   const [file, setFile] = React.useState<File | null>(null);
   const [preflightMsg, setPreflightMsg] = React.useState<string | null>(null);
+  const [followUpWarning, setFollowUpWarning] = React.useState<string | null>(null);
   const [validating, setValidating] = React.useState(false);
+  const inFlight = React.useRef(false);
+  const readerRef = React.useRef<FileReader | null>(null);
+  const mounted = React.useRef(false);
+
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      readerRef.current?.abort();
+    };
+  }, []);
+
+  const mutate = useMutation<BulkUploadResult, unknown, File>({
+    retry: false,
+    mutationFn: async sourceFile => {
+      const reader = new FileReader();
+      readerRef.current = reader;
+      const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+        reader.onload = () => {
+          if (reader.result === null || typeof reader.result === 'string') {
+            reject(new BulkCsvValidationError('Unable to read the CSV file. No upload was sent.'));
+          } else {
+            resolve(reader.result);
+          }
+        };
+        reader.onerror = () => reject(new BulkCsvValidationError('Unable to read the CSV file. No upload was sent.'));
+        reader.onabort = () => reject(new BulkCsvValidationError('CSV validation was cancelled. No upload was sent.'));
+        reader.readAsArrayBuffer(sourceFile);
+      });
+      readerRef.current = null;
+      if (!mounted.current || !access.current.sessionReady) {
+        throw new BulkCsvValidationError('Your session is not ready. Sign in again before uploading.');
+      }
+      let text: string;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        throw new BulkCsvValidationError('CSV must be valid UTF-8 text. No upload was sent.');
+      }
+      const { csv, changed, rowCount } = sanitizeBulkCsv(text, access.current);
+      let sanitizedFile: File;
+      try {
+        sanitizedFile = new File([csv], sourceFile.name, { type: 'text/csv', lastModified: sourceFile.lastModified });
+      } catch {
+        throw new BulkCsvValidationError('Unable to prepare the sanitized CSV file. No upload was sent.');
+      }
+      const fd = new FormData();
+      fd.append('file', sanitizedFile);
+      setPreflightMsg(`Prepared ${rowCount} rows; sanitized publication/scheduling fields in ${changed} rows.`);
+      setValidating(false);
+      debug('[UploadCsvDialog] sanitized CSV prepared', { rowCount, changed });
+      const res = await api.post<BulkUploadResult>('articles/bulk-upload', fd);
+      return res.data;
+    },
+    onSuccess: async result => {
+      setFollowUpWarning(articleFollowUpWarning(result));
+      try {
+        await qc.invalidateQueries({ queryKey: ['articles'] }, { throwOnError: true });
+      } catch {
+        setFollowUpWarning(previous => previous
+          ? `${previous} The article list also could not be refreshed.`
+          : 'CSV upload completed, but the article list could not be refreshed. Refresh the list; do not repeat the upload.');
+      }
+    },
+    onSettled: () => {
+      readerRef.current = null;
+      inFlight.current = false;
+      setValidating(false);
+    },
+  });
+  const busy = validating || mutate.isPending;
   return (
     <div className="p-4 border rounded bg-white space-y-3">
       <h2 className="font-semibold">CSV Upload</h2>
-      <input type="file" accept=".csv" onChange={e=> { setFile(e.target.files?.[0] || null); setPreflightMsg(null); }} />
+      <input type="file" accept=".csv" aria-label="CSV file" disabled={busy} onChange={e => {
+        if (inFlight.current) return;
+        setFile(e.target.files?.[0] || null);
+        setPreflightMsg(null);
+        setFollowUpWarning(null);
+        mutate.reset();
+      }} />
       <button
-        disabled={!file || validating}
-        onClick={()=> {
-          if (!file) return;
-            setValidating(true);
-            const reader = new FileReader();
-            reader.onload = () => {
-              try {
-                const text = String(reader.result || '');
-                const lines = text.split(/\r?\n/).filter(l=> l.trim().length>0);
-                if (lines.length < 2) {
-                  setPreflightMsg('CSV appears empty');
-                  setValidating(false);
-                  return;
-                }
-                const header = lines[0].split(',');
-                const statusIdx = header.findIndex(h => h.toLowerCase() === 'status');
-                const scheduledIdx = header.findIndex(h => h.toLowerCase() === 'scheduledat');
-                const dataRows = lines.slice(1);
-                const parsed = dataRows.map(r => {
-                  const cols = r.split(',');
-                  return { status: statusIdx>=0 ? cols[statusIdx] : undefined, scheduledAt: scheduledIdx>=0 ? cols[scheduledIdx] : undefined };
-                });
-                const { changed } = sanitizeBulkRows(parsed, { publishEnabled, isFounder });
-                if (changed > 0) {
-                  setPreflightMsg(`Sanitized ${changed} publish/schedule statuses to draft (flag off or insufficient role). Proceeding.`);
-                } else {
-                  setPreflightMsg('Preflight OK');
-                }
-                mutate.mutate(file);
-              } catch (err:any) {
-                debug('[UploadCsvDialog] preflight error', err);
-                setPreflightMsg('Preflight failed: ' + (err.message || 'unknown'));
-              } finally {
-                setValidating(false);
-              }
-            };
-            reader.onerror = () => { setPreflightMsg('Unable to read file'); setValidating(false); };
-            reader.readAsText(file);
+        disabled={!file || !sessionReady || busy || mutate.isSuccess}
+        onClick={() => {
+          if (!file || !sessionReady || inFlight.current || mutate.isSuccess) return;
+          inFlight.current = true;
+          setValidating(true);
+          setPreflightMsg(null);
+          setFollowUpWarning(null);
+          mutate.mutate(file);
         }}
         className="px-3 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
-      >{validating ? 'Validating…' : 'Upload'}</button>
-      {preflightMsg && <div className="text-[11px] text-slate-600">{preflightMsg}</div>}
-      {!publishEnabled && (
+      >{validating ? 'Validating…' : mutate.isPending ? 'Uploading…' : 'Upload'}</button>
+      {preflightMsg && <div role="status" className="text-[11px] text-slate-600">{preflightMsg}</div>}
+      {mutate.isError && (
+        <div role="alert" className="text-xs text-red-600">
+          {mutate.error instanceof BulkCsvValidationError
+            ? `Preflight failed: ${mutate.error.message}`
+            : normalizeArticleError(mutate.error, 'CSV upload failed').message}
+        </div>
+      )}
+      {followUpWarning && <div role="alert" className="text-xs text-amber-700">{followUpWarning}</div>}
+      {(!publishEnabled || !isFounder) && (
         <div className="text-[11px] text-amber-700">
-          Publishing OFF: publish/scheduled statuses auto-downgraded to draft.
+          {publishEnabled ? 'CSV publishing and scheduling require Founder.' : 'Publishing OFF:'}
+          {' '}Publish/scheduled statuses are downgraded to draft and publication/scheduling timestamps are cleared.
         </div>
       )}
       {mutate.data && (
@@ -85,7 +137,7 @@ export const UploadCsvDialog: React.FC<Props> = ({ onDone }) => {
           )}
         </div>
       )}
-      <button onClick={onDone} className="px-3 py-1 bg-slate-600 text-white rounded">Close</button>
+      <button onClick={onDone} disabled={busy} className="px-3 py-1 bg-slate-600 text-white rounded disabled:opacity-50">Close</button>
       <a href="data:text/csv;charset=utf-8,title,summary,content,category,tags,imageUrl,sourceName,sourceUrl,language,status,scheduledAt\nSample Title,Short summary,<p>HTML body</p>,Breaking,tag1;tag2,,Reuters,https://example.com,en,draft," download="articles-template.csv" className="text-blue-700 underline text-xs">Download Template</a>
     </div>
   );
