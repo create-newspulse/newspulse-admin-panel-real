@@ -27,6 +27,7 @@ type DraftPatch = Partial<Pick<Article,
   | 'coverImageUrl'
 >>;
 type WorkspaceArticle = Article | OwnDraftDetail;
+type PublicationPhase = 'idle' | 'saving' | 'publishing' | 'unconfirmed' | 'published';
 
 function normalizeImageUrl(a?: WorkspaceArticle): string {
   const cover = a?.coverImage;
@@ -90,14 +91,28 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
   const [warning, setWarning] = useState<string | null>(null);
   const [recoveryReady, setRecoveryReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [published, setPublished] = useState(false);
+  const [publicationPhase, setPublicationPhaseState] = useState<PublicationPhase>('idle');
   const [deleted, setDeleted] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
   const pendingPatch = useRef<DraftPatch>({});
+  const activeSave = useRef<Promise<boolean> | null>(null);
   const inFlight = useRef(false);
   const paused = useRef(false);
   const mounted = useRef(true);
-  useUnsavedChanges(dirty, saving);
+  const publicationPhaseRef = useRef<PublicationPhase>('idle');
+  const refreshInFlight = useRef(false);
+  const publishAccess = useRef({ canPublish, publishEnabled });
+  publishAccess.current = { canPublish, publishEnabled };
+  const published = publicationPhase === 'published';
+  const publicationPending = publicationPhase === 'saving' || publicationPhase === 'publishing';
+  const editingLocked = publicationPhase !== 'idle';
+  useUnsavedChanges(dirty, saving || publicationPending);
+
+  function setPublicationPhase(phase: PublicationPhase) {
+    // Close callback races before React renders the disabled controls.
+    publicationPhaseRef.current = phase;
+    if (mounted.current) setPublicationPhaseState(phase);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -138,49 +153,55 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
 
   const armSave = () => {
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-    if (paused.current) return;
+    saveTimerRef.current = null;
+    if (paused.current || publicationPhaseRef.current !== 'idle') return;
     saveTimerRef.current = window.setTimeout(() => { void flushPending(); }, 600);
   };
 
-  async function flushPending(): Promise<boolean> {
+  function flushPending(): Promise<boolean> {
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
-    if (inFlight.current || paused.current) return false;
+    if (activeSave.current) return activeSave.current;
+    if (inFlight.current || paused.current) return Promise.resolve(false);
     const patch = pendingPatch.current;
-    if (!Object.keys(patch).length) return true;
+    if (!Object.keys(patch).length) return Promise.resolve(true);
     pendingPatch.current = {};
     inFlight.current = true;
     setSaving(true);
-    try {
-      const result = await updateArticle(draftId, patch);
-      if (!mounted.current) return true;
-      // Only locally edited fields are applied; a restricted DTO is never promoted to a full editor DTO.
-      setArticle((previous) => previous ? { ...previous, ...patch } : previous);
-      setLastSavedAt(Date.now());
-      setSaveError(null);
-      const followUp = articleFollowUpWarning(result);
-      setWarning(followUp);
-      if (followUp) {
+    activeSave.current = Promise.resolve().then(async () => {
+      try {
+        const result = await updateArticle(draftId, patch);
+        if (!mounted.current) return false;
+        // Only locally edited fields are applied; a restricted DTO is never promoted to a full editor DTO.
+        setArticle((previous) => previous ? { ...previous, ...patch } : previous);
+        setLastSavedAt(Date.now());
+        setSaveError(null);
+        const followUp = articleFollowUpWarning(result);
+        setWarning(followUp);
+        if (followUp) {
+          paused.current = true;
+          setRecoveryReady(false);
+        }
+        setDirty(Object.keys(pendingPatch.current).length > 0);
+        return true;
+      } catch (error: unknown) {
+        if (!mounted.current) return false;
+        pendingPatch.current = { ...patch, ...pendingPatch.current };
         paused.current = true;
         setRecoveryReady(false);
+        setDirty(true);
+        setSaveError(normalizeArticleError(error, 'Autosave failed'));
+        return false;
+      } finally {
+        activeSave.current = null;
+        inFlight.current = false;
+        if (mounted.current) {
+          setSaving(false);
+          if (Object.keys(pendingPatch.current).length && !paused.current) armSave();
+        }
       }
-      setDirty(Object.keys(pendingPatch.current).length > 0);
-      return true;
-    } catch (error: unknown) {
-      if (!mounted.current) return false;
-      pendingPatch.current = { ...patch, ...pendingPatch.current };
-      paused.current = true;
-      setRecoveryReady(false);
-      setDirty(true);
-      setSaveError(normalizeArticleError(error, 'Autosave failed'));
-      return false;
-    } finally {
-      inFlight.current = false;
-      if (mounted.current) {
-        setSaving(false);
-        if (Object.keys(pendingPatch.current).length && !paused.current) armSave();
-      }
-    }
+    });
+    return activeSave.current;
   }
 
   useEffect(() => {
@@ -196,20 +217,57 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
   }, [deleted, saving, dirty, navigate]);
 
   async function refreshLatest() {
+    if (!mounted.current || refreshInFlight.current || inFlight.current
+      || publicationPhaseRef.current === 'saving' || publicationPhaseRef.current === 'publishing') return;
+    refreshInFlight.current = true;
     setRefreshing(true);
     setRecoveryReady(false);
     try {
       const latest = await (restricted ? getOwnDraft(draftId) : getArticle(draftId));
+      if (!mounted.current) return;
       setArticle(latest);
+      if (publicationPhaseRef.current === 'unconfirmed') {
+        if (latest.status === 'published') {
+          setPublicationPhase('published');
+          setSaveError(null);
+          return;
+        }
+        if (latest.status !== 'draft') {
+          toast.error('This story is no longer a draft. Review its latest status before continuing.');
+          return;
+        }
+      }
       setRecoveryReady(true);
     } catch (error: unknown) {
-      toast.error(normalizeArticleError(error, 'Could not refresh the draft; your edits are still here').message);
+      if (mounted.current) toast.error(normalizeArticleError(error, 'Could not refresh the draft; your edits are still here').message);
     } finally {
-      setRefreshing(false);
+      refreshInFlight.current = false;
+      if (mounted.current) setRefreshing(false);
     }
   }
 
+  function resumeSaving() {
+    if (!recoveryReady || refreshInFlight.current || inFlight.current
+      || publicationPhaseRef.current === 'saving' || publicationPhaseRef.current === 'publishing'
+      || publicationPhaseRef.current === 'published') return;
+    setPublicationPhase('idle');
+    paused.current = false;
+    setSaveError(null);
+    setWarning(null);
+    setRecoveryReady(false);
+    void flushPending();
+  }
+
+  const canLeaveEditor = () => {
+    if (publicationPhaseRef.current === 'saving' || publicationPhaseRef.current === 'publishing') {
+      toast.error('Wait for publication to finish before leaving the editor.');
+      return false;
+    }
+    return true;
+  };
+
   const setMode = (next: 'view' | 'edit') => {
+    if (!canLeaveEditor()) return;
     const sp = new URLSearchParams(searchParams);
     if (next === 'edit') sp.set('mode', 'edit');
     else sp.delete('mode');
@@ -218,6 +276,10 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
 
   const onChange = (key: Exclude<keyof NonNullable<typeof form>, 'language'>, value: string) => {
     if (!form) return;
+    if (publicationPhaseRef.current !== 'idle') {
+      toast.error('Editing is locked for publication. No changes were applied.');
+      return;
+    }
     setForm((previous) => previous ? { ...previous, [key]: value } : previous);
 
     const patch: DraftPatch = {};
@@ -234,31 +296,47 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
   };
 
   const publishDraft = async () => {
-    if (!canPublish || !publishEnabled || published || inFlight.current || paused.current) return;
-    const hadEdits = Object.keys(pendingPatch.current).length > 0;
-    if (!await flushPending() || paused.current || Object.keys(pendingPatch.current).length) return;
-    if (!window.confirm('Publish this story? The Backend will verify every language edition and your effective Publish News right.')) return;
-    inFlight.current = true;
-    setSaving(true);
+    if (!article || loading || deleted || !publishAccess.current.canPublish || !publishAccess.current.publishEnabled
+      || publicationPhaseRef.current !== 'idle' || paused.current || refreshInFlight.current
+      || (inFlight.current && !activeSave.current)) return;
+    const hadEdits = !!activeSave.current || Object.keys(pendingPatch.current).length > 0;
+    setPublicationPhase('saving');
+    let attempted = false;
     try {
-      const result = await publishArticle(article ? articleCmsId(article) : draftId);
-      setPublished(true);
+      do {
+        if (!await flushPending() || !mounted.current || paused.current) return;
+      } while (Object.keys(pendingPatch.current).length > 0);
+      if (!publishAccess.current.canPublish || !publishAccess.current.publishEnabled) {
+        toast.error('Publishing access changed. Publication was not attempted.');
+        return;
+      }
+      if (!window.confirm('Publish this story? The Backend will verify every language edition and your effective Publish News right.')) return;
+      const cmsId = articleCmsId(article);
+      setPublicationPhase('publishing');
+      inFlight.current = true;
+      attempted = true;
+      const result = await publishArticle(cmsId);
+      if (!mounted.current) return;
+      setPublicationPhase('published');
       paused.current = true;
       setWarning(articleFollowUpWarning(result));
       toast.success('Story published');
     } catch (error: unknown) {
+      if (!mounted.current) return;
+      if (attempted) setPublicationPhase('unconfirmed');
       paused.current = true;
       setRecoveryReady(false);
       const failure = normalizeArticleError(error, 'Publication failed');
-      setSaveError({ ...failure, message: `${hadEdits ? 'Draft changes were saved. ' : ''}Publication was not confirmed. ${failure.message}` });
+      setSaveError({ ...failure, message: `${hadEdits && attempted ? 'Draft changes were saved. ' : ''}Publication was not ${attempted ? 'confirmed' : 'attempted'}. ${failure.message}` });
     } finally {
       inFlight.current = false;
-      setSaving(false);
+      if (!attempted) setPublicationPhase('idle');
     }
   };
 
   const deleteDraft = async () => {
-    if (!draftId || restricted || inFlight.current) return;
+    if (!draftId || restricted || inFlight.current
+      || (publicationPhaseRef.current !== 'idle' && publicationPhaseRef.current !== 'published')) return;
     const ok = window.confirm(`Delete this draft? It will move to Deleted.${dirty ? ' Unsaved edits will be discarded.' : ''}`);
     if (!ok) return;
     inFlight.current = true;
@@ -313,7 +391,7 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
           <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-white hover:bg-slate-50"
-            disabled={!article || loading || published}
+            disabled={!article || loading || editingLocked}
             onClick={() => setMode('edit')}
           >
             Edit draft
@@ -321,18 +399,18 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
           {!restricted && <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
-            disabled={saving || loading}
-            onClick={() => navigate(`/admin/articles?qv=draft&highlight=${encodeURIComponent(draftId)}`)}
+            disabled={saving || loading || publicationPending}
+            onClick={() => { if (canLeaveEditor()) navigate(`/admin/articles?qv=draft&highlight=${encodeURIComponent(draftId)}`); }}
           >
             Open in Manage News
           </button>}
           {canPublish && !published && <button type="button" className="rounded-md border bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-60"
-            disabled={!article || loading || saving || !publishEnabled || !!saveError || !!warning}
-            onClick={() => void publishDraft()}>Publish</button>}
+            disabled={!article || loading || editingLocked || (saving && !activeSave.current) || refreshing || !publishEnabled || !!saveError || !!warning}
+            onClick={() => void publishDraft()}>{publicationPhase === 'saving' ? 'Saving before publishing...' : publicationPhase === 'publishing' ? 'Publishing...' : 'Publish'}</button>}
           {!restricted && <button
             type="button"
             className="px-3 py-2 text-sm rounded-md border bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-60"
-            disabled={!article || saving || loading}
+            disabled={!article || saving || loading || (editingLocked && !published)}
             onClick={deleteDraft}
           >
             Delete draft
@@ -342,21 +420,20 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
 
       {loading ? <div>Loading…</div> : null}
       {restricted && <p className="text-sm text-slate-600">Own-draft workspace. Only changed fields are saved; other editions and omitted metadata are not loaded or replaced.</p>}
+      {publicationPending && <div role="status" className="rounded border p-3 text-slate-700">
+        {publicationPhase === 'saving' ? 'Saving changes before publishing...' : 'Publishing story...'} Editing is locked until publication is resolved.
+      </div>}
       {published && <div role="status" className="rounded border p-3 text-emerald-700">Publication committed. This story is no longer an own draft. Do not publish it again.</div>}
       {(saveError || warning) && <div role="alert" className="rounded border border-amber-300 p-3 text-amber-900">
         <div>{saveError?.message || warning}</div>
-        <p>Unsaved edits remain in this workspace. Automatic retries are paused.</p>
-        {!published && <button type="button" className="mt-2 underline" disabled={saving || refreshing} onClick={() => void refreshLatest()}>
+        <p>{publicationPhase === 'unconfirmed'
+          ? 'Editing is locked until the latest state is verified. Publication will not be retried automatically.'
+          : 'Unsaved edits remain in this workspace. Automatic retries are paused.'}</p>
+        {!published && <button type="button" className="mt-2 underline" disabled={saving || refreshing || publicationPending} onClick={() => void refreshLatest()}>
           {refreshing ? 'Refreshing...' : 'Refresh latest state without discarding edits'}
         </button>}
-        {!published && recoveryReady && <button type="button" className="ml-3 underline" disabled={saving}
-          onClick={() => {
-            paused.current = false;
-            setSaveError(null);
-            setWarning(null);
-            setRecoveryReady(false);
-            void flushPending();
-          }}>Resume saving unsaved changes</button>}
+        {!published && recoveryReady && <button type="button" className="ml-3 underline" disabled={saving || refreshing || publicationPending}
+          onClick={resumeSaving}>Resume saving unsaved changes</button>}
       </div>}
       {!saveError && !warning && dirty && <div role="status">Unsaved changes{saving ? ' - saving...' : ''}</div>}
 
@@ -397,7 +474,9 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
       <FiltersDrawer
         open={drawerOpen}
         title={
-          saving
+          publicationPending
+            ? publicationPhase === 'saving' ? 'Saving before publishing...' : 'Publishing...'
+            : saving
             ? 'Editing (saving…)'
             : dirty
               ? 'Editing (unsaved changes)'
@@ -410,7 +489,7 @@ function DraftWorkspace({ draftId, restricted, canPublish }: { draftId: string; 
         {!form ? (
           <div className="text-sm text-slate-600">Loading editor…</div>
         ) : (
-          <fieldset className="space-y-3" disabled={published}>
+          <fieldset className="space-y-3" disabled={editingLocked}>
             <div>
               <label className="text-xs font-medium text-slate-600">Title</label>
               <input
