@@ -3,6 +3,8 @@
 // We merge functionality into a single set of exports using the existing apiClient.
 
 import { adminApiClient } from '@/lib/adminApiClient';
+import { z } from 'zod';
+import { ArticleRestoreGuardError } from '@/lib/articleLifecycle';
 import type { ArticleStatus } from '@/types/articles';
 import type { PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
 import type { AuthorByline } from '@/lib/authorByline';
@@ -107,6 +109,35 @@ export interface ArticleMutationResponse {
   revalidation?: { ok?: boolean };
   postCommitWarnings?: Array<{ code: string; message?: string }>;
 }
+
+const restoreEligibilitySchema = z.object({
+  articleId: z.string().min(1),
+  eligible: z.boolean(),
+  decision: z.enum(['eligible', 'founder_required', 'blocked', 'incomplete']),
+  complete: z.boolean(),
+  requiresFounder: z.boolean(),
+  reasonCodes: z.array(z.string()),
+  members: z.array(z.object({
+    id: z.string().min(1),
+    language: z.string().nullable(),
+    status: z.string().nullable(),
+    restoreStatus: z.string().nullable(),
+    historyKnown: z.boolean(),
+  })),
+  publicCopies: z.array(z.object({
+    id: z.string().min(1),
+    sourceNewsId: z.string().nullable(),
+  })),
+});
+
+export type ArticleRestoreEligibility = z.infer<typeof restoreEligibilitySchema>;
+
+const restoreEligibilityResponseSchema = z.object({
+  ok: z.literal(true),
+  success: z.literal(true),
+  status: z.literal(200),
+  data: restoreEligibilitySchema,
+});
 
 // Own-draft reads deliberately omit group, ownership, workflow and other editor fields.
 // Never hydrate ArticleForm or build a full Article update from these DTOs.
@@ -660,9 +691,24 @@ export async function archiveArticle(id: string) {
   const url = `${ARTICLES_PATH}/${encoded}`;
   return putArticleState(url, { status: 'archived' });
 }
+export async function getArticleRestoreEligibility(id: string, signal?: AbortSignal): Promise<ArticleRestoreEligibility> {
+  if (!id || id !== id.trim()) throw new ArticleRestoreGuardError('Invalid article ID. Refresh the list before checking Restore.');
+  const res = await adminApiClient.get<unknown>(`${ARTICLES_PATH}/${encodeURIComponent(id)}/restore-eligibility`, {
+    signal,
+    timeout: 10_000,
+    headers: { 'Cache-Control': 'no-store, no-cache', Pragma: 'no-cache' },
+  });
+  const parsed = restoreEligibilityResponseSchema.safeParse(res.data);
+  if (!parsed.success || parsed.data.data.articleId !== id) {
+    throw new ArticleRestoreGuardError('Restore eligibility returned an invalid or mismatched assessment. No restore was authorized.');
+  }
+  return parsed.data.data;
+}
 export async function restoreArticle(id: string) {
   const encoded = encodeURIComponent(id);
-  const res = await adminApiClient.post<ArticleMutationResponse>(`${ARTICLES_PATH}/${encoded}/restore`);
+  // A mutation must not be replayed by the client's authentication-refresh interceptor.
+  const config = { skipAuthRefresh: true, timeout: 30_000 };
+  const res = await adminApiClient.post<ArticleMutationResponse>(`${ARTICLES_PATH}/${encoded}/restore`, undefined, config);
   return mutationResponse(res.data);
 }
 export async function deleteArticle(id: string) {

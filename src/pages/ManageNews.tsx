@@ -327,7 +327,9 @@ export default function ManageNews() {
             </button>
             <button
               onClick={() => navigate('/add')}
-              className="px-3 py-1 bg-green-600 text-white rounded"
+              disabled={!editorialAccess.canCreateNews}
+              title={!editorialAccess.canCreateNews ? 'Create News permission is required.' : undefined}
+              className="px-3 py-1 bg-green-600 text-white rounded disabled:opacity-50"
             >
               Add New
             </button>

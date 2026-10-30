@@ -2,9 +2,11 @@ import React from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArticleForm } from '@/components/news/ArticleForm';
 import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import AdminModuleRoute from '@/components/AdminModuleRoute';
+import Denied from '@/pages/Denied';
 
 // Direct Add Article page using the advanced ArticleForm (replaces old redirect shim)
-const AddNews: React.FC = () => {
+const AddNewsEditor: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const access = useEditorialAccess();
@@ -15,6 +17,9 @@ const AddNews: React.FC = () => {
     return access.canReadOwnDrafts
       ? <Navigate to={`/draft-desk/${encodeURIComponent(resumeId)}?mode=edit`} replace />
       : <div role="alert">{access.reason}</div>;
+  }
+  if (!resumeId && !access.canCreateNews) {
+    return <Denied message="Create News requires effective Add News, Draft Desk, or Manage News with Edit news permission." />;
   }
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -41,5 +46,11 @@ const AddNews: React.FC = () => {
     </div>
   );
 };
+
+const AddNews: React.FC = () => (
+  <AdminModuleRoute moduleKey={['add_news', 'draft_desk', 'manage_news']}>
+    <AddNewsEditor />
+  </AdminModuleRoute>
+);
 
 export default AddNews;

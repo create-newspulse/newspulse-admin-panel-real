@@ -9,6 +9,7 @@ import { isFaithCultureTopic } from '@/lib/faithCultureTopics';
 
 const mocks = vi.hoisted(() => ({
   role: 'admin',
+  creationAccess: false,
   apiGet: vi.fn(),
   getMediaStatus: vi.fn(),
   createArticle: vi.fn<(payload: Partial<Article>) => Promise<{ article: Article }>>(),
@@ -25,12 +26,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'admin-1', role: mocks.role, moduleAccess: ['manage_news'] },
+  useAuth: () => ({ user: { id: 'admin-1', role: mocks.role, moduleAccess: mocks.creationAccess ? ['manage_news', 'add_news'] : ['manage_news'] },
     isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false }),
 }));
 vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
   isLoading: false, error: null, backendAccess: {},
-  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+  modulePolicy: {
+    manage_news: { moduleKey: 'manage_news', state: 'available' },
+    add_news: { moduleKey: 'add_news', state: 'available' },
+  },
 }) }));
 vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
   useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
@@ -113,6 +117,7 @@ let storedArticle: Article;
 const queryClients: QueryClient[] = [];
 
 function renderForm(article?: Article, loadFromApi = false) {
+  mocks.creationAccess = !article;
   if (article) storedArticle = { ...article };
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false } },

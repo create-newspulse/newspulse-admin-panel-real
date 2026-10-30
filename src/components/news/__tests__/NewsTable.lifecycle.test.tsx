@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Article, ListResponse } from '@/lib/api/articles';
+import type { Article, ArticleRestoreEligibility, ListResponse } from '@/lib/api/articles';
 import type { ArticleLogicalCounts } from '@/lib/api/articleCounts';
 import type { ManageNewsParams } from '@/types/api';
 import ManageNews from '@/pages/ManageNews';
@@ -11,6 +11,12 @@ import { NewsTable } from '../NewsTable';
 const mocks = vi.hoisted(() => ({
   role: 'founder',
   staffPublish: false,
+  permanentRestore: false,
+  temporaryRestore: false,
+  restoreConfigured: false,
+  restoreDenied: false,
+  modules: ['manage_news'],
+  eligibility: vi.fn(),
   publishEnabled: true,
   list: vi.fn(),
   counts: vi.fn(),
@@ -28,7 +34,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({
-    user: { role: mocks.role, moduleAccess: ['manage_news'], specialRights: mocks.staffPublish ? ['news_publish', 'news_edit'] : [],
+    user: { id: 'synthetic-news-user', role: mocks.role, moduleAccess: mocks.modules,
+      specialRights: [...(mocks.staffPublish ? ['news_publish', 'news_edit'] : []), ...(!mocks.restoreDenied && (mocks.permanentRestore || mocks.temporaryRestore) ? ['news_restore'] : [])],
+      specialRightsConfigured: mocks.restoreConfigured,
+      specialRightsOverride: mocks.permanentRestore ? ['news_restore'] : [],
+      temporaryAccess: mocks.temporaryRestore ? [{ rightKey: 'news_restore', enabled: true }] : [],
       newsPublishGrantRecorded: mocks.staffPublish },
     isFounder: mocks.role === 'founder', isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false,
   }),
@@ -47,6 +57,7 @@ vi.mock('@/lib/api/articles', () => ({
   publishArticle: mocks.publish,
   unpublishArticle: mocks.unpublish,
   restoreArticle: mocks.restore,
+  getArticleRestoreEligibility: mocks.eligibility,
   deleteArticle: mocks.remove,
   hardDeleteArticle: mocks.hardDelete,
   bulkHardDeleteArticles: mocks.bulkDelete,
@@ -86,6 +97,20 @@ const story: Article = {
 
 function response(rows: Article[]): ListResponse {
   return { rows, total: rows.length, page: 1, pages: 1 };
+}
+
+function restoreAssessment(restoreStatus = 'draft'): ArticleRestoreEligibility {
+  return {
+    articleId: 'source-en', eligible: true, decision: 'eligible', complete: true, requiresFounder: false,
+    reasonCodes: [], publicCopies: [],
+    members: ['source-en', 'edition-hi', 'edition-gu'].map((id, index) => ({
+      id, language: ['en', 'hi', 'gu'][index], status: 'deleted', restoreStatus, historyKnown: true,
+    })),
+  };
+}
+
+function restoreButton() {
+  return screen.getAllByText('Restore', { selector: 'button' })[0];
 }
 
 function countsResponse(overrides: Partial<ArticleLogicalCounts['counts']> = {}) {
@@ -135,6 +160,12 @@ beforeEach(() => {
   localStorage.clear();
   mocks.role = 'founder';
   mocks.staffPublish = false;
+  mocks.permanentRestore = false;
+  mocks.temporaryRestore = false;
+  mocks.restoreConfigured = false;
+  mocks.restoreDenied = false;
+  mocks.modules = ['manage_news'];
+  mocks.eligibility.mockResolvedValue(restoreAssessment());
   mocks.publishEnabled = true;
   mocks.counts.mockResolvedValue(countsResponse({ draft: 1 }));
   backendRows = [
@@ -298,9 +329,202 @@ describe('Manage News lifecycle actions', () => {
     fireEvent.click(action('Restore'));
     await screen.findByText('No stories found.');
     expect(mocks.restore.mock.calls).toEqual([['source-en']]);
+    expect(mocks.eligibility).not.toHaveBeenCalled();
     expect(mocks.updateStatus).not.toHaveBeenCalled();
     expect(backendRows.every((row) => row.status === 'published')).toBe(true);
     expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['draft', 'archived', 'published', 'scheduled'] as const)(
+    'does not infer staff restore from visible %s history before an assessment', async previous => {
+      mocks.role = 'editor';
+      mocks.permanentRestore = true;
+      mocks.restoreConfigured = true;
+      backendRows = backendRows.map(row => ({ ...row, status: 'deleted', deletedFromStatus: previous }));
+      renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+      await screen.findAllByText('Source story');
+      const restore = restoreButton();
+      expect(restore).toBeDisabled();
+      expect(restore).toHaveAttribute('title', expect.stringMatching(/Check restore eligibility/i));
+      fireEvent.click(restore);
+      expect(mocks.restore).not.toHaveBeenCalled();
+      expect(mocks.updateStatus).not.toHaveBeenCalled();
+      expect(mocks.eligibility).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['role-only', 'temporary-only', 'unconfigured-permanent', 'temporary-denial', 'missing-manage-news'])('rejects %s restore claims', async claim => {
+    mocks.role = 'admin';
+    mocks.permanentRestore = ['unconfigured-permanent', 'temporary-denial', 'missing-manage-news'].includes(claim);
+    mocks.temporaryRestore = claim === 'temporary-only';
+    mocks.restoreConfigured = claim !== 'unconfigured-permanent';
+    mocks.restoreDenied = claim === 'temporary-denial';
+    mocks.modules = claim === 'missing-manage-news' ? [] : ['manage_news'];
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted', deletedFromStatus: 'draft' }));
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    const restore = screen.getAllByRole('button', { name: /Restore|restore/ })[0];
+    expect(restore).toBeDisabled();
+    expect(restore).toHaveAttribute('title', expect.stringMatching(claim === 'missing-manage-news' ? /Manage News/ : /permanent/i));
+    fireEvent.click(restore);
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Check restore' })).not.toBeInTheDocument();
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { deletedFromStatus: 'scheduled' as const },
+    { publishedAt: '2026-01-15T10:00:00Z' },
+    { scheduledAt: '2026-01-15T10:00:00Z' },
+  ])('uses the Backend assessment for protected history instead of trusting visible metadata %j', async history => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted', deletedFromStatus: 'draft' }));
+    backendRows[1] = { ...backendRows[1], ...history };
+    mocks.eligibility.mockResolvedValue({
+      ...restoreAssessment(), eligible: false, decision: 'founder_required', requiresFounder: true,
+    });
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(restoreButton()).toHaveAttribute('title', expect.stringMatching(/Founder permission/)));
+    const restore = restoreButton();
+    expect(restore).toBeDisabled();
+    fireEvent.click(restore);
+    expect(mocks.restore).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'archived'] as const)('checks twice and restores one eligible deleted %s group without changing the route or IDs', async restoreStatus => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted', deletedFromStatus: restoreStatus }));
+    mocks.eligibility.mockResolvedValue(restoreAssessment(restoreStatus));
+    mocks.restore.mockImplementation(async () => {
+      backendRows = backendRows.map(row => ({ ...row, status: restoreStatus }));
+      return { ok: true, changedIds: backendRows.map(row => row._id), restoredStatuses: [restoreStatus] };
+    });
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    expect(restoreButton()).toBeDisabled();
+    expect(mocks.eligibility).not.toHaveBeenCalled();
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(restoreButton()).toBeEnabled());
+    const restore = restoreButton();
+    fireEvent.click(restore);
+    fireEvent.click(restore);
+    await screen.findByText('No stories found.');
+    expect(mocks.eligibility.mock.calls.map(([id]) => id)).toEqual(['source-en', 'source-en']);
+    expect(mocks.restore.mock.calls).toEqual([['source-en']]);
+    expect(mocks.updateStatus).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(backendRows.map(row => row._id)).toEqual(['source-en', 'edition-hi', 'edition-gu']);
+    expect(backendRows.every(row => row.status === restoreStatus && row.translationGroupId === 'story-group')).toBe(true);
+  });
+
+  it.each([401, 403, 404, 409, 503, 500])('keeps Restore disabled after an assessment HTTP %s', async status => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted' }));
+    mocks.eligibility.mockRejectedValue({ response: { status, data: {} } });
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    expect(restoreButton()).toBeDisabled();
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.updateStatus).not.toHaveBeenCalled();
+    expect(mocks.eligibility).toHaveBeenCalledTimes(1);
+  });
+
+  it('never restores when the action-time assessment changes to eligible:false', async () => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted' }));
+    mocks.eligibility.mockResolvedValueOnce(restoreAssessment())
+      .mockResolvedValueOnce({ ...restoreAssessment(), eligible: false });
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(restoreButton()).toBeEnabled());
+    fireEvent.click(restoreButton());
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/blocked Restore/)));
+    expect(restoreButton()).toBeDisabled();
+    expect(mocks.restore).not.toHaveBeenCalled();
+  });
+
+  it('does not transfer a queued staff Restore into changed Founder access', async () => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted' }));
+    const { client } = renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(restoreButton()).toBeEnabled());
+    let release!: () => void;
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    client.getMutationCache().config.onMutate = () => paused;
+    fireEvent.click(restoreButton());
+    expect(mocks.restore).not.toHaveBeenCalled();
+    mocks.role = 'founder';
+    const query = client.getQueryCache().find({ queryKey: ['articles'], exact: false });
+    if (!query) throw new Error('Article list query not found');
+    act(() => {
+      client.setQueryData<ListResponse>(query.queryKey, data => data && {
+        ...data, rows: data.rows.map(row => ({ ...row, title: `${row.title} after access change` })),
+      });
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Check restore' })).not.toBeInTheDocument());
+    await act(async () => { release(); });
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.eligibility).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/account, permissions or story changed/));
+  });
+
+  it('shows an ambiguous Restore error, refreshes eligibility and never enables a replay', async () => {
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    backendRows = backendRows.map(row => ({ ...row, status: 'deleted' }));
+    mocks.restore.mockRejectedValue(new Error('Network error'));
+    renderTable({ params: { status: 'deleted', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Check restore'));
+    await waitFor(() => expect(restoreButton()).toBeEnabled());
+    fireEvent.click(restoreButton());
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/may have completed.*do not retry/)));
+    expect(mocks.eligibility).toHaveBeenCalledTimes(3);
+    expect(restoreButton()).toBeDisabled();
+    expect(restoreButton()).toHaveAttribute('title', expect.stringMatching(/unconfirmed/));
+    fireEvent.click(restoreButton());
+    expect(mocks.restore).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the existing Founder archived-row PUT and blocks the unverified staff counterpart', async () => {
+    backendRows = backendRows.map(row => ({ ...row, status: 'archived' }));
+    mocks.updateStatus.mockResolvedValue({ ok: true });
+    renderTable({ params: { status: 'archived', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    fireEvent.click(action('Restore'));
+    await waitFor(() => expect(mocks.updateStatus).toHaveBeenCalledExactlyOnceWith('source-en', 'draft'));
+    expect(mocks.restore).not.toHaveBeenCalled();
+    cleanup();
+    mocks.updateStatus.mockClear();
+    mocks.role = 'editor';
+    mocks.permanentRestore = true;
+    mocks.restoreConfigured = true;
+    renderTable({ params: { status: 'archived', page: 1, limit: 20, sort: '-updatedAt' } });
+    await screen.findAllByText('Source story');
+    const restore = screen.getAllByRole('button', { name: /Restore|restore/ })[0];
+    expect(restore).toBeDisabled();
+    expect(restore).toHaveAttribute('title', expect.stringMatching(/archived.*not.*verified/i));
+    fireEvent.click(restore);
+    expect(mocks.updateStatus).not.toHaveBeenCalled();
   });
 
   it.each(['admin', 'editor', 'staff'])('does not grant %s publication or permanent deletion rights', async (role) => {
@@ -315,7 +539,8 @@ describe('Manage News lifecycle actions', () => {
     await screen.findAllByText('Source story');
     expect(screen.queryByRole('button', { name: 'Delete forever' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Delete Selected Forever/ })).not.toBeInTheDocument();
-    if (role !== 'staff') expect(screen.getAllByRole('button', { name: /Founder permission is required to restore/ })[0]).toBeDisabled();
+    expect(restoreButton()).toBeDisabled();
+    expect(restoreButton()).toHaveAttribute('title', expect.stringMatching(/permanent/i));
   });
 
   it('requires typed irreversible confirmation for permanent whole-story deletion', async () => {

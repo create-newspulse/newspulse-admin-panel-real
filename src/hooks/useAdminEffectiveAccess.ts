@@ -137,7 +137,7 @@ function normalizeBackendAccess(raw: unknown, user: any, modulePolicy: AdminModu
   return next;
 }
 
-function normalizeEffectiveAccessResponse(raw: unknown, user: any): EffectiveAccessState {
+export function normalizeEffectiveAccessResponse(raw: unknown, user: any): EffectiveAccessState {
   const modulePolicy = normalizeAdminModulePolicy(raw, (raw as any)?.visibility ?? (raw as any)?.data?.visibility);
   const backendAccess = normalizeBackendAccess(raw, user, modulePolicy);
   const policyWithBackendStates = Object.entries(backendAccess).reduce((acc, [moduleKey, access]) => {

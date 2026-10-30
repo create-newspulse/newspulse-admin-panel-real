@@ -279,7 +279,7 @@ function App() {
 
               {/* 🔐 Admin Protected Routes */}
               {/* Legacy /add now redirects to /admin/add-news (updated editor) */}
-              <Route path="/add" element={<AdminModuleRoute moduleKey="add_news"><AddNews /></AdminModuleRoute>} />
+              <Route path="/add" element={<AddNews />} />
               <Route path="/edit/:id" element={<ProtectedRoute><LockCheckWrapper><EditNews /></LockCheckWrapper></ProtectedRoute>} />
               {/* New dedicated modern edit route using ArticleForm */}
               <Route path="/admin/articles/:id/edit" element={<ProtectedRoute><LockCheckWrapper><ArticleEditPage /></LockCheckWrapper></ProtectedRoute>} />
@@ -300,8 +300,8 @@ function App() {
               <Route path="/poll-editor" element={<ProtectedRoute><LockCheckWrapper><PollEditor /></LockCheckWrapper></ProtectedRoute>} />
               <Route path="/poll-results" element={<ProtectedRoute><LockCheckWrapper><PollResultsChart /></LockCheckWrapper></ProtectedRoute>} />
               {/* Add News legacy redirect */}
-              <Route path="/admin/add" element={<AdminModuleRoute moduleKey="add_news"><Navigate to="/add" replace /></AdminModuleRoute>} />
-              <Route path="/admin/add-news" element={<AdminModuleRoute moduleKey="add_news"><AddNews /></AdminModuleRoute>} />
+              <Route path="/admin/add" element={<Navigate to="/add" replace />} />
+              <Route path="/admin/add-news" element={<AddNews />} />
               {/* Manage News canonical route + redirects */}
               <Route path="/admin/articles" element={<AdminModuleRoute moduleKey="manage_news"><LockCheckWrapper><ManageNews /></LockCheckWrapper></AdminModuleRoute>} />
               <Route path="/admin/compliance-reports" element={<AdminModuleRoute moduleKey="compliance_reports"><LockCheckWrapper><ComplianceReportsPage /></LockCheckWrapper></AdminModuleRoute>} />

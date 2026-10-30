@@ -75,7 +75,7 @@ describe('article lifecycle API contract', () => {
     };
     mocks.post.mockResolvedValue({ data: restored });
     expect(await restoreArticle('article-1')).toBe(restored);
-    expect(mocks.post.mock.calls).toEqual([['articles/article-1/restore']]);
+    expect(mocks.post.mock.calls).toEqual([['articles/article-1/restore', undefined, { skipAuthRefresh: true, timeout: 30_000 }]]);
     expect(mocks.put).not.toHaveBeenCalled();
   });
 

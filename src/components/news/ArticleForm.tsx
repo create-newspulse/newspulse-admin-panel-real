@@ -422,7 +422,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const editorialAccess = useEditorialAccess();
   const effectiveUserRole = normalizeRoleId(user?.role || userRole);
   const effectiveSpecialRights = useMemo(() => getEffectiveSpecialRights(user), [user]);
-  const canGenerateNewStoryTranslations = editorialAccess.canManageNews || editorialAccess.canReadOwnDrafts;
+  const canGenerateNewStoryTranslations = editorialAccess.canCreateNews;
   const canGenerateMissingEditions = editorialAccess.canEditNews;
   const liveCreationGenerationAccessRef = useRef(canGenerateNewStoryTranslations);
   liveCreationGenerationAccessRef.current = canGenerateNewStoryTranslations;
@@ -445,6 +445,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const committedEditionsRef = useRef<Partial<Record<LangCode, CommittedEdition>>>({});
   const editionIdsRef = useRef<Partial<Record<LangCode, string>>>({});
   const unknownSaveIdentityRef = useRef(false);
+  const createPermissionDeniedRef = useRef(false);
+  const refreshRequestRef = useRef<symbol | null>(null);
   const anchorLanguageRef = useRef<LangCode | null>(null);
   const generationInFlightRef = useRef(false);
   const createdTranslationSourceRef = useRef<CreatedTranslationSource | null>(null);
@@ -461,6 +463,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     pendingSaveRef.current = false;
     setLifecycleMessage(null);
     setNeedsLatestRefresh(false);
+    createPermissionDeniedRef.current = false;
+    refreshRequestRef.current = null;
+    setRefreshingArticle(false);
     autosavePausedRef.current = false;
     hydratedArticleIdRef.current = null;
     mutationTargetIdRef.current = initialEditId;
@@ -742,6 +747,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     pendingSaveRef.current = false;
     setLifecycleMessage(null);
     setNeedsLatestRefresh(false);
+    createPermissionDeniedRef.current = false;
+    refreshRequestRef.current = null;
+    setRefreshingArticle(false);
     autosavePausedRef.current = false;
     hydratedArticleIdRef.current = null;
     mutationTargetIdRef.current = null;
@@ -1470,7 +1478,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       report('Creation access could not be verified. Translation generation is blocked.');
       return;
     }
-    if (needsLatestRefresh || refreshingArticle || unknownSaveIdentityRef.current) {
+    if (needsLatestRefresh || refreshingArticle || createPermissionDeniedRef.current || refreshRequestRef.current || unknownSaveIdentityRef.current) {
       report('Refresh the acknowledged save before generating translations. Your edits are still here.');
       return;
     }
@@ -1899,10 +1907,33 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
   async function refreshLatestPreservingEdits() {
     const targetId = mutationTargetIdRef.current || effectiveId;
-    if (!targetId || refreshingArticle) return;
+    const permissionsOnly = !targetId && createPermissionDeniedRef.current && !unknownSaveIdentityRef.current;
+    if (refreshRequestRef.current || refreshingArticle) return;
+    if (!targetId && !permissionsOnly) {
+      toast.error('The saved article identity is not verified. Preserve your edits and review Draft Desk; do not create another copy.');
+      return;
+    }
+    const workspace = workspaceVersionRef.current;
+    const request = Symbol();
+    refreshRequestRef.current = request;
+    const current = () => workspaceVersionRef.current === workspace && refreshRequestRef.current === request;
     setRefreshingArticle(true);
     try {
+      if (permissionsOnly) {
+        const permissions = await editorialAccess.refreshPermissions();
+        if (!current()) return;
+        if (!permissions.canCreateNews) {
+          setLifecycleMessage('Creation is not currently authorized. Your edits are kept. Request Founder approval, then refresh permissions again.');
+          return;
+        }
+        createPermissionDeniedRef.current = false;
+        setNeedsLatestRefresh(false);
+        setLifecycleMessage('Creation permission verified. Your edits are kept. Select Save Draft to retry explicitly.');
+        return;
+      }
+      if (!targetId) throw new Error('No saved article identity is available for verification.');
       const latest = editorialAccess.canManageNews ? await getArticle(targetId) : await getOwnDraft(targetId);
+      if (!current()) return;
       if (articleCmsId(latest) !== targetId) throw new ArticleEditionIdentityError('The refreshed article identity did not match. Your edits were kept.');
       if (editorialAccess.canManageNews) qc.setQueryData(['articles', 'one', targetId], latest);
       if (latest.status === 'draft' || latest.status === 'scheduled' || latest.status === 'published') {
@@ -1913,10 +1944,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setPublishedAt('publishedAt' in latest ? latest.publishedAt || '' : '');
       setNeedsLatestRefresh(false);
     } catch (error: unknown) {
+      if (!current()) return;
       setNeedsLatestRefresh(true);
-      toast.error(normalizeArticleError(error, 'Could not refresh the latest article; your edits are still here').message);
+      const message = normalizeArticleError(error, permissionsOnly
+        ? 'Could not refresh creation permissions; your edits are still here'
+        : 'Could not refresh the latest article; your edits are still here').message;
+      setLifecycleMessage(message);
+      toast.error(message);
     } finally {
-      setRefreshingArticle(false);
+      if (refreshRequestRef.current === request) {
+        refreshRequestRef.current = null;
+        if (workspaceVersionRef.current === workspace) setRefreshingArticle(false);
+      }
     }
   }
 
@@ -1926,6 +1965,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // desiredStatusOverride lets callers force a specific status (e.g., Publish)
     mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
       if (generationInFlightRef.current) throw new Error('Wait for translation generation before saving or publishing.');
+      if (createPermissionDeniedRef.current || refreshRequestRef.current) {
+        throw new Error('Finish verifying the latest permissions or saved state before retrying. Your edits are kept.');
+      }
+      if (!effectiveId && !liveCreationGenerationAccessRef.current) {
+        throw new Error('Create News permission is required. Your unsaved edits are kept.');
+      }
       const submittedWorkspace = workspaceVersionRef.current;
       mutationInFlightRef.current = true;
       mutationTargetIdRef.current = effectiveId;
@@ -2629,6 +2674,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       pendingSaveRef.current = false;
       autosavePausedRef.current = true;
       setLifecycleMessage(n.message);
+      if (n.status === 403 && !effectiveId && !mutationTargetIdRef.current
+        && !unknownSaveIdentityRef.current && Object.keys(committedEditionsRef.current).length === 0) {
+        createPermissionDeniedRef.current = true;
+      }
       if (n.status === 403 || err instanceof ArticleSaveProgressError) setNeedsLatestRefresh(true);
 
       if (saveKindRef.current === 'autosave') {
@@ -2667,6 +2716,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [mutation.isPending, mutation.isSuccess, mutation.mutate, automaticTranslationMutation.isPending, needsLatestRefresh, refreshingArticle, currentArticleRecord?.status, lastSavedHash, hasPendingLanguageChanges, trendingTopics.isDirty]);
 
   function saveDraft(){
+    if (createPermissionDeniedRef.current || refreshRequestRef.current) {
+      toast.error('Finish verifying the latest permissions or saved state before retrying. Your edits are kept.');
+      return;
+    }
     if (generationInFlightRef.current) {
       toast.error('Wait for translation generation before saving. Your edits are still here.');
       return;
@@ -3883,10 +3936,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           <div>{lifecycleMessage}</div>
           {mutation.isError && <div className="mt-1">Your unsaved edits are kept. Autosave is paused. Review the latest state before explicitly saving remaining changes.</div>}
           {currentArticleRecord?.status && <div className="mt-1">Latest status: {currentArticleRecord.status}</div>}
-          {(effectiveId || mutationTargetIdRef.current) && (
+          {(effectiveId || mutationTargetIdRef.current || createPermissionDeniedRef.current) && (
             <button type="button" className="mt-2 underline" disabled={refreshingArticle || mutation.isPending}
               onClick={() => { autosavePausedRef.current = true; void refreshLatestPreservingEdits(); }}>
-              {refreshingArticle ? 'Refreshing...' : 'Refresh latest state'}
+              {refreshingArticle ? 'Refreshing...' : createPermissionDeniedRef.current ? 'Refresh permissions' : 'Refresh latest state'}
             </button>
           )}
         </div>
@@ -3931,7 +3984,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 {automaticTranslationMutation.isPending ? 'Retrying…' : 'Retry Translation'}
               </button>
             )}
-            <button type="button" onClick={saveDraft} className="btn-secondary" disabled={isSaving || isPublishing || mutation.isPending || automaticTranslationMutation.isPending || needsLatestRefresh || refreshingArticle || currentArticleRecord?.status === 'deleted'}>{editingPublished ? 'Save Update' : 'Save Draft'}</button>
+            <button type="button" onClick={saveDraft} className="btn-secondary" disabled={isSaving || isPublishing || mutation.isPending || automaticTranslationMutation.isPending || needsLatestRefresh || refreshingArticle || (!effectiveId && !editorialAccess.canCreateNews) || currentArticleRecord?.status === 'deleted'}>{editingPublished ? 'Save Update' : 'Save Draft'}</button>
             <button
               type="button"
               onClick={() => openPreviewForLanguage(language)}

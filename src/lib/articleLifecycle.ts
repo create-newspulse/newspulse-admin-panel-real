@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { normalizeError, type NormalizedError } from '@/lib/error';
-import type { Article } from '@/lib/api/articles';
+import type { Article, ArticleRestoreEligibility } from '@/lib/api/articles';
 
 const CONFLICT_MESSAGES = new Set([
   'Slug already exists',
@@ -79,6 +79,86 @@ export function articleCmsId(article: Pick<Article, '_id' | 'sourceNewsId'>): st
   const id = String(article.sourceNewsId || article._id || '').trim();
   if (!id) throw new Error('Missing CMS News ID. Reload the story before publishing.');
   return id;
+}
+
+export interface ArticleRestoreAccess {
+  canManageNews: boolean;
+  canRestoreNews: boolean;
+  isFounder: boolean;
+}
+
+export function articleRestoreAccessDenial(
+  access: ArticleRestoreAccess,
+  article: Article | undefined,
+): string | null {
+  if (!access.canManageNews) return 'Verified Manage News access is required to restore a story.';
+  if (!article || (article.status !== 'deleted' && article.status !== 'archived')) {
+    return 'The story is no longer available for restoration. Refresh the list.';
+  }
+  if (access.isFounder && access.canRestoreNews) return null;
+  if (article.status === 'archived') {
+    return 'Archived-to-draft Restore permissions are not verified. Founder review is required.';
+  }
+  if (!access.canRestoreNews) return 'Verified configured permanent and effective Restore News permission is required; temporary rights are not sufficient.';
+  return null;
+}
+
+export function articleRestoreDenial(
+  access: ArticleRestoreAccess,
+  article: Article | undefined,
+  assessment?: ArticleRestoreEligibility,
+): string | null {
+  const denial = articleRestoreAccessDenial(access, article);
+  if (denial || access.isFounder) return denial;
+  if (!assessment) return 'Check restore eligibility before restoring this deleted story.';
+  if (assessment.articleId !== article?._id) return 'Restore assessment does not match this story. Refresh the list.';
+  if (assessment.requiresFounder || assessment.decision === 'founder_required' || assessment.publicCopies.length
+    || assessment.members.some(member => member.restoreStatus === 'published' || member.restoreStatus === 'scheduled')) {
+    return 'Founder permission is required to restore a previously published or scheduled story.';
+  }
+  if (assessment.complete !== true || assessment.decision === 'incomplete') return 'Restore assessment is incomplete. Founder review is required.';
+  if (assessment.eligible !== true || assessment.decision !== 'eligible') return 'The Backend has blocked Restore for this story. Founder review is required.';
+  if (assessment.requiresFounder !== false || assessment.reasonCodes.length
+    || !assessment.members.length || !assessment.members.some(member => member.id === article?._id)
+    || new Set(assessment.members.map(member => member.id)).size !== assessment.members.length
+    || new Set(assessment.members.map(member => member.language)).size !== assessment.members.length
+    || assessment.members.some(member => member.historyKnown !== true || member.status !== 'deleted'
+      || !['en', 'hi', 'gu'].includes(member.language || '')
+      || (member.restoreStatus !== 'draft' && member.restoreStatus !== 'archived'))) {
+    return 'Restore assessment is conflicting or incomplete. Founder review is required.';
+  }
+  return null;
+}
+
+export class ArticleRestoreGuardError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArticleRestoreGuardError';
+  }
+}
+
+export class ArticleRestoreUnconfirmedError extends Error {
+  constructor(public readonly cause: unknown) {
+    super('Restore outcome is unconfirmed.');
+    this.name = 'ArticleRestoreUnconfirmedError';
+  }
+}
+
+export function normalizeRestoreError(error: unknown, fallback: string): NormalizedError {
+  const unconfirmed = error instanceof ArticleRestoreUnconfirmedError;
+  const cause = unconfirmed ? error.cause : error;
+  const failure = normalizeArticleError(cause, fallback);
+  if (cause instanceof ArticleRestoreGuardError) failure.message = cause.message;
+  if (failure.status === 400) failure.message = 'Invalid article ID. Refresh the list before checking Restore.';
+  if (failure.status === 404) failure.message = 'The story was not found. Refresh the list before checking Restore.';
+  if (failure.status === 409 && failure.code === 'ARTICLE_RESTORE_SCOPE_CHANGED') {
+    failure.message = 'The restore scope changed. Refresh the story and check eligibility again.';
+  }
+  if (unconfirmed) {
+    failure.message += ' Restore may have completed. Its outcome is unconfirmed; do not retry. Founder review is required.';
+  }
+  failure.retriable = false;
+  return failure;
 }
 
 export class ArticleSaveProgressError extends Error {

@@ -53,6 +53,7 @@ vi.mock('@/lib/http/adminFetch', () => ({
 }));
 
 import { adminApiClient } from '@/lib/adminApiClient';
+import { restoreArticle } from '@/lib/api/articles';
 
 function axiosError(status: number, message = 'Request failed') {
   const error: any = new Error(message);
@@ -75,6 +76,17 @@ beforeEach(() => {
 });
 
 describe('adminApiClient authentication', () => {
+  it('does not refresh and replay a rejected Restore mutation', async () => {
+    mocks.getAuthToken.mockReturnValue('synthetic-expired');
+    mocks.dispatch.mockRejectedValueOnce(axiosError(401));
+    await expect(restoreArticle('synthetic-article')).rejects.toMatchObject({ response: { status: 401 } });
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'post', url: 'articles/synthetic-article/restore', data: undefined, skipAuthRefresh: true,
+    }));
+    expect(mocks.refreshRequest).not.toHaveBeenCalled();
+  });
+
   it('sends authenticated SEO requests with bearer token and cookie credentials', async () => {
     mocks.getAuthToken.mockReturnValue('current-token');
     mocks.dispatch.mockResolvedValueOnce({ data: { ok: true } });

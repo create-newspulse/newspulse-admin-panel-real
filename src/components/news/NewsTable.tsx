@@ -9,7 +9,6 @@ import { adminJson } from '@/lib/http/adminFetch';
 import {
   listArticles,
   archiveArticle,
-  restoreArticle,
   deleteArticle,
   publishArticle,
   unpublishArticle,
@@ -23,11 +22,12 @@ import {
   type ListResponse,
 } from '@/lib/api/articles';
 import { normalizeError } from '@/lib/error';
-import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { articleFollowUpWarning, articleRestoreDenial, ArticleRestoreGuardError, normalizeArticleError, normalizeRestoreError, refreshArticleQueries } from '@/lib/articleLifecycle';
 import { normalizeRoleId } from '@/lib/adminAccessControl';
 import { ARTICLE_PUSH_SPAM_WARNING, pushSendErrorMessage } from '@/lib/pushSendFeedback';
 import { useAuth } from '@/context/AuthContext';
 import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import { useArticleRestore } from '@/hooks/useArticleRestore';
 import { articleCmsId } from '@/lib/articleLifecycle';
 import { usePublishFlag } from '@/context/PublishFlagContext';
 import { ScheduleDialog } from './ScheduleDialog';
@@ -463,7 +463,8 @@ interface Props {
 }
 
 type LifecycleRequest =
-  | { action: 'publish' | 'unpublish' | 'archive' | 'restore' | 'unarchive' | 'delete' | 'hardDelete' | 'unschedule'; id: string }
+  | { action: 'publish' | 'unpublish' | 'archive' | 'unarchive' | 'delete' | 'hardDelete' | 'unschedule'; id: string }
+  | { action: 'restore'; id: string; restoreContextVersion?: number }
   | { action: 'schedule'; id: string; at: string }
   | { action: 'hardDeleteBulk'; ids: string[] };
 
@@ -548,6 +549,18 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
   }, [isLoading, isFetching, error, onLoadStateChange]);
 
   const rawRows: Article[] = (data as any)?.rows ?? (data as any)?.data ?? [];
+  const deletedRestore = useArticleRestore({
+    access: editorialAccess, rows: rawRows,
+    viewKey: JSON.stringify([fetchParams, quickView]),
+    disabled: actionsDisabled || isFetching,
+  });
+  const restoreContext = React.useRef({ access: editorialAccess, rows: rawRows });
+  restoreContext.current = { access: editorialAccess, rows: rawRows };
+  const mounted = React.useRef(false);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [unreflectedPublications, setUnreflectedPublications] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (!isSuccess || isFetching) return;
@@ -566,7 +579,11 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
         case 'publish': return publishArticle(request.id);
         case 'unpublish': return unpublishArticle(request.id);
         case 'archive': return archiveArticle(request.id);
-        case 'restore': return restoreArticle(request.id);
+        case 'restore':
+          if (request.restoreContextVersion === undefined) {
+            throw new ArticleRestoreGuardError('The Restore request context is missing. Check eligibility again.');
+          }
+          return deletedRestore.restore(request.id, request.restoreContextVersion);
         case 'unarchive': return updateArticleStatus(request.id, 'draft');
         case 'delete': return deleteArticle(request.id);
         case 'hardDelete': return hardDeleteArticle(request.id);
@@ -605,8 +622,10 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
         toast.error('The action completed, but the refreshed list could not be loaded. Refresh the list; do not repeat the action.');
       }
     },
-    onError: async (error: unknown) => {
-      const failure = normalizeArticleError(error, 'Article action failed');
+    onError: async (error: unknown, request) => {
+      const failure = request.action === 'restore'
+        ? normalizeRestoreError(error, 'Failed to restore story')
+        : normalizeArticleError(error, 'Article action failed');
       toast.error(failure.message);
       if (failure.status === 409) {
         try {
@@ -620,7 +639,19 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
   });
 
   const runLifecycle = (request: LifecycleRequest) => {
-    if (lifecycleInFlight.current || actionsDisabled || isFetching) return;
+    if (lifecycleInFlight.current || deletedRestore.busy || actionsDisabled || isFetching) return;
+    if (request.action === 'restore' || request.action === 'unarchive') {
+      if (!mounted.current) return;
+      const current = restoreContext.current;
+      const article = current.rows.find(row => row._id === request.id);
+      const reason = request.action === 'restore'
+        ? deletedRestore.denial(article)
+        : articleRestoreDenial(current.access, article);
+      if (reason) {
+        toast.error(reason);
+        return;
+      }
+    }
     if (request.action === 'publish' && unreflectedPublications.includes(request.id)) {
       toast.error('Publication already committed. Refresh the list; do not repeat it.');
       return;
@@ -645,10 +676,13 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
       }
     }
     lifecycleInFlight.current = true;
-    lifecycleMutation.mutate(request);
+    // React Query may dispatch after an account or permission change.
+    lifecycleMutation.mutate(request.action === 'restore'
+      ? { ...request, restoreContextVersion: deletedRestore.contextVersion }
+      : request);
   };
 
-  const lifecycleBusy = lifecycleMutation.isPending || actionsDisabled || isFetching;
+  const lifecycleBusy = lifecycleMutation.isPending || deletedRestore.busy || actionsDisabled || isFetching;
   const bulkDeleting = lifecycleMutation.isPending && lifecycleMutation.variables.action === 'hardDeleteBulk';
   const [translationBackfillMode, setTranslationBackfillMode] = React.useState<'all' | 'hi' | 'gu' | 'en'>('all');
   const [bulkTranslating, setBulkTranslating] = React.useState(false);
@@ -1123,7 +1157,8 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
     const id = a._id;
     const group = logicalGroups.find((candidate) => getArticleId(candidate.primary) === id);
     const groupRows = group?.articles || [a];
-    const restoreNeedsFounder = groupRows.some((row) => row.deletedFromStatus === 'published');
+    const restoreDenial = st === 'deleted'
+      ? deletedRestore.denial(a) : articleRestoreDenial(editorialAccess, a);
     const baseLogPayload = {
       clickedArticleId: id,
       slug: String(a.slug || ''),
@@ -1242,12 +1277,22 @@ export function NewsTable({ params, search, quickView, onCounts, onLoadStateChan
           />
         )}
 
-        {(st === 'archived' || st === 'deleted') && canArchive && (
+        {deletedRestore.canCheck(a) && (
+          <ActionLink
+            label="Check restore"
+            tone="blue"
+            disabled={lifecycleBusy}
+            onClick={() => {
+              if (!lifecycleInFlight.current) void deletedRestore.check(id);
+            }}
+          />
+        )}
+        {(st === 'archived' || st === 'deleted') && (
           <ActionLink
             label="Restore"
             tone="blue"
-            disabled={lifecycleBusy || (restoreNeedsFounder && !isFounder)}
-            title={restoreNeedsFounder && !isFounder ? 'Founder permission is required to restore a published story' : undefined}
+            disabled={lifecycleBusy || !!restoreDenial}
+            title={restoreDenial || undefined}
             onClick={() => runLifecycle({ action: st === 'deleted' ? 'restore' : 'unarchive', id })}
           />
         )}

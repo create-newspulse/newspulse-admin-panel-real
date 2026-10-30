@@ -9,6 +9,7 @@ import type { AuthorByline } from '@/lib/authorByline';
 
 const mocks = vi.hoisted(() => ({
   authUser: { id: 'editor-1', email: 'editor@newspulse.co.in', role: 'editor' },
+  creationAccess: false,
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   getMediaStatus: vi.fn(),
@@ -27,12 +28,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@context/AuthContext', () => ({
-  useAuth: () => ({ user: { ...mocks.authUser, moduleAccess: ['manage_news'] },
+  useAuth: () => ({ user: { ...mocks.authUser, moduleAccess: mocks.creationAccess ? ['manage_news', 'add_news'] : ['manage_news'] },
     isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false }),
 }));
 vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
   isLoading: false, error: null, backendAccess: {},
-  modulePolicy: { manage_news: { moduleKey: 'manage_news', state: 'available' } },
+  modulePolicy: {
+    manage_news: { moduleKey: 'manage_news', state: 'available' },
+    add_news: { moduleKey: 'add_news', state: 'available' },
+  },
 }) }));
 vi.mock('@/hooks/useTrendingTopicsAccess', () => ({
   useTrendingTopicsAccess: () => ({ canRead: true, canEdit: true, isFounder: true, loading: false, reason: '' }),
@@ -112,6 +116,7 @@ vi.mock('@/components/preview/PreviewModal', () => ({
 vi.mock('@/components/ui/ConfirmModal', () => ({ default: () => null }));
 
 function renderArticleForm(userRole: 'writer' | 'editor' | 'admin' | 'founder' = 'editor') {
+  mocks.creationAccess = true;
   mocks.authUser = { ...mocks.authUser, role: userRole };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/admin/add-news']}><ArticleForm mode="create" userRole={userRole} /></MemoryRouter></QueryClientProvider>);
@@ -164,6 +169,7 @@ async function fillPublishableSourceArticle() {
 
 beforeEach(() => {
   mocks.authUser = { ...mocks.authUser, role: 'editor' };
+  mocks.creationAccess = false;
   mocks.apiGet.mockResolvedValue({ data: ['en', 'hi', 'gu'] });
   mocks.getMediaStatus.mockResolvedValue({ ok: true, uploadEnabled: true });
   mocks.uploadCoverImage.mockResolvedValue({ url: '/uploads/uploaded-author.jpg' });

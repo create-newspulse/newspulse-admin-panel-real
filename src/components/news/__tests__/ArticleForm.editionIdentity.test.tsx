@@ -21,11 +21,14 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/adminApiClient', () => ({ adminApiClient: { get: mocks.get, put: mocks.put, post: mocks.post } }));
+vi.mock('@/lib/http', () => ({ api: vi.fn() }));
 vi.mock('@context/AuthContext', () => ({ useAuth: () => ({
   isAuthenticated: true, isReady: true, isLoading: false, isRestoring: false,
   user: { id: 'founder-test', role: mocks.role, moduleAccess: mocks.modules, specialRights: mocks.specialRights },
 }) }));
-vi.mock('@/hooks/useAdminEffectiveAccess', () => ({ useAdminEffectiveAccess: () => ({
+vi.mock('@/hooks/useAdminEffectiveAccess', async importOriginal => ({
+  ...await importOriginal<typeof import('@/hooks/useAdminEffectiveAccess')>(),
+  useAdminEffectiveAccess: () => ({
   isLoading: false, error: null, backendAccess: {},
   modulePolicy: {
     manage_news: { moduleKey: 'manage_news', state: 'available' },
@@ -232,6 +235,95 @@ afterEach(() => {
 });
 
 describe('Normal new-story automatic translation', () => {
+  function permissionReads(allowed: () => boolean) {
+    const get = mocks.get.getMockImplementation()!;
+    mocks.get.mockImplementation(async url => {
+      if (url === 'admin/me') return { data: { user: { id: 'founder-test', role: mocks.role, specialRights: [] } } };
+      if (url === 'access/me') return { data: { effectiveModuleAccess: {
+        addNews: { allowed: allowed(), visible: true, policyState: 'available', reasonCode: allowed() ? 'ALLOWED' : 'STAFF_ACCESS_DISABLED' },
+      } } };
+      return get(url);
+    });
+  }
+
+  it('recovers a new-story 403 by refreshing permissions without an ID or losing edits, then retries explicitly', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    mocks.role = 'editor';
+    mocks.modules = ['add_news'];
+    configureNewStory();
+    permissionReads(() => true);
+    mocks.post.mockRejectedValueOnce({ response: { status: 403, data: {} } });
+    await openNewStory();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await screen.findByText(/Access denied/);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story content' }), { target: { value: 'Keep my edited body after the denial.' } });
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh permissions' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.get.mock.calls.map(([url]) => url)).toEqual(['admin/me', 'access/me']);
+    expect(input('Title', 'input')).toHaveValue('New gu source');
+    expect(screen.getByRole('textbox', { name: 'Story content' })).toHaveValue('Keep my edited body after the denial.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Translation job queued for EN+HI'));
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', 'articles', 'admin/articles/created-gu/translations/generate']);
+    expect(records['created-gu'].content).toBe('Keep my edited body after the denial.');
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
+  it('keeps a denied new-story retry blocked until a later permission refresh confirms access', async () => {
+    mocks.role = 'editor';
+    mocks.modules = ['draft_desk'];
+    configureNewStory();
+    let allowed = false;
+    permissionReads(() => allowed);
+    mocks.post.mockRejectedValueOnce({ response: { status: 403, data: {} } });
+    await openNewStory('en');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await screen.findByText(/Access denied/);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh permissions' }));
+    await screen.findByText(/Creation is not currently authorized/);
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    expect(input('Title', 'input')).toHaveValue('New en source');
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    allowed = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh permissions' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Translation job queued for HI+GU'));
+  });
+
+  it.each([401, 403, 503])('retains a new-story buffer after permission refresh HTTP %s', async status => {
+    mocks.role = 'editor';
+    mocks.modules = ['add_news'];
+    configureNewStory();
+    mocks.post.mockRejectedValueOnce({ response: { status: 403, data: {} } });
+    mocks.get.mockRejectedValueOnce({ response: { status, data: {} } });
+    await openNewStory('hi');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await screen.findByText(/Access denied/);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh permissions' }));
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh permissions' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    expect(input('Title', 'input')).toHaveValue('New hi source');
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not offer no-ID permission recovery for an acknowledged create with an unknown saved identity', async () => {
+    configureNewStory();
+    mocks.post.mockResolvedValueOnce({ data: { ok: true } });
+    await openNewStory();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await screen.findByText(/save committed but its source identity could not be verified/);
+    expect(screen.queryByRole('button', { name: 'Refresh permissions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.get).not.toHaveBeenCalled();
+  });
+
   it.each(['gu', 'hi', 'en'] as const)('saves a new %s source and queues the other two languages once', async language => {
     configureNewStory();
     await openNewStory(language);
@@ -267,6 +359,31 @@ describe('Normal new-story automatic translation', () => {
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Translation job queued for EN+HI'));
     expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', 'admin/articles/created-gu/translations/generate']);
     expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
+  it('creates and translates for Manage News staff with effective news_edit', async () => {
+    mocks.role = 'editor';
+    mocks.modules = ['manage_news'];
+    mocks.specialRights = ['news_edit'];
+    configureNewStory();
+    await openNewStory('en');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Translation job queued for HI+GU'));
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', 'admin/articles/created-en/translations/generate']);
+    expect(['en', 'hi', 'gu'].map(code => records[`created-${code}`].status)).toEqual(['draft', 'draft', 'draft']);
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
+  it('does not save or generate an unsaved source for Manage News-only readers', async () => {
+    mocks.role = 'editor';
+    mocks.modules = ['manage_news'];
+    configureNewStory();
+    await openNewStory();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate Translations' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    expect(mocks.post).not.toHaveBeenCalled();
     expect(mocks.put).not.toHaveBeenCalled();
   });
 

@@ -7,7 +7,6 @@ import {
   listArticles,
   listOwnDrafts,
   deleteArticle,
-  restoreArticle,
   hardDeleteArticle,
   Article as NPArticle,
   type ArticleMutationResponse,
@@ -16,8 +15,9 @@ import {
 import { normalizeYouthPulseTrack } from '@/lib/youthPulseTracks';
 import { useAuth } from '@/context/AuthContext';
 import { normalizeRoleId } from '@/lib/adminAccessControl';
-import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { articleFollowUpWarning, normalizeArticleError, normalizeRestoreError, refreshArticleQueries } from '@/lib/articleLifecycle';
 import { useEditorialAccess } from '@/hooks/useEditorialAccess';
+import { useArticleRestore } from '@/hooks/useArticleRestore';
 
 // Extend with optional “community / pro / founder” hints
 type Article = NPArticle & {
@@ -229,7 +229,7 @@ function groupDraftTranslations(rows: Article[]): DraftGroup[] {
 export default function DraftDeskPage() {
   const access = useEditorialAccess();
   if (access.loading) return <div>Checking Draft Desk access...</div>;
-  if (access.canManageNews) return <FullDraftDesk />;
+  if (access.canManageNews) return <FullDraftDesk access={access} />;
   if (access.canReadOwnDrafts) return <OwnDraftDesk />;
   return <div role="alert" className="rounded border p-4 text-red-700">{access.reason}</div>;
 }
@@ -264,6 +264,7 @@ function OwnDraftDesk() {
         <p className="text-sm text-slate-600">
           Only your eligible, unpublished drafts are shown. Assigned-but-not-owned drafts are not supported.
         </p>
+        <button type="button" className="mt-2 rounded bg-green-600 px-3 py-1 text-white" onClick={() => navigate('/add')}>Add New</button>
       </div>
       {loading && <div>Loading your drafts...</div>}
       {failure && (
@@ -294,13 +295,20 @@ function OwnDraftDesk() {
   );
 }
 
-function FullDraftDesk() {
+function FullDraftDesk({ access }: { access: ReturnType<typeof useEditorialAccess> }) {
   const { user } = useAuth();
   const viewerIsFounder = normalizeRoleId(user?.role) === 'founder';
   const queryClient = useQueryClient();
   const lifecycleInFlight = useRef(false);
   const [reloadVersion, setReloadVersion] = useState(0);
   const [items, setItems] = useState<Article[]>([]);
+  const restoreContext = useRef({ access, items });
+  restoreContext.current = { access, items };
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<ReturnType<typeof normalizeArticleError> | null>(null);
   const [query, setQuery] = useState('');
@@ -384,7 +392,11 @@ function FullDraftDesk() {
   }, [allDrafts, sourceFilter, query]);
 
   const groupedDrafts = useMemo(() => groupDraftTranslations(filtered), [filtered]);
-  const lifecycleBusy = loading || !!deletingId || !!hardDeletingId || !!restoringId;
+  const deletedRestore = useArticleRestore({
+    access, rows: items, disabled: loading,
+    viewKey: JSON.stringify([statusFilter, sourceFilter, query, reloadVersion]),
+  });
+  const lifecycleBusy = loading || deletedRestore.busy || !!deletingId || !!hardDeletingId || !!restoringId;
 
   const finishLifecycle = async (id: string, result: ArticleMutationResponse, message: string) => {
     const ids = result.deletedIds || result.changedIds || [id];
@@ -400,8 +412,8 @@ function FullDraftDesk() {
     }
   };
 
-  const lifecycleFailed = async (error: unknown, fallback: string) => {
-    const failure = normalizeArticleError(error, fallback);
+  const lifecycleFailed = async (error: unknown, fallback: string, restoring = false) => {
+    const failure = restoring ? normalizeRestoreError(error, fallback) : normalizeArticleError(error, fallback);
     toast.error(failure.message);
     if (failure.status === 409) {
       setReloadVersion((version) => version + 1);
@@ -414,7 +426,7 @@ function FullDraftDesk() {
   };
 
   const handleDelete = async (id: string) => {
-    if (lifecycleInFlight.current) return;
+    if (lifecycleInFlight.current || deletedRestore.busy) return;
     const draft = items.find((a) => a._id === id);
     if (!draft) return;
 
@@ -437,17 +449,32 @@ function FullDraftDesk() {
   };
 
   const handleRestore = async (id: string) => {
-    if (lifecycleInFlight.current) return;
+    if (lifecycleInFlight.current || deletedRestore.busy || !mounted.current) return;
+    const denial = () => {
+      const current = restoreContext.current;
+      const article = current.items.find(row => row._id === id);
+      return deletedRestore.denial(article);
+    };
+    const reason = denial();
+    if (reason) {
+      toast.error(reason);
+      return;
+    }
     const ok = window.confirm('Restore this story and all available language versions? Backend will determine the restored status.');
     if (!ok) return;
+    const changed = denial();
+    if (!mounted.current || changed) {
+      if (changed) toast.error(changed);
+      return;
+    }
     lifecycleInFlight.current = true;
     try {
       setRestoringId(id);
-      const result = await restoreArticle(id);
+      const result = await deletedRestore.restore(id);
       await finishLifecycle(id, result, result.restoredStatuses?.length
         ? `Story restored (${result.restoredStatuses.join(', ')})` : 'Story restored');
     } catch (error: unknown) {
-      await lifecycleFailed(error, 'Failed to restore story');
+      await lifecycleFailed(error, 'Failed to restore story', true);
     } finally {
       lifecycleInFlight.current = false;
       setRestoringId(null);
@@ -455,7 +482,7 @@ function FullDraftDesk() {
   };
 
   const handleHardDelete = async (id: string) => {
-    if (lifecycleInFlight.current) return;
+    if (lifecycleInFlight.current || deletedRestore.busy) return;
     if (!viewerIsFounder || items.find((article) => article._id === id)?.status !== 'deleted') {
       toast.error('Only Founder can permanently delete an already-deleted story.');
       return;
@@ -489,6 +516,7 @@ function FullDraftDesk() {
         <div className="text-sm text-slate-600">
           Shared draft destination for Community Reporter, Youth Pulse Community, editors, founder, and professional journalist workflows.
         </div>
+        {access.canCreateNews && <button type="button" className="mt-2 rounded bg-green-600 px-3 py-1 text-white" onClick={() => navigate('/add')}>Add New</button>}
       </div>
 
       {/* Search + filters */}
@@ -767,10 +795,21 @@ function FullDraftDesk() {
 
                 {statusFilter === 'deleted' && a.status === 'deleted' && (
                   <>
+                    {deletedRestore.canCheck(a) && <button
+                      type="button"
+                      className="px-3 py-1 rounded border text-center bg-white hover:bg-slate-100 disabled:opacity-60"
+                      disabled={lifecycleBusy}
+                      onClick={() => {
+                        if (!lifecycleInFlight.current) void deletedRestore.check(a._id);
+                      }}
+                    >
+                      Check restore
+                    </button>}
                     <button
                       type="button"
                       className="px-3 py-1 rounded border text-center bg-white hover:bg-slate-100 disabled:opacity-60"
-                      disabled={lifecycleBusy || (!viewerIsFounder && group.articles.some((article) => article.deletedFromStatus === 'published'))}
+                      disabled={lifecycleBusy || !!deletedRestore.denial(a)}
+                      title={deletedRestore.denial(a) || undefined}
                       onClick={() => handleRestore(a._id)}
                     >
                       {restoringId === a._id ? 'Restoring…' : 'Restore'}
