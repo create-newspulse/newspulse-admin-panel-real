@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Article, ListResponse } from '@/lib/api/articles';
+import type { Article, ArticleTranslationEditions } from '@/lib/api/articles';
 import { ArticleForm } from '../ArticleForm';
 import ArticleEditPage from '@/pages/ArticleEditPage';
 
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn<(id: string, data: Partial<Article>) => Promise<{ article: Article }>>(),
   get: vi.fn<(id: string) => Promise<Article>>(),
   publish: vi.fn<(id: string) => Promise<{ article: Article; publishedLanguages: string[] }>>(),
-  group: vi.fn<() => Promise<ListResponse>>(),
+  group: vi.fn<(id: string) => Promise<ArticleTranslationEditions>>(),
   translations: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -42,10 +42,13 @@ vi.mock('@/lib/api/trendingTopics', async (importOriginal) => ({
 }));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: mocks.publishEnabled }) }));
 vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 'hi', 'gu'] })) } }));
-vi.mock('@/lib/api/articles', () => ({
+vi.mock('@/lib/api/articles', async (importOriginal) => ({
+  ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
+  createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
   createArticle: mocks.create, updateArticle: mocks.update, getArticle: mocks.get,
-  publishArticle: mocks.publish, listArticlesByTranslationGroupId: mocks.group,
+  publishArticle: mocks.publish, getArticleTranslationEditions: mocks.group,
   retryArticleTranslation: vi.fn(), requeueArticleTranslations: mocks.translations,
+  generateMissingArticleTranslations: mocks.translations,
 }));
 vi.mock('@/lib/api/media', () => ({
   getMediaStatus: vi.fn(async () => ({ ok: true, uploadEnabled: true })), uploadCoverImage: vi.fn(),
@@ -133,12 +136,13 @@ beforeEach(() => {
     stored = { ...stored, _id: id, status: 'published', publishedAt: stored.publishedAt || originalPublishedAt };
     return { article: { ...stored }, publishedLanguages: ['en', 'hi', 'gu'] };
   });
-  mocks.group.mockImplementation(async () => ({
-    rows: [
-      { ...stored },
-      { ...stored, _id: 'edition-hi', title: 'Hindi edition', language: 'hi', lang: 'hi' },
-      { ...stored, _id: 'edition-gu', title: 'Gujarati edition', language: 'gu', lang: 'gu' },
-    ],
+  mocks.group.mockImplementation(async (id) => ({
+    anchorId: id, translationGroupId: stored.translationGroupId || null,
+    rows: stored.translationGroupId ? (['en', 'hi', 'gu'] as const).map(code =>
+      code === (stored.lang || stored.language) ? { ...stored } : {
+        ...stored, _id: `edition-${code}`, title: `${code === 'hi' ? 'Hindi' : code === 'gu' ? 'Gujarati' : 'English'} edition`,
+        language: code, lang: code,
+      }) : [{ ...stored }],
     total: 3, page: 1, pages: 1,
   }));
   mocks.translations.mockResolvedValue({ ok: true });
@@ -307,8 +311,9 @@ describe('Founder Edit Published - Save Update', () => {
 
   it.each([false, true])('applies the saved Backend values after a slow group refresh without replacing dirty input (%s)', async (dirty) => {
     const { client } = renderForm();
-    await waitFor(() => expect(client.getQueryState(['articles', 'translationGroup', 'story-group'])?.fetchStatus).toBe('idle'));
-    let finishRefresh!: (result: ListResponse) => void;
+    await waitFor(() => expect(client.getQueryState(['articles', 'translationEditions', source._id])?.fetchStatus).toBe('idle'));
+    let finishRefresh!: (result: ArticleTranslationEditions) => void;
+    mocks.group.mockResolvedValueOnce({ anchorId: source._id, translationGroupId: 'story-group', rows: [{ ...stored }] });
     mocks.group.mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }));
     mocks.update.mockImplementationOnce(async (id, payload) => {
       stored = { ...stored, ...payload, _id: id, title: 'Backend-normalized headline' };
@@ -316,10 +321,10 @@ describe('Founder Edit Published - Save Update', () => {
     });
     fireEvent.change(titleInput(), { target: { value: 'Submitted headline' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
-    await waitFor(() => expect(mocks.group).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.group).toHaveBeenCalledTimes(3));
     expect(client.getQueryData(['articles', 'one', source._id])).toMatchObject({ title: 'Backend-normalized headline' });
     if (dirty) fireEvent.change(titleInput(), { target: { value: 'Keep my newer edit' } });
-    await act(async () => { finishRefresh({ rows: [{ ...stored }], total: 1, page: 1, pages: 1 }); });
+    await act(async () => { finishRefresh({ anchorId: source._id, translationGroupId: 'story-group', rows: [{ ...stored }] }); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled());
     expect(titleInput()).toHaveValue(dirty ? 'Keep my newer edit' : 'Backend-normalized headline');
     expect(mocks.update).toHaveBeenCalledTimes(1);
@@ -474,7 +479,7 @@ describe('Founder Edit Published - Save Update', () => {
 });
 
 describe('Scheduled multilingual authoring', () => {
-  it('saves only the edited edition and still queues selected automatic translations without changing lifecycle fields', async () => {
+  it('saves only the edited edition without regenerating present translations or changing lifecycle fields', async () => {
     const scheduledAt = '2026-11-01T10:00:00.000Z';
     mocks.update.mockImplementation(async (id, payload) => {
       const wirePayload = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
@@ -486,7 +491,8 @@ describe('Scheduled multilingual authoring', () => {
     await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
     fireEvent.change(titleInput(), { target: { value: 'Updated scheduled headline' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
-    await waitFor(() => expect(mocks.translations).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
+    expect(mocks.translations).not.toHaveBeenCalled();
     expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1']);
     for (const [, payload] of mocks.update.mock.calls) {
       expect(payload).not.toHaveProperty('status');
@@ -497,29 +503,20 @@ describe('Scheduled multilingual authoring', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it('still creates a manually authored missing language draft for a Scheduled source', async () => {
+  it('blocks an unverified language for a Scheduled source without changing its lifecycle', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    mocks.group.mockImplementation(async () => ({ rows: [{ ...stored }], total: 1, page: 1, pages: 1 }));
-    mocks.create.mockImplementation(async (payload) => ({ article: { ...source, ...payload, _id: 'created-hi' } }));
+    mocks.group.mockImplementation(async (id) => ({ anchorId: id, translationGroupId: 'story-group', rows: [{ ...stored }] }));
     renderForm({ ...source, status: 'scheduled' });
     const language = screen.getByText('Language').parentElement?.querySelector('select');
     if (!language) throw new Error('Language control not found');
+    await waitFor(() => expect(screen.getByTitle('Open this language variant')).toBeInTheDocument());
     fireEvent.change(language, { target: { value: 'hi' } });
-    await waitFor(() => {
-      expect(language).toHaveValue('hi');
-      expect(titleInput()).toHaveValue('');
-    });
-    fireEvent.change(titleInput(), { target: { value: 'Manually authored Hindi edition' } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Story content' }), { target: { value: 'Hindi edition body.' } });
-    fireEvent.change(language, { target: { value: 'en' } });
-    await waitFor(() => {
-      expect(language).toHaveValue('en');
-      expect(titleInput()).toHaveValue(source.title);
-    });
+    expect(language).toHaveValue('en');
+    expect(titleInput()).toHaveValue(source.title);
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Edition identity is unverified'));
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Manually authored Hindi edition', language: 'hi', status: 'draft', translationGroupId: 'story-group',
-    })));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    expect(mocks.create).not.toHaveBeenCalled();
     expect(stored.status).toBe('scheduled');
     expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('status');
     expect(mocks.publish).not.toHaveBeenCalled();
@@ -606,7 +603,7 @@ describe('Editorial integration: multilingual commits and effective publication'
       'edition-hi': { ...source, _id: 'edition-hi', title: 'Hindi edition', slug: 'hindi-edition', language: 'hi', lang: 'hi', status },
       'edition-gu': { ...source, _id: 'edition-gu', title: 'Gujarati edition', slug: 'gujarati-edition', language: 'gu', lang: 'gu', status },
     };
-    mocks.group.mockImplementation(async () => ({ rows: Object.values(editions), total: 3, page: 1, pages: 1 }));
+    mocks.group.mockImplementation(async (id) => ({ anchorId: id, translationGroupId: 'story-group', rows: Object.values(editions) }));
     mocks.get.mockImplementation(async (id) => ({ ...editions[id] }));
     mocks.update.mockImplementation(async (id, payload) => {
       const patch = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
@@ -698,38 +695,25 @@ describe('Editorial integration: multilingual commits and effective publication'
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it('retains a newly created Hindi ID when the following Gujarati create fails', async () => {
+  it('keeps existing source edits when HI and GU identities are unknown and never creates replacements', async () => {
     const editions = installEditions();
     delete editions['edition-hi'];
     delete editions['edition-gu'];
-    let rejectGujarati = true;
-    mocks.create.mockImplementation(async (payload) => {
-      if (payload.lang === 'gu' && rejectGujarati) {
-        rejectGujarati = false;
-        throw { response: { status: 409, data: {} } };
-      }
-      const id = `created-${payload.lang}`;
-      editions[id] = { ...source, ...payload, _id: id };
-      return { article: { ...editions[id] } };
-    });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderForm(editions['source-1']);
     await screen.findByText('No Trending Topics are available.');
     await waitFor(() => expect(mocks.group).toHaveBeenCalled());
+    fireEvent.change(titleInput(), { target: { value: 'Accepted source edit' } });
     fireEvent.change(languageControl(), { target: { value: 'hi' } });
-    fireEvent.change(titleInput(), { target: { value: 'New Hindi edition' } });
     fireEvent.change(languageControl(), { target: { value: 'gu' } });
-    fireEvent.change(titleInput(), { target: { value: 'New Gujarati edition' } });
-    fireEvent.change(languageControl(), { target: { value: 'en' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/EN, HI saved.*GU save did not complete/));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    expect(languageControl()).toHaveValue('en');
+    expect(titleInput()).toHaveValue('Accepted source edit');
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Edition identity is unverified'));
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
-    expect(mocks.create.mock.calls.map(([payload]) => payload.lang)).toEqual(['hi', 'gu', 'gu']);
+    expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.update.mock.calls.map(([id]) => id)).toEqual(['source-1']);
-    expect(editions['created-hi']._id).toBe('created-hi');
-    expect(editions['created-gu'].translationGroupId).toBe('story-group');
+    expect(editions['source-1'].title).toBe('Accepted source edit');
     expect(mocks.translations).not.toHaveBeenCalled();
   });
 

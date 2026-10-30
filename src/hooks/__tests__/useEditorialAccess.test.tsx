@@ -34,13 +34,13 @@ describe('Existing effective editorial access', () => {
     mocks.auth.user.role = 'founder';
     mocks.auth.user.moduleAccess = [];
     expect(renderHook(useEditorialAccess).result.current).toMatchObject({
-      canManageNews: true, canReadOwnDrafts: true, canPublish: true, canSchedule: true,
+      canManageNews: true, canEditNews: true, canReadOwnDrafts: true, canPublish: true, canSchedule: true,
     });
   });
 
   it('preserves full Manage News for an authorized Editor without granting publication', () => {
     expect(renderHook(useEditorialAccess).result.current).toMatchObject({
-      canManageNews: true, canPublish: false, canSchedule: false,
+      canManageNews: true, canEditNews: false, canPublish: false, canSchedule: false,
     });
   });
 
@@ -48,7 +48,7 @@ describe('Existing effective editorial access', () => {
     mocks.auth.user.role = 'intern';
     mocks.auth.user.moduleAccess = [module];
     expect(renderHook(useEditorialAccess).result.current).toMatchObject({
-      canManageNews: false, canReadOwnDrafts: true, canPublish: false, canSchedule: false,
+      canManageNews: false, canEditNews: false, canReadOwnDrafts: true, canPublish: false, canSchedule: false,
     });
   });
 
@@ -56,6 +56,20 @@ describe('Existing effective editorial access', () => {
     mocks.auth.user.specialRights = ['news_edit', right];
     mocks.auth.user.newsPublishGrantRecorded = true;
     expect(renderHook(useEditorialAccess).result.current).toMatchObject({ canPublish: true, canSchedule: false });
+  });
+
+  it.each(['news_edit', 'can_edit_news'])('recognizes the computed %s right only with Manage News access', right => {
+    mocks.auth.user.specialRights = [right];
+    const mounted = renderHook(useEditorialAccess);
+    expect(mounted.result.current.canEditNews).toBe(true);
+    mocks.auth.user.moduleAccess = ['draft_desk'];
+    mounted.rerender();
+    expect(mounted.result.current.canEditNews).toBe(false);
+  });
+
+  it('does not authorize full-news editing from permanent selections alone', () => {
+    mocks.auth.user.specialRightsOverride = ['news_edit'];
+    expect(renderHook(useEditorialAccess).result.current.canEditNews).toBe(false);
   });
 
   it('never treats a recorded or permanent selection as an effective grant', () => {
@@ -89,18 +103,19 @@ describe('Existing effective editorial access', () => {
   it('fails closed while permissions are loading or unavailable', () => {
     mocks.effective.isLoading = true;
     const mounted = renderHook(useEditorialAccess);
-    expect(mounted.result.current).toMatchObject({ loading: true, canManageNews: false });
+    expect(mounted.result.current).toMatchObject({ loading: true, canManageNews: false, canEditNews: false });
     mocks.effective.isLoading = false;
     mocks.effective.error = new Error('Synthetic access failure');
     mounted.rerender();
     expect(mounted.result.current.canManageNews).toBe(false);
+    expect(mounted.result.current.canEditNews).toBe(false);
   });
 
   it('does not use a logged-out Founder hint', () => {
     mocks.auth.isAuthenticated = false;
     mocks.auth.user.role = 'founder';
     expect(renderHook(useEditorialAccess).result.current).toMatchObject({
-      canManageNews: false, canReadOwnDrafts: false, canPublish: false, canSchedule: false,
+      canManageNews: false, canEditNews: false, canReadOwnDrafts: false, canPublish: false, canSchedule: false,
     });
   });
 });

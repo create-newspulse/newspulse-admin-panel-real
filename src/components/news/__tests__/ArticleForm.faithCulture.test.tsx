@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArticleForm } from '@/components/news/ArticleForm';
-import type { Article, ListResponse } from '@/lib/api/articles';
+import type { Article, ArticleTranslationEditions } from '@/lib/api/articles';
 import { ARTICLE_CATEGORY_OPTIONS } from '@/lib/articleCategories';
 import { isFaithCultureTopic } from '@/lib/faithCultureTopics';
 
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   publishArticle: vi.fn(),
   retryArticleTranslation: vi.fn(),
   requeueArticleTranslations: vi.fn(),
-  listArticlesByTranslationGroupId: vi.fn<() => Promise<ListResponse>>(),
+  editions: vi.fn<(id: string) => Promise<ArticleTranslationEditions>>(),
   checkSlugAvailability: vi.fn(),
   toastInfo: vi.fn(),
   toastSuccess: vi.fn(),
@@ -41,14 +41,17 @@ vi.mock('@/lib/api/trendingTopics', async (importOriginal) => ({
 }));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/api', () => ({ default: { get: mocks.apiGet } }));
-vi.mock('@/lib/api/articles', () => ({
+vi.mock('@/lib/api/articles', async (importOriginal) => ({
+  ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
+  createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
   createArticle: mocks.createArticle,
   updateArticle: mocks.updateArticle,
   getArticle: mocks.getArticle,
   publishArticle: mocks.publishArticle,
   retryArticleTranslation: mocks.retryArticleTranslation,
   requeueArticleTranslations: mocks.requeueArticleTranslations,
-  listArticlesByTranslationGroupId: mocks.listArticlesByTranslationGroupId,
+  generateMissingArticleTranslations: mocks.requeueArticleTranslations,
+  getArticleTranslationEditions: mocks.editions,
 }));
 vi.mock('@/lib/api/pulseDialogue', () => ({
   listPulseDialogueContributors: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 20 })),
@@ -105,7 +108,7 @@ const sourceArticle: Article = {
   sourceLanguage: 'en',
   tags: ['heritage-report'],
 };
-const emptyGroup: ListResponse = { rows: [], total: 0, page: 1, pages: 1 };
+const groupIdentity = { anchorId: sourceArticle._id, translationGroupId: sourceArticle.translationGroupId! };
 let storedArticle: Article;
 const queryClients: QueryClient[] = [];
 
@@ -199,7 +202,9 @@ beforeEach(() => {
   });
   mocks.retryArticleTranslation.mockResolvedValue({ ok: true });
   mocks.requeueArticleTranslations.mockResolvedValue({ ok: true });
-  mocks.listArticlesByTranslationGroupId.mockResolvedValue(emptyGroup);
+  mocks.editions.mockImplementation(async (id) => ({
+    anchorId: id, translationGroupId: storedArticle.translationGroupId || null, rows: [{ ...storedArticle }],
+  }));
 });
 
 afterEach(() => {
@@ -234,14 +239,15 @@ describe('ArticleForm Faith & Culture topic selector', () => {
     expect(topicSelect()).toHaveClass('w-full', 'border', 'px-2', 'py-2', 'rounded');
   });
 
-  it('allows a blank topic for Save Draft and automatic translation generation', async () => {
+  it('saves a blank topic and retains normal automatic new-story translation', async () => {
     renderForm();
     await fillCreate();
+    expect(screen.getByLabelText('Generate translations after Save Draft')).toBeChecked();
     await saveDraft();
     expect(mocks.createArticle.mock.calls[0][0]).not.toHaveProperty('topic');
     expect(storedArticle).not.toHaveProperty('topic');
-    expect(mocks.requeueArticleTranslations).toHaveBeenCalledWith('created-1', { languages: ['hi', 'gu'] });
-    expect(mocks.toastError).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.requeueArticleTranslations).toHaveBeenCalledWith(storedArticle._id, { languages: ['hi', 'gu'] }));
+    expect(mocks.requeueArticleTranslations).toHaveBeenCalledTimes(1);
   });
 
   it.each(approvedTopics)('saves $value on create without labels, tags, or alias fields', async ({ value }) => {
@@ -457,13 +463,18 @@ describe('ArticleForm Faith & Culture topic selector', () => {
     expect(control<HTMLInputElement>('Title', 'input')).toHaveValue('');
   });
 
-  it('allows blank-topic Generate and Regenerate Translations without changing their payload', async () => {
+  it('does not let a blank topic bypass missing-edition generation authority', async () => {
+    mocks.editions.mockImplementation(async (id) => ({
+      anchorId: id, translationGroupId: 'faith-group',
+      rows: (['en', 'hi', 'gu'] as const).map(code => ({
+        ...storedArticle, _id: code === 'en' ? id : `edition-${code}`, lang: code, language: code,
+      })),
+    }));
     renderForm({ ...sourceArticle, topic: undefined });
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
-    await waitFor(() => expect(mocks.requeueArticleTranslations).toHaveBeenCalledWith('source-1', { languages: ['hi', 'gu'] }));
-    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Translations' }));
-    await waitFor(() => expect(mocks.requeueArticleTranslations).toHaveBeenCalledTimes(2));
-    expect(mocks.requeueArticleTranslations).toHaveBeenLastCalledWith('source-1', { languages: ['hi', 'gu'] });
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(screen.getByRole('button', { name: 'Generate Translations' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Regenerate Translations' })).toBeDisabled();
+    expect(mocks.requeueArticleTranslations).not.toHaveBeenCalled();
   });
 });
 
@@ -564,12 +575,14 @@ describe('Faith source ownership and linked drafts', () => {
   });
 
   it('uses explicit group source identity, including when it arrives after a local selection', async () => {
-    let resolveGroup!: (value: ListResponse) => void;
-    mocks.listArticlesByTranslationGroupId.mockImplementationOnce(() => new Promise((resolve) => { resolveGroup = resolve; }));
+    let resolveGroup!: (value: ArticleTranslationEditions) => void;
+    mocks.editions.mockImplementationOnce(() => new Promise((resolve) => { resolveGroup = resolve; }));
     const { onDirtyChange } = renderForm({ ...sourceArticle, sourceLanguage: undefined });
     expect(topicSelect()).toBeEnabled();
     chooseTopic('faith-spiritual-life');
-    await act(async () => { resolveGroup({ ...emptyGroup, sourceArticle: { _id: 'canonical-1', lang: 'gu' } }); });
+    await act(async () => { resolveGroup({
+      ...groupIdentity, rows: [{ ...sourceArticle, sourceArticle: { _id: 'canonical-1', lang: 'gu' } }],
+    }); });
     await waitFor(() => expect(topicSelect()).toBeDisabled());
     expect(topicSelect()).toHaveValue('living-heritage');
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
@@ -586,12 +599,15 @@ describe('Faith source ownership and linked drafts', () => {
   });
 
   it('does not invent source identity from language, translation rows, or the translations object', async () => {
-    mocks.listArticlesByTranslationGroupId.mockResolvedValue({
-      ...emptyGroup,
-      rows: [{ ...sourceArticle, _id: 'different-language', lang: 'gu', language: 'gu', sourceLanguage: undefined }],
+    mocks.editions.mockResolvedValue({
+      ...groupIdentity,
+      rows: [
+        { ...sourceArticle, sourceLanguage: undefined },
+        { ...sourceArticle, _id: 'different-language', lang: 'gu', language: 'gu', sourceLanguage: undefined },
+      ],
     });
     renderForm({ ...sourceArticle, sourceLanguage: undefined, translations: { hi: { _id: 'hi-1', title: 'Hindi child' } } });
-    await waitFor(() => expect(mocks.listArticlesByTranslationGroupId).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.editions).toHaveBeenCalled());
     expect(topicSelect()).toBeEnabled();
     expect(screen.queryByText('Faith & Culture Topic is managed from the source article.')).not.toBeInTheDocument();
   });
@@ -644,24 +660,22 @@ describe('Faith source ownership and linked drafts', () => {
     expect(storedArticle.topic).toBe('faith-spiritual-life');
   });
 
-  it.each(['living-heritage', 'legacy-topic', null])('copies only approved topic metadata into a new linked translation (%s)', async (topic) => {
+  it.each(['living-heritage', 'legacy-topic', null])('never creates an unverified linked translation for topic %s', async (topic) => {
     renderForm({ ...sourceArticle, topic });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Hindi version' }));
-    await waitFor(() => expect(mocks.createArticle).toHaveBeenCalled());
-    const payload = mocks.createArticle.mock.calls[0][0];
-    expect(payload).toMatchObject({ category: 'faith-culture', language: 'hi', translationGroupId: 'faith-group', status: 'draft' });
-    if (topic === 'living-heritage') expect(payload).toHaveProperty('topic', topic);
-    else expect(payload).not.toHaveProperty('topic');
+    const create = screen.getByRole('button', { name: 'Create Hindi version' });
+    expect(create).toBeDisabled();
+    fireEvent.click(create);
+    expect(mocks.createArticle).not.toHaveBeenCalled();
+    expect(storedArticle.topic).toBe(topic);
   });
 
   it('saves topic on the source without rewriting unchanged linked children', async () => {
-    mocks.listArticlesByTranslationGroupId.mockResolvedValue({
-      ...emptyGroup,
-      rows: [{ ...sourceArticle, _id: 'hi-1', lang: 'hi', language: 'hi' }],
-      sourceLanguage: 'en',
+    mocks.editions.mockResolvedValue({
+      ...groupIdentity,
+      rows: [{ ...sourceArticle }, { ...sourceArticle, _id: 'hi-1', lang: 'hi', language: 'hi' }],
     });
     renderForm(sourceArticle);
-    await waitFor(() => expect(screen.getByTitle('Open this language variant')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(2));
     chooseTopic('faith-spiritual-life');
     await saveDraft();
     expect(mocks.updateArticle.mock.calls[0]).toEqual(['source-1', expect.objectContaining({ topic: 'faith-spiritual-life' })]);
@@ -669,20 +683,16 @@ describe('Faith source ownership and linked drafts', () => {
     expect(childSaves).toHaveLength(0);
   });
 
-  it('includes the stable topic when Save Draft creates a new linked language draft', async () => {
+  it('keeps topic edits on the source and blocks a programmatic switch to an unverified language', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderForm(sourceArticle);
     chooseTopic('language-cultural-identity');
     fireEvent.change(control<HTMLSelectElement>('Language', 'select'), { target: { value: 'hi' } });
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
-    fireEvent.change(control<HTMLInputElement>('Title', 'input'), { target: { value: 'New Hindi draft' } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Content editor input' }), { target: { value: 'New translated body.' } });
-    fireEvent.change(control<HTMLSelectElement>('Language', 'select'), { target: { value: 'en' } });
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(control<HTMLSelectElement>('Language', 'select')).toHaveValue('en');
+    expect(topicSelect()).toHaveValue('language-cultural-identity');
     await saveDraft();
-    expect(mocks.createArticle).toHaveBeenCalledWith(expect.objectContaining({
-      language: 'hi', category: 'faith-culture', topic: 'language-cultural-identity', translationGroupId: 'faith-group',
-    }));
+    expect(mocks.createArticle).not.toHaveBeenCalled();
+    expect(mocks.updateArticle).toHaveBeenCalledWith('source-1', expect.objectContaining({ topic: 'language-cultural-identity' }));
   });
 });
 

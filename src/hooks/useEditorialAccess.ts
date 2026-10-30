@@ -22,6 +22,7 @@ export function useEditorialAccess() {
   const rights: unknown[] = Array.isArray(auth.user?.specialRights) ? auth.user.specialRights : [];
   const hasPublishRight = rights.some((right) => localSpecialRightKey(right) === 'can_publish_news');
   const hasEditRight = rights.some((right) => localSpecialRightKey(right) === 'can_edit_news');
+  const canEditNews = canManageNews && (isFounder || hasEditRight);
   const canPublish = ready && (isFounder || (
     ((canManageNews && hasEditRight) || canReadOwnDrafts) && hasPublishRight && auth.user?.newsPublishGrantRecorded === true
   ));
@@ -30,6 +31,7 @@ export function useEditorialAccess() {
     loading,
     isFounder: Boolean(isFounder),
     canManageNews,
+    canEditNews,
     canReadOwnDrafts,
     canPublish,
     canSchedule: ready && isFounder,

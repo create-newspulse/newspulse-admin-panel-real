@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArticleForm } from '@/components/news/ArticleForm';
-import { createArticle, publishArticle, requeueArticleTranslations, updateArticle } from '@/lib/api/articles';
+import { createArticle, publishArticle, requeueArticleTranslations, updateArticle, type Article } from '@/lib/api/articles';
 import { ARTICLE_CATEGORY_OPTIONS } from '@/lib/articleCategories';
 import type { AuthorByline } from '@/lib/authorByline';
 
@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   publishArticle: vi.fn(),
   retryArticleTranslation: vi.fn(),
   requeueArticleTranslations: vi.fn(),
-  listArticlesByTranslationGroupId: vi.fn(),
+  editions: vi.fn(),
   checkSlugAvailability: vi.fn(),
   toastInfo: vi.fn(),
   toastSuccess: vi.fn(),
@@ -50,14 +50,17 @@ vi.mock('@/lib/api', () => ({
   default: { get: mocks.apiGet, post: mocks.apiPost },
 }));
 
-vi.mock('@/lib/api/articles', () => ({
+vi.mock('@/lib/api/articles', async (importOriginal) => ({
+  ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
+  createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
   createArticle: mocks.createArticle,
   updateArticle: mocks.updateArticle,
   getArticle: mocks.getArticle,
   publishArticle: mocks.publishArticle,
   retryArticleTranslation: mocks.retryArticleTranslation,
   requeueArticleTranslations: mocks.requeueArticleTranslations,
-  listArticlesByTranslationGroupId: mocks.listArticlesByTranslationGroupId,
+  generateMissingArticleTranslations: mocks.requeueArticleTranslations,
+  getArticleTranslationEditions: mocks.editions,
 }));
 
 vi.mock('@/lib/api/pulseDialogue', () => ({
@@ -171,7 +174,13 @@ beforeEach(() => {
   mocks.getArticle.mockResolvedValue(null);
   mocks.retryArticleTranslation.mockResolvedValue({ ok: true });
   mocks.requeueArticleTranslations.mockResolvedValue({ ok: true });
-  mocks.listArticlesByTranslationGroupId.mockResolvedValue({ rows: [], total: 0, page: 1, pages: 1 });
+  mocks.editions.mockImplementation(async (id: string) => {
+    const payload: Partial<Article> = id === 'created-1' ? mocks.createArticle.mock.lastCall?.[0] || {} : {};
+    const article: Article = {
+      _id: id, title: 'Existing story', lang: 'en', language: 'en', ...payload,
+    };
+    return { anchorId: id, translationGroupId: article.translationGroupId || null, rows: [article] };
+  });
 });
 
 afterEach(() => {
@@ -673,7 +682,7 @@ describe('ArticleForm Quality Tools', () => {
     expect(mocks.updateArticle.mock.calls[0][1]).not.toHaveProperty('authorByline');
   });
 
-  it('publishes an English source article through the canonical publish service when Hindi and Gujarati are missing', async () => {
+  it('leaves group completeness to canonical publication without creating unverified editions', async () => {
     renderArticleForm('founder');
     await fillPublishableSourceArticle();
 
@@ -693,21 +702,29 @@ describe('ArticleForm Quality Tools', () => {
     expect(mocks.toastError).not.toHaveBeenCalledWith(expect.stringContaining('Complete the English, Hindi and Gujarati versions'));
   });
 
-  it('keeps Save Draft successful when automatic translation generation fails', async () => {
-    mocks.requeueArticleTranslations.mockRejectedValueOnce(new Error('Translation generation failed'));
+  it('queues normal new-story translations after saving its source draft', async () => {
     renderArticleForm('admin');
     await fillPublishableSourceArticle();
+    expect(screen.getByLabelText('Generate translations after Save Draft')).toBeChecked();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
 
     await waitFor(() => expect(createArticle).toHaveBeenCalledWith(expect.objectContaining({ status: 'draft' })));
+    await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith('Draft saved'));
     await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('created-1', { languages: ['hi', 'gu'] }));
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('Draft saved');
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Translation job could not be queued'));
+    expect(mocks.createArticle.mock.invocationCallOrder[0]).toBeLessThan(mocks.requeueArticleTranslations.mock.invocationCallOrder[0]);
+    expect(requeueArticleTranslations).toHaveBeenCalledTimes(1);
     expect(publishArticle).not.toHaveBeenCalled();
   });
 
-  it('keeps Generate and Regenerate translation controls on the shared helper', async () => {
+  it('does not grant generation authority to a Manage News reader without an Edit news right', async () => {
+    mocks.editions.mockImplementation(async (id: string) => ({
+      anchorId: id, translationGroupId: 'verified-group',
+      rows: (['en', 'hi', 'gu'] as const).map(code => ({
+        _id: code === 'en' ? id : `edition-${code}`, title: `${code} edition`, lang: code, language: code,
+        translationGroupId: 'verified-group',
+      })),
+    }));
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
       <MemoryRouter initialEntries={['/admin/articles/article-1/edit']}>
         <ArticleForm
@@ -724,17 +741,16 @@ describe('ArticleForm Quality Tools', () => {
             status: 'draft',
             language: 'en',
             lang: 'en',
+            translationGroupId: 'verified-group',
           }}
         />
       </MemoryRouter>
     </QueryClientProvider>);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Generate Translations' }));
-    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('article-1', { languages: ['hi', 'gu'] }));
-
-    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Translations' }));
-    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledTimes(2));
-    expect(requeueArticleTranslations).toHaveBeenLastCalledWith('article-1', { languages: ['hi', 'gu'] });
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(screen.getByRole('button', { name: 'Generate Translations' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Regenerate Translations' })).toBeDisabled();
+    expect(requeueArticleTranslations).not.toHaveBeenCalled();
     expect(publishArticle).not.toHaveBeenCalled();
   });
 
@@ -817,6 +833,7 @@ describe('ArticleForm Author Byline', () => {
     renderArticleForm('admin');
     await fillPublishableSourceArticle();
     await fillAuthor();
+    expect(screen.getByLabelText('Generate translations after Save Draft')).toBeChecked();
     for (const label of ['Public Designation / Role (optional)', 'Short Bio (optional)']) {
       expect(screen.getByLabelText(label)).not.toBeRequired();
       expect(screen.getByLabelText(label)).toHaveValue('');

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Article, ListResponse } from '@/lib/api/articles';
+import type { Article, ArticleTranslationEditions } from '@/lib/api/articles';
 import type { adminApiClient } from '@/lib/adminApiClient';
 import type { AvailableTopic } from '@/lib/api/trendingTopics';
 import { ArticleForm } from '@/components/news/ArticleForm';
@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn<(id: string, payload: Partial<Article>) => Promise<{ article: Article }>>(),
   get: vi.fn<(id: string) => Promise<Article>>(),
   publish: vi.fn<(id: string) => Promise<{ article: Article; publishedLanguages: string[] }>>(),
-  group: vi.fn<() => Promise<ListResponse>>(),
+  group: vi.fn<(id: string) => Promise<ArticleTranslationEditions>>(),
   translations: vi.fn(),
   info: vi.fn(), success: vi.fn(), error: vi.fn(),
   client: {
@@ -41,10 +41,13 @@ vi.mock('@/hooks/useAdminEffectiveAccess', () => ({
 vi.mock('@/lib/adminApiClient', () => ({ adminApiClient: mocks.client }));
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 'hi', 'gu'] })) } }));
-vi.mock('@/lib/api/articles', () => ({
+vi.mock('@/lib/api/articles', async (importOriginal) => ({
+  ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
+  createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
   createArticle: mocks.create, updateArticle: mocks.update, getArticle: mocks.get,
-  publishArticle: mocks.publish, listArticlesByTranslationGroupId: mocks.group,
+  publishArticle: mocks.publish, getArticleTranslationEditions: mocks.group,
   retryArticleTranslation: vi.fn(), requeueArticleTranslations: mocks.translations,
+  generateMissingArticleTranslations: mocks.translations,
 }));
 vi.mock('@/lib/api/media', () => ({
   getMediaStatus: vi.fn(async () => ({ ok: true, uploadEnabled: true })), uploadCoverImage: vi.fn(),
@@ -111,7 +114,7 @@ beforeEach(() => {
     stored = { ...stored, _id: id, status: 'published', publishedAt: stored.publishedAt || originalPublishedAt };
     return { article: { ...stored }, publishedLanguages: ['en', 'hi', 'gu'] };
   });
-  mocks.group.mockImplementation(async () => ({ rows: [{ ...stored }], total: 1, page: 1, pages: 1 }));
+  mocks.group.mockImplementation(async (id) => ({ anchorId: id, translationGroupId: stored.translationGroupId || null, rows: [{ ...stored }] }));
   mocks.translations.mockResolvedValue({ ok: true });
   mocks.client.get.mockImplementation(async (url, config) => {
     if (url === 'admin/topics/available') {

@@ -28,6 +28,7 @@ export interface Article {
   ctaUrl?: string;
   imageUrl?: string;
   translationGroupId?: string;
+  translationKey?: string;
   // Some environments/public site use coverImageUrl instead of imageUrl.
   coverImageUrl?: string;
   // Canonical field requested by admin publish contract.
@@ -409,19 +410,237 @@ export async function listArticles(params: {
   return normalizeListResponse(res.data, { requestedPage, limit });
 }
 
-export async function listArticlesByTranslationGroupId(translationGroupId: string, opts?: { limit?: number }): Promise<ListResponse> {
-  const gid = String(translationGroupId || '').trim();
-  if (!gid) return { rows: [], total: 0, page: 1, pages: 1 };
-  const limit = opts?.limit || 50;
-  const res = await adminApiClient.get(ARTICLES_PATH, {
-    params: {
-      translationGroupId: gid,
-      limit,
-      page: 1,
-      sort: '-updatedAt',
-    },
-  });
-  return normalizeListResponse(res.data, { requestedPage: 1, limit });
+type EditionLanguage = 'en' | 'hi' | 'gu';
+const EDITION_LANGUAGES = ['en', 'hi', 'gu'] as const;
+
+export interface ArticleTranslationEditions {
+  anchorId: string;
+  translationGroupId: string | null;
+  rows: Article[];
+  missingLanguages?: EditionLanguage[];
+  generationSourceId?: string | null;
+  generationUnavailableReason?: string | null;
+  translationStates?: Partial<Record<EditionLanguage, string>>;
+}
+
+export class ArticleEditionIdentityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArticleEditionIdentityError';
+  }
+}
+
+function isEditionId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim()
+    && !/[/\\?#\u0000-\u001f\u007f]/.test(value);
+}
+
+function editionCmsId(article: Article): string {
+  if (!isEditionId(article._id)
+    || (article.sourceNewsId != null && !isEditionId(article.sourceNewsId))) {
+    throw new ArticleEditionIdentityError('Invalid language edition ID. No edition was selected.');
+  }
+  return article.sourceNewsId ?? article._id;
+}
+
+function editionLanguage(article: Article): 'en' | 'hi' | 'gu' {
+  const language = article.lang ?? article.language;
+  const code = typeof language === 'string' ? language.trim().toLowerCase() : '';
+  if ((code !== 'en' && code !== 'hi' && code !== 'gu')
+    || [article.lang, article.language].some(value =>
+      value != null && (typeof value !== 'string' || value.trim().toLowerCase() !== code))) {
+    throw new ArticleEditionIdentityError('Invalid or inconsistent language edition language. No edition was selected.');
+  }
+  return code;
+}
+
+function editionGroupId(article: { translationGroupId?: unknown; translationKey?: unknown }): string | null {
+  const group = article.translationGroupId;
+  const key = article.translationKey;
+  if (key != null && key !== '' && (typeof key !== 'string' || !key.trim() || key !== key.trim())) {
+    throw new ArticleEditionIdentityError('Invalid language edition translationKey. No edition was selected.');
+  }
+  if (group && key && group !== key) {
+    throw new ArticleEditionIdentityError('translationKey and translationGroupId conflict. No edition was selected.');
+  }
+  if (group == null || group === '') return null;
+  if (typeof group !== 'string' || !group.trim() || group !== group.trim()) {
+    throw new ArticleEditionIdentityError('Invalid language edition group. No edition was selected.');
+  }
+  return group;
+}
+
+function isEditionRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function createdArticleCmsId(
+  article: Article | undefined,
+  expected: { language: EditionLanguage; translationGroupId: string | null },
+): string {
+  if (!article || article._id == null || article._id === '') {
+    throw new ArticleEditionIdentityError('The created source returned no CMS News ID.');
+  }
+  const id = editionCmsId(article);
+  if (article._id !== id) {
+    throw new ArticleEditionIdentityError('The created source returned a different CMS News identity.');
+  }
+  // An accepted create supplies omitted metadata through its submitted payload, not a discovery lookup.
+  if ((article.lang != null || article.language != null) && editionLanguage(article) !== expected.language) {
+    throw new ArticleEditionIdentityError('The created source language does not match the submitted story.');
+  }
+  const group = editionGroupId(article);
+  if ((article.translationGroupId !== undefined && group !== expected.translationGroupId)
+    || (article.translationKey && article.translationKey !== expected.translationGroupId)) {
+    throw new ArticleEditionIdentityError('The created source translation group does not match the submitted story.');
+  }
+  for (const value of [article.sourceLanguage, article.originalLanguage, article.baseLanguage, article.sourceLang, article.originalLang, article.baseLang]) {
+    if (value != null && value !== '' && (typeof value !== 'string' || value.trim().toLowerCase() !== expected.language)) {
+      throw new ArticleEditionIdentityError('The created article is not the submitted translation source.');
+    }
+  }
+  for (const reference of [article.sourceArticle, article.originalArticle, article.baseArticle]) {
+    if (reference == null) continue;
+    if (!isEditionRecord(reference) || reference._id !== id
+      || (reference.sourceNewsId != null && reference.sourceNewsId !== id)
+      || (reference.translationGroupId !== undefined && editionGroupId(reference) !== expected.translationGroupId)
+      || (reference.translationKey && reference.translationKey !== expected.translationGroupId)
+      || [reference.lang, reference.language].some(value =>
+        value != null && (typeof value !== 'string' || value.trim().toLowerCase() !== expected.language))) {
+      throw new ArticleEditionIdentityError('The created article references a different translation source.');
+    }
+  }
+  return id;
+}
+
+function editionGenerationSource(rows: Article[], groupId: string | null, verifiedLanguages: number, statusMetadata: Record<string, unknown>) {
+  const unavailable = (reason: string) => ({ generationSourceId: null, generationUnavailableReason: reason });
+  if (!groupId || verifiedLanguages !== EDITION_LANGUAGES.length) {
+    return unavailable('The complete translation group is unverified. Duplicate editions cannot be ruled out safely.');
+  }
+  const sourceLanguages = new Set<EditionLanguage>();
+  const sourceIds = new Set<string>();
+  for (const row of [...rows, statusMetadata]) {
+    if (row.status === 'deleted' || row.status === 'archived') {
+      return unavailable('Restore the complete story before generating missing editions.');
+    }
+    for (const value of [row.sourceLanguage, row.originalLanguage, row.baseLanguage, row.sourceLang, row.originalLang, row.baseLang]) {
+      if (value == null || value === '') continue;
+      const code = typeof value === 'string' ? value.trim().toLowerCase() : '';
+      if (code !== 'en' && code !== 'hi' && code !== 'gu') {
+        return unavailable('The canonical source language is invalid. Missing-edition generation is blocked.');
+      }
+      sourceLanguages.add(code);
+    }
+    for (const reference of [row.sourceArticle, row.originalArticle, row.baseArticle]) {
+      if (reference == null) continue;
+      if (!isEditionRecord(reference) || !isEditionId(reference._id)
+        || (reference.sourceNewsId != null && !isEditionId(reference.sourceNewsId))) {
+        return unavailable('The canonical source article identity is unverified.');
+      }
+      const sourceId = typeof reference.sourceNewsId === 'string' ? reference.sourceNewsId : reference._id;
+      const source = rows.find(candidate => editionCmsId(candidate) === sourceId);
+      if (!source || (reference._id !== source._id && reference._id !== editionCmsId(source))
+        || (reference.translationGroupId != null && editionGroupId(reference) !== groupId)
+        || (reference.translationKey != null && reference.translationKey !== groupId)
+        || [reference.lang, reference.language].some(value =>
+          value != null && (typeof value !== 'string' || value.trim().toLowerCase() !== editionLanguage(source)))) {
+        return unavailable('The canonical source article does not match the verified story.');
+      }
+      sourceIds.add(sourceId);
+    }
+  }
+  if (sourceLanguages.size > 1 || sourceIds.size > 1 || (!sourceLanguages.size && !sourceIds.size)) {
+    return unavailable('The canonical source identity is uncertain. Missing-edition generation is blocked.');
+  }
+  const candidates = rows.filter(row =>
+    (!sourceLanguages.size || sourceLanguages.has(editionLanguage(row)))
+    && (!sourceIds.size || sourceIds.has(editionCmsId(row))));
+  if (candidates.length !== 1) {
+    return unavailable('The canonical source identity is inconsistent or missing. Generation is blocked.');
+  }
+  return { generationSourceId: editionCmsId(candidates[0]), generationUnavailableReason: null };
+}
+
+export async function getArticleTranslationEditions(articleId: string): Promise<ArticleTranslationEditions> {
+  if (!isEditionId(articleId)) throw new ArticleEditionIdentityError('A valid CMS article ID is required to verify language editions.');
+  const anchor = await getArticle(articleId);
+  if (editionCmsId(anchor) !== articleId) throw new ArticleEditionIdentityError('The requested article identity did not match. No edition was selected.');
+  const anchorLanguage = editionLanguage(anchor);
+  const groupId = editionGroupId(anchor);
+  const response = await adminApiClient.get<unknown>(`${ARTICLES_PATH}/${encodeURIComponent(articleId)}/translation-status`);
+  const body = response.data;
+  const statusMetadata = isEditionRecord(body) && isEditionRecord(body.data) ? body.data : null;
+  const perLang = statusMetadata?.perLang;
+  if (!isEditionRecord(perLang) || !statusMetadata
+    || statusMetadata.ok === false || statusMetadata.success === false
+    || (isEditionRecord(body) && (body.ok === false || body.success === false || (typeof body.status === 'number' && body.status >= 400)))) {
+    throw new ArticleEditionIdentityError('Language edition identity could not be verified from translation status.');
+  }
+  const statusGroupId = editionGroupId(statusMetadata);
+  if ((statusGroupId && statusGroupId !== groupId)
+    || (statusMetadata.translationKey && statusMetadata.translationKey !== groupId)) {
+    throw new ArticleEditionIdentityError('Translation status group identity does not match this story.');
+  }
+
+  const identified: Array<{ language: EditionLanguage; id: string }> = [];
+  const missingLanguages: EditionLanguage[] = [];
+  const translationStates: Partial<Record<EditionLanguage, string>> = {};
+  const ids = new Set<string>();
+  for (const language of EDITION_LANGUAGES) {
+    const entry = perLang[language];
+    if (entry == null) continue;
+    if (!isEditionRecord(entry)
+      || [entry.lang, entry.language].some(value =>
+        value != null && (typeof value !== 'string' || value.trim().toLowerCase() !== language))) {
+      throw new ArticleEditionIdentityError('Invalid or ambiguous language edition identity. No edition was selected.');
+    }
+    const entryGroupId = editionGroupId(entry);
+    if ((entryGroupId && entryGroupId !== groupId) || (entry.translationKey && entry.translationKey !== groupId)) {
+      throw new ArticleEditionIdentityError('Language edition group identity does not match this story.');
+    }
+    const storedState = entry.status ?? entry.state;
+    if (typeof storedState === 'string') translationStates[language] = storedState;
+    if (entry.present === false && entry.presence === 'missing'
+      && entry.articleId === null && entry.childArticleId === null) {
+      missingLanguages.push(language);
+      continue;
+    }
+    if (entry.articleId == null && entry.childArticleId == null && entry.present !== true
+      && (entry.presence == null || entry.presence === 'missing')) continue;
+    if (!isEditionId(entry.articleId) || ids.has(entry.articleId)
+      || (entry.childArticleId != null && entry.childArticleId !== entry.articleId)
+      || (entry.present != null && entry.present !== true)
+      || (entry.presence != null && entry.presence !== 'present')) {
+      throw new ArticleEditionIdentityError('Invalid or ambiguous language edition IDs. No edition was selected.');
+    }
+    ids.add(entry.articleId);
+    identified.push({ language, id: entry.articleId });
+  }
+  if (!identified.some(entry => entry.language === anchorLanguage && entry.id === articleId)) {
+    throw new ArticleEditionIdentityError('Translation status did not verify the current article. No edition was selected.');
+  }
+
+  const rows = await Promise.all(identified.map(async ({ language, id }) => {
+    const article = id === articleId ? anchor : await getArticle(id);
+    if (editionCmsId(article) !== id || editionLanguage(article) !== language
+      || editionGroupId(article) !== groupId || (id !== articleId && !groupId)) {
+      throw new ArticleEditionIdentityError('Language edition identity does not match this story. No edition was selected.');
+    }
+    return { ...article, language, lang: language };
+  }));
+  const recordIds = new Set<string>();
+  for (const row of rows) {
+    const aliases = new Set([row._id, editionCmsId(row)]);
+    if ([...aliases].some(id => recordIds.has(id))) {
+      throw new ArticleEditionIdentityError('Duplicate language edition identities. No edition was selected.');
+    }
+    aliases.forEach(id => recordIds.add(id));
+  }
+  return {
+    anchorId: articleId, translationGroupId: groupId, rows, missingLanguages, translationStates,
+    ...editionGenerationSource(rows, groupId, identified.length + missingLanguages.length, statusMetadata),
+  };
 }
 export async function getArticle(id: string): Promise<Article> {
   const encoded = encodeURIComponent(id);
@@ -431,7 +650,7 @@ export async function getArticle(id: string): Promise<Article> {
   const article = (raw?.article)
     || (raw?.data?.article)
     || (raw?.data && typeof raw.data === 'object' && !Array.isArray(raw.data) ? raw.data : null);
-  if (!ok || !article || !article._id) {
+  if (raw?.ok === false || raw?.success === false || !ok || !article || !article._id) {
     throw new Error('Failed to get article');
   }
   return normalizeArticleStatus(normalizeArticleLanguage(article as Article));
@@ -501,7 +720,23 @@ export async function requeueArticleTranslations(id: string, opts?: { languages?
     ? { languages: opts.languages }
     : undefined;
   const res = await adminApiClient.post(`admin/${ARTICLES_PATH}/${encoded}/translations/generate`, payload);
-  return res.data as any;
+  return mutationResponse(res.data);
+}
+
+export async function generateMissingArticleTranslations(id: string, opts: { targetLanguages: EditionLanguage[] }) {
+  if (!isEditionId(id)) throw new ArticleEditionIdentityError('A valid CMS source ID is required for translation generation.');
+  const languages = opts.targetLanguages;
+  if (!Array.isArray(languages) || !languages.length
+    || languages.some(language => !EDITION_LANGUAGES.includes(language))
+    || new Set(languages).size !== languages.length) {
+    throw new ArticleEditionIdentityError('Select valid, distinct missing-edition languages.');
+  }
+  const res = await adminApiClient.post<ArticleMutationResponse>(
+    `${ARTICLES_PATH}/${encodeURIComponent(id)}/translations/generate`,
+    { targetLanguages: languages, overwrite: false },
+  );
+  if (!isEditionRecord(res.data)) throw new Error('Translation generation was not confirmed. Verify language editions before retrying.');
+  return mutationResponse(res.data);
 }
 
 export async function scheduleArticle(id: string, publishAt: string) {
