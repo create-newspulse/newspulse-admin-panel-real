@@ -46,7 +46,7 @@ vi.mock('@/components/editor/RichTextEditor', () => ({
 const source: Article = {
   _id: 'source-en', title: 'Lifecycle source story', slug: 'lifecycle-source',
   content: 'A source story with body content.', summary: 'A summary.',
-  status: 'draft', language: 'en', translationGroupId: 'group-1',
+  category: 'National', status: 'draft', language: 'en', translationGroupId: 'group-1',
 };
 let records: Article[];
 const clients: QueryClient[] = [];
@@ -84,6 +84,10 @@ beforeEach(() => {
   } : { data: { article: records[0] } });
   mocks.publish.mockImplementation(async () => {
     records = records.map((record) => ({ ...record, status: 'published', publishedAt: '2026-01-15T10:00:00.000Z' }));
+    return { ok: true, article: records[0] };
+  });
+  mocks.update.mockImplementation(async (id: string, payload: Partial<Article>) => {
+    records[0] = { ...records[0], ...payload, _id: id };
     return { ok: true, article: records[0] };
   });
   mocks.remove.mockImplementation(async () => {
@@ -211,16 +215,18 @@ describe('Legacy editor publication integration', () => {
     expect(client.getQueryData(['articles', 'one', 'source-en'])).toMatchObject({ status: 'published' });
   });
 
-  it('preserves a slug conflict and unsaved content without retrying Publish', async () => {
+  it('preserves the committed edit and slug conflict without retrying Publish', async () => {
     mocks.publish.mockRejectedValue({ response: { status: 409, data: { message: 'Slug already exists' } } });
     renderPage(true);
     const publish = await screen.findByRole('button', { name: /Publish Now/ });
     await waitFor(() => expect(publish).toBeEnabled());
     fireEvent.change(screen.getByRole('textbox', { name: 'Legacy content' }), { target: { value: 'Keep this unsaved edit' } });
     fireEvent.click(publish);
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith('Slug already exists'));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Slug already exists')));
     expect(screen.getByRole('textbox', { name: 'Legacy content' })).toHaveValue('Keep this unsaved edit');
     expect(mocks.publish).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith('source-en', expect.objectContaining({ content: 'Keep this unsaved edit' }));
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('remain committed'));
     expect(mocks.post).not.toHaveBeenCalled();
     expect(mocks.success).not.toHaveBeenCalled();
   });
