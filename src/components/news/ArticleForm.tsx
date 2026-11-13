@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createArticle, createdArticleCmsId, updateArticle, getArticle, getOwnDraft, publishArticle, requeueArticleTranslations, generateMissingArticleTranslations, getArticleTranslationEditions, ArticleEditionIdentityError, type Article, type ArticleMutationResponse, type ArticleTranslationEditions } from '@/lib/api/articles';
+import { createArticle, createdArticleCmsId, updateArticle, getArticle, getOwnDraft, publishArticle, requeueArticleTranslations, generateMissingArticleTranslations, getArticleTranslationEditions, articleEditionLanguage, articleEditionGroupKey, normalizeArticleLanguageCode, ArticleEditionIdentityError, type Article, type ArticleMutationResponse, type ArticleTranslationEditions } from '@/lib/api/articles';
 import apiClient from '@/lib/api';
 import toast from 'react-hot-toast';
 import { verifyLanguage, readability } from '@/lib/api/language';
@@ -1174,9 +1174,18 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // because it can reset/clear fields (requirement: keep form exactly as-is).
     if (src && !initialValues && suppressServerHydration) return;
     if (src) {
+      let incomingLanguage: LangCode;
+      try {
+        incomingLanguage = articleEditionLanguage(src);
+      } catch (error) {
+        if (!(error instanceof ArticleEditionIdentityError)) throw error;
+        setLifecycleMessage(error.message);
+        autosavePausedRef.current = true;
+        return;
+      }
       if (hydratedArticleIdRef.current === src._id
         && (dirtyRef.current || mutationInFlightRef.current || autosavePausedRef.current
-          || language !== normalizeLang(src.lang ?? src.language))) return;
+          || language !== incomingLanguage)) return;
       hydratedArticleIdRef.current = src._id || effectiveId;
       const dbg = isArticleEditorDebugEnabled();
       if (dbg) {
@@ -1224,7 +1233,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setPulseDialogue(incomingPulseDialogue);
       const incomingContributor = (src as any).pulseDialogue?.contributor || (src as any).pulseDialogue?.publicContributor || null;
       setSelectedPulseContributor(incomingContributor && typeof incomingContributor === 'object' ? incomingContributor : null);
-      setLanguage(normalizeLang((src as any).lang ?? (src as any).language ?? 'en'));
+      setLanguage(incomingLanguage);
       setTranslationGroupId(String((src as any).translationGroupId || ''));
       setTranslationStatus(extractTranslationStatus(src));
       const rawStatus = ((src as any).status ?? (src as any).state ?? (src as any).publishStatus) as any;
@@ -1573,16 +1582,23 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (!anchorRecordMatches || editions.anchorId !== editionAnchorId || editions.anchorId !== liveEditionAnchorRef.current) {
       return 'The article workspace changed. No language edition was selected.';
     }
-    if (currentArticleRecord && (currentArticleRecord.translationGroupId || null) !== editions.translationGroupId) {
-      return 'The translation group changed. Reopen the story after preserving your unsaved edits.';
-    }
-    if (currentArticleRecord?.translationKey && currentArticleRecord.translationKey !== editions.translationGroupId) {
-      return 'translationKey and translationGroupId conflict or cannot be verified. No edition was selected.';
-    }
-    const expectedLanguage = currentArticleRecord?.lang || currentArticleRecord?.language || anchorLanguageRef.current;
     const anchor = editions.rows.find(row => articleCmsId(row) === editions.anchorId);
-    if (expectedLanguage && (typeof expectedLanguage !== 'string' || anchor?.lang !== expectedLanguage.trim().toLowerCase())) {
-      return 'The source language identity changed. Your edits will not be applied to a different edition.';
+    if (!anchor) return 'The current CMS edition could not be verified. No edition was selected.';
+    try {
+      if (currentArticleRecord && articleEditionGroupKey(currentArticleRecord) !== articleEditionGroupKey(anchor)) {
+        return 'The translation group changed. Reopen the story after preserving your unsaved edits.';
+      }
+      const expectedLanguage = currentArticleRecord ? articleEditionLanguage(currentArticleRecord) : anchorLanguageRef.current;
+      if (expectedLanguage && anchor.lang !== expectedLanguage) {
+        return 'The source language identity changed. Your edits will not be applied to a different edition.';
+      }
+      if ([currentArticleRecord?.sourceArticleId, currentArticleRecord?.translationMeta?.sourceArticleId]
+        .some(value => value != null && value !== editions.canonicalSourceId)) {
+        return 'The canonical source identity changed or could not be verified. Your edits are kept; Founder review is required.';
+      }
+    } catch (error) {
+      if (!(error instanceof ArticleEditionIdentityError)) throw error;
+      return error.message;
     }
     for (const row of editions.rows) {
       const code = row.lang;
@@ -1611,6 +1627,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     ? translationGroupQuery.data?.rows : undefined;
   const verifiedMissingLanguages = editorialAccess.canManageNews && !editionIdentityError
     ? translationGroupQuery.data?.missingLanguages || [] : [];
+  useEffect(() => {
+    if (!verifiedEditionRows || !translationGroupQuery.data) return;
+    const storedGroup = String(currentArticleRecord?.translationGroupId || '');
+    const verifiedGroup = translationGroupQuery.data.translationGroupId || '';
+    if (translationGroupId !== storedGroup || translationGroupId === verifiedGroup) return;
+    setTranslationGroupId(verifiedGroup);
+    setLastSavedSnapshot(previous => ({ ...previous, translationGroupId: verifiedGroup }));
+  }, [verifiedEditionRows, translationGroupQuery.data, currentArticleRecord, translationGroupId]);
   const missingGenerationLimitation = !canGenerateMissingEditions
     ? 'Manage News access and the Edit news special right are required to generate missing editions.'
     : editionIdentityError ? UNVERIFIED_EDITION_MESSAGE
@@ -1622,22 +1646,26 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const automaticGenerationLimitation = isNewStoryTranslationWorkflow
     ? canGenerateNewStoryTranslations ? null : editorialAccess.reason
     : missingGenerationLimitation;
+  const canonicalSourceId = translationGroupQuery.data?.canonicalSourceId || translationGroupQuery.data?.generationSourceId;
   const generationSourceLanguage = isNewStoryTranslationWorkflow ? createdTranslationSourceRef.current?.language || language
-    : verifiedEditionRows?.find(row => articleCmsId(row) === translationGroupQuery.data?.generationSourceId)?.lang;
+    : verifiedEditionRows?.find(row => articleCmsId(row) === canonicalSourceId)?.lang;
   const translationGroupPayload = useMemo(() => {
     return verifiedEditionRows?.find(row => articleCmsId(row) === editionAnchorId) || null;
   }, [verifiedEditionRows, editionAnchorId]);
 
   const translationSourceArticle = useMemo(() => {
-    return extractSourceArticle(translationGroupPayload, currentArticleRecord);
-  }, [translationGroupPayload, currentArticleRecord]);
+    return verifiedEditionRows?.find(row => articleCmsId(row) === canonicalSourceId)
+      || extractSourceArticle(translationGroupPayload, currentArticleRecord);
+  }, [verifiedEditionRows, canonicalSourceId, translationGroupPayload, currentArticleRecord]);
 
   const translationSourceLanguage = useMemo<LangCode | null>(() => {
+    if (isLangCode(generationSourceLanguage)) return generationSourceLanguage;
     const explicit = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
     if (explicit) return explicit;
 
     if (currentArticleRecord && (currentArticleRecord as any)?.translations && typeof (currentArticleRecord as any)?.translations === 'object') {
-      return normalizeLang((currentArticleRecord as any)?.lang ?? (currentArticleRecord as any)?.language ?? language);
+      return normalizeArticleLanguageCode(currentArticleRecord.lang || currentArticleRecord.language
+        || currentArticleRecord.translationMeta?.targetLanguage || currentArticleRecord.originalLang) || language;
     }
 
     if (translationSourceArticle) {
@@ -1645,11 +1673,12 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     }
 
     return null;
-  }, [translationGroupPayload, currentArticleRecord, translationSourceArticle, language]);
+  }, [generationSourceLanguage, translationGroupPayload, currentArticleRecord, translationSourceArticle, language]);
 
   const currentArticleLanguage = useMemo<LangCode>(() => {
     if (currentArticleRecord) {
-      return normalizeLang((currentArticleRecord as any)?.lang ?? (currentArticleRecord as any)?.language ?? language);
+      return normalizeArticleLanguageCode(currentArticleRecord.lang || currentArticleRecord.language
+        || currentArticleRecord.translationMeta?.targetLanguage || currentArticleRecord.originalLang) || language;
     }
     return anchorLanguageRef.current || normalizeLang(language);
   }, [currentArticleRecord, language]);
@@ -1674,7 +1703,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     const active = translationVariants[language];
     const activeId = active ? articleCmsId(active) : language === currentArticleLanguage ? editionAnchorId : null;
     if (!activeId) return false;
-    const sourceId = String(translationSourceArticle?._id || translationSourceArticle?.id || '').trim();
+    const sourceId = String(translationSourceArticle?.sourceNewsId || translationSourceArticle?._id || translationSourceArticle?.id || '').trim();
     if (sourceId) return sourceId !== activeId;
     // Only explicit Backend source metadata can make an edition's topic read-only.
     const sourceLanguage = extractSourceLanguage(translationGroupPayload, currentArticleRecord, translationSourceArticle);
@@ -1732,8 +1761,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   }, [translationVariants, language, title, slug, summary, content]);
 
   const isMasterArticle = useMemo(() => {
-    return !!translationGroupIdTrimmed && !!translationSourceLanguage && translationSourceLanguage === currentArticleLanguage;
-  }, [translationGroupIdTrimmed, translationSourceLanguage, currentArticleLanguage]);
+    return !!verifiedEditionRows && !!canonicalSourceId && canonicalSourceId === editionAnchorId;
+  }, [verifiedEditionRows, canonicalSourceId, editionAnchorId]);
 
   const translationSyncStatuses = useMemo<Record<LangCode, TranslationSyncEntry>>(() => {
     const base = { en: null, hi: null, gu: null } as Record<LangCode, TranslationSyncEntry | null>;
@@ -2155,6 +2184,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
 
         const coverUrl = trimOrUndef(coverImageUrl);
         const coverPid = trimOrUndef(coverImagePublicId);
+        const isCreatingEdition = opts.newArticle || !effectiveId;
+        const storedGroupId = verifiedEditions?.rows.find(row => row.lang === langToSend)?.translationGroupId;
+        const groupIdToSend = isCreatingEdition ? translationGroupIdForSave
+          : storedGroupId && articleEditionGroupKey({ translationGroupId: storedGroupId }) === storedGroupId ? storedGroupId : undefined;
         const youthTrack = categoryKey === 'youth-pulse' ? normalizeYouthPulseTrack(youthPulseTrack) : '';
         const pulseDialoguePayload = categoryKey === PULSE_DIALOGUE_CATEGORY ? buildPulseDialoguePayload(pulseDialogue) : undefined;
         const authorPayload = categoryKey !== PULSE_DIALOGUE_CATEGORY && !opts.authorAlreadySaved
@@ -2202,7 +2235,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           ...(opts.status ? { status: opts.status } : {}),
           language: (langToSend as any) as 'en'|'hi'|'gu',
           lang: (langToSend as any) as 'en'|'hi'|'gu',
-          translationGroupId: translationGroupIdForSave || undefined,
+          translationGroupId: groupIdToSend || undefined,
           imageAltText: imageAltToSend,
           imageAlt: imageAltToSend,
           seoTitle: seoTitleToSend,
@@ -2542,7 +2575,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         relatedArticleIds: getRelatedArticleIds(saved),
       });
       setTranslationStatus(extractTranslationStatus(saved));
-      const savedGroupId = String(saved?.translationGroupId || raw?.translationGroupId || '');
+      const savedGroupId = lastSubmitRef.current?.wasNew
+        ? String(saved?.translationGroupId || raw?.translationGroupId || '')
+        : lastSubmitRef.current?.snapshot.translationGroupId || '';
       const savedId: string | null =
         (returnedId ||
           effectiveId ||
@@ -3453,10 +3488,14 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                 {translationGroupId ? (
                   <div className="mt-1 text-[11px] text-slate-500">Group: {translationGroupId}</div>
                 ) : (
-                  <div className="mt-1 text-[11px] text-slate-500">Save once to generate a group id.</div>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    {effectiveId
+                      ? 'No stored group key. Updating this edition will not create one.'
+                      : 'Save once to generate a group id.'}
+                  </div>
                 )}
 
-                {translationGroupIdTrimmed ? (
+                {translationStatusVisible ? (
                   <div className="mt-3 rounded border border-slate-200 bg-white p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-xs font-semibold">Translations</div>

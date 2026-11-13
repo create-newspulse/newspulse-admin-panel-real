@@ -37,6 +37,31 @@ const CONFLICT_MESSAGES = new Set([
   'Translation changed during generation. Retry the operation.',
 ]);
 
+export const TRANSLATION_SOURCE_REVIEW_MESSAGE = 'The article source identity could not be verified. Founder review is required before saving or generating translations. Do not create another article or change edition IDs.';
+
+const SOURCE_IDENTITY_MESSAGES = new Set([
+  'Invalid translation language metadata.',
+  'Invalid translation source or edition ID.',
+  'Invalid translation source metadata.',
+  'Conflicting translation source links.',
+  'Invalid translation group key.',
+  'Translation source identity is missing or ambiguous.',
+  'Conflicting translation group keys.',
+  'Conflicting translation source language.',
+  'Translation group editions are missing.',
+  'Translation group edition IDs are missing or ambiguous.',
+  'The requested translation edition is missing from the group.',
+  'The linked translation source is missing.',
+  'The translation source language is missing.',
+  'The requested edition language changed.',
+  'A translation edition has no source or group linkage.',
+  'Translation edition languages are missing or ambiguous.',
+  'The requested translation edition ID is missing.',
+  'The public copy has no CMS edition link.',
+  'The public copy CMS edition is missing.',
+  'The public copy conflicts with its CMS translation edition.',
+].map(message => `${message} Founder review is required.`));
+
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
@@ -52,7 +77,10 @@ export function normalizeArticleError(error: unknown, fallback: string): Normali
   if (typeof code === 'string') normalized.code = code;
 
   if (normalized.status === 409) {
-    normalized.message = typeof data.message === 'string' && CONFLICT_MESSAGES.has(data.message)
+    normalized.message = code === 'TRANSLATION_SOURCE_IDENTITY_INVALID'
+      ? typeof data.message === 'string' && SOURCE_IDENTITY_MESSAGES.has(data.message)
+        ? data.message : TRANSLATION_SOURCE_REVIEW_MESSAGE
+      : typeof data.message === 'string' && CONFLICT_MESSAGES.has(data.message)
       ? data.message
       : code === 'SLUG_CONFLICT'
         ? 'Slug already exists'
