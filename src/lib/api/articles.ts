@@ -29,13 +29,14 @@ export interface Article {
   ctaText?: string;
   ctaUrl?: string;
   imageUrl?: string;
+  imageURL?: string;
   translationGroupId?: string;
   translationKey?: string;
   // Some environments/public site use coverImageUrl instead of imageUrl.
   coverImageUrl?: string;
   // Canonical field requested by admin publish contract.
   // Back-compat: some environments store this as a plain string URL.
-  coverImage?: string | { url: string; publicId?: string };
+  coverImage?: string | { url: string; publicId?: string | null };
   category?: string;
   editorialType?: 'editorial' | 'special_story' | string;
   topic?: string | null;

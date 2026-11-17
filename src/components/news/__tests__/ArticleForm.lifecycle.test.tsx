@@ -45,6 +45,9 @@ vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 
 vi.mock('@/lib/api/articles', async (importOriginal) => ({
   ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
   createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
+  articleEditionLanguage: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionLanguage,
+  articleEditionGroupKey: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionGroupKey,
+  normalizeArticleLanguageCode: (await importOriginal<typeof import('@/lib/api/articles')>()).normalizeArticleLanguageCode,
   createArticle: mocks.create, updateArticle: mocks.update, getArticle: mocks.get,
   publishArticle: mocks.publish, getArticleTranslationEditions: mocks.group,
   retryArticleTranslation: vi.fn(), requeueArticleTranslations: mocks.translations,
@@ -246,8 +249,13 @@ describe('Founder Edit Published - Save Update', () => {
     const payload = mocks.update.mock.calls[0][1];
     expect(payload).toMatchObject({
       title: 'Updated published headline', slug: source.slug, content: source.content,
-      summary: source.summary, category: source.category, imageUrl: source.imageUrl,
+      summary: source.summary, category: source.category,
     });
+    expect(payload).not.toHaveProperty('imageUrl');
+    expect(payload).not.toHaveProperty('coverImageUrl');
+    expect(payload).not.toHaveProperty('coverImage');
+    expect(payload).not.toHaveProperty('removeCoverImage');
+    expect(stored.imageUrl).toBe(source.imageUrl);
     expect(payload).not.toHaveProperty('tags');
     expect(stored.tags).toEqual(source.tags);
     expect(payload).not.toHaveProperty('status');

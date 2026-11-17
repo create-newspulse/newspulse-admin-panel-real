@@ -260,6 +260,24 @@ The admin UI provides a full Manage News panel at `/admin/manage-news` (protecte
 - CSV bulk upload (drag-n-drop) with result summary (created / updated / skipped / errors)
 - Badge counts in navbar (Published / Drafts / Flagged)
 
+#### Published-article cover images
+
+Normal Manage News editing uses `/admin/articles/:id/edit` and **Save Update**.
+Leaving the cover unchanged omits image fields from the update. An uploaded or
+Media Library replacement sends the selected cover URL. Uploads include the
+matching asset identifier; URL-only Library choices clear the obsolete identifier.
+Save Update neither republishes the article nor resets `publishedAt`.
+
+Founder can use the existing **Remove** control on an existing published article
+without uploading a replacement. The next save sends `removeCoverImage: true` to
+`PUT /admin-api/articles/:id` only for that edition's explicit pending removal,
+after rechecking its published status. The Backend clears the cover and fallback
+URLs without deleting the Media Library asset or article content. Ordinary,
+keep-image and replacement saves omit the flag; replacement cancels pending
+removal, and an acknowledged removal is not resent. This does not enable existing
+draft/scheduled cover removal or change staff permissions or the Cover Image /
+Media Library UI.
+
 Backend endpoints (`/api/articles`):
 
 | Method | Path | Description |

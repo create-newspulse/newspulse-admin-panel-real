@@ -66,10 +66,14 @@ type ArticleLanguageDraft = {
   content: string;
 };
 
+type ArticleCoverImage = { url: string; publicId?: string };
+type ArticleCoverInput = { revision: number; workspace: number; uploading: boolean };
+
 type ArticleLanguageReviewFields = {
   imageAltText: string;
   seoTitle: string;
   metaDescription: string;
+  coverSelection?: { revision: number; image: ArticleCoverImage | null };
 };
 
 type LanguageBaseline = { draft: ArticleLanguageDraft; review: ArticleLanguageReviewFields };
@@ -83,7 +87,7 @@ type TranslationGenerationRequest = {
 };
 
 function editionFingerprint(draft: ArticleLanguageDraft, review: ArticleLanguageReviewFields): string {
-  return JSON.stringify([draft.title, draft.slug, draft.summary, draft.content, review.imageAltText, review.seoTitle, review.metaDescription]);
+  return JSON.stringify([draft.title, draft.slug, draft.summary, draft.content, review.imageAltText, review.seoTitle, review.metaDescription, review.coverSelection]);
 }
 
 const EMPTY_LANGUAGE_DRAFT: ArticleLanguageDraft = {
@@ -119,6 +123,19 @@ function getArticleReviewFieldsFromRecord(record: any): ArticleLanguageReviewFie
     seoTitle: String(record?.seoTitle ?? record?.metaTitle ?? ''),
     metaDescription: String(record?.metaDescription ?? record?.seoDescription ?? ''),
   };
+}
+
+function getArticleCoverImage(record: {
+  coverImage?: unknown; coverImageUrl?: unknown; imageUrl?: unknown; imageURL?: unknown;
+  featuredImage?: unknown; mediaUrl?: unknown;
+} | null | undefined): ArticleCoverImage | null {
+  const field = record?.coverImage;
+  const cover = field && typeof field === 'object' && !Array.isArray(field) ? field as Record<string, unknown> : null;
+  const url = String(cover?.url || cover?.secureUrl || cover?.secure_url
+    || record?.coverImageUrl || record?.imageUrl || record?.imageURL
+    || (typeof field === 'string' ? field : '') || record?.featuredImage || record?.mediaUrl || '').trim();
+  const publicId = String(cover?.publicId || cover?.public_id || '').trim();
+  return url ? { url, publicId: publicId || undefined } : null;
 }
 
 function createTranslationGroupId(seed: string): string {
@@ -442,6 +459,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const mutationTargetIdRef = useRef<string | null>(initialEditId);
   const workspaceVersionRef = useRef(0);
   const languageBaselinesRef = useRef<Partial<Record<LangCode, LanguageBaseline>>>({});
+  const coverSelectionRevisionRef = useRef(0);
+  const coverInputsRef = useRef<Partial<Record<LangCode, ArticleCoverInput>>>({});
   const committedEditionsRef = useRef<Partial<Record<LangCode, CommittedEdition>>>({});
   const editionIdsRef = useRef<Partial<Record<LangCode, string>>>({});
   const unknownSaveIdentityRef = useRef(false);
@@ -549,7 +568,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [translationSyncOverrides, setTranslationSyncOverrides] = useState<Partial<Record<LangCode, TranslationSyncEntry>>>({});
 
   // Cover image (backend-supported field: imageUrl)
-  const [coverImage, setCoverImage] = useState<{ url: string; publicId?: string } | null>(null);
+  const [coverImage, setCoverImage] = useState<ArticleCoverImage | null>(null);
   // Upload-only: selecting a file uploads it and stores a remote URL.
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
@@ -687,6 +706,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     tags: string[];
     coverImage: string;
     coverImagePublicId: string;
+    coverSelectionRevision: number;
     isBreaking: boolean;
     spotlightEnabled: boolean;
     spotlightPinned: boolean;
@@ -721,6 +741,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     tags: [],
     coverImage: '',
     coverImagePublicId: '',
+    coverSelectionRevision: 0,
     isBreaking: false,
     spotlightEnabled: false,
     spotlightPinned: false,
@@ -850,6 +871,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       tags: Array.isArray(next?.tags) ? (next?.tags as string[]) : tags,
       coverImage: (next?.coverImage ?? coverImageUrl ?? '').toString(),
       coverImagePublicId: (next?.coverImagePublicId ?? coverImagePublicId ?? '').toString(),
+      coverSelectionRevision: next?.coverSelectionRevision ?? languageReviewFields[language].coverSelection?.revision ?? 0,
       isBreaking: (typeof next?.isBreaking === 'boolean') ? next.isBreaking : isBreaking,
       spotlightEnabled: (typeof next?.spotlightEnabled === 'boolean') ? next.spotlightEnabled : spotlightEnabled,
       spotlightPinned: (typeof next?.spotlightPinned === 'boolean') ? next.spotlightPinned : spotlightPinned,
@@ -897,14 +919,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     const nextStatus = getVariantStatus(existingVariant);
     const workspaceStatus = nextStatus === 'published' || nextStatus === 'scheduled' ? nextStatus : 'draft';
     const nextPublishedAt = String(existingVariant?.publishedAt || '');
+    const savedCover = getArticleCoverImage(existingVariant);
+    const selection = languageReviewFields[code].coverSelection;
+    const nextCover = selection && selection.revision !== languageBaselinesRef.current[code]?.review.coverSelection?.revision
+      ? selection.image : savedCover;
     setLanguageDrafts(next);
     applyLanguageDraft(code, nextDraft);
+    if (effectiveId) {
+      setCoverImage(nextCover);
+      setCoverImageFile(null);
+      setCoverUploadOk(false);
+      setCoverUploadError(null);
+    }
     setStatus(workspaceStatus);
     originalStatusRef.current = workspaceStatus;
     setPublishedAt(nextPublishedAt);
     setStatusExplicitlyChanged(false);
     setLastSavedSnapshot((previous) => ({
       ...previous, ...baseline, language: code, status: workspaceStatus, publishedAt: nextPublishedAt,
+      ...(effectiveId ? {
+        coverImage: savedCover?.url || '',
+        coverImagePublicId: savedCover?.publicId || '',
+        coverSelectionRevision: languageBaselinesRef.current[code]?.review.coverSelection?.revision || 0,
+      } : {}),
     }));
   }
 
@@ -941,6 +978,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       tags: (Array.isArray(s.tags) ? s.tags : []).map((t) => String(t || '').trim()).filter(Boolean),
       coverImage: (s.coverImage || ''),
       coverImagePublicId: (s.coverImagePublicId || ''),
+      coverSelectionRevision: s.coverSelectionRevision || 0,
       isBreaking: !!s.isBreaking,
       spotlightEnabled: !!s.spotlightEnabled,
       spotlightPinned: !!s.spotlightPinned,
@@ -1296,37 +1334,11 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ?? ''
       ));
 
-      // Cover image (support both coverImageUrl and imageUrl across environments)
-      const incomingCoverField: any = (src as any).coverImage;
-      const incomingCoverUrl = (() => {
-        if (incomingCoverField && typeof incomingCoverField === 'object') {
-          return (
-            incomingCoverField.url ||
-            incomingCoverField.secureUrl ||
-            incomingCoverField.secure_url ||
-            ''
-          );
-        }
-        return (
-          (src as any).coverImageUrl ||
-          (src as any).imageUrl ||
-          (typeof incomingCoverField === 'string' ? incomingCoverField : '') ||
-          (src as any).featuredImage ||
-          (src as any).mediaUrl ||
-          ''
-        );
-      })();
-
-      const incomingCoverPid = (() => {
-        if (incomingCoverField && typeof incomingCoverField === 'object') {
-          return incomingCoverField.publicId || incomingCoverField.public_id || '';
-        }
-        return '';
-      })();
-
-      const nextCoverUrl = String(incomingCoverUrl || '').trim();
-      const nextCoverPid = String(incomingCoverPid || '').trim();
-      setCoverImage(nextCoverUrl ? { url: nextCoverUrl, publicId: nextCoverPid || undefined } : null);
+      const incomingCover = getArticleCoverImage(src);
+      const incomingReview = getArticleReviewFieldsFromRecord(src);
+      const savedCoverSelection = languageBaselinesRef.current[incomingLanguage]?.review.coverSelection;
+      if (committedEditionsRef.current[incomingLanguage] && savedCoverSelection) incomingReview.coverSelection = savedCoverSelection;
+      setCoverImage(incomingCover);
       setCoverImageFile(null);
       setCoverUploadOk(false);
       setCoverUploadError(null);
@@ -1349,8 +1361,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
-          coverImage: String(incomingCoverUrl || ''),
-          coverImagePublicId: String(incomingCoverPid || ''),
+          coverImage: incomingCover?.url || '',
+          coverImagePublicId: incomingCover?.publicId || '',
+          coverSelectionRevision: incomingReview.coverSelection?.revision || 0,
           isBreaking: !!(src as any).isBreaking,
           spotlightEnabled: !!(src as any).spotlightEnabled,
           spotlightPinned: !!(src as any).spotlightPinned,
@@ -1379,7 +1392,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         setLastSavedSnapshot(s);
         languageBaselinesRef.current[normalizeLang(s.language)] = {
           draft: { title: s.title, slug: s.slug, summary: s.summary, content: s.content },
-          review: getArticleReviewFieldsFromRecord(src),
+          review: incomingReview,
         };
         anchorLanguageRef.current = normalizeLang(s.language);
         setLastSavedAt(Date.now());
@@ -1752,7 +1765,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const variant = translationVariants[code];
         if (!variant) continue;
         const current = next[code] || { ...EMPTY_LANGUAGE_REVIEW_FIELDS };
-        if (!current.imageAltText && !current.seoTitle && !current.metaDescription) {
+        if (!current.imageAltText && !current.seoTitle && !current.metaDescription && !current.coverSelection) {
           next[code] = getArticleReviewFieldsFromRecord(variant);
         }
       }
@@ -2098,6 +2111,26 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return t ? t : undefined;
       };
 
+      const buildCoverPayload = (code: LangCode, isCreatingEdition = false) => {
+        const selection = languageReviewFields[code].coverSelection;
+        const coverChanged = selection && selection.revision !== languageBaselinesRef.current[code]?.review.coverSelection?.revision;
+        if (!isCreatingEdition && !coverChanged) return {};
+        if (!isCreatingEdition && selection?.image === null) {
+          if (!editorialAccess.isFounder) throw new ArticleEditionIdentityError('Only Founder can remove an existing cover image.');
+          if (getVariantStatus(verifiedEditions?.rows.find(row => row.lang === code)) !== 'published') {
+            throw new ArticleEditionIdentityError('Cover removal is available only for existing published articles. The stored cover was kept.');
+          }
+          return { removeCoverImage: true as const };
+        }
+        const coverUrl = trimOrUndef(isCreatingEdition ? coverImageUrl : selection?.image?.url || '');
+        const coverPid = trimOrUndef(isCreatingEdition ? coverImagePublicId : selection?.image?.publicId || '');
+        return {
+          imageUrl: coverUrl,
+          coverImageUrl: coverUrl,
+          coverImage: coverUrl ? { url: coverUrl, publicId: coverPid ?? (isCreatingEdition ? undefined : null) } : undefined,
+        };
+      };
+
       const buildPublicPayload = (opts: { status?: PublicArticleStatus; language?: LangCode; draft?: ArticleLanguageDraft; newArticle?: boolean; authorAlreadySaved?: boolean }): {
         title: string;
         slug: string;
@@ -2140,7 +2173,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         };
         imageUrl?: string;
         coverImageUrl?: string;
-        coverImage?: { url: string; publicId?: string };
+        coverImage?: { url: string; publicId?: string | null };
+        removeCoverImage?: true;
         pulseDialogue?: ReturnType<typeof buildPulseDialoguePayload>;
         authorByline?: AuthorBylineRequest;
         tags?: string[];
@@ -2182,8 +2216,6 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const isViralVideo = String(categoryKey) === 'viral-videos';
         const isFounderEditorial = categoryKey === 'editorial' && userRole === 'founder' && opts.status === 'published';
 
-        const coverUrl = trimOrUndef(coverImageUrl);
-        const coverPid = trimOrUndef(coverImagePublicId);
         const isCreatingEdition = opts.newArticle || !effectiveId;
         const storedGroupId = verifiedEditions?.rows.find(row => row.lang === langToSend)?.translationGroupId;
         const groupIdToSend = isCreatingEdition ? translationGroupIdForSave
@@ -2253,9 +2285,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           district: trimOrUndef(district),
           city: trimOrUndef(city),
           geo,
-          imageUrl: coverUrl,
-          coverImageUrl: coverUrl,
-          coverImage: coverUrl ? { url: coverUrl, publicId: coverPid } : undefined,
+          ...buildCoverPayload(langToSend, isCreatingEdition),
           pulseDialogue: pulseDialoguePayload,
           ...(authorPayload ? { authorByline: authorPayload } : {}),
           // Unchanged tags and existing linked editions must not overwrite logical-story membership.
@@ -2295,7 +2325,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         ...submittedSnapshot, slug: safeSlug, translationGroupId: translationGroupIdForSave,
       }) + JSON.stringify(languageReviewFields[language]);
 
-      async function persistEdition(code: LangCode, payload: Partial<Article>, signature: string) {
+      async function persistEdition(code: LangCode, payload: Partial<Article> & { removeCoverImage?: true }, signature: string) {
         step = `${code.toUpperCase()} save`;
         if (submittedWorkspace !== workspaceVersionRef.current
           || effectiveId && editionAnchorId !== liveEditionAnchorRef.current) {
@@ -2309,6 +2339,17 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         if (previous && previous.id === targetId && previous.signature === signature) {
           committedLanguages.push(code);
           return previous.result;
+        }
+        const submittedReview = { ...languageReviewFields[code] };
+        const selectedImage = submittedReview.coverSelection?.image;
+        const submittedCover = payload.coverImage;
+        const coverSelectionSubmitted = selectedImage === null
+          ? payload.removeCoverImage === true
+          : !!selectedImage && !!submittedCover && typeof submittedCover === 'object'
+            && submittedCover.url === trimOrUndef(selectedImage.url)
+            && (submittedCover.publicId ?? null) === (trimOrUndef(selectedImage.publicId || '') ?? null);
+        if (!coverSelectionSubmitted) {
+          submittedReview.coverSelection = languageBaselinesRef.current[code]?.review.coverSelection;
         }
         const result: ArticleMutationResponse = targetId
           ? await updateArticle(targetId, payload)
@@ -2338,7 +2379,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         editionIdsRef.current[code] = savedId;
         languageBaselinesRef.current[code] = {
           draft: { ...currentLanguageDrafts[code], slug: payload.slug || currentLanguageDrafts[code].slug },
-          review: { ...languageReviewFields[code] },
+          review: submittedReview,
         };
         if (translationGroupIdForSave) setTranslationGroupId(translationGroupIdForSave);
         if (code === language) {
@@ -2508,6 +2549,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               summary: draft.summary, description: draft.summary, content: draft.content,
               imageAltText: review.imageAltText, imageAlt: review.imageAltText,
               seoTitle: review.seoTitle, metaTitle: review.seoTitle, metaDescription: review.metaDescription,
+              ...buildCoverPayload(code),
             } : buildPublicPayload({ status: 'draft', language: code, draft, newArticle: true });
             await persistEdition(code, draftPayload, editionFingerprint(draft, review));
           }
@@ -2808,14 +2850,22 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       return;
     }
 
-    setIsUploadingCover(true);
+    const uploadLanguage = language;
+    const uploadInput = beginCoverInput(uploadLanguage, true);
+    const previousCover = coverImage;
     setCoverUploadOk(false);
     setCoverUploadError(null);
-    // Do not keep any old cover image if the user is replacing it.
-    // Only set coverImage after a successful upload response.
     setCoverImage(null);
     try {
       const res = await uploadCoverImage(file);
+      if (uploadInput.workspace !== workspaceVersionRef.current) {
+        toast.error('The image upload finished for a previous workspace. It was not applied to this story.');
+        return;
+      }
+      if (coverInputsRef.current[uploadLanguage] !== uploadInput) {
+        toast.error('A newer cover choice was made for this edition. The earlier upload was not applied.');
+        return;
+      }
       logArticleEditorDebug('cover upload result', {
         url: res.url,
         publicId: res.publicId,
@@ -2824,24 +2874,52 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         bytes: res.bytes,
         format: res.format,
       });
-      setCoverImage({ url: res.url, publicId: res.publicId || undefined });
-      setCoverImageFile(null);
-      setCoverUploadOk(true);
+      rememberCoverSelection({ url: res.url, publicId: res.publicId || undefined }, uploadLanguage, uploadInput);
+      if (!mutationTargetIdRef.current || currentSnapshotRef.current.language === uploadLanguage) {
+        setCoverImageFile(null);
+        setCoverUploadOk(true);
+      }
       toast.success('Image uploaded');
     } catch (err: any) {
       const n = normalizeError(err, 'Cover image upload failed');
-      setCoverImage(null);
-      setCoverImageFile(null);
-      setCoverUploadOk(false);
-      setCoverUploadError(n.message);
+      if (uploadInput.workspace === workspaceVersionRef.current && coverInputsRef.current[uploadLanguage] === uploadInput
+        && (!mutationTargetIdRef.current || currentSnapshotRef.current.language === uploadLanguage)) {
+        setCoverImage(mutationTargetIdRef.current ? previousCover : null);
+        setCoverImageFile(null);
+        setCoverUploadOk(false);
+        setCoverUploadError(n.message);
+      }
       toast.error(n.message);
     } finally {
-      setIsUploadingCover(false);
+      uploadInput.uploading = false;
+      refreshCoverUploadState();
     }
   }
 
+  function refreshCoverUploadState() {
+    setIsUploadingCover(Object.values(coverInputsRef.current).some(input =>
+      input != null && input.workspace === workspaceVersionRef.current && input.uploading));
+  }
+
+  function beginCoverInput(code: LangCode, uploading: boolean): ArticleCoverInput {
+    const input = { revision: ++coverSelectionRevisionRef.current, workspace: workspaceVersionRef.current, uploading };
+    coverInputsRef.current[code] = input;
+    refreshCoverUploadState();
+    return input;
+  }
+
+  function rememberCoverSelection(image: ArticleCoverImage | null, code = language, input = beginCoverInput(code, false)) {
+    if (mutationTargetIdRef.current || mutationInFlightRef.current) {
+      setLanguageReviewFields(previous => ({
+        ...previous, [code]: { ...previous[code], coverSelection: { revision: input.revision, image } },
+      }));
+      if (mutationTargetIdRef.current && currentSnapshotRef.current.language !== code) return;
+    }
+    setCoverImage(image);
+  }
+
   function chooseCoverFromMediaLibrary(asset: MediaLibraryAsset) {
-    setCoverImage({ url: asset.url });
+    rememberCoverSelection({ url: asset.url });
     setCoverImageFile(null);
     setCoverUploadError(null);
     setCoverUploadOk(true);
@@ -3816,8 +3894,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
                     if (f) void uploadSelectedCover(f);
                   }}
                   onRemove={() => {
+                    if (effectiveId && (!editorialAccess.isFounder || originalStatusRef.current !== 'published')) {
+                      const message = !editorialAccess.isFounder
+                        ? 'Only Founder can remove an existing cover image. The cover was kept.'
+                        : 'Cover removal is available only for existing published articles. The cover was kept.';
+                      setCoverUploadError(message);
+                      toast.error(message);
+                      return;
+                    }
                     setCoverImageFile(null);
-                    setCoverImage(null);
+                    rememberCoverSelection(null);
                     setCoverUploadOk(false);
                     setCoverUploadError(null);
                   }}

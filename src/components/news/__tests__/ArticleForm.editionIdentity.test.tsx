@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Article } from '@/lib/api/articles';
+import { backendTranslationStatus, editionLanguages } from '@/tests/articleEditionFixtures';
 import { ArticleForm } from '../ArticleForm';
 import ArticleEditPage from '@/pages/ArticleEditPage';
 
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn<(url: string) => Promise<{ data: unknown }>>(),
   put: vi.fn<(url: string, payload: Partial<Article>) => Promise<{ data: unknown }>>(),
   post: vi.fn<(url: string, payload?: Partial<Article> | GenerationPayload | NewStoryGenerationPayload) => Promise<{ data: unknown }>>(),
+  upload: vi.fn<(file: File) => Promise<{ url: string; publicId?: string }>>(),
+  libraryUrl: 'https://images.example.test/reviewed-cover.jpg',
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -46,7 +49,7 @@ vi.mock('@/lib/api/trendingTopics', async importOriginal => ({
 vi.mock('@/context/PublishFlagContext', () => ({ usePublishFlag: () => ({ publishEnabled: true }) }));
 vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 'hi', 'gu'] })) } }));
 vi.mock('@/lib/api/media', () => ({
-  getMediaStatus: vi.fn(async () => ({ ok: true, uploadEnabled: true })), uploadCoverImage: vi.fn(),
+  getMediaStatus: vi.fn(async () => ({ ok: true, uploadEnabled: true })), uploadCoverImage: mocks.upload,
 }));
 vi.mock('@/lib/api/language', () => ({ verifyLanguage: vi.fn(), readability: vi.fn() }));
 vi.mock('@/lib/slugAvailability', () => ({
@@ -58,8 +61,23 @@ vi.mock('@/components/editor/RichTextEditor', () => ({
     <textarea aria-label="Story content" value={value} onChange={event => onChange(event.target.value)} />
   ),
 }));
-vi.mock('@/components/articles/CoverImageUpload', () => ({ default: () => null }));
-vi.mock('@/components/media/MediaLibrarySelector', () => ({ default: () => null }));
+vi.mock('@/components/articles/CoverImageUpload', () => ({
+  default: ({ url, onChooseFromLibrary, onRemove, onChangeFile }: {
+    url: string; onChooseFromLibrary: () => void; onRemove: () => void; onChangeFile: (file: File | null) => void;
+  }) => (
+    <div>
+      <output data-testid="cover-url">{url}</output>
+      <button type="button" onClick={onChooseFromLibrary}>Choose test cover</button>
+      <button type="button" onClick={onRemove}>Remove test cover</button>
+      <input type="file" aria-label="Test cover file" onChange={event => onChangeFile(event.target.files?.[0] || null)} />
+    </div>
+  ),
+}));
+vi.mock('@/components/media/MediaLibrarySelector', () => ({
+  default: ({ open, onSelect }: { open: boolean; onSelect: (asset: { id: string; url: string }) => void }) => open ? (
+    <button type="button" onClick={() => onSelect({ id: 'library-item-not-an-asset-public-id', url: mocks.libraryUrl })}>Use test cover</button>
+  ) : null,
+}));
 vi.mock('@/components/preview/PreviewModal', () => ({ default: () => null }));
 vi.mock('@/components/ui/ConfirmModal', () => ({ default: () => null }));
 vi.mock('@/components/news/PulseDialogueDetailsSection', () => ({ default: () => null }));
@@ -186,6 +204,7 @@ beforeEach(() => {
   mocks.role = 'founder';
   mocks.modules = ['manage_news'];
   mocks.specialRights = [];
+  mocks.libraryUrl = 'https://images.example.test/reviewed-cover.jpg';
   lookupFailure = null;
   records = { [source._id]: { ...source } };
   for (const language of ['hi', 'gu']) {
@@ -232,6 +251,418 @@ afterEach(() => {
   vi.useRealTimers();
   clients.splice(0).forEach(client => client.clear());
   vi.restoreAllMocks();
+});
+
+describe('Published article cover intent', () => {
+  function configureBackendStory(status: 'draft' | 'scheduled' | 'published' = 'published') {
+    records = Object.fromEntries(editionLanguages.map(language => [`story-a-${language}`, {
+      ...source, status, _id: `story-a-${language}`, title: `Reviewed ${language} headline`, slug: `stored-${language}-slug`,
+      content: `Manually reviewed ${language} content that must not be regenerated or replaced by another edition.`,
+      summary: `Manually reviewed ${language} summary.`,
+      language, lang: language, originalLang: language, sourceLanguage: 'gu', sourceArticleId: 'story-a-gu',
+      translationKey: 'group-a', machineGenerated: language !== 'gu', humanEdited: true,
+      publishedAt: `2026-01-${language === 'en' ? '15' : language === 'hi' ? '16' : '17'}T10:00:00.000Z`,
+      imageUrl: `https://images.example.test/${language}.jpg`,
+      imageURL: `https://images.example.test/${language}.jpg`,
+      coverImageUrl: `https://images.example.test/${language}.jpg`,
+      coverImage: { url: `https://images.example.test/${language}.jpg`, publicId: `cover-${language}` },
+    }]));
+    mocks.get.mockImplementation(async url => {
+      const suffix = '/translation-status';
+      const id = url.slice('articles/'.length, url.endsWith(suffix) ? -suffix.length : undefined);
+      const article = records[id];
+      if (!article) throw new Error('Unexpected article read');
+      if (url.endsWith(suffix)) {
+        if (lookupFailure) throw lookupFailure;
+        return { data: backendTranslationStatus(article, Object.values(records)) };
+      }
+      return { data: {
+        ok: true, success: true, article: { ...article }, data: { article: { ...article } },
+        translationGroupStatus: backendTranslationStatus(article, Object.values(records)).data.languageStates,
+      } };
+    });
+    mocks.put.mockImplementation(async (url, payload) => {
+      const id = url.slice('articles/'.length);
+      const current = records[id];
+      if (!current) throw new Error('Unexpected CMS mutation target');
+      const { removeCoverImage, ...wire }: Partial<Article> & { removeCoverImage?: true } = JSON.parse(JSON.stringify(payload));
+      const oldCover = typeof current.coverImage === 'object' ? current.coverImage : undefined;
+      const oldUrl = oldCover?.url || current.coverImageUrl || current.imageUrl;
+      records[id] = { ...current, ...wire };
+      if (removeCoverImage || wire.coverImage && typeof wire.coverImage === 'object') {
+        const cover = !removeCoverImage && typeof wire.coverImage === 'object' ? { ...oldCover, ...wire.coverImage } : undefined;
+        const imageFields = { coverImage: cover, imageUrl: cover?.url, imageURL: cover?.url, coverImageUrl: cover?.url };
+        Object.assign(records[id], imageFields);
+        for (const sibling of Object.values(records).filter(row => row._id !== current._id)) {
+          const siblingUrl = typeof sibling.coverImage === 'object' ? sibling.coverImage.url : sibling.coverImageUrl || sibling.imageUrl;
+          if (!siblingUrl || siblingUrl === oldUrl) {
+            Object.assign(sibling, { ...imageFields, coverImage: cover ? { ...cover } : undefined });
+          }
+        }
+      }
+      return { data: { ok: true, success: true, article: { ...records[id] }, data: { article: { ...records[id] } } } };
+    });
+  }
+
+  it.each(editionLanguages)('cover intent: keeps the published %s cover and article fields unchanged through Save Update and reload', async language => {
+    configureBackendStory();
+    const id = `story-a-${language}`;
+    const before = structuredClone(records);
+    const mounted = await open(3, records[id]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith(`articles/${id}`, expect.any(Object));
+    const wire: Partial<Article> = JSON.parse(JSON.stringify(mocks.put.mock.calls[0][1]));
+    for (const field of ['removeCoverImage', 'coverImage', 'coverImageUrl', 'imageUrl', 'imageURL', 'status', 'publishedAt', 'publishAt', 'scheduledAt']) {
+      expect(wire).not.toHaveProperty(field);
+    }
+    expect(records[id]).toMatchObject(before[id]);
+    expect(Object.keys(records)).toEqual(Object.keys(before));
+    for (const other of editionLanguages.filter(code => code !== language)) {
+      expect(records[`story-a-${other}`]).toEqual(before[`story-a-${other}`]);
+    }
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+    mounted.unmount();
+    await open(3, records[id]);
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(before[id].coverImageUrl!);
+    expect(input('Title', 'input')).toHaveValue(before[id].title);
+    expect(screen.getByRole('textbox', { name: 'Story content' })).toHaveValue(before[id].content);
+    expect(input('Language', 'select')).toHaveValue(language);
+  });
+
+  it('cover intent: does not infer removal from an unchanged empty cover', async () => {
+    configureBackendStory();
+    const id = 'story-a-hi';
+    for (const field of ['coverImage', 'coverImageUrl', 'imageUrl', 'imageURL'] as const) delete records[id][field];
+    await open(3, records[id]);
+    expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith(`articles/${id}`, expect.any(Object));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('removeCoverImage');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(editionLanguages)('cover intent: removes the published %s cover explicitly without an upload or changes to article fields and editions', async language => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureBackendStory();
+    const id = `story-a-${language}`;
+    const before = structuredClone(records);
+    const mounted = await open(3, records[id]);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith(`articles/${id}`, expect.objectContaining({ removeCoverImage: true }));
+    const wire: Partial<Article> = JSON.parse(JSON.stringify(mocks.put.mock.calls[0][1]));
+    for (const field of ['coverImage', 'coverImageUrl', 'imageUrl', 'imageURL', 'status', 'publishedAt', 'publishAt', 'scheduledAt']) {
+      expect(wire).not.toHaveProperty(field);
+    }
+    expect(records[id]).toMatchObject({
+      ...before[id], coverImage: undefined, coverImageUrl: undefined, imageUrl: undefined, imageURL: undefined,
+    });
+    expect(Object.keys(records)).toEqual(Object.keys(before));
+    for (const other of editionLanguages.filter(code => code !== language)) {
+      expect(records[`story-a-${other}`]).toEqual(before[`story-a-${other}`]);
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Text-only approved change' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledTimes(2));
+    expect(mocks.put).toHaveBeenCalledTimes(2);
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('removeCoverImage');
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('coverImage');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+    mounted.unmount();
+    await open(3, records[id]);
+    expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    expect(input('Title', 'input')).toHaveValue('Text-only approved change');
+    expect(screen.getByRole('textbox', { name: 'Story content' })).toHaveValue(before[id].content);
+    expect(input('Language', 'select')).toHaveValue(language);
+  });
+
+  it.each(editionLanguages)('cover intent: replaces only the published %s cover while preserving content, URL, chronology and editions', async language => {
+    configureBackendStory();
+    const id = `story-a-${language}`;
+    const before = structuredClone(records);
+    const mounted = await open(3, records[id]);
+    const file = new File(['synthetic image'], 'reviewed.jpg', { type: 'image/jpeg' });
+    const replacement = { url: 'https://images.example.test/uploaded.jpg', publicId: 'uploaded-asset' };
+    mocks.upload.mockResolvedValueOnce(replacement);
+    fireEvent.change(screen.getByLabelText('Test cover file'), { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByTestId('cover-url')).toHaveTextContent(replacement.url));
+    expect(mocks.upload).toHaveBeenCalledExactlyOnceWith(file);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith(`articles/${id}`, expect.objectContaining({
+      coverImage: replacement, imageUrl: replacement.url, coverImageUrl: replacement.url,
+    }));
+    const wire: Partial<Article> = JSON.parse(JSON.stringify(mocks.put.mock.calls[0][1]));
+    for (const field of ['removeCoverImage', 'status', 'publishedAt', 'publishAt', 'scheduledAt']) expect(wire).not.toHaveProperty(field);
+    expect(records[id]).toMatchObject({
+      ...before[id], coverImage: replacement, imageUrl: replacement.url, imageURL: replacement.url, coverImageUrl: replacement.url,
+    });
+    expect(Object.keys(records)).toEqual(Object.keys(before));
+    for (const other of editionLanguages.filter(code => code !== language)) {
+      expect(records[`story-a-${other}`]).toEqual(before[`story-a-${other}`]);
+    }
+    expect(mocks.post).not.toHaveBeenCalled();
+    mounted.unmount();
+    await open(3, records[id]);
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(replacement.url);
+    expect(input('Title', 'input')).toHaveValue(before[id].title);
+    expect(screen.getByRole('textbox', { name: 'Story content' })).toHaveValue(before[id].content);
+    expect(input('Language', 'select')).toHaveValue(language);
+  });
+
+  it.each(['Library', 'upload'] as const)('cover intent: a %s replacement cancels an unsaved removal, even with the original URL', async choice => {
+    configureBackendStory();
+    const id = 'story-a-hi';
+    const before = structuredClone(records);
+    await open(3, records[id]);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    mocks.libraryUrl = before[id].coverImageUrl!;
+    if (choice === 'Library') {
+      fireEvent.click(screen.getByText('Choose test cover'));
+      fireEvent.click(screen.getByText('Use test cover'));
+    } else {
+      mocks.upload.mockResolvedValueOnce({ url: mocks.libraryUrl, publicId: 'replacement-asset' });
+      fireEvent.change(screen.getByLabelText('Test cover file'), {
+        target: { files: [new File(['synthetic'], 'replacement.jpg', { type: 'image/jpeg' })] },
+      });
+    }
+    await waitFor(() => expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith(`articles/${id}`, expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: choice === 'Library' ? null : 'replacement-asset' },
+    }));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('removeCoverImage');
+    expect(JSON.stringify(mocks.put.mock.calls[0][1])).not.toContain('library-item-not-an-asset-public-id');
+    expect(records['story-a-gu']).toEqual(before['story-a-gu']);
+    expect(records['story-a-en']).toEqual(before['story-a-en']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Later text-only edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('coverImage');
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('removeCoverImage');
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['remove', 'replace'] as const)('cover intent: keeps pending %s scoped to its edition across another edition save', async choice => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory();
+    const before = structuredClone(records);
+    await open(3, records['story-a-gu']);
+    if (choice === 'remove') fireEvent.click(screen.getByText('Remove test cover'));
+    else {
+      fireEvent.click(screen.getByText('Choose test cover'));
+      fireEvent.click(screen.getByText('Use test cover'));
+    }
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(before['story-a-hi'].coverImageUrl!);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.any(Object));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('removeCoverImage');
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('coverImage');
+    expect(records['story-a-gu']).toEqual(before['story-a-gu']);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    if (choice === 'remove') expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    else expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls[1]).toEqual(['articles/story-a-gu', expect.objectContaining(choice === 'remove'
+      ? { removeCoverImage: true } : { coverImage: { url: mocks.libraryUrl, publicId: null } })]);
+    expect(records['story-a-hi']).toMatchObject(before['story-a-hi']);
+    expect(records['story-a-en']).toEqual(before['story-a-en']);
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: explicit removal supersedes an unfinished replacement upload', async () => {
+    configureBackendStory();
+    await open(3, records['story-a-hi']);
+    let finish!: (value: { url: string; publicId: string }) => void;
+    mocks.upload.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'late.jpg', { type: 'image/jpeg' })] },
+    });
+    fireEvent.click(screen.getByText('Remove test cover'));
+    await act(async () => { finish({ url: mocks.libraryUrl, publicId: 'late-upload' }); });
+    expect(screen.getByTestId('cover-url')).toBeEmptyDOMElement();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({ removeCoverImage: true }));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('coverImage');
+    expect(records['story-a-hi'].coverImage).toBeUndefined();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: an older removal acknowledgement does not consume a newer replacement', async () => {
+    configureBackendStory();
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    const put = mocks.put.getMockImplementation()!;
+    let finish!: () => void;
+    mocks.put.mockImplementationOnce((url, payload) => new Promise(resolve => { finish = () => resolve(put(url, payload)); }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled());
+    expect(records['story-a-hi'].coverImage).toBeUndefined();
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls[0][1]).toHaveProperty('removeCoverImage', true);
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('removeCoverImage');
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: reports failed removal without changing stored content or automatically retrying', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureBackendStory();
+    const before = structuredClone(records);
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    mocks.put.mockRejectedValueOnce({ response: { status: 503, data: {} } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Backend is temporarily unavailable')));
+    expect(mocks.success).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({ removeCoverImage: true }));
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('removeCoverImage');
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['editor', 'admin'])('cover intent: does not grant %s staff removal but preserves their existing replacement access', async role => {
+    mocks.role = role;
+    mocks.specialRights = ['news_edit'];
+    configureBackendStory();
+    const before = structuredClone(records);
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(before['story-a-hi'].coverImageUrl!);
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Only Founder'));
+    expect(records).toEqual(before);
+    expect(mocks.put).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: null },
+    }));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('removeCoverImage');
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'scheduled'] as const)('cover intent: keeps an existing %s cover when Founder attempts removal', async status => {
+    configureBackendStory(status);
+    const before = structuredClone(records);
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(before['story-a-hi'].coverImageUrl!);
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('only for existing published articles'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.put).toHaveBeenCalledTimes(1));
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('removeCoverImage');
+    expect(records['story-a-hi']).toMatchObject(before['story-a-hi']);
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: rechecks published status before sending a pending removal', async () => {
+    configureBackendStory();
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    records['story-a-hi'].status = 'draft';
+    const before = structuredClone(records);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('only for existing published articles')));
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+  });
+
+  it('cover intent: rechecks Founder access before sending a pending removal', async () => {
+    configureBackendStory();
+    const before = structuredClone(records);
+    const { client, rerender } = await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Remove test cover'));
+    mocks.role = 'editor';
+    mocks.specialRights = ['news_edit'];
+    rerender(editor(client, records['story-a-hi']));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('Only Founder')));
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+  });
+
+  it.each(['Library', 'upload'] as const)('secondary cover: preserves the existing %s replacement path in a multi-edition draft save', async choice => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('draft');
+    const before = structuredClone(records);
+    await open(3, records['story-a-gu']);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    if (choice === 'Library') {
+      fireEvent.click(screen.getByText('Choose test cover'));
+      fireEvent.click(screen.getByText('Use test cover'));
+    } else {
+      mocks.upload.mockResolvedValueOnce({ url: mocks.libraryUrl, publicId: 'secondary-asset' });
+      fireEvent.change(screen.getByLabelText('Test cover file'), {
+        target: { files: [new File(['synthetic'], 'secondary.jpg', { type: 'image/jpeg' })] },
+      });
+      await waitFor(() => expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl));
+    }
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Saved Gujarati draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Draft updated');
+      expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    });
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-gu', 'articles/story-a-hi']);
+    expect(mocks.put.mock.calls[1][1]).toMatchObject({
+      coverImage: { url: mocks.libraryUrl, publicId: choice === 'Library' ? null : 'secondary-asset' },
+    });
+    for (const [, payload] of mocks.put.mock.calls) {
+      expect(payload).not.toHaveProperty('removeCoverImage');
+      expect(payload).not.toHaveProperty('status');
+      expect(payload).not.toHaveProperty('publishedAt');
+    }
+    expect(records['story-a-gu'].coverImage).toEqual(before['story-a-gu'].coverImage);
+    expect(records['story-a-en']).toEqual(before['story-a-en']);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
 });
 
 describe('Normal new-story automatic translation', () => {
