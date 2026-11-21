@@ -1,3 +1,4 @@
+import type { Article } from '@/lib/api/articles';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -487,6 +488,64 @@ describe('NewsTable article push modal', () => {
     await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith('en-source', { languages: ['hi', 'gu'] }));
     expect(requeueArticleTranslations).toHaveBeenCalledTimes(1);
     expect(publishArticle).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it.each([
+    { sourceLanguage: 'gu', target: 'en', languages: ['en'] },
+    { sourceLanguage: 'gu', target: 'hi', languages: ['hi'] },
+    { sourceLanguage: 'hi', target: 'gu', languages: ['gu'] },
+    { sourceLanguage: 'en', target: 'gu', languages: ['gu'] },
+    { sourceLanguage: 'en', target: 'all', languages: ['hi', 'gu'] },
+  ])('passes only selected missing targets for $sourceLanguage -> $target', async ({ sourceLanguage, target, languages }) => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(listArticles).mockResolvedValueOnce({
+      rows: [
+        { _id: `${sourceLanguage}-source`, title: 'Selected source', status: 'published', language: sourceLanguage, translationGroupId: 'group-1', sourceLanguage },
+      ],
+      total: 1,
+      page: 1,
+      pages: 1,
+    });
+
+    renderNewsTable();
+
+    fireEvent.click((await screen.findAllByLabelText('Select row'))[0]);
+    fireEvent.change(screen.getByTitle('Missing translation target'), { target: { value: target } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Missing Translations' }));
+
+    await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledWith(`${sourceLanguage}-source`, { languages }));
+    expect(requeueArticleTranslations).toHaveBeenCalledTimes(1);
+    expect(publishArticle).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it.each(['all', 'hi'])('keeps existing Hindi edition identity and content for target %s', async target => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const rows: Article[] = [
+      { _id: 'gu-source', title: 'Gujarati source', status: 'published', language: 'gu', translationGroupId: 'group-1', sourceLanguage: 'gu' },
+      {
+        _id: 'existing-hi', title: 'Reviewed Hindi edition', content: 'Keep reviewed Hindi content',
+        status: 'published', language: 'hi', originalLang: 'hi', sourceLanguage: 'gu',
+        sourceArticleId: 'gu-source', translationGroupId: 'group-1',
+      },
+    ];
+    const before = structuredClone(rows);
+    vi.mocked(listArticles).mockResolvedValueOnce({ rows, total: rows.length, page: 1, pages: 1 });
+    renderNewsTable();
+    fireEvent.click((await screen.findAllByLabelText('Select row'))[0]);
+    fireEvent.change(screen.getByTitle('Missing translation target'), { target: { value: target } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Missing Translations' }));
+
+    if (target === 'all') {
+      await waitFor(() => expect(requeueArticleTranslations).toHaveBeenCalledExactlyOnceWith('gu-source', { languages: ['en'] }));
+    } else {
+      expect(requeueArticleTranslations).not.toHaveBeenCalled();
+      expect(confirmSpy).not.toHaveBeenCalled();
+    }
+    expect(rows).toEqual(before);
+    expect(publishArticle).not.toHaveBeenCalled();
+    expect(updateArticleStatus).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
   });
 

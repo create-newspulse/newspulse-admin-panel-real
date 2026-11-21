@@ -44,6 +44,9 @@ vi.mock('@/lib/api', () => ({ default: { get: vi.fn(async () => ({ data: ['en', 
 vi.mock('@/lib/api/articles', async (importOriginal) => ({
   ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
   createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
+  articleEditionLanguage: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionLanguage,
+  articleEditionGroupKey: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionGroupKey,
+  normalizeArticleLanguageCode: (await importOriginal<typeof import('@/lib/api/articles')>()).normalizeArticleLanguageCode,
   createArticle: mocks.create, updateArticle: mocks.update, getArticle: mocks.get,
   publishArticle: mocks.publish, getArticleTranslationEditions: mocks.group,
   retryArticleTranslation: vi.fn(), requeueArticleTranslations: mocks.translations,
@@ -114,7 +117,7 @@ beforeEach(() => {
     stored = { ...stored, _id: id, status: 'published', publishedAt: stored.publishedAt || originalPublishedAt };
     return { article: { ...stored }, publishedLanguages: ['en', 'hi', 'gu'] };
   });
-  mocks.group.mockImplementation(async (id) => ({ anchorId: id, translationGroupId: stored.translationGroupId || null, rows: [{ ...stored }] }));
+  mocks.group.mockImplementation(async (id) => ({ anchorId: id, canonicalSourceId: id, translationGroupId: stored.translationGroupId || null, rows: [{ ...stored }] }));
   mocks.translations.mockResolvedValue({ ok: true });
   mocks.client.get.mockImplementation(async (url, config) => {
     if (url === 'admin/topics/available') {

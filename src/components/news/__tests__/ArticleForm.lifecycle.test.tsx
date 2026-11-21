@@ -141,6 +141,7 @@ beforeEach(() => {
   });
   mocks.group.mockImplementation(async (id) => ({
     anchorId: id, translationGroupId: stored.translationGroupId || null,
+    canonicalSourceId: stored.sourceNewsId || stored._id,
     rows: stored.translationGroupId ? (['en', 'hi', 'gu'] as const).map(code =>
       code === (stored.lang || stored.language) ? { ...stored } : {
         ...stored, _id: `edition-${code}`, title: `${code === 'hi' ? 'Hindi' : code === 'gu' ? 'Gujarati' : 'English'} edition`,

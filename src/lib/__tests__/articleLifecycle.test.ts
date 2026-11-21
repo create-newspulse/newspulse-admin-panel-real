@@ -1,6 +1,6 @@
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries } from '@/lib/articleLifecycle';
+import { articleFollowUpWarning, normalizeArticleError, refreshArticleQueries, TRANSLATION_SOURCE_REVIEW_MESSAGE } from '@/lib/articleLifecycle';
 
 describe('article-scoped lifecycle feedback', () => {
   it.each([
@@ -57,6 +57,42 @@ describe('article-scoped lifecycle feedback', () => {
     const message = 'Restore the deleted story before changing its status.';
     expect(normalizeArticleError({ status: 409, body: { message } }, 'Save failed'))
       .toMatchObject({ status: 409, message, retriable: false });
+  });
+
+  it.each([
+    'The translation source identity is unresolved. Founder review is required.',
+    'DatabaseError: private diagnostic\n at internal.ts:12',
+    '<script>untrusted diagnostics</script>',
+    'Slug already exists',
+    undefined,
+  ])('preserves source-identity 409 guidance without exposing untrusted text: %s', message => {
+    const error = { response: { status: 409, data: { code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message } } };
+    expect(normalizeArticleError(error, 'Save failed')).toMatchObject({
+      status: 409, code: 'TRANSLATION_SOURCE_IDENTITY_INVALID',
+      message: TRANSLATION_SOURCE_REVIEW_MESSAGE, retriable: false, authExpired: false,
+    });
+    expect(TRANSLATION_SOURCE_REVIEW_MESSAGE).toContain('Founder review is required');
+  });
+
+  it('keeps the source-identity code and guidance in the status/body error format', () => {
+    expect(normalizeArticleError({
+      status: 409, body: { code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message: 'Unverified source' },
+    }, 'Save failed')).toMatchObject({
+      code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message: TRANSLATION_SOURCE_REVIEW_MESSAGE, retriable: false,
+    });
+  });
+
+  it.each([
+    'Conflicting translation source links. Founder review is required.',
+    'The linked translation source is missing. Founder review is required.',
+    'The public copy conflicts with its CMS translation edition. Founder review is required.',
+    'Translation source identity is missing or ambiguous. Founder review is required.',
+  ])('retains the exact safe Backend source-identity message: %s', message => {
+    expect(normalizeArticleError({
+      response: { status: 409, data: { code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message } },
+    }, 'Save failed')).toMatchObject({
+      status: 409, code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message, retriable: false,
+    });
   });
 
   it.each([

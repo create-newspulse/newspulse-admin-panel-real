@@ -86,6 +86,74 @@ type TranslationGenerationRequest = {
   createdSource?: CreatedTranslationSource;
 };
 
+function verifyGeneratedEditions(
+  before: ArticleTranslationEditions, after: ArticleTranslationEditions,
+  request: TranslationGenerationRequest, result: ArticleMutationResponse,
+): boolean {
+  function reject(): never {
+    throw new ArticleEditionIdentityError('The generation acknowledgement does not match the verified CMS story. Founder review is required.');
+  }
+  const sourceBefore = before.rows.find(row => articleCmsId(row) === request.sourceId);
+  const sourceAfter = after.rows.find(row => articleCmsId(row) === request.sourceId);
+  if (!sourceBefore || !sourceAfter || before.anchorId !== after.anchorId
+    || before.generationSourceId !== request.sourceId || after.generationSourceId !== request.sourceId
+    || after.canonicalSourceId !== request.sourceId
+    || sourceBefore.lang !== sourceAfter.lang) {
+    reject();
+  }
+  const oldSourceGroup = articleEditionGroupKey(sourceBefore);
+  const newSourceGroup = articleEditionGroupKey(sourceAfter);
+  const initializesGroup = !oldSourceGroup;
+  if ((before.translationGroupId && before.translationGroupId !== after.translationGroupId)
+    || newSourceGroup !== after.translationGroupId || (initializesGroup && !newSourceGroup)) reject();
+  for (const row of before.rows) {
+    const next = after.rows.find(candidate => candidate.lang === row.lang);
+    if (!next || articleCmsId(next) !== articleCmsId(row)
+      || (!(initializesGroup && articleCmsId(row) === request.sourceId)
+        && articleEditionGroupKey(row) !== articleEditionGroupKey(next))) reject();
+  }
+
+  const receipt: Record<string, unknown> = { ...result };
+  const receiptGroup = articleEditionGroupKey(receipt);
+  if ((initializesGroup || 'translationGroupId' in receipt || 'translationKey' in receipt)
+    && receiptGroup !== newSourceGroup) reject();
+  if ((initializesGroup || 'sourceLanguage' in receipt)
+    && normalizeArticleLanguageCode(receipt.sourceLanguage) !== sourceBefore.lang) reject();
+  if (['sourceArticleId', 'sourceNewsId'].some(key => key in receipt && receipt[key] !== request.sourceId)) reject();
+  const targets = receipt.targetLanguages;
+  if (initializesGroup || targets !== undefined) {
+    if (!Array.isArray(targets) || targets.length !== request.languages.length
+      || new Set(targets).size !== targets.length
+      || targets.some(code => !isLangCode(code) || !request.languages.includes(code))) reject();
+  }
+  if (initializesGroup && receipt.status !== 'review_required') reject();
+  const acknowledged = new Set<string>();
+  for (const field of ['created', 'updated', 'skipped', 'failed'] as const) {
+    const value = receipt[field];
+    if (value === undefined && !initializesGroup) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      reject();
+    }
+    const entries: Array<[string, unknown]> = Object.entries(value);
+    if ((field === 'updated' || field === 'failed') && entries.length) reject();
+    for (const [code, entry] of entries) {
+      let id = entry;
+      if (field === 'skipped') {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+          || !('reason' in entry) || (entry.reason !== 'exists' && entry.reason !== 'human_edited')
+          || !('id' in entry)) reject();
+        id = entry.id;
+      }
+      const edition = after.rows.find(row => row.lang === code);
+      if (!isLangCode(code) || !request.languages.includes(code) || acknowledged.has(code)
+        || typeof id !== 'string' || !edition || articleCmsId(edition) !== id) reject();
+      acknowledged.add(code);
+    }
+  }
+  if (initializesGroup && request.languages.some(code => !acknowledged.has(code))) reject();
+  return initializesGroup;
+}
+
 function editionFingerprint(draft: ArticleLanguageDraft, review: ArticleLanguageReviewFields): string {
   return JSON.stringify([draft.title, draft.slug, draft.summary, draft.content, review.imageAltText, review.seoTitle, review.metaDescription, review.coverSelection]);
 }
@@ -555,6 +623,8 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [founderOverride, setFounderOverride] = useState(false);
   const autoSaveRef = useRef<number | null>(null);
   const { publishEnabled } = usePublishFlag();
+  const livePublishAccessRef = useRef(false);
+  livePublishAccessRef.current = editorialAccess.canPublish && publishEnabled;
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLanguage, setPreviewLanguage] = useState<LangCode>(DEFAULT_CREATE_LANGUAGE);
   const [qualityToolsCollapsed, setQualityToolsCollapsed] = useState(false);
@@ -1357,7 +1427,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           faithTopic: incomingFaithTopic,
           pulseDialogue: normalizedCategory === PULSE_DIALOGUE_CATEGORY ? incomingPulseDialogue : { ...EMPTY_PULSE_DIALOGUE_VALUE },
           authorByline: incomingAuthorByline,
-          language: normalizeLang((src as any).lang ?? (src as any).language ?? 'en'),
+          language: incomingLanguage,
           translationGroupId: String((src as any).translationGroupId || ''),
           status: ((((src as any).status as any) || 'draft') as any),
           tags: Array.isArray((src as any).tags) ? (src as any).tags : [],
@@ -1407,6 +1477,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const automaticTranslationMutation = useMutation({
     retry: false,
     mutationFn: async ({ anchorId, sourceId, languages, createdSource }: TranslationGenerationRequest) => {
+      const workspace = workspaceVersionRef.current;
       if (createdSource) {
         if (!liveCreationGenerationAccessRef.current) {
           throw new ArticleEditionIdentityError('Creation access could not be verified. The saved source was kept; translation generation was not attempted.');
@@ -1420,7 +1491,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
             || editionIdsRef.current[code] || committedEditionsRef.current[code] || requestedEditionsRef.current.has(code))) {
           throw new ArticleEditionIdentityError('Only the other languages of this newly saved source may be queued. Existing editions will not be regenerated.');
         }
-        return requeueArticleTranslations(sourceId, { languages });
+        return { result: await requeueArticleTranslations(sourceId, { languages }), before: null, workspace };
       }
       const editions = await loadVerifiedEditions();
       if (!liveGenerationAccessRef.current) {
@@ -1433,7 +1504,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         || editionIdsRef.current[code] || committedEditionsRef.current[code] || requestedEditionsRef.current.has(code))) {
         throw new ArticleEditionIdentityError('Only verified missing editions may be generated. Existing or previously bound editions will not be overwritten or recreated.');
       }
-      return generateMissingArticleTranslations(sourceId, { targetLanguages: languages });
+      if (articleEditionGroupKey({ translationGroupId: currentSnapshotRef.current.translationGroupId }) !== editions.translationGroupId) {
+        throw new ArticleEditionIdentityError('The translation group changed. Preserve your edits before generating editions.');
+      }
+      return { result: await generateMissingArticleTranslations(sourceId, { targetLanguages: languages }), before: editions, workspace };
     },
     onMutate: ({ languages }) => {
       setTranslationJobStatus('translating');
@@ -1443,8 +1517,10 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         return next;
       });
     },
-    onSuccess: async (result, vars) => {
-      if (vars.createdSource ? vars.createdSource !== createdTranslationSourceRef.current : vars.anchorId !== liveEditionAnchorRef.current) {
+    onSuccess: async ({ result, before, workspace }, vars) => {
+      const isCurrent = () => workspace === workspaceVersionRef.current
+        && (vars.createdSource ? vars.createdSource === createdTranslationSourceRef.current : vars.anchorId === liveEditionAnchorRef.current);
+      if (!isCurrent()) {
         toast('Generation was requested for the previous story. Reopen that story to verify its drafts.');
         return;
       }
@@ -1456,9 +1532,38 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       toast.success(`${vars.createdSource ? 'Translation job queued' : 'Missing-edition generation requested'} for ${vars.languages.map(code => code.toUpperCase()).join('+')}`);
       await qc.invalidateQueries({ queryKey: ['articles'], refetchType: 'none' });
       if (vars.createdSource) return;
-      const refreshed = await translationGroupQuery.refetch();
-      if (refreshed.error) {
-        setGenerationMessage(`${message} Edition verification failed; verify again before review. Do not repeat the accepted generation request.`);
+      try {
+        if (!before || !liveGenerationAccessRef.current) {
+          throw new ArticleEditionIdentityError('Current access could not be verified. Reopen the story to review its generated editions.');
+        }
+        const refreshed = await getArticleTranslationEditions(vars.anchorId);
+        if (!isCurrent()) return;
+        const initialized = verifyGeneratedEditions(before, refreshed, vars, result);
+        if (articleEditionGroupKey({ translationGroupId: currentSnapshotRef.current.translationGroupId }) !== before.translationGroupId) {
+          throw new ArticleEditionIdentityError('The workspace group changed during generation. Preserve your edits and review the story.');
+        }
+        await qc.cancelQueries({ queryKey: ['articles', 'translationEditions', vars.anchorId], exact: true });
+        if (!isCurrent()) return;
+        if (initialized) {
+          const group = refreshed.translationGroupId || '';
+          if (effectiveId && currentArticleRecord && vars.anchorId === vars.sourceId) {
+            const source = refreshed.rows.find(row => articleCmsId(row) === vars.sourceId)!;
+            qc.setQueryData(['articles', 'one', effectiveId], {
+              ...currentArticleRecord, translationGroupId: source.translationGroupId, translationKey: source.translationKey,
+            });
+          }
+          setTranslationGroupId(group);
+          setLastSavedSnapshot(previous => ({ ...previous, translationGroupId: group }));
+        }
+        qc.setQueryData(['articles', 'translationEditions', vars.anchorId], refreshed);
+      } catch (error: unknown) {
+        if (!isCurrent()) return;
+        autosavePausedRef.current = true;
+        pendingSaveRef.current = false;
+        setNeedsLatestRefresh(true);
+        const failure = normalizeArticleError(error,
+          error instanceof ArticleEditionIdentityError ? error.message : 'Edition verification failed').message;
+        setGenerationMessage(`${message} ${failure} Verify again before review. Do not repeat the accepted generation request.`);
       }
     },
     onError: (err: unknown, vars) => {
@@ -2007,6 +2112,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     // desiredStatusOverride lets callers force a specific status (e.g., Publish)
     mutationFn: async (desiredStatusOverride?: 'draft'|'scheduled'|'published') => {
       if (generationInFlightRef.current) throw new Error('Wait for translation generation before saving or publishing.');
+      if (unknownSaveIdentityRef.current) throw new ArticleEditionIdentityError('The saved article identity is uncertain. Review Draft Desk before creating or publishing another article.');
       if (createPermissionDeniedRef.current || refreshRequestRef.current) {
         throw new Error('Finish verifying the latest permissions or saved state before retrying. Your edits are kept.');
       }
@@ -2072,7 +2178,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
       const saveAllLanguageDrafts = saveKindRef.current === 'manual' && desiredStatusOverride !== 'published'
         && !wasPublished;
-      const translationGroupIdForSave = (translationGroupId || '').trim()
+      let translationGroupIdForSave = (translationGroupId || '').trim()
         || (!effectiveId && saveAllLanguageDrafts ? createTranslationGroupId(title || slug || summary || 'article') : '');
       const ordinaryTags = tags.filter((tag) => !trendingTopics.isProtectedTag(tag));
       const ordinaryTagsChanged = JSON.stringify(ordinaryTags)
@@ -2351,9 +2457,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         if (!coverSelectionSubmitted) {
           submittedReview.coverSelection = languageBaselinesRef.current[code]?.review.coverSelection;
         }
-        const result: ArticleMutationResponse = targetId
-          ? await updateArticle(targetId, payload)
-          : await createArticle(payload);
+        let result: ArticleMutationResponse;
+        try {
+          result = targetId ? await updateArticle(targetId, payload) : await createArticle(payload);
+        } catch (error: unknown) {
+          if (!targetId && error instanceof ArticleSaveProgressError && submittedWorkspace === workspaceVersionRef.current) {
+            unknownSaveIdentityRef.current = true;
+            setNeedsLatestRefresh(true);
+          }
+          throw error;
+        }
         if (submittedWorkspace !== workspaceVersionRef.current) {
           throw new ArticleSaveProgressError(
             `${code.toUpperCase()} save committed for the previous workspace. Open that source in Draft Desk to verify it. No edition identity was attached to the current story, and remaining steps were not attempted.`, null,
@@ -2367,6 +2480,32 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           savedId = targetId || createdArticleCmsId(savedArticle, {
             language: code, translationGroupId: translationGroupIdForSave || null,
           });
+          if (!targetId) {
+            const groups = new Set<string | null>();
+            for (const receipt of [result.article, result.data?.article]) {
+              if (!receipt) continue;
+              if (createdArticleCmsId(receipt, { language: code, translationGroupId: translationGroupIdForSave || null }) !== savedId) {
+                throw new ArticleEditionIdentityError('The creation acknowledgement contains conflicting CMS source IDs.');
+              }
+              if (receipt.translationGroupId !== undefined || receipt.translationKey) groups.add(articleEditionGroupKey(receipt));
+            }
+            if (groups.size > 1) throw new ArticleEditionIdentityError('The creation acknowledgement contains conflicting source groups.');
+            const acknowledgedGroup = groups.values().next().value || translationGroupIdForSave || null;
+            if (result.translationGroupId !== undefined
+              && articleEditionGroupKey({ translationGroupId: result.translationGroupId }) !== acknowledgedGroup) {
+              throw new ArticleEditionIdentityError('The creation acknowledgement contains a conflicting source group.');
+            }
+            if (acknowledgedGroup) {
+              if (acknowledgedGroup !== translationGroupIdForSave) {
+                signature = snapshotHash({ ...submittedSnapshot, slug: safeSlug, translationGroupId: acknowledgedGroup })
+                  + JSON.stringify(languageReviewFields[code]);
+              }
+              translationGroupIdForSave = acknowledgedGroup;
+              if (lastSubmitRef.current) lastSubmitRef.current.snapshot = {
+                ...lastSubmitRef.current.snapshot, translationGroupId: acknowledgedGroup,
+              };
+            }
+          }
         } catch (error: unknown) {
           if (!(error instanceof ArticleEditionIdentityError)) throw error;
           unknownSaveIdentityRef.current = true;
@@ -2423,12 +2562,16 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       }
 
       // Production CMS contract:
-      // Publish should persist the source draft first if needed, then publish via the canonical endpoint.
+      // The Backend validates the requested edition, then resolves and publishes its canonical group.
       if (!onSubmit && desiredStatusOverride === 'published') {
         if (!title.trim()) throw new Error('Title required to publish');
         if (!categoryKey) throw new Error('Category required to publish');
         if (!content.trim()) throw new Error('Content required to publish');
         if (!categoryAllowed) throw new Error('Category is not allowed');
+        const canonicalSource = verifiedEditions?.rows.find(row => articleCmsId(row) === verifiedEditions.canonicalSourceId);
+        if (verifiedEditions && !canonicalSource) {
+          throw new ArticleEditionIdentityError('The canonical source identity is unverified. Publication was not attempted; preserve your edits for Founder review.');
+        }
 
         return withSaveProgress(async () => {
           const draftPayload = buildPublicPayload({
@@ -2444,8 +2587,29 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
           step = 'Trending Topics';
           await saveSelectedTopics(idToPublish);
           step = 'Publication';
-          if (effectiveId && editionAnchorId !== liveEditionAnchorRef.current) {
+          if (verifiedEditions && canonicalSource) {
+            const latest = await loadVerifiedEditions();
+            const publishSourceId = articleCmsId(canonicalSource);
+            const latestSource = latest.rows.find(row => articleCmsId(row) === publishSourceId);
+            if (latest.canonicalSourceId !== publishSourceId || latest.translationGroupId !== verifiedEditions.translationGroupId
+              || !latestSource || latestSource.lang !== canonicalSource.lang
+              || articleEditionGroupKey(latestSource) !== articleEditionGroupKey(canonicalSource)
+              || !latest.rows.some(row => row.lang === language && articleCmsId(row) === idToPublish)) {
+              throw new ArticleEditionIdentityError('The canonical source or selected edition identity changed. Publication was not attempted; preserve your edits for Founder review.');
+            }
+          } else {
+            const createdSource = createdTranslationSourceRef.current;
+            if (!createdSource || createdSource.id !== idToPublish || createdSource.language !== language
+              || committedEditionsRef.current[language]?.id !== createdSource.id) {
+              throw new ArticleEditionIdentityError('The canonical source identity is unverified. Publication was not attempted; preserve your edits for Founder review.');
+            }
+          }
+          if (submittedWorkspace !== workspaceVersionRef.current
+            || effectiveId && editionAnchorId !== liveEditionAnchorRef.current) {
             throw new ArticleEditionIdentityError('The article workspace changed. Publication was not attempted.');
+          }
+          if (!livePublishAccessRef.current) {
+            throw new Error('Publication is no longer authorized or enabled. Your saved edits were kept.');
           }
           const published = await publishArticle(idToPublish);
           return { ...published, __npCreatedId: idToPublish };
@@ -2571,6 +2735,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       const raw = result as any;
       let saved = (raw?.article) || (raw?.data?.article) || (raw?.data && typeof raw.data === 'object' ? raw.data : raw);
       const returnedId = mutationTargetIdRef.current || raw?.__npCreatedId || (saved?._id ? articleCmsId(saved) : saved?.id);
+      if (saveKindRef.current === 'publish' && saved?._id && articleCmsId(saved) !== returnedId) saved = null;
       if (editorialAccess.canManageNews && saved?._id && articleCmsId(saved) === returnedId) {
         qc.setQueryData(['articles', 'one', String(returnedId)], saved);
       }

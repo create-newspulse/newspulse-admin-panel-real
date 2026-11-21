@@ -57,6 +57,9 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/api/articles', async (importOriginal) => ({
   ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
   createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
+  articleEditionLanguage: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionLanguage,
+  articleEditionGroupKey: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionGroupKey,
+  normalizeArticleLanguageCode: (await importOriginal<typeof import('@/lib/api/articles')>()).normalizeArticleLanguageCode,
   createArticle: mocks.createArticle,
   updateArticle: mocks.updateArticle,
   getArticle: mocks.getArticle,
@@ -185,7 +188,7 @@ beforeEach(() => {
     const article: Article = {
       _id: id, title: 'Existing story', lang: 'en', language: 'en', ...payload,
     };
-    return { anchorId: id, translationGroupId: article.translationGroupId || null, rows: [article] };
+    return { anchorId: id, canonicalSourceId: id, translationGroupId: article.translationGroupId || null, rows: [article] };
   });
 });
 

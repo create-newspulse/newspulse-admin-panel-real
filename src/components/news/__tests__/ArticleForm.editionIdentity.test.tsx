@@ -2,13 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Article } from '@/lib/api/articles';
-import { backendTranslationStatus, editionLanguages } from '@/tests/articleEditionFixtures';
+import type { Article, ArticleTranslationEditions } from '@/lib/api/articles';
+import { articleEditionGroupKey, articleEditionLanguage } from '@/lib/api/articles';
+import { applyLegacyEditionVariant, backendGenerationReceipt, backendTranslationStatus, editionLanguages, sourceEditLanguageCases } from '@/tests/articleEditionFixtures';
+import { TRANSLATION_SOURCE_REVIEW_MESSAGE } from '@/lib/articleLifecycle';
 import { ArticleForm } from '../ArticleForm';
 import ArticleEditPage from '@/pages/ArticleEditPage';
 
 type GenerationPayload = { targetLanguages: Array<'en' | 'hi' | 'gu'>; overwrite: false };
-type NewStoryGenerationPayload = { languages: string[] };
+type NewStoryGenerationPayload = { targetLanguages: Array<'en' | 'hi' | 'gu'>; overwrite?: false };
 
 const mocks = vi.hoisted(() => ({
   role: 'founder',
@@ -95,6 +97,7 @@ let perLang: Record<string, unknown>;
 let lookupFailure: unknown;
 const clients: QueryClient[] = [];
 const missingEdition = { present: false, presence: 'missing', articleId: null, childArticleId: null };
+const firstPublishedAt = '2026-02-01T10:00:00.000Z';
 
 function markMissing(...languages: Array<'en' | 'hi' | 'gu'>) {
   for (const language of languages) {
@@ -110,16 +113,31 @@ function completeGeneration() {
     if (!payload || !('targetLanguages' in payload) || payload.overwrite !== false) throw new Error('Unsafe generation payload');
     const sourceId = decodeURIComponent(url.slice('articles/'.length, -'/translations/generate'.length));
     if (!records[sourceId]) throw new Error('Unexpected generation source');
+    const sourceLanguage = articleEditionLanguage(records[sourceId]);
+    const group = Object.values(records).map(articleEditionGroupKey).find(Boolean) || 'initialized-story-group';
+    records[sourceId] = { ...records[sourceId], translationGroupId: group, translationKey: group };
+    const created: Partial<Record<typeof editionLanguages[number], string>> = {};
+    const skipped: Partial<Record<typeof editionLanguages[number], { id: string; reason: 'human_edited' }>> = {};
     for (const code of payload.targetLanguages) {
       const id = `story-a-${code}`;
-      if (records[id]) throw new Error('Attempted to overwrite an existing edition');
-      records[id] = {
+      if (records[id]) {
+        skipped[code] = { id, reason: 'human_edited' };
+        continue;
+      }
+      const child = {
         ...records[sourceId], _id: id, title: `Generated ${code} draft`, slug: `generated-${code}`,
-        language: code, lang: code, status: 'draft', publishedAt: undefined, sourceNewsId: undefined,
+        language: code, lang: code, status: 'draft' as const, publishedAt: undefined, sourceNewsId: undefined,
+        originalLang: code, sourceLanguage, sourceArticleId: sourceId, humanEdited: false, machineGenerated: true,
+        translationMeta: {
+          ...records[sourceId].translationMeta, sourceArticleId: sourceId,
+          sourceLanguage, targetLanguage: code,
+        },
       };
-      perLang[code] = { present: true, presence: 'present', articleId: id, childArticleId: id, status: 'ready' };
+      records[id] = child;
+      created[code] = id;
+      perLang[code] = { present: true, presence: 'translated', articleId: id, childArticleId: id, status: 'ready' };
     }
-    return { data: { ok: true } };
+    return { data: backendGenerationReceipt(sourceLanguage, group, payload.targetLanguages, created, skipped) };
   });
 }
 
@@ -146,22 +164,38 @@ async function open(expectedEditions = 3, article = records[source._id]) {
 }
 
 function configureNewStory() {
+  const get = mocks.get.getMockImplementation()!;
+  mocks.get.mockImplementation(async url => {
+    const suffix = '/translation-status';
+    const id = url.slice('articles/'.length, url.endsWith(suffix) ? -suffix.length : undefined);
+    if (!id.startsWith('created-') || !records[id]) return get(url);
+    if (url.endsWith(suffix)) {
+      if (lookupFailure) throw lookupFailure;
+      return { data: backendTranslationStatus(records[id], Object.values(records).filter(row => row._id.startsWith('created-'))) };
+    }
+    return { data: { ok: true, success: true, article: { ...records[id] }, data: { article: { ...records[id] } } } };
+  });
   const post = mocks.post.getMockImplementation()!;
   mocks.post.mockImplementation(async (url, payload) => {
     if (url === 'articles') {
       if (!payload || !('lang' in payload) || !payload.lang) throw new Error('Missing source language');
       const id = `created-${payload.lang}`;
       if (records[id]) throw new Error('Attempted to create the source twice');
-      records[id] = { _id: id, title: '', ...payload, sourceLanguage: payload.lang };
+      records[id] = {
+        _id: id, title: '', ...payload, sourceLanguage: payload.lang, sourceArticleId: id, originalLang: payload.lang,
+        translationGroupId: payload.translationGroupId || `backend-assigned-${payload.lang}`,
+      };
       perLang = Object.fromEntries(['en', 'hi', 'gu'].map(code => [
         code, code === payload.lang ? { articleId: id } : { ...missingEdition },
       ]));
-      return { data: { ok: true, article: { ...records[id] } } };
+      const article = { ...records[id], id };
+      return { data: { ok: true, success: true, status: 201, article, data: { article } } };
     }
     if (url.includes('/created-') && url.endsWith('/translations/generate')) {
-      if (!payload) throw new Error('Missing generation payload');
+      if (!payload || !('targetLanguages' in payload)) throw new Error('Missing generation targets');
       const normal = url.startsWith('admin/articles/');
-      const languages = 'languages' in payload ? payload.languages : 'targetLanguages' in payload ? payload.targetLanguages : [];
+      const languages = payload.targetLanguages;
+      if ('overwrite' in payload && payload.overwrite !== false) throw new Error('Unexpected translation overwrite');
       if (!normal && (!('overwrite' in payload) || payload.overwrite !== false)) throw new Error('Unsafe recovery payload');
       const sourceId = decodeURIComponent(url.slice(normal ? 'admin/articles/'.length : 'articles/'.length, -'/translations/generate'.length));
       const saved = records[sourceId];
@@ -169,10 +203,25 @@ function configureNewStory() {
       for (const code of languages) {
         const id = `created-${code}`;
         if (records[id]) throw new Error('Attempted to overwrite an edition');
-        records[id] = { ...saved, _id: id, title: `Generated ${code}`, slug: `created-${code}`, lang: code, language: code, status: 'draft' };
-        perLang[code] = { articleId: id, childArticleId: id, present: true, presence: 'present' };
+        records[id] = {
+          ...saved, _id: id, title: `Generated ${code}`, slug: `created-${code}`, lang: code, language: code,
+          originalLang: code, sourceArticleId: sourceId, status: 'draft',
+        };
+        perLang[code] = { articleId: id, childArticleId: id, present: true, presence: 'translated' };
       }
       return { data: { ok: true } };
+    }
+    if (url.startsWith('articles/created-') && url.endsWith('/publish')) {
+      const id = decodeURIComponent(url.slice('articles/'.length, -'/publish'.length));
+      if (!records[id]) throw new Error('Unknown CMS publication target');
+      const group = records[id].translationGroupId;
+      const editions = Object.values(records).filter(row => row.translationGroupId === group);
+      for (const row of editions) records[row._id] = { ...row, status: 'published', publishedAt: row.publishedAt || firstPublishedAt };
+      const article = { ...records[id] };
+      return { data: {
+        ok: true, success: true, status: 200, article, data: { article },
+        translationGroupId: group, publishedLanguages: editions.map(row => row.lang),
+      } };
     }
     return post(url, payload);
   });
@@ -197,6 +246,14 @@ async function openNewStory(language: 'en' | 'hi' | 'gu' = 'gu') {
   });
   await waitFor(() => expect(input('Language', 'select')).toHaveValue(language));
   return { client, ...rendered };
+}
+
+async function enabledStoryAction(name: 'Publish' | 'Save Update' | 'Refresh latest state') {
+  // While the action is absent, avoid rebuilding the whole editor's accessibility diagnostics on each poll.
+  await waitFor(() => expect(screen.queryByText(name, { selector: 'button' })).toBeEnabled());
+  const button = screen.getByRole('button', { name });
+  expect(button).toBeEnabled();
+  return button;
 }
 
 beforeEach(() => {
@@ -239,7 +296,13 @@ beforeEach(() => {
   mocks.post.mockImplementation(async url => {
     if (url.endsWith('/publish')) {
       const id = decodeURIComponent(url.slice('articles/'.length, -'/publish'.length));
-      records[id] = { ...records[id], status: 'published' };
+      const source = records[id];
+      if (!source) throw new Error('Unknown CMS publication target');
+      for (const [editionId, article] of Object.entries(records)) {
+        if (article.translationGroupId === source.translationGroupId) {
+          records[editionId] = { ...article, status: 'published', publishedAt: article.publishedAt || firstPublishedAt };
+        }
+      }
       return { data: { article: { ...records[id] }, publishedLanguages: ['en', 'hi', 'gu'] } };
     }
     return { data: { ok: true } };
@@ -677,6 +740,174 @@ describe('Normal new-story automatic translation', () => {
     });
   }
 
+  it.each(editionLanguages)('first publishes a new %s source with the Backend-assigned group and no second create', async language => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureNewStory();
+    await openNewStory(language);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await enabledStoryAction('Save Update');
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', `articles/created-${language}/publish`]);
+    const wire = JSON.parse(JSON.stringify(mocks.post.mock.calls[0][1]));
+    expect(wire).toMatchObject({ status: 'draft', lang: language, language, title: `New ${language} source` });
+    expect(wire).not.toHaveProperty('translationGroupId');
+    expect(wire).not.toHaveProperty('publishedAt');
+    expect(records[`created-${language}`]).toMatchObject({
+      status: 'published', sourceArticleId: `created-${language}`, sourceLanguage: language,
+      translationGroupId: `backend-assigned-${language}`, publishedAt: firstPublishedAt,
+    });
+    expect(input('Translation Group ID (optional)', 'input')).toHaveValue(`backend-assigned-${language}`);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(Object.keys(records).filter(id => id.startsWith('created-'))).toEqual([`created-${language}`]);
+  });
+
+  it.each(editionLanguages)('preserves Save Draft then Publish for a new %s source without recreating it', async language => {
+    configureNewStory();
+    await openNewStory(language);
+    fireEvent.click(screen.getByLabelText('Generate translations after Save Draft'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft saved'));
+    const saved = structuredClone(records[`created-${language}`]);
+    expect(saved.translationGroupId).toBeTruthy();
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ translationGroupId: saved.translationGroupId, status: 'draft' });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await enabledStoryAction('Save Update');
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', `articles/created-${language}/publish`]);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(records[`created-${language}`]).toEqual({ ...saved, status: 'published', publishedAt: firstPublishedAt });
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it.each(editionLanguages)('retries only canonical Publish after a new %s draft was acknowledged', async language => {
+    configureNewStory();
+    const post = mocks.post.getMockImplementation()!;
+    let failed = false;
+    mocks.post.mockImplementation(async (url, payload) => {
+      if (url.endsWith('/publish') && !failed) {
+        failed = true;
+        throw { response: { status: 503, data: {} } };
+      }
+      return post(url, payload);
+    });
+    await openNewStory(language);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(new RegExp(`${language.toUpperCase()} saved.*Publication did not complete`));
+    expect(input('Title', 'input')).toHaveValue(`New ${language} source`);
+    expect(records[`created-${language}`].status).toBe('draft');
+    fireEvent.click(await enabledStoryAction('Refresh latest state'));
+    fireEvent.click(await enabledStoryAction('Publish'));
+    await enabledStoryAction('Save Update');
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual([
+      'articles', `articles/created-${language}/publish`, `articles/created-${language}/publish`,
+    ]);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(records[`created-${language}`].translationGroupId).toBe(`backend-assigned-${language}`);
+  });
+
+  it.each([
+    { id: 'different-source' }, { sourceNewsId: 'different-cms-id' },
+    { lang: 'hi' }, { sourceLanguage: 'en' }, { sourceArticleId: 'different-source' },
+    { translationMeta: { sourceArticleId: 'different-source' } },
+    { translationGroupId: 'conflicting-group' }, { sourceArticleId: undefined, sourceLanguage: undefined },
+  ])('keeps the committed first-Publish draft paused after conflicting or unverified receipt %j', async patch => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureNewStory();
+    const post = mocks.post.getMockImplementation()!;
+    mocks.post.mockImplementation(async (url, payload) => {
+      if (url !== 'articles') return post(url, payload);
+      await post(url, payload);
+      return { data: { ok: true, success: true, status: 201,
+        article: { ...records['created-gu'], id: 'created-gu', ...patch }, data: { article: { ...records['created-gu'] } },
+      } };
+    });
+    await openNewStory();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(/save committed but its source identity could not be verified/);
+    expect(screen.getByRole('alert')).toHaveTextContent('Autosave is paused');
+    expect(input('Title', 'input')).toHaveValue('New gu source');
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles']);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(records['created-gu'].status).toBe('draft');
+  });
+
+  it.each([undefined, null, {}, [], 'unrecognized response', { ok: false, committed: true }, { ok: false }, { ok: true, success: false }])(
+    'does not retry creation when the successful create request returns an unreadable acknowledgement %j',
+    async data => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      configureNewStory();
+      const post = mocks.post.getMockImplementation()!;
+      mocks.post.mockImplementation(async (url, payload) => {
+        const result = await post(url, payload);
+        return url === 'articles' ? { data } : result;
+      });
+      await openNewStory();
+      fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+      await screen.findByText(/creation response could not be verified; a draft may already exist/);
+      expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+      expect(input('Title', 'input')).toHaveValue('New gu source');
+      expect(screen.queryByRole('button', { name: 'Refresh permissions' })).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles']);
+      expect(mocks.put).not.toHaveBeenCalled();
+      expect(records['created-gu'].status).toBe('draft');
+    },
+  );
+
+  it('parks a new draft after the server saves it but the creation response is lost', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureNewStory();
+    const post = mocks.post.getMockImplementation()!;
+    mocks.post.mockImplementation(async (url, payload) => {
+      const result = await post(url, payload);
+      if (url === 'articles') throw new Error('Connection closed before receipt');
+      return result;
+    });
+    await openNewStory();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(/a draft may already exist/i);
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(records['created-gu'].status).toBe('draft');
+    expect(input('Title', 'input')).toHaveValue('New gu source');
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles']);
+  });
+
+  it('preserves edits typed during first Publish while binding the acknowledged source ID and group', async () => {
+    configureNewStory();
+    const post = mocks.post.getMockImplementation()!;
+    let finish!: () => void;
+    mocks.post.mockImplementation(async (url, payload) => {
+      if (url === 'articles') await new Promise<void>(resolve => { finish = resolve; });
+      return post(url, payload);
+    });
+    await openNewStory('hi');
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Unsaved text typed after Publish' } });
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled());
+    expect(input('Title', 'input')).toHaveValue('Unsaved text typed after Publish');
+    expect(records['created-hi']).toMatchObject({ title: 'New hi source', status: 'published', translationGroupId: 'backend-assigned-hi' });
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', 'articles/created-hi/publish']);
+    expect(mocks.put).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/created-hi']);
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('publishedAt');
+    expect(records['created-hi']).toMatchObject({
+      title: 'Unsaved text typed after Publish', status: 'published', translationGroupId: 'backend-assigned-hi', publishedAt: firstPublishedAt,
+    });
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+  });
+
   it('recovers a new-story 403 by refreshing permissions without an ID or losing edits, then retries explicitly', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     mocks.role = 'editor';
@@ -766,7 +997,7 @@ describe('Normal new-story automatic translation', () => {
     const languages = ['en', 'hi', 'gu'].filter(code => code !== language);
     await waitFor(() => expect(mocks.success).toHaveBeenCalledWith(`Translation job queued for ${languages.map(code => code.toUpperCase()).join('+')}`));
     expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles', `admin/articles/created-${language}/translations/generate`]);
-    expect(mocks.post.mock.calls[1][1]).toEqual({ languages });
+    expect(mocks.post.mock.calls[1][1]).toEqual({ targetLanguages: languages });
     expect(records[`created-${language}`]).toMatchObject({ title: `New ${language} source`, lang: language, language, status: 'draft' });
     const group = records[`created-${language}`].translationGroupId;
     expect(group).toBeTruthy();
@@ -778,6 +1009,41 @@ describe('Normal new-story automatic translation', () => {
     expect(records['unrelated-hi'].title).toBe('Unrelated hi');
     expect(records['unrelated-gu'].title).toBe('Unrelated gu');
     expect(screen.getByRole('alert')).toHaveTextContent('drafts requiring translation review');
+  });
+
+  it.each([
+    { sourceLanguage: 'gu', targetLanguage: 'en' },
+    { sourceLanguage: 'gu', targetLanguage: 'hi' },
+    { sourceLanguage: 'hi', targetLanguage: 'gu' },
+    { sourceLanguage: 'en', targetLanguage: 'gu' },
+  ] as const)('creates only the selected $targetLanguage edition for a new $sourceLanguage source', async ({ sourceLanguage, targetLanguage }) => {
+    configureNewStory();
+    const before = structuredClone(records);
+    await openNewStory(sourceLanguage);
+    const labels = { en: 'English', hi: 'Hindi', gu: 'Gujarati' };
+    for (const code of editionLanguages.filter(code => code !== sourceLanguage && code !== targetLanguage)) {
+      const checkbox = screen.getByRole('checkbox', { name: labels[code] });
+      expect(checkbox).toBeChecked();
+      fireEvent.click(checkbox);
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith(`Translation job queued for ${targetLanguage.toUpperCase()}`));
+    const sourceId = `created-${sourceLanguage}`;
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual([
+      'articles', `admin/articles/${sourceId}/translations/generate`,
+    ]);
+    expect(mocks.post.mock.calls[1][1]).toEqual({ targetLanguages: [targetLanguage] });
+    expect(Object.keys(records).filter(id => id.startsWith('created-')).sort())
+      .toEqual([sourceId, `created-${targetLanguage}`].sort());
+    expect(records[`created-${targetLanguage}`]).toMatchObject({
+      _id: `created-${targetLanguage}`, sourceArticleId: sourceId,
+      sourceLanguage, lang: targetLanguage, language: targetLanguage,
+      translationGroupId: records[sourceId].translationGroupId, status: 'draft',
+    });
+    for (const [id, article] of Object.entries(before)) expect(records[id]).toEqual(article);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it.each(['add_news', 'draft_desk'])('retains authorized %s creation without Manage News discovery or Edit news rights', async module => {
@@ -1062,6 +1328,933 @@ describe('Normal new-story automatic translation', () => {
 });
 
 describe('Verified language edition identity', () => {
+  function configureBackendStory(sourceLanguage: typeof editionLanguages[number], status: 'draft' | 'published' = 'published') {
+    records = Object.fromEntries(editionLanguages.map(language => [`story-a-${language}`, {
+      ...source, status, _id: `story-a-${language}`, title: `Reviewed ${language} headline`, slug: `stored-${language}-slug`,
+      content: `Manually reviewed ${language} content that must not be regenerated or replaced by another edition.`,
+      summary: `Manually reviewed ${language} summary.`,
+      language, lang: language, originalLang: language, sourceLanguage, sourceArticleId: `story-a-${sourceLanguage}`,
+      translationKey: 'group-a', machineGenerated: language !== sourceLanguage, humanEdited: true,
+      publishedAt: `2026-01-${language === 'en' ? '15' : language === 'hi' ? '16' : '17'}T10:00:00.000Z`,
+      imageUrl: `https://images.example.test/${language}.jpg`,
+      coverImageUrl: `https://images.example.test/${language}.jpg`,
+      coverImage: { url: `https://images.example.test/${language}.jpg`, publicId: `cover-${language}` },
+    }]));
+    mocks.get.mockImplementation(async url => {
+      const suffix = '/translation-status';
+      const id = url.slice('articles/'.length, url.endsWith(suffix) ? -suffix.length : undefined);
+      const article = records[id];
+      if (!article) throw new Error('Unexpected article read');
+      if (url.endsWith(suffix)) {
+        if (lookupFailure) throw lookupFailure;
+        return { data: backendTranslationStatus(article, Object.values(records)) };
+      }
+      return { data: {
+        ok: true, success: true, article: { ...article }, data: { article: { ...article } },
+        translationGroupStatus: backendTranslationStatus(article, Object.values(records)).data.languageStates,
+      } };
+    });
+    mocks.put.mockImplementation(async (url, payload) => {
+      const id = url.slice('articles/'.length);
+      const current = records[id];
+      if (!current) throw new Error('Unexpected CMS mutation target');
+      const wire: Partial<Article> = JSON.parse(JSON.stringify(payload));
+      const oldCover = typeof current.coverImage === 'object' ? current.coverImage : undefined;
+      const oldUrl = oldCover?.url || current.coverImageUrl || current.imageUrl;
+      records[id] = { ...current, ...wire };
+      if (wire.coverImage && typeof wire.coverImage === 'object') {
+        const cover = { ...oldCover, ...wire.coverImage };
+        Object.assign(records[id], { coverImage: cover, imageUrl: cover.url, imageURL: cover.url, coverImageUrl: cover.url });
+        for (const sibling of Object.values(records).filter(row => row._id !== current._id)) {
+          const siblingUrl = typeof sibling.coverImage === 'object' ? sibling.coverImage.url : sibling.coverImageUrl || sibling.imageUrl;
+          if (!siblingUrl || siblingUrl === oldUrl) {
+            Object.assign(sibling, { coverImage: { ...cover }, imageUrl: cover.url, imageURL: cover.url, coverImageUrl: cover.url });
+          }
+        }
+      }
+      return { data: { ok: true, success: true, article: { ...records[id] }, data: { article: { ...records[id] } } } };
+    });
+  }
+
+  it.each(sourceEditLanguageCases)(
+    'saves a linked legacy $editLanguage edition of a $sourceLanguage source without creating group keys',
+    async ({ sourceLanguage, editLanguage }) => {
+      configureBackendStory(sourceLanguage);
+      applyLegacyEditionVariant(Object.values(records), sourceLanguage, 'all-missing-groups');
+      const before = structuredClone(records);
+      const id = `story-a-${editLanguage}`;
+      await open(3, records[id]);
+      expect(input('Language', 'select')).toHaveValue(editLanguage);
+      expect(screen.queryByText('Canonical source unverified')).not.toBeInTheDocument();
+      expect(screen.getByText('No stored group key. Updating this edition will not create one.')).toBeInTheDocument();
+      fireEvent.change(input('Title', 'input'), { target: { value: 'Reviewed legacy headline' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+      await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+      expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([`articles/${id}`]);
+      const wire = JSON.parse(JSON.stringify(mocks.put.mock.calls[0][1]));
+      expect(wire).not.toHaveProperty('translationGroupId');
+      expect(wire).not.toHaveProperty('translationKey');
+      expect(wire).not.toHaveProperty('sourceArticleId');
+      expect(wire).not.toHaveProperty('publishedAt');
+      expect(wire).not.toHaveProperty('status');
+      expect(wire).not.toHaveProperty('coverImage');
+      expect(records[id]).toMatchObject({ ...before[id], title: 'Reviewed legacy headline' });
+      for (const language of editionLanguages) {
+        expect(records[`story-a-${language}`].translationGroupId).toBeUndefined();
+        expect(records[`story-a-${language}`].translationKey).toBeUndefined();
+        if (language !== editLanguage) expect(records[`story-a-${language}`]).toEqual(before[`story-a-${language}`]);
+      }
+      expect(mocks.post).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { variant: 'child-missing-groups', sourceLanguage: 'gu', editLanguage: 'hi' },
+    { variant: 'source-missing-groups', sourceLanguage: 'hi', editLanguage: 'hi' },
+    { variant: 'placeholder-groups', sourceLanguage: 'en', editLanguage: 'gu' },
+    { variant: 'placeholder-group-with-key', sourceLanguage: 'gu', editLanguage: 'hi' },
+    { variant: 'translation-key-only', sourceLanguage: 'hi', editLanguage: 'en' },
+    { variant: 'original-language-only-source', sourceLanguage: 'gu', editLanguage: 'gu' },
+    { variant: 'nested-canonical-metadata', sourceLanguage: 'hi', editLanguage: 'gu' },
+    ...editionLanguages.map(sourceLanguage => ({
+      variant: 'language-aliases' as const, sourceLanguage,
+      editLanguage: editionLanguages.find(language => language !== sourceLanguage)!,
+    })),
+  ] as const)('hydrates and saves legacy $variant for $sourceLanguage/$editLanguage', async ({ variant, sourceLanguage, editLanguage }) => {
+    configureBackendStory(sourceLanguage);
+    applyLegacyEditionVariant(Object.values(records), sourceLanguage, variant);
+    const before = structuredClone(records);
+    const id = `story-a-${editLanguage}`;
+    await open(3, records[id]);
+    expect(input('Language', 'select')).toHaveValue(editLanguage);
+    expect(screen.getByText('Source Language').parentElement).toHaveTextContent(`(${sourceLanguage})`);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'A verified legacy update' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([`articles/${id}`]);
+    expect(records[id]).toMatchObject({
+      ...before[id], title: 'A verified legacy update', language: editLanguage, lang: editLanguage,
+    });
+    expect(records[id].translationGroupId).toBe(before[id].translationGroupId);
+    expect(records[id].translationKey).toBe(before[id].translationKey);
+    expect(records[id].sourceArticleId).toBe(before[id].sourceArticleId);
+    expect(records[id].translationMeta).toEqual(before[id].translationMeta);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ...(['all-missing-groups', 'placeholder-groups'] as const).flatMap(variant =>
+      sourceEditLanguageCases.map(combination => ({ ...combination, variant }))),
+    ...(['child-missing-groups', 'source-missing-groups', 'trimmed-group-keys',
+      'translation-key-only', 'original-language-only-source', 'language-aliases'] as const).flatMap(variant =>
+      editionLanguages.map(sourceLanguage => ({ sourceLanguage, editLanguage: sourceLanguage, variant }))),
+  ])('generates verified legacy $variant for $sourceLanguage/$editLanguage and then saves the same CMS edition', async ({
+    sourceLanguage, editLanguage, variant,
+  }) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureBackendStory(sourceLanguage);
+    const target = editionLanguages.find(code => code !== sourceLanguage && code !== editLanguage)!;
+    delete records[`story-a-${target}`];
+    applyLegacyEditionVariant(Object.values(records), sourceLanguage, variant);
+    const before = structuredClone(records);
+    completeGeneration();
+    const sourceId = `story-a-${sourceLanguage}`;
+    const editedId = `story-a-${editLanguage}`;
+    await open(2, records[editedId]);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Preserved unsaved legacy headline' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Edition identity is unverified/)).not.toBeInTheDocument();
+    expect(input('Title', 'input')).toHaveValue('Preserved unsaved legacy headline');
+    expect(input('Language', 'select')).toHaveValue(editLanguage);
+    expect(mocks.post).toHaveBeenCalledExactlyOnceWith(`articles/${sourceId}/translations/generate`, {
+      targetLanguages: [target], overwrite: false,
+    });
+    expect(mocks.put).not.toHaveBeenCalled();
+    const group = records[sourceId].translationGroupId;
+    expect(group).toBeTruthy();
+    for (const [id, article] of Object.entries(before)) {
+      expect(records[id]).toEqual(id === sourceId ? { ...article, translationGroupId: group, translationKey: group } : article);
+    }
+    expect(records[`story-a-${target}`]).toMatchObject({
+      lang: target, language: target, sourceArticleId: sourceId, sourceLanguage, status: 'draft',
+      translationGroupId: group, translationKey: group, humanEdited: false,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+    expect(mocks.put.mock.calls[0][0]).toBe(`articles/${editedId}`);
+    const wire = JSON.parse(JSON.stringify(mocks.put.mock.calls[0][1]));
+    for (const field of ['publishedAt', 'sourceArticleId', 'translationKey', 'status', 'coverImage', 'coverImageUrl', 'imageUrl']) {
+      expect(wire).not.toHaveProperty(field);
+    }
+    if (!articleEditionGroupKey(before[editedId]) && editedId !== sourceId) expect(wire).not.toHaveProperty('translationGroupId');
+    expect(records[editedId]).toMatchObject({
+      title: 'Preserved unsaved legacy headline', publishedAt: before[editedId].publishedAt,
+      slug: before[editedId].slug, coverImage: before[editedId].coverImage, sourceArticleId: sourceId, status: 'published',
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { name: 'missing receipt metadata', patch: { sourceLanguage: undefined, translationGroupId: undefined, translationKey: undefined } },
+    { name: 'conflicting receipt group', patch: { translationGroupId: 'other-group', translationKey: 'other-group' } },
+    { name: 'conflicting source language', patch: { sourceLanguage: 'hi' } },
+    { name: 'conflicting source ID', patch: { sourceArticleId: 'story-a-hi' } },
+    { name: 'wrong target language', patch: { targetLanguages: ['hi'] } },
+    { name: 'duplicate target languages', patch: { targetLanguages: ['en', 'en'] } },
+    { name: 'different created CMS ID', patch: { created: { en: 'another-en' } } },
+    { name: 'missing created ID', patch: { created: {} } },
+    { name: 'unrequested updated edition', patch: { updated: { hi: 'story-a-hi' } } },
+    { name: 'failed target', patch: { failed: { en: ['translation failed'] } } },
+    { name: 'duplicate created and skipped target', patch: { skipped: { en: { id: 'story-a-en', reason: 'human_edited' } } } },
+    { name: 'invalid skipped reason', patch: { created: {}, skipped: { en: { id: 'story-a-en', reason: 'unverified' } } } },
+  ])('pauses key initialization after $name without adopting identity or replaying generation', async ({ patch }) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureBackendStory('gu');
+    delete records['story-a-en'];
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'all-missing-groups');
+    completeGeneration();
+    const post = mocks.post.getMockImplementation()!;
+    mocks.post.mockImplementation(async (url, payload) => {
+      const result = await post(url, payload);
+      if (!result.data || typeof result.data !== 'object') throw new Error('Missing fixture receipt');
+      return { data: { ...result.data, ...patch } };
+    });
+    const { client } = await open(2, records['story-a-gu']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Keep this unverified-generation buffer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await screen.findByText(/Do not repeat the accepted generation request/);
+    expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes('Founder review is required'))).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save Update' })).toBeDisabled();
+    expect(input('Title', 'input')).toHaveValue('Keep this unverified-generation buffer');
+    expect(client.getQueryData<ArticleTranslationEditions>(['articles', 'translationEditions', 'story-a-gu'])?.translationGroupId).toBeNull();
+    expect(input('Translation Group ID (optional)', 'input')).toHaveValue('');
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Translations' }));
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
+  it.each(['changed held ID', 'changed canonical link', 'changed held group', 'uninitialized source', 'failed verification'] as const)(
+    'keeps buffers and pauses after accepted legacy generation with %s',
+    async failure => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      configureBackendStory('gu');
+      delete records['story-a-en'];
+      applyLegacyEditionVariant(Object.values(records), 'gu', 'placeholder-groups');
+      completeGeneration();
+      const post = mocks.post.getMockImplementation()!;
+      mocks.post.mockImplementation(async (url, payload) => {
+        const result = await post(url, payload);
+        if (failure === 'changed held ID') {
+          records['replacement-hi'] = { ...records['story-a-hi'], _id: 'replacement-hi' };
+          delete records['story-a-hi'];
+        } else if (failure === 'changed canonical link') {
+          records['story-a-gu'] = { ...records['story-a-gu'], sourceArticleId: 'story-a-hi' };
+        } else if (failure === 'changed held group') {
+          records['story-a-hi'] = { ...records['story-a-hi'], translationGroupId: 'initialized-story-group', translationKey: 'initialized-story-group' };
+        } else if (failure === 'uninitialized source') {
+          records['story-a-gu'] = { ...records['story-a-gu'], translationGroupId: 'null', translationKey: 'undefined' };
+        } else {
+          lookupFailure = { response: { status: 503, data: {} } };
+        }
+        return result;
+      });
+      const { client } = await open(2, records['story-a-gu']);
+      fireEvent.change(input('Title', 'input'), { target: { value: 'Keep the previous CMS edition buffer' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+      await screen.findByText(/Do not repeat the accepted generation request/);
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeDisabled();
+      expect(input('Title', 'input')).toHaveValue('Keep the previous CMS edition buffer');
+      expect(client.getQueryData<ArticleTranslationEditions>(['articles', 'translationEditions', 'story-a-gu'])?.translationGroupId).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      fireEvent.click(screen.getByRole('button', { name: 'Regenerate Translations' }));
+      expect(mocks.post).toHaveBeenCalledTimes(1);
+      expect(mocks.put).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts a verified skipped human-edited target without overwriting it during key initialization', async () => {
+    configureBackendStory('hi');
+    applyLegacyEditionVariant(Object.values(records), 'hi', 'all-missing-groups');
+    const humanEdition = structuredClone(records['story-a-en']);
+    delete records['story-a-en'];
+    completeGeneration();
+    const post = mocks.post.getMockImplementation()!;
+    mocks.post.mockImplementation(async (url, payload) => {
+      records['story-a-en'] = humanEdition;
+      return post(url, payload);
+    });
+    await open(2, records['story-a-hi']);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(records['story-a-en']).toEqual(humanEdition);
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.post).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi/translations/generate', {
+      targetLanguages: ['en'], overwrite: false,
+    });
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+  });
+
+  it('keeps both source and sibling buffers when a keyless source is initialized', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('gu');
+    delete records['story-a-en'];
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'all-missing-groups');
+    const before = structuredClone(records);
+    completeGeneration();
+    await open(2, records['story-a-gu']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Unsaved Gujarati source' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story content' }), { target: { value: 'Unsaved Gujarati body' } });
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Unsaved Hindi sibling' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(input('Title', 'input')).toHaveValue('Unsaved Hindi sibling');
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    expect(input('Title', 'input')).toHaveValue('Unsaved Gujarati source');
+    expect(screen.getByRole('textbox', { name: 'Story content' })).toHaveValue('Unsaved Gujarati body');
+    expect(records['story-a-hi']).toEqual(before['story-a-hi']);
+    expect(records['story-a-gu']).toEqual({
+      ...before['story-a-gu'], translationGroupId: 'initialized-story-group', translationKey: 'initialized-story-group',
+    });
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let an older edition read replace the verified initialized group', async () => {
+    configureBackendStory('gu');
+    delete records['story-a-en'];
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'all-missing-groups');
+    completeGeneration();
+    const post = mocks.post.getMockImplementation()!;
+    const get = mocks.get.getMockImplementation()!;
+    let finishPost!: () => void;
+    let finishOldRead!: () => void;
+    let holdOldRead = false;
+    mocks.post.mockImplementation(async (url, payload) => {
+      await new Promise<void>(resolve => { finishPost = resolve; });
+      return post(url, payload);
+    });
+    mocks.get.mockImplementation(async url => {
+      const result = await get(url);
+      if (holdOldRead && url === 'articles/story-a-gu/translation-status') {
+        holdOldRead = false;
+        await new Promise<void>(resolve => { finishOldRead = resolve; });
+      }
+      return result;
+    });
+    const { client } = await open(2, records['story-a-gu']);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(finishPost).toBeDefined());
+    holdOldRead = true;
+    let staleRead!: Promise<void>;
+    act(() => { staleRead = client.refetchQueries({ queryKey: ['articles', 'translationEditions', 'story-a-gu'] }); });
+    await waitFor(() => expect(finishOldRead).toBeDefined());
+    await act(async () => { finishPost(); });
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    await act(async () => { finishOldRead(); await staleRead; });
+    expect(client.getQueryData<ArticleTranslationEditions>(['articles', 'translationEditions', 'story-a-gu'])?.translationGroupId)
+      .toBe('initialized-story-group');
+    expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3);
+    expect(input('Translation Group ID (optional)', 'input')).toHaveValue('initialized-story-group');
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Safe after an older response' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-gu']);
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply a late initialized-group acknowledgement to a different workspace', async () => {
+    configureBackendStory('gu');
+    delete records['story-a-en'];
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'all-missing-groups');
+    completeGeneration();
+    const get = mocks.get.getMockImplementation()!;
+    let finish!: () => void;
+    mocks.get.mockImplementation(async url => {
+      const result = await get(url);
+      if (url === 'articles/story-a-en') await new Promise<void>(resolve => { finish = resolve; });
+      return result;
+    });
+    const mounted = await open(2, records['story-a-gu']);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    const other: Article = {
+      ...source, _id: 'other-gu', title: 'Different workspace', lang: 'gu', language: 'gu',
+      originalLang: 'gu', sourceLanguage: 'gu', sourceArticleId: 'other-gu',
+      translationGroupId: 'other-group', translationKey: 'other-group',
+    };
+    records = { 'other-gu': other };
+    mounted.rerender(editor(mounted.client, other));
+    await waitFor(() => expect(input('Title', 'input')).toHaveValue('Different workspace'));
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(1));
+    expect(input('Title', 'input')).toHaveValue('Different workspace');
+    expect(input('Translation Group ID (optional)', 'input')).toHaveValue('other-group');
+    expect(records['other-gu']).toEqual(other);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the verified nested canonical source for missing-edition generation', async () => {
+    configureBackendStory('gu');
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'nested-canonical-metadata');
+    delete records['story-a-en'];
+    completeGeneration();
+    await open(2, records['story-a-hi']);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Translations' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledExactlyOnceWith('articles/story-a-gu/translations/generate', {
+      targetLanguages: ['en'], overwrite: false,
+    }));
+    await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(records['story-a-en']).toMatchObject({ lang: 'en', sourceArticleId: 'story-a-gu', status: 'draft' });
+  });
+
+  it('keeps legacy buffers and sends no mutation after a nested source link conflicts', async () => {
+    configureBackendStory('gu');
+    applyLegacyEditionVariant(Object.values(records), 'gu', 'all-missing-groups');
+    await open(3, records['story-a-hi']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Keep this legacy edit' } });
+    records['story-a-hi'].translationMeta = { sourceArticleId: 'story-a-en' };
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Founder review is required'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Autosave is paused');
+    expect(input('Title', 'input')).toHaveValue('Keep this legacy edit');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['lookup', 'save'] as const)('preserves exact source-identity 409 Founder guidance after %s without retry', async phase => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    configureBackendStory('gu');
+    const before = structuredClone(records);
+    await open(3, records['story-a-hi']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Keep my unpublished changes to this published edition' } });
+    const message = 'Conflicting translation source links. Founder review is required.';
+    const error = { response: { status: 409, data: { code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message } } };
+    if (phase === 'lookup') lookupFailure = error;
+    else mocks.put.mockRejectedValueOnce(error);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(message));
+    expect(screen.getByRole('alert')).toHaveTextContent('Autosave is paused');
+    expect(input('Language', 'select')).toHaveValue('hi');
+    expect(input('Title', 'input')).toHaveValue('Keep my unpublished changes to this published edition');
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.put).toHaveBeenCalledTimes(phase === 'save' ? 1 : 0);
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+  });
+
+  it('sanitizes an untrusted source-identity 409 message while retaining Founder guidance and edits', async () => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    lookupFailure = { response: { status: 409, data: { code: 'TRANSLATION_SOURCE_IDENTITY_INVALID', message: 'PrivateDiagnostic: untrusted details' } } };
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Do not lose this title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(TRANSLATION_SOURCE_REVIEW_MESSAGE));
+    expect(screen.queryByText(/PrivateDiagnostic/)).not.toBeInTheDocument();
+    expect(input('Title', 'input')).toHaveValue('Do not lose this title');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('secondary cover: preserves a rejected selection and retries only its unsaved edition', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('gu', 'draft');
+    const before = structuredClone(records);
+    const put = mocks.put.getMockImplementation()!;
+    let rejectHindi = true;
+    mocks.put.mockImplementation(async (url, payload) => {
+      if (url === 'articles/story-a-hi' && rejectHindi) {
+        rejectHindi = false;
+        throw { response: { status: 409, data: {} } };
+      }
+      return put(url, payload);
+    });
+    await open(3, records['story-a-gu']);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Acknowledged Gujarati draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await screen.findByText(/GU saved.*HI save did not complete/);
+    expect(mocks.put.mock.calls[1][1]).toMatchObject({ coverImage: { url: mocks.libraryUrl, publicId: null } });
+    expect(records['story-a-hi']).toEqual(before['story-a-hi']);
+    expect(mocks.success).not.toHaveBeenCalledWith('Draft updated');
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.put).toHaveBeenCalledTimes(2);
+    const refresh = screen.getByRole('button', { name: 'Refresh latest state' });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    fireEvent.click(refresh);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([
+      'articles/story-a-gu', 'articles/story-a-hi', 'articles/story-a-hi',
+    ]);
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('secondary cover: acknowledges only the submitted revision when a newer upload finishes during its save', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('gu', 'draft');
+    await open(3, records['story-a-gu']);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    let finishUpload!: () => void;
+    mocks.upload.mockImplementationOnce(() => new Promise(resolve => {
+      finishUpload = () => resolve({ url: mocks.libraryUrl, publicId: 'newer-secondary-asset' });
+    }));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'newer-secondary.jpg', { type: 'image/jpeg' })] },
+    });
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    const put = mocks.put.getMockImplementation()!;
+    let finishSave!: () => void;
+    mocks.put.mockImplementation(async (url, payload) => {
+      if (url === 'articles/story-a-hi') await new Promise<void>(resolve => { finishSave = resolve; });
+      return put(url, payload);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(finishSave).toBeDefined());
+    await act(async () => { finishUpload(); finishSave(); });
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Draft updated');
+      expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    });
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    mocks.put.mockImplementation(put);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Draft updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([
+      'articles/story-a-gu', 'articles/story-a-hi', 'articles/story-a-hi',
+    ]);
+    expect(mocks.put.mock.calls[2][1]).toMatchObject({
+      coverImage: { url: mocks.libraryUrl, publicId: 'newer-secondary-asset' },
+    });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: preserves a pending cover choice across another edition save without copying it', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('gu');
+    const before = structuredClone(records);
+    await open(3, records['story-a-gu']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/hi.jpg');
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Independent Hindi edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('coverImage');
+    expect(records['story-a-gu']).toEqual(before['story-a-gu']);
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.put).toHaveBeenCalledTimes(2));
+    expect(mocks.put.mock.calls[1]).toEqual(['articles/story-a-gu', expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: null },
+    })]);
+    expect(records['story-a-hi'].coverImage).toEqual(before['story-a-hi'].coverImage);
+    expect(records['story-a-en']).toEqual(before['story-a-en']);
+  });
+
+  it('cover intent: retains a newer same-URL choice while an older save is being acknowledged', async () => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    const put = mocks.put.getMockImplementation()!;
+    let finish!: () => void;
+    mocks.put.mockImplementationOnce((url, payload) => new Promise(resolve => { finish = () => resolve(put(url, payload)); }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    await act(async () => { finish(); });
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put).toHaveBeenCalledTimes(2);
+    expect(mocks.put.mock.calls[1][1]).toMatchObject({ coverImage: { url: mocks.libraryUrl, publicId: null } });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('cover intent: does not resend an acknowledged cover during a later text-only update', async () => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Later text-only update' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('coverImage');
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('imageUrl');
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+  });
+
+  it('cover intent: displays refreshed cover metadata rather than an already acknowledged selection after switching', async () => {
+    configureBackendStory('gu');
+    const { client } = await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(screen.getByRole('button', { name: 'Save Update' })).toBeEnabled();
+    });
+    records['story-a-hi'].coverImage = { url: 'https://images.example.test/refreshed-hi.jpg', publicId: 'refreshed-hi' };
+    records['story-a-hi'].coverImageUrl = 'https://images.example.test/refreshed-hi.jpg';
+    await act(async () => { await client.invalidateQueries({ queryKey: ['articles'] }); });
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/refreshed-hi.jpg');
+    expect(mocks.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('cover intent: binds an upload finishing after a language switch to its original edition', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    configureBackendStory('gu');
+    await open(3, records['story-a-gu']);
+    let finish!: () => void;
+    mocks.upload.mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ url: 'https://images.example.test/late-gu.jpg', publicId: 'late-gu-asset' });
+    }));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'gu.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    await act(async () => { finish(); });
+    expect(input('Language', 'select')).toHaveValue('hi');
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/hi.jpg');
+    expect(mocks.put).not.toHaveBeenCalled();
+    fireEvent.change(input('Language', 'select'), { target: { value: 'gu' } });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/late-gu.jpg');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-gu', expect.objectContaining({
+      coverImage: { url: 'https://images.example.test/late-gu.jpg', publicId: 'late-gu-asset' },
+    }));
+    expect(records['story-a-hi'].coverImageUrl).toBe('https://images.example.test/hi.jpg');
+  });
+
+  it('cover intent: ignores an upload completing after the article workspace changes', async () => {
+    configureBackendStory('gu');
+    const { client, rerender } = await open(3, records['story-a-gu']);
+    let finish!: () => void;
+    mocks.upload.mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ url: 'https://images.example.test/previous-workspace.jpg', publicId: 'previous-asset' });
+    }));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'previous.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(finish).toBeDefined());
+    rerender(editor(client, records['story-a-hi']));
+    await waitFor(() => expect(input('Language', 'select')).toHaveValue('hi'));
+    await act(async () => { finish(); });
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('previous workspace'));
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/hi.jpg');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['success', 'failure'] as const)('cover intent: preserves a later Library choice when an earlier upload finishes with %s', async result => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    let finish!: () => void;
+    mocks.upload.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finish = () => result === 'success'
+        ? resolve({ url: 'https://images.example.test/obsolete-upload.jpg', publicId: 'obsolete-asset' })
+        : reject(new Error('Earlier upload failed'));
+    }));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'earlier.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    await act(async () => { finish(); });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: null },
+    }));
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['older-first', 'newer-first'] as const)('cover intent: orders overlapping uploads by file selection rather than response order (%s)', async order => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    const finish: Array<() => void> = [];
+    mocks.upload.mockImplementation(file => new Promise(resolve => {
+      finish.push(() => resolve({ url: `https://images.example.test/${file.name}`, publicId: file.name }));
+    }));
+    for (const name of ['earlier.jpg', 'latest.jpg']) {
+      fireEvent.change(screen.getByLabelText('Test cover file'), {
+        target: { files: [new File(['synthetic'], name, { type: 'image/jpeg' })] },
+      });
+    }
+    await waitFor(() => expect(finish).toHaveLength(2));
+    const sequence = order === 'older-first' ? [0, 1] : [1, 0];
+    await act(async () => { finish[sequence[0]](); });
+    if (order === 'older-first') expect(screen.getByText(/^Uploading/)).toBeInTheDocument();
+    await act(async () => { finish[sequence[1]](); });
+    expect(screen.getByTestId('cover-url')).toHaveTextContent('https://images.example.test/latest.jpg');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({
+      coverImage: { url: 'https://images.example.test/latest.jpg', publicId: 'latest.jpg' },
+    }));
+  });
+
+  it('cover intent: retains the previous unsaved cover choice when its replacement upload fails', async () => {
+    configureBackendStory('gu');
+    await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    mocks.upload.mockRejectedValueOnce(new Error('Replacement upload failed'));
+    fireEvent.change(screen.getByLabelText('Test cover file'), {
+      target: { files: [new File(['synthetic'], 'failed.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(mocks.error).toHaveBeenCalled());
+    expect(screen.getByTestId('cover-url')).toHaveTextContent(mocks.libraryUrl);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put).toHaveBeenCalledWith('articles/story-a-hi', expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: null },
+    }));
+  });
+
+  it.each(['Library', 'upload'] as const)('cover intent: preserves a %s selection made while the first source save is pending', async selection => {
+    configureNewStory();
+    await openNewStory();
+    fireEvent.click(screen.getByLabelText('Generate translations after Save Draft'));
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    const submittedUrl = mocks.libraryUrl;
+    const post = mocks.post.getMockImplementation()!;
+    let finish!: () => Promise<void>;
+    mocks.post.mockImplementationOnce((url, payload) => new Promise(resolve => {
+      finish = async () => resolve(await post(url, payload));
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    mocks.libraryUrl = 'https://images.example.test/newer-create-choice.jpg';
+    let finishUpload: (() => void) | undefined;
+    if (selection === 'Library') {
+      fireEvent.click(screen.getByText('Choose test cover'));
+      fireEvent.click(screen.getByText('Use test cover'));
+    } else {
+      mocks.upload.mockImplementationOnce(() => new Promise(resolve => {
+        finishUpload = () => resolve({ url: mocks.libraryUrl, publicId: 'late-create-asset' });
+      }));
+      fireEvent.change(screen.getByLabelText('Test cover file'), {
+        target: { files: [new File(['synthetic'], 'late-create.jpg', { type: 'image/jpeg' })] },
+      });
+      await waitFor(() => expect(finishUpload).toBeDefined());
+    }
+    await act(async () => { await finish(); });
+    if (finishUpload) await act(async () => { finishUpload!(); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
+    expect(records['created-gu'].coverImage).toMatchObject({ url: submittedUrl });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft updated'));
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/created-gu', expect.objectContaining({
+      coverImage: { url: mocks.libraryUrl, publicId: selection === 'Library' ? null : 'late-create-asset' },
+    }));
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles']);
+  });
+
+  it('cover intent: preserves authorized shared-cover synchronization without overwriting a custom sibling cover', async () => {
+    configureBackendStory('gu');
+    Object.assign(records['story-a-hi'], {
+      coverImage: { url: records['story-a-gu'].coverImageUrl!, publicId: 'cover-gu' },
+      coverImageUrl: records['story-a-gu'].coverImageUrl, imageUrl: records['story-a-gu'].imageUrl,
+    });
+    const customSibling = structuredClone(records['story-a-en']);
+    await open(3, records['story-a-gu']);
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-gu']);
+    expect(records['story-a-hi'].coverImage).toEqual({ url: mocks.libraryUrl, publicId: null });
+    expect(records['story-a-en']).toEqual(customSibling);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(sourceEditLanguageCases)(
+    'updates a published $editLanguage edition of a $sourceLanguage source through the actual Backend-shaped contract',
+    async ({ sourceLanguage, editLanguage }) => {
+      configureBackendStory(sourceLanguage);
+      const before = structuredClone(records);
+      const id = `story-a-${editLanguage}`;
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+      clients.push(client);
+      render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/admin/articles/${id}/edit`]}>
+        <Routes><Route path="/admin/articles/:id/edit" element={<ArticleEditPage />} /></Routes>
+      </MemoryRouter></QueryClientProvider>);
+      await waitFor(() => expect(screen.getAllByTitle('Open this language variant')).toHaveLength(3));
+      await screen.findByText('No Trending Topics are available.');
+      const sourceLabel = { en: 'English (en)', hi: 'Hindi (hi)', gu: 'Gujarati (gu)' }[sourceLanguage];
+      expect(screen.getByText('Source Language').parentElement).toHaveTextContent(sourceLabel);
+      expect(input('Language', 'select')).toHaveValue(editLanguage);
+      expect(input('Title', 'input')).toHaveValue(before[id].title);
+      fireEvent.change(input('Title', 'input'), { target: { value: `Approved ${editLanguage} headline update` } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+      await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+      expect(mocks.put).toHaveBeenCalledTimes(1);
+      const [url, payload] = mocks.put.mock.calls[0];
+      expect(url).toBe(`articles/${id}`);
+      expect(payload).toMatchObject({
+        title: `Approved ${editLanguage} headline update`, slug: before[id].slug,
+        language: editLanguage, lang: editLanguage, translationGroupId: 'group-a',
+        content: before[id].content, summary: before[id].summary,
+      });
+      expect(payload).not.toHaveProperty('status');
+      expect(payload).not.toHaveProperty('publishedAt');
+      expect(payload).not.toHaveProperty('sourceArticleId');
+      expect(payload).not.toHaveProperty('sourceLanguage');
+      expect(payload).not.toHaveProperty('originalLang');
+      expect(records[id]).toMatchObject({
+        ...before[id], title: `Approved ${editLanguage} headline update`,
+      });
+      for (const language of editionLanguages.filter(code => code !== editLanguage)) {
+        expect(records[`story-a-${language}`]).toEqual(before[`story-a-${language}`]);
+      }
+      expect(mocks.post).not.toHaveBeenCalled();
+      expect(mocks.error).not.toHaveBeenCalled();
+      expect(screen.queryByText('Canonical source unverified')).not.toBeInTheDocument();
+    },
+  );
+
+  it('uses the scalar canonical CMS source for source labels rather than the child originalLang', async () => {
+    configureBackendStory('gu');
+    Object.values(records).forEach(record => { delete record.sourceLanguage; });
+    await open(3, records['story-a-hi']);
+    expect(screen.getByText('Source Language').parentElement).toHaveTextContent('Gujarati (gu)');
+    expect(screen.queryByText('Canonical source unverified')).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it.each(sourceEditLanguageCases)(
+    'preserves edition-specific media when selecting $editLanguage in the $sourceLanguage source workspace',
+    async ({ sourceLanguage, editLanguage }) => {
+      configureBackendStory(sourceLanguage);
+      const before = structuredClone(records);
+      await open(3, records[`story-a-${sourceLanguage}`]);
+      fireEvent.change(input('Language', 'select'), { target: { value: editLanguage } });
+      const id = `story-a-${editLanguage}`;
+      expect(input('Title', 'input')).toHaveValue(before[id].title);
+      fireEvent.change(input('Title', 'input'), { target: { value: `Reviewed ${editLanguage} update after switching` } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+      await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+      expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([`articles/${id}`]);
+      expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('imageUrl');
+      expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('coverImageUrl');
+      expect(mocks.put.mock.calls[0][1]).not.toHaveProperty('coverImage');
+      expect(records[id]).toMatchObject({ ...before[id], title: `Reviewed ${editLanguage} update after switching` });
+      for (const language of editionLanguages.filter(code => code !== editLanguage)) {
+        expect(records[`story-a-${language}`]).toEqual(before[`story-a-${language}`]);
+      }
+      expect(mocks.post).not.toHaveBeenCalled();
+    },
+  );
+
+  it('saves an explicitly chosen child cover without copying it back on the next source update', async () => {
+    configureBackendStory('gu');
+    const sourceCover = records['story-a-gu'].coverImage;
+    await open(3, records['story-a-gu']);
+    const languageSelect = input('Language', 'select');
+    const saveButton = screen.getByRole('button', { name: 'Save Update' });
+    fireEvent.change(languageSelect, { target: { value: 'hi' } });
+    fireEvent.click(screen.getByText('Choose test cover'));
+    fireEvent.click(screen.getByText('Use test cover'));
+    fireEvent.click(saveButton);
+    await waitFor(() => {
+      expect(mocks.success).toHaveBeenCalledWith('Article updated');
+      expect(saveButton).toBeEnabled();
+    });
+    expect(mocks.put).toHaveBeenCalledExactlyOnceWith('articles/story-a-hi', expect.objectContaining({
+      coverImage: { url: 'https://images.example.test/reviewed-cover.jpg', publicId: null },
+    }));
+    fireEvent.change(languageSelect, { target: { value: 'gu' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Updated original GU headline' } });
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(mocks.success.mock.calls.filter(([message]) => message === 'Article updated')).toHaveLength(2));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi', 'articles/story-a-gu']);
+    expect(mocks.put.mock.calls[1][1]).not.toHaveProperty('coverImage');
+    expect(records['story-a-gu'].coverImage).toEqual(sourceCover);
+    expect(records['story-a-hi'].coverImage).toMatchObject({ url: 'https://images.example.test/reviewed-cover.jpg' });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('updates the verified CMS edition rather than a public-copy ID or its canonical source ID', async () => {
+    configureBackendStory('gu');
+    records['story-a-hi'] = { ...records['story-a-hi'], _id: 'public-copy-hi', sourceNewsId: 'story-a-hi' };
+    await open(3, records['story-a-hi']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Approved HI copy-backed edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi']);
+    expect(mocks.get).not.toHaveBeenCalledWith('articles/public-copy-hi');
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(records['story-a-hi'].sourceArticleId).toBe('story-a-gu');
+    expect(records['story-a-gu'].title).toBe('Reviewed gu headline');
+  });
+
+  it.each([
+    { articleId: null }, { articleId: 'story-a-hi' }, { childArticleId: 'unrelated-id' },
+    { sourceArticleId: 'unrelated-id' }, { presence: 'duplicate' },
+  ])('keeps edits and sends no mutation for inconsistent Backend-shaped edition identity %j', async patch => {
+    configureBackendStory('gu');
+    const get = mocks.get.getMockImplementation()!;
+    mocks.get.mockImplementation(async url => {
+      if (!url.endsWith('/translation-status')) return get(url);
+      const response = backendTranslationStatus(records['story-a-hi'], Object.values(records));
+      Object.assign(response.data.perLang.gu, patch);
+      return { data: response };
+    });
+    await open(0, records['story-a-hi']);
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Preserve this HI edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Update' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Invalid or ambiguous'));
+    expect(input('Title', 'input')).toHaveValue('Preserve this HI edit');
+    expect(screen.getByRole('alert')).toHaveTextContent('Autosave is paused');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
   it.each(['hi', 'gu'])('never saves an unrelated %s story returned by ignored group filtering', async language => {
     await open();
     fireEvent.change(input('Language', 'select'), { target: { value: language } });
@@ -1273,30 +2466,124 @@ describe('Verified language edition identity', () => {
     expect(mocks.post).toHaveBeenCalledTimes(2);
   });
 
-  it.each([401, 403, 409, 503])('saves the verified HI edition before POST publish and never replays its save after HTTP %s', async status => {
+  it.each([
+    { language: 'hi', status: 401 }, { language: 'gu', status: 403 },
+    { language: 'hi', status: 409 }, { language: 'gu', status: 503 },
+  ])('canonical publication: saves $language separately and never replays its save after HTTP $status', async ({ language, status }) => {
     for (const id of ['story-a-en', 'story-a-hi', 'story-a-gu']) records[id].status = 'draft';
-    await open();
-    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
-    fireEvent.change(input('Title', 'input'), { target: { value: 'Saved Hindi publication text' } });
+    const id = `story-a-${language}`;
+    records[id].publishedAt = '2026-01-20T10:00:00.000Z';
+    const before = structuredClone(records);
+    const { client } = await open();
+    fireEvent.change(input('Language', 'select'), { target: { value: language } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Saved translated publication text' } });
     mocks.post.mockRejectedValueOnce({ response: { status, data: {} } });
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/HI saved.*Publication did not complete/));
-    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi']);
-    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi/publish']);
+    await waitFor(() => expect(screen.queryByRole('alert')).toHaveTextContent(new RegExp(`${language.toUpperCase()} saved.*Publication did not complete`)));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([`articles/${id}`]);
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual([`articles/${id}/publish`]);
     expect(mocks.put.mock.invocationCallOrder[0]).toBeLessThan(mocks.post.mock.invocationCallOrder[0]);
-    expect(records['story-a-hi'].title).toBe('Saved Hindi publication text');
-    const refresh = screen.getByRole('button', { name: 'Refresh latest state' });
-    await waitFor(() => expect(refresh).toBeEnabled());
-    fireEvent.click(refresh);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
-    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
+    expect(records[id].title).toBe('Saved translated publication text');
+    fireEvent.click(await enabledStoryAction('Refresh latest state'));
+    fireEvent.click(await enabledStoryAction('Publish'));
+    await enabledStoryAction('Save Update');
     expect(mocks.put).toHaveBeenCalledTimes(1);
-    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi/publish', 'articles/story-a-hi/publish']);
-    expect(records['story-a-hi']).toMatchObject({
-      status: 'published', slug: 'story-a-hi', translationGroupId: 'group-a', publishedAt: source.publishedAt, imageUrl: source.imageUrl,
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual([`articles/${id}/publish`, `articles/${id}/publish`]);
+    expect(records[id]).toMatchObject({ ...before[id], status: 'published', title: 'Saved translated publication text' });
+    expect(records[source._id]).toEqual({ ...before[source._id], status: 'published' });
+    expect(client.getQueryData(['articles', 'one', id])).toMatchObject({
+      _id: id, lang: language, publishedAt: before[id].publishedAt, title: 'Saved translated publication text',
     });
+    expect(input('Language', 'select')).toHaveValue(language);
+    expect(input('Title', 'input')).toHaveValue('Saved translated publication text');
     expect(records['unrelated-hi'].title).toBe('Unrelated hi');
+  });
+
+  it('canonical publication: refuses an unresolved source without publishing or dropping edits', async () => {
+    for (const id of ['story-a-en', 'story-a-hi', 'story-a-gu']) {
+      records[id].status = 'draft';
+      delete records[id].sourceLanguage;
+    }
+    await open();
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Keep this unresolved-source edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(/canonical source.*unverified/i);
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/canonical source.*unverified/i)));
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(input('Title', 'input')).toHaveValue('Keep this unresolved-source edit');
+  });
+
+  it('canonical publication: rechecks the source after saving the selected edition', async () => {
+    for (const id of ['story-a-en', 'story-a-hi', 'story-a-gu']) records[id].status = 'draft';
+    const put = mocks.put.getMockImplementation()!;
+    mocks.put.mockImplementation(async (url, payload) => {
+      const result = await put(url, payload);
+      for (const id of ['story-a-en', 'story-a-hi', 'story-a-gu']) records[id].sourceLanguage = 'gu';
+      return result;
+    });
+    await open();
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Acknowledged Hindi edition' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(/HI saved.*Publication did not complete/);
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi']);
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(records['story-a-hi'].title).toBe('Acknowledged Hindi edition');
+    expect(input('Title', 'input')).toHaveValue('Acknowledged Hindi edition');
+  });
+
+  it('canonical publication: never uses the source receipt as the child state when its refresh fails', async () => {
+    configureBackendStory('gu', 'draft');
+    records['story-a-hi'].tags = ['child-only-tag'];
+    records['story-a-gu'].tags = ['source-only-tag'];
+    const before = structuredClone(records);
+    const post = mocks.post.getMockImplementation()!;
+    const get = mocks.get.getMockImplementation()!;
+    let published = false;
+    mocks.post.mockImplementation(async (url, payload) => {
+      const result = await post(url, payload);
+      published = true;
+      return { ...result, data: { article: { ...records['story-a-gu'] }, publishedLanguages: ['en', 'hi', 'gu'] } };
+    });
+    mocks.get.mockImplementation(async url => {
+      if (published && url === 'articles/story-a-hi') throw { response: { status: 503, data: {} } };
+      return get(url);
+    });
+    const { client } = await open(3, records['story-a-hi']);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await screen.findByText(/change was saved, but the latest article could not be loaded/);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh latest state' })).toBeEnabled());
+    expect(mocks.post.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi/publish']);
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(input('Language', 'select')).toHaveValue('hi');
+    expect(input('Title', 'input')).toHaveValue(before['story-a-hi'].title);
+    expect(client.getQueryData<Article>(['articles', 'one', 'story-a-hi'])?._id).not.toBe('story-a-gu');
+    expect(screen.getByText('child-only-tag')).toBeInTheDocument();
+    expect(screen.queryByText('source-only-tag')).not.toBeInTheDocument();
+  });
+
+  it('canonical publication: preserves the saved edition but stops if publishing permission is revoked', async () => {
+    for (const id of ['story-a-en', 'story-a-hi', 'story-a-gu']) records[id].status = 'draft';
+    const put = mocks.put.getMockImplementation()!;
+    let finishSave!: () => void;
+    mocks.put.mockImplementationOnce(async (url, payload) => {
+      await new Promise<void>(resolve => { finishSave = resolve; });
+      return put(url, payload);
+    });
+    const { client, rerender } = await open();
+    fireEvent.change(input('Language', 'select'), { target: { value: 'hi' } });
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Saved before access changed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    await waitFor(() => expect(finishSave).toBeDefined());
+    mocks.role = 'editor';
+    rerender(editor(client, records[source._id]));
+    await act(async () => { finishSave(); });
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.stringMatching(/HI saved.*Publication did not complete/)));
+    expect(mocks.put.mock.calls.map(([url]) => url)).toEqual(['articles/story-a-hi']);
+    expect(records['story-a-hi'].title).toBe('Saved before access changed');
+    expect(mocks.post).not.toHaveBeenCalled();
   });
 
   it('rejects a programmatic group change instead of using it as an edition lookup or update', async () => {
@@ -1415,7 +2702,7 @@ describe('Verified missing-edition generation', () => {
       'articles/story-a-en/translations/generate', { targetLanguages: ['gu'], overwrite: false },
     );
     expect(mocks.put).not.toHaveBeenCalled();
-    expect(records[source._id]).toEqual(sourceBefore);
+    expect(records[source._id]).toEqual({ ...sourceBefore, translationKey: sourceBefore.translationGroupId });
     expect(records['story-a-hi']).toEqual(hindiBefore);
     expect(input('Language', 'select')).toHaveValue('hi');
     expect(input('Title', 'input')).toHaveValue('Unsaved Hindi headline');
@@ -1429,7 +2716,7 @@ describe('Verified missing-edition generation', () => {
 
   it.each([
     ['en', 'gu'], ['hi', 'en'], ['gu', 'en'],
-  ] as const)('creates the missing %s edition from canonical %s and only saves/publishes its verified CMS ID', async (target, sourceLanguage) => {
+  ] as const)('creates missing %s from canonical %s and submits the reviewed edition to group Publish', async (target, sourceLanguage) => {
     Object.values(records).forEach(record => { record.sourceLanguage = sourceLanguage; });
     markMissing(target);
     completeGeneration();
@@ -1450,7 +2737,10 @@ describe('Verified missing-edition generation', () => {
     ]);
     expect(mocks.put.mock.calls.map(([url]) => url)).toEqual([`articles/story-a-${target}`]);
     expect(records[sourceId].publishedAt).toBe(source.publishedAt);
-    expect(records[`story-a-${target}`].title).toBe(`Human-reviewed ${target} edition`);
+    expect(records[`story-a-${target}`]).toMatchObject({
+      title: `Human-reviewed ${target} edition`, sourceArticleId: sourceId,
+      translationGroupId: records[sourceId].translationGroupId, status: 'published',
+    });
     expect(records['unrelated-hi'].title).toBe('Unrelated hi');
     expect(records['unrelated-gu'].title).toBe('Unrelated gu');
     expect(mocks.get.mock.calls.every(([url]) => url !== 'articles')).toBe(true);

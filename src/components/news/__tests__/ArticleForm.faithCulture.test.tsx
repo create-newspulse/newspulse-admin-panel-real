@@ -48,6 +48,9 @@ vi.mock('@/lib/api', () => ({ default: { get: mocks.apiGet } }));
 vi.mock('@/lib/api/articles', async (importOriginal) => ({
   ArticleEditionIdentityError: (await importOriginal<typeof import('@/lib/api/articles')>()).ArticleEditionIdentityError,
   createdArticleCmsId: (await importOriginal<typeof import('@/lib/api/articles')>()).createdArticleCmsId,
+  articleEditionLanguage: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionLanguage,
+  articleEditionGroupKey: (await importOriginal<typeof import('@/lib/api/articles')>()).articleEditionGroupKey,
+  normalizeArticleLanguageCode: (await importOriginal<typeof import('@/lib/api/articles')>()).normalizeArticleLanguageCode,
   createArticle: mocks.createArticle,
   updateArticle: mocks.updateArticle,
   getArticle: mocks.getArticle,
@@ -209,6 +212,7 @@ beforeEach(() => {
   mocks.requeueArticleTranslations.mockResolvedValue({ ok: true });
   mocks.editions.mockImplementation(async (id) => ({
     anchorId: id, translationGroupId: storedArticle.translationGroupId || null, rows: [{ ...storedArticle }],
+    canonicalSourceId: storedArticle.sourceNewsId || storedArticle._id,
   }));
 });
 

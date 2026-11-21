@@ -4,7 +4,7 @@
 
 import { adminApiClient } from '@/lib/adminApiClient';
 import { z } from 'zod';
-import { ArticleRestoreGuardError } from '@/lib/articleLifecycle';
+import { ArticleRestoreGuardError, ArticleSaveProgressError } from '@/lib/articleLifecycle';
 import type { ArticleStatus } from '@/types/articles';
 import type { PulseDialogueArticleMetadata } from '@/lib/pulseDialogue';
 import type { AuthorByline } from '@/lib/authorByline';
@@ -103,7 +103,7 @@ export interface Article {
 export interface ArticleMutationResponse {
   ok?: boolean;
   success?: boolean;
-  status?: number;
+  status?: number | string;
   article?: Article;
   data?: { article?: Article };
   restoredStatuses?: ArticleStatus[];
@@ -346,8 +346,9 @@ function mutationResponse(data: ArticleMutationResponse): ArticleMutationRespons
     throw new Error('Invalid article operation response');
   }
   if (data?.ok === false || data?.success === false) {
+    const status = Number(data.status);
     throw Object.assign(new Error('Article operation failed'), {
-      response: { status: data.status && data.status >= 400 ? data.status : 500, data },
+      response: { status: status >= 400 ? status : 500, data },
     });
   }
   if (data.ok !== true && data.success !== true && !data.article?._id && !data.data?.article?._id) {
@@ -550,37 +551,64 @@ export function createdArticleCmsId(
   article: Article | undefined,
   expected: { language: EditionLanguage; translationGroupId: string | null },
 ): string {
-  if (!article || article._id == null || article._id === '') {
+  if (!isEditionRecord(article) || article._id == null || article._id === '') {
     throw new ArticleEditionIdentityError('The created source returned no CMS News ID.');
   }
   const id = editionCmsId(article);
-  if (article._id !== id) {
+  if (article._id !== id || (article.id != null && article.id !== id)) {
     throw new ArticleEditionIdentityError('The created source returned a different CMS News identity.');
   }
-  // An accepted create supplies omitted metadata through its submitted payload, not a discovery lookup.
-  if ((article.lang != null || article.language != null) && articleEditionLanguage(article) !== expected.language) {
-    throw new ArticleEditionIdentityError('The created source language does not match the submitted story.');
-  }
   const group = editionGroupId(article);
-  if ((article.translationGroupId !== undefined && group !== expected.translationGroupId)
-    || (article.translationKey && article.translationKey !== expected.translationGroupId)) {
+  const assignedGroup = expected.translationGroupId === null && group !== null;
+  const expectedGroup = assignedGroup ? group : expected.translationGroupId;
+  if ((article.translationGroupId !== undefined && group !== expectedGroup)
+    || (article.translationKey && article.translationKey !== expectedGroup)
+    || (assignedGroup && articleEditionGroupKey(article) !== group)) {
     throw new ArticleEditionIdentityError('The created source translation group does not match the submitted story.');
   }
-  for (const value of [article.sourceLanguage, article.originalLanguage, article.baseLanguage, article.sourceLang, article.originalLang, article.baseLang]) {
-    if (value != null && value !== '' && (typeof value !== 'string' || value.trim().toLowerCase() !== expected.language)) {
-      throw new ArticleEditionIdentityError('The created article is not the submitted translation source.');
+  let sourceLinkVerified = false;
+  const verifySource = (record: Record<string, unknown>) => {
+    if (record.translationMeta != null && !isEditionRecord(record.translationMeta)) {
+      throw new ArticleEditionIdentityError('The created source metadata is invalid.');
     }
+    const meta = isEditionRecord(record.translationMeta) ? record.translationMeta : {};
+    for (const value of [record.sourceArticleId, meta.sourceArticleId]) {
+      if (value == null) continue;
+      if (!isEditionId(value) || value !== id) {
+        throw new ArticleEditionIdentityError('The created article references a different translation source.');
+      }
+      sourceLinkVerified = true;
+    }
+    for (const value of [record.sourceLanguage, meta.sourceLanguage, record.originalLanguage,
+      record.baseLanguage, record.sourceLang, record.originalLang, record.baseLang, meta.targetLanguage]) {
+      if (value != null && value !== '' && normalizeArticleLanguageCode(value) !== expected.language) {
+        throw new ArticleEditionIdentityError('The created article is not the submitted translation source.');
+      }
+    }
+  };
+  verifySource(article);
+  const languageProvided = [article.lang, article.language, article.translationMeta?.targetLanguage, article.originalLang]
+    .some(value => value != null && value !== '');
+  if (languageProvided && articleEditionLanguage(article) !== expected.language) {
+    throw new ArticleEditionIdentityError('The created source language does not match the submitted story.');
   }
   for (const reference of [article.sourceArticle, article.originalArticle, article.baseArticle]) {
     if (reference == null) continue;
-    if (!isEditionRecord(reference) || reference._id !== id
+    if (!isEditionRecord(reference) || (reference._id ?? reference.id) !== id
+      || (reference._id != null && reference._id !== id) || (reference.id != null && reference.id !== id)
       || (reference.sourceNewsId != null && reference.sourceNewsId !== id)
-      || (reference.translationGroupId !== undefined && editionGroupId(reference) !== expected.translationGroupId)
-      || (reference.translationKey && reference.translationKey !== expected.translationGroupId)
+      || (reference.translationGroupId !== undefined && editionGroupId(reference) !== expectedGroup)
+      || (reference.translationKey && reference.translationKey !== expectedGroup)
       || [reference.lang, reference.language].some(value =>
-        value != null && (typeof value !== 'string' || value.trim().toLowerCase() !== expected.language))) {
+        value != null && normalizeArticleLanguageCode(value) !== expected.language)) {
       throw new ArticleEditionIdentityError('The created article references a different translation source.');
     }
+    verifySource(reference);
+    sourceLinkVerified = true;
+  }
+  // A server-assigned group cannot use the submitted payload as proof of its new identity.
+  if (assignedGroup && (!languageProvided || !sourceLinkVerified)) {
+    throw new ArticleEditionIdentityError('The Backend-assigned source group requires a verified CMS source link and language. Founder review is required.');
   }
   return id;
 }
@@ -920,10 +948,14 @@ export async function retryArticleTranslation(id: string, opts?: { languages?: s
 }
 
 export async function requeueArticleTranslations(id: string, opts?: { languages?: string[] }) {
+  if (!isEditionId(id)) throw new ArticleEditionIdentityError('A valid CMS source ID is required.');
   const encoded = encodeURIComponent(id);
-  const payload = Array.isArray(opts?.languages) && opts?.languages.length > 0
-    ? { languages: opts.languages }
-    : undefined;
+  const targets = opts?.languages;
+  if (targets !== undefined && (!Array.isArray(targets) || !targets.length || new Set(targets).size !== targets.length
+    || targets.some(code => !EDITION_LANGUAGES.some(lang => lang === code)))) {
+    throw new ArticleEditionIdentityError('Select valid, distinct missing edition languages.');
+  }
+  const payload = targets === undefined ? undefined : { targetLanguages: targets };
   const res = await adminApiClient.post(`admin/${ARTICLES_PATH}/${encoded}/translations/generate`, payload);
   return mutationResponse(res.data);
 }
@@ -997,8 +1029,22 @@ export async function createArticle(data: Partial<Article>) {
     payload,
     relatedArticleIds: [],
   });
-  const res = await adminApiClient.post(ARTICLES_PATH, payload);
-  mutationResponse(res.data);
+  const unconfirmed = (cause: unknown) => new ArticleSaveProgressError(
+    'The creation response could not be verified; a draft may already exist. Open Draft Desk for Founder review. Do not create another draft.', cause,
+  );
+  const res = await adminApiClient.post(ARTICLES_PATH, payload).catch((error: unknown) => {
+    const response = isEditionRecord(error) && isEditionRecord(error.response) ? error.response : null;
+    const status = Number(response?.status);
+    if (status >= 400 && status < 500 && status !== 408 && !(isEditionRecord(response?.data) && response.data.committed === true)) throw error;
+    throw unconfirmed(error);
+  });
+  try {
+    mutationResponse(res.data);
+  } catch (error: unknown) {
+    if (isEditionRecord(res.data) && res.data.committed === false
+      && (res.data.ok === false || res.data.success === false) && res.data.ok !== true && res.data.success !== true) throw error;
+    throw unconfirmed(error);
+  }
   return res.data;
 }
 // Community Reporter wrapper: reuse createArticle and tag origin/source for badge detection
