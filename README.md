@@ -260,6 +260,10 @@ The admin UI provides a full Manage News panel at `/admin/manage-news` (protecte
 - CSV bulk upload (drag-n-drop) with result summary (created / updated / skipped / errors)
 - Badge counts in navbar (Published / Drafts / Flagged)
 
+In Add News and Manage News, **Summary → Auto** starts off for each edition.
+Enabling Auto asks before replacing existing text. Typing or trimming turns it
+off again; **Save Update** saves the summary shown in the editor.
+
 #### Published-article cover images
 
 Normal Manage News editing uses `/admin/articles/:id/edit` and **Save Update**.

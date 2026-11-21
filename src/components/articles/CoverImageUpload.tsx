@@ -187,8 +187,8 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
         </div>
       ) : null}
 
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0 space-y-2">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="flex-auto min-w-0 space-y-2">
           {!hasRealPreview ? (
             <div className="text-xs text-slate-600">No cover image</div>
           ) : fileMeta ? (
@@ -200,7 +200,7 @@ export default function CoverImageUpload({ url, file, onChangeFile, onRemove, di
             <div className="text-xs text-slate-600">Current cover image</div>
           ) : null}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button type="button" className="btn" onClick={pick} disabled={disabled} title={disabledText || undefined}>
               {hasRealPreview ? 'Replace' : 'Upload Image'}
             </button>

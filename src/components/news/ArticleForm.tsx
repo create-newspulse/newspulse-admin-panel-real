@@ -565,6 +565,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     explicitCreationGenerationRef.current = false;
     requestedEditionsRef.current.clear();
     setGenerationMessage(null);
+    setAutoSummary(false);
     setGenerateTranslationsAfterSave(!initialEditId);
     return () => { workspaceVersionRef.current += 1; };
   }, [initialEditId]);
@@ -581,7 +582,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
   const [slug, setSlug] = useState('');
   const [autoSlug, setAutoSlug] = useState(!initialEditId);
   const [summary, setSummary] = useState('');
-  const [autoSummary, setAutoSummary] = useState(!initialEditId);
+  const [autoSummary, setAutoSummary] = useState(false);
   const [content, setContent] = useState('');
   const [languageDrafts, setLanguageDrafts] = useState<Record<LangCode, ArticleLanguageDraft>>({
     en: { ...EMPTY_LANGUAGE_DRAFT },
@@ -859,7 +860,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setSlug('');
     setAutoSlug(true);
     setSummary('');
-    setAutoSummary(true);
+    setAutoSummary(false);
     setContent('');
     setLanguageDrafts({
       en: { ...EMPTY_LANGUAGE_DRAFT },
@@ -966,7 +967,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     setSummary(draft.summary || '');
     setContent(draft.content || '');
     setAutoSlug(!draft.slug);
-    setAutoSummary(!draft.summary);
+    setAutoSummary(false);
   }
 
   function selectLanguageWorkspace(code: LangCode) {
@@ -1314,8 +1315,9 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
       setTitle(src.title || '');
       setSlug(src.slug || '');
       setAutoSlug(!src.slug);
-      setSummary((src as any).summary || '');
-      setAutoSummary(!src.summary);
+      const savedSummary = getArticleDraftFromRecord(src).summary;
+      setSummary(savedSummary);
+      setAutoSummary(false);
       setContent((src as any).content ?? (src as any).body ?? '');
       // Backward compat: category might be stored as a string OR object.
       // Normalize to string slug/_id only; never store the object.
@@ -1418,7 +1420,7 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
         const s = buildSnapshot({
           title: src.title || '',
           slug: src.slug || '',
-          summary: (src as any).summary || '',
+          summary: savedSummary,
           content: (src as any).content ?? (src as any).body ?? '',
           category: (typeof (src as any).category === 'object' && (src as any).category)
             ? String(((src as any).category.slug ?? (src as any).category._id ?? '') || '')
@@ -2039,7 +2041,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
     if (autoSummary) setSummary(generateSummary(title, content));
   }, [title, content, autoSummary]);
 
-  function trimSummaryTo160(){ setSummary(s => (s.length <= 160 ? s : s.slice(0,160).replace(/\s+\S*$/, '') + '…')); }
+  function toggleSummaryAuto(enabled: boolean) {
+    if (enabled && summary.trim() && !window.confirm('Replace the current summary with an automatically generated one?')) return;
+    setAutoSummary(enabled);
+  }
+
+  function editSummary(value: string) {
+    setAutoSummary(false);
+    setSummary(value);
+  }
 
   const lastSubmitRef = useRef<null | {
     statusToSend: 'draft'|'scheduled'|'published';
@@ -3399,15 +3409,15 @@ export const ArticleForm: React.FC<ArticleFormProps> = ({
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-medium">Summary</label>
                 <label className="text-xs flex items-center gap-1 select-none">
-                  <input type="checkbox" checked={autoSummary} onChange={e=> setAutoSummary(e.target.checked)} /> Auto
+                  <input type="checkbox" checked={autoSummary} onChange={e=> toggleSummaryAuto(e.target.checked)} /> Auto
                 </label>
               </div>
-              <textarea value={summary} onChange={e=> setSummary(e.target.value)} rows={3} className="w-full border px-2 py-2 rounded" />
+              <textarea value={summary} onChange={e=> editSummary(e.target.value)} rows={3} className="w-full border px-2 py-2 rounded" />
               {breakingChecked && !summary.trim() && (
                 <div className="mt-1 text-[11px] text-amber-700">Summary is recommended for breaking stories (ticker previews look better).</div>
               )}
               <div className="mt-2 flex gap-2 flex-wrap">
-                {summary.length > 200 && <button type="button" onClick={trimSummaryTo160} className="btn-secondary text-[11px] px-2 py-1">Trim to ~160</button>}
+                {summary.length > 200 && <button type="button" onClick={() => editSummary(summary.slice(0,160).replace(/\s+\S*$/, '') + '…')} className="btn-secondary text-[11px] px-2 py-1">Trim to ~160</button>}
               </div>
             </div>
             <div>

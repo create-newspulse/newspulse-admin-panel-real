@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Article, ArticleTranslationEditions } from '@/lib/api/articles';
@@ -314,6 +314,118 @@ afterEach(() => {
   vi.useRealTimers();
   clients.splice(0).forEach(client => client.clear());
   vi.restoreAllMocks();
+});
+
+describe('Summary Auto', () => {
+  const manual = { en: 'A note from the editor.', hi: 'संपादक का सारांश।', gu: 'સંપાદકનો સારાંશ.' };
+
+  function summaryFields() {
+    const section = within(screen.getByText('Summary', { selector: 'label' }).parentElement!.parentElement!);
+    return { auto: section.getByRole('checkbox', { name: 'Auto' }), text: section.getByRole<HTMLTextAreaElement>('textbox') };
+  }
+
+  it.each(editionLanguages)('starts off and saves the handwritten %s draft summary', async language => {
+    configureNewStory();
+    await openNewStory(language);
+    const { auto, text } = summaryFields();
+    expect(auto).not.toBeChecked();
+    expect(text).toHaveValue('');
+    fireEvent.change(text, { target: { value: manual[language] } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story content' }), { target: { value: 'Revised article body.' } });
+    expect(text).toHaveValue(manual[language]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Draft saved'));
+    expect(records[`created-${language}`]).toMatchObject({ lang: language, summary: manual[language], description: manual[language] });
+  });
+
+  it('asks before replacing text, generates only after opt-in, and stops on manual input', async () => {
+    await openNewStory('hi');
+    const { auto, text } = summaryFields();
+    fireEvent.change(text, { target: { value: manual.hi } });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(auto);
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/replace.*summary/i));
+    expect(auto).not.toBeChecked();
+    expect(text).toHaveValue(manual.hi);
+    confirm.mockReturnValue(true);
+    fireEvent.click(auto);
+    expect(auto).toBeChecked();
+    const body = screen.getByRole('textbox', { name: 'Story content' });
+    fireEvent.change(body, { target: { value: 'नई खबर का विवरण।' } });
+    expect(text).toHaveValue('नई खबर का विवरण।');
+    fireEvent.click(auto);
+    fireEvent.change(body, { target: { value: 'अगली खबर।' } });
+    expect(text).toHaveValue('नई खबर का विवरण।');
+    fireEvent.click(auto);
+    expect(text).toHaveValue('अगली खबर।');
+    fireEvent.change(text, { target: { value: manual.hi } });
+    expect(auto).not.toBeChecked();
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Updated headline' } });
+    expect(text).toHaveValue(manual.hi);
+  });
+
+  it.each(editionLanguages)('preserves the published %s summary through Save Update', async language => {
+    const id = `story-a-${language}`;
+    const existing = language === 'hi' ? '' : manual[language];
+    Object.assign(records[id], language === 'gu' ? { summary: undefined, description: existing } : { summary: existing });
+    await open(3, records[id]);
+    const { auto, text } = summaryFields();
+    expect(auto).not.toBeChecked();
+    expect(text).toHaveValue(existing);
+    const expected = language === 'en' ? 'Revised by the editor.' : existing;
+    if (language === 'en') fireEvent.change(text, { target: { value: expected } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Story content' }), { target: { value: 'Updated published content.' } });
+    expect(text).toHaveValue(expected);
+    fireEvent.click(await enabledStoryAction('Save Update'));
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Article updated'));
+    expect(mocks.put.mock.calls).toEqual([[`articles/${id}`, expect.objectContaining({ summary: expected, description: expected })]]);
+    expect(records[id]).toMatchObject({ summary: expected, status: 'published', publishedAt: source.publishedAt });
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deliberately trimmed summary when the body changes again', async () => {
+    await openNewStory('en');
+    const { auto, text } = summaryFields();
+    const body = screen.getByRole('textbox', { name: 'Story content' });
+    fireEvent.change(body, { target: { value: 'Reporting from the newsroom '.repeat(10) } });
+    fireEvent.click(auto);
+    fireEvent.click(screen.getByRole('button', { name: 'Trim to ~160' }));
+    const trimmed = text.value;
+    expect(trimmed).toMatch(/…$/);
+    expect(auto).not.toBeChecked();
+    fireEvent.change(body, { target: { value: 'Later body correction.' } });
+    expect(text).toHaveValue(trimmed);
+  });
+
+  it('starts the next new article in manual mode after publication', async () => {
+    configureNewStory();
+    await openNewStory('gu');
+    fireEvent.click(summaryFields().auto);
+    fireEvent.click(await enabledStoryAction('Publish'));
+    fireEvent.click(await screen.findByText('New Article', { selector: 'button' }));
+    const { auto, text } = summaryFields();
+    expect(auto).not.toBeChecked();
+    fireEvent.change(input('Title', 'input'), { target: { value: 'Next article' } });
+    expect(text).toHaveValue('');
+  });
+
+  it('does not carry opt-in into a blank edition or replace buffered text on return', async () => {
+    await openNewStory('en');
+    const { auto, text } = summaryFields();
+    fireEvent.click(auto);
+    expect(auto).toBeChecked();
+    const generated = text.value;
+    expect(generated).not.toBe('');
+    const language = input('Language', 'select');
+    fireEvent.change(language, { target: { value: 'gu' } });
+    expect(auto).not.toBeChecked();
+    expect(text).toHaveValue('');
+    fireEvent.change(text, { target: { value: manual.gu } });
+    fireEvent.change(language, { target: { value: 'en' } });
+    expect(text).toHaveValue(generated);
+    fireEvent.change(language, { target: { value: 'gu' } });
+    expect(text).toHaveValue(manual.gu);
+  });
 });
 
 describe('Published article cover intent', () => {
